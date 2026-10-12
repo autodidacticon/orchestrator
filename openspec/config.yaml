@@ -1,0 +1,27 @@
+schema: spec-driven
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+context: |
+  Domain: orchestration of parallel coding agents over a task DAG against one git repository.
+  Tech stack: TypeScript (ESM), Node 22+, npm, better-sqlite3, zod, yaml, @modelcontextprotocol/sdk; tests with vitest and fast-check.
+  Entry points for context: README.md, plans/0-orchestrator-v1/plan.md (design record and phases), openspec/changes/add-orchestrator-v1/.
+  Conventions: every external effect sits between two durable records; the orchestrator is the sole writer of task state; agents and humans submit intents as events; done means integrated, not correct.
+  Specs use SHALL/MUST requirements with WHEN/THEN scenarios, one scenario per testable behavior.

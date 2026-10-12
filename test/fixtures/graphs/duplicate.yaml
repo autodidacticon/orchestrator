@@ -1,0 +1,3 @@
+nodes:
+  - { id: A, deps: [] }
+  - { id: A, deps: [] }

@@ -1,0 +1,4 @@
+nodes:
+  - { id: T1, deps: [] }
+  - { id: M1, kind: milestone, deps: [T1] }
+  - { id: M2, kind: milestone, deps: [M1] }

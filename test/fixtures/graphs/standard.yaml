@@ -1,0 +1,7 @@
+nodes:
+  - { id: T1, title: Schema migration,  deps: [] }
+  - { id: T2, title: Feature A API,     deps: [T1] }
+  - { id: T3, title: Feature B API,     deps: [T1] }
+  - { id: T4, title: Feature A UI,      deps: [T2] }
+  - { id: T5, title: Changelog,         deps: [] }
+  - { id: MVP, kind: milestone, gated: true, deps: [T3, T4] }
