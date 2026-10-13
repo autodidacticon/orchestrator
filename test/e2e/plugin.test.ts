@@ -4,7 +4,7 @@
  * Agents are scripted (free); only the operating session is a real model.
  */
 import { execFile } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { health, listRuns, stopDaemon } from '../../src/runs/lifecycle.js';
 import { runPaths } from '../../src/runs/runDir.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
-import { gitIn, makeRepo, scriptedAgent, tsxLoader } from '../slice/harness.js';
+import { gitIn, makeRepo } from '../slice/harness.js';
 
 const execFileP = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -34,21 +34,14 @@ describe('plugin skills', () => {
 });
 
 describe.skipIf(!enabled)('e2e: Claude Code session operates a run through the plugin', () => {
-  it('runs the graph to completion and reviews the milestone', async () => {
+  // The default experience: nothing on PATH, the plugin's launcher runs the checkout, the run skill works the
+  // launches with the session's own subagents (pull mode), relays the question, and reviews the milestone.
+  it('runs the graph to completion with session subagents and reviews the milestone', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-plugin-home-'));
     const base = mkdtempSync(path.join(tmpdir(), 'orch-plugin-repo-'));
-    const binDir = path.join(base, 'bin');
-    mkdirSync(binDir);
-    // orchestrator-mcp on PATH, as npm link would provide it
-    const wrapper = path.join(binDir, 'orchestrator-mcp');
-    writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" --import "${tsxLoader}" "${path.join(root, 'src/operator/mcp.ts')}" "$@"\n`);
-    chmodSync(wrapper, 0o755);
     const repo = realpathSync(makeRepo(base));
-    writeFileSync(path.join(repo, 'orchestrator.yaml'), [
-      `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
-      'checkCommand: "true"', 'tickIntervalMs: 200', 'leaseTtlMs: 60000', 'retryWindowMs: 5000', 'capacity: 2',
-    ].join('\n'));
-    const env: Record<string, string> = { ...(process.env as Record<string, string>), ORCH_HOME: home, PATH: `${binDir}:${process.env['PATH']}` };
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 200', 'leaseTtlMs: 600000', 'capacity: 2'].join('\n'));
+    const env: Record<string, string> = { ...(process.env as Record<string, string>), ORCH_HOME: home };
     delete env['CLAUDECODE'];
     delete env['CLAUDE_CODE_ENTRYPOINT'];
     // Pre-import a graph with a question so the session has to relay it, then review the milestone.
@@ -56,35 +49,42 @@ describe.skipIf(!enabled)('e2e: Claude Code session operates a run through the p
     mkdirSync(paths.runDir, { recursive: true });
     writeFileSync(paths.graphPath, [
       'nodes:',
-      '  - { id: T1, title: Pick a database, deps: [], behavior: "blockAndWait:Which database should we use, sqlite or postgres? Answer with one word.", description: "Decide the database.", acceptanceCriteria: ["answer recorded in T1.txt"] }',
-      '  - { id: T2, title: Write the changelog, deps: [T1], behavior: commitAndSubmit, description: "Write the changelog entry.", acceptanceCriteria: ["T2.txt exists"] }',
+      '  - { id: T1, title: Pick a database, deps: [], description: "Before writing anything, ask the operator with launch_block (kind needsDecision) which database to use, sqlite or postgres, and wait for the answer. Then create T1.txt at the repository root containing the one-word answer, and commit it.", acceptanceCriteria: ["T1.txt contains the operator answer"] }',
+      '  - { id: T2, title: Write the changelog, deps: [T1], description: "Create T2.txt at the repository root containing the line changelog: initial, and commit it.", acceptanceCriteria: ["T2.txt exists"] }',
       '  - { id: MVP, kind: milestone, gated: true, deps: [T2], acceptanceCriteria: ["both files are committed on main"] }',
       '',
     ].join('\n'));
     try {
       const prompt = [
         'You are operating an orchestrated run in this repository using the orchestrator plugin.',
-        'Use the run skill: start the daemon, then loop on wait. When an agent asks which database to use, answer "sqlite".',
+        'Use the run skill: start the daemon and follow the skill, including working the run with the bundled workflow since the mode is pull. When a worker asks which database to use, answer "sqlite".',
         'When the MVP milestone awaits review, use the review skill: fetch the bundle and accept it if T1.txt and T2.txt are on main.',
         'Stop looping once the run is finished, then stop the daemon (without reaping). Reply with one line: FINISHED or NOT FINISHED and why.',
       ].join(' ');
       const { stdout } = await execFileP(
         'claude',
-        ['-p', prompt, '--plugin-dir', path.join(root, 'hosts/claude-code'), '--output-format', 'json', '--permission-mode', 'acceptEdits', '--allowedTools', 'mcp__plugin_orchestrator_operator__*', 'Bash(git:*)', '--no-session-persistence'],
-        { cwd: repo, env, maxBuffer: 16 * 1024 * 1024, timeout: 15 * 60_000 },
+        ['-p', prompt, '--plugin-dir', path.join(root, 'hosts/claude-code'), '--output-format', 'json', '--permission-mode', 'acceptEdits', '--allowedTools', 'mcp__plugin_orchestrator_operator__*', 'Bash(git:*)', 'Workflow', 'Agent', '--no-session-persistence'],
+        { cwd: repo, env, maxBuffer: 16 * 1024 * 1024, timeout: 20 * 60_000 },
       );
       const result = JSON.parse(stdout) as { result?: string; is_error?: boolean };
       expect(result.is_error, stdout.slice(0, 2000)).toBeFalsy();
-      expect(String(result.result)).toMatch(/FINISHED/i);
       const store = new SqliteStore(path.join(paths.runDir, 'store.sqlite'));
       try {
         const entries = store.allEntries();
-        expect(entries.get('T1')?.status.kind).toBe('done');
-        expect(entries.get('T2')?.status.kind).toBe('done');
-        expect(entries.get('MVP')?.status.kind).toBe('done');
+        const picture = JSON.stringify({ reply: result.result, statuses: Object.fromEntries([...entries].map(([k, v]) => [k, v.status.kind])), launches: store.listLaunches().map((l) => ({ task: l.taskId, status: l.status, worker: l.worker?.id, pid: l.pid })) });
+        expect(String(result.result), picture).toMatch(/FINISHED/i);
+        expect(entries.get('T1')?.status.kind, picture).toBe('done');
+        expect(entries.get('T2')?.status.kind, picture).toBe('done');
+        expect(entries.get('MVP')?.status.kind, picture).toBe('done');
+        // Every launch was held by a session worker, never spawned by the daemon.
+        for (const l of store.listLaunches()) {
+          expect(l.worker, picture).toBeDefined();
+          expect(l.pid, picture).toBeUndefined();
+        }
         const kinds = store.listEvents().map((e) => e.kind);
-        expect(kinds).toContain('operator.answer');
-        expect(kinds).toContain('operator.accept');
+        expect(kinds, picture).toContain('agent.block');
+        expect(kinds, picture).toContain('operator.answer');
+        expect(kinds, picture).toContain('operator.accept');
       } finally {
         store.close();
       }

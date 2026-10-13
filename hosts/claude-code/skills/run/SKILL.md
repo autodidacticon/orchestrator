@@ -11,8 +11,31 @@ never raw event lists.
 
 ## 1. Start
 
-Call `start`. It returns the run directory, graph path, and URL, and is safe to repeat. Then
-call `status`. If no graph is loaded, say so and suggest the `import` skill.
+Call `start`. It returns the run directory, graph path, URL, and the runner `mode` in force,
+and is safe to repeat. A run started from this plugin defaults to `pull`: the daemon prepares
+each launch and this session's own subagents do the work (section 1a), so the user sees every
+agent here. `spawn` (the daemon runs headless agents, for unattended runs) and `mixed` are
+explicit choices: `start` with `mode`, or `runner.mode` in `orchestrator.yaml`, which wins.
+Tell the user who is executing the work. Then call `status`. If no graph is loaded, say so
+and suggest the `import` skill.
+
+## 1a. Work the run with session subagents
+
+When the mode in force is `pull` or `mixed`, run the bundled workflow before the first `wait`,
+with a worker count no larger than the run's `capacity` (from `status`), usually 2 to 4, and
+a run tag such as `work-1`:
+
+```
+Workflow({ scriptPath: "<plugin dir>/workflows/work.js", args: { workers: 2, runTag: "work-1" } })
+```
+
+Each worker loop claims a launch, runs a worker subagent on its brief in the prepared
+worktree, reports through the worker tools, and claims again until nothing is claimable. The
+workflow runs in the background; do not wait for its completion notice, monitor with `wait`
+(section 2). When the workflow has ended while launches are still claimable (a question was
+answered after it stopped, or a task was retried), re-run it with the same run tag: a worker
+with the same id claims its launch back. In `spawn` mode run no workflow; the daemon's agents
+do the work and you only monitor.
 
 ## 2. Monitor loop
 
@@ -111,6 +134,12 @@ daemon down gracefully: agents keep running and are adopted on the next `start`.
 
 ## 4. When the session ends
 
-The run continues without you. Tell the user they can come back and call `status` or
-`run` again; nothing is lost. Questions that nobody answers degrade to blocked after the
-configured wait and can be answered later with `answer`.
+The run's state is durable. A launch held by one of this session's workers is handed back
+when the session ends, with its branch kept and any uncommitted work committed on it; the
+next launch is briefed to continue from that branch, and no attempt is spent. Parked
+launches wait for the next worker. The daemon exits on its own after `daemon.idleExitMs`
+(ten minutes by default) with no session attached and nothing live, records why in the run
+directory, and comes back on the next tool call; `runs` shows every run with its daemon's
+state or last exit. Tell the user they can come back and use the `run` skill again; nothing
+is lost. Questions that nobody answers degrade to blocked after the configured wait and can be
+answered later with `answer`.

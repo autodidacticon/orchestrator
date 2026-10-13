@@ -114,6 +114,19 @@ export class GitWorkspace implements Workspace {
     return existsSync(path.join(launch.worktree, ORCH_DIR, 'brief.json'));
   }
 
+  async preserve(launch: Launch): Promise<{ headSha: string; wipCommit?: string }> {
+    const dirty = (await dirtyFiles(launch.worktree)).filter((f) => !f.startsWith(`${ORCH_DIR}/`));
+    let wipCommit: string | undefined;
+    if (dirty.length) {
+      // The brief directory is git-ignored in every worktree; `add -A` skips it, and the reset is a guard for a repository that tracks it.
+      await git(launch.worktree, ['add', '-A']);
+      await git(launch.worktree, ['rm', '-r', '-q', '--cached', '--ignore-unmatch', ORCH_DIR], { allowFail: true });
+      await git(launch.worktree, ['-c', 'user.name=orchestrator', '-c', 'user.email=orchestrator@localhost', 'commit', '-q', '--no-verify', '-m', 'WIP: uncommitted work preserved by the orchestrator at release']);
+      wipCommit = await revParse(launch.worktree, 'HEAD');
+    }
+    return { headSha: await revParse(launch.worktree, 'HEAD'), wipCommit };
+  }
+
   /** Head sha plus a hash over `git status --porcelain` (minus .orchestrator/) and `git diff HEAD`, so edits to an already dirty file still register. */
   async fingerprint(launch: Launch): Promise<string> {
     const head = await revParse(launch.worktree, 'HEAD');

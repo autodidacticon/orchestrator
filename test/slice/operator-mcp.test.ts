@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { clampWait, digestSatisfies, TOOL_NAMES, WAIT_CAP_MS, WAIT_DEFAULT_MS } from '../../src/operator/mcp-server.js';
 import { listRuns, stopDaemon } from '../../src/runs/lifecycle.js';
+import { pidAlive } from '../../src/runner/subprocess.js';
 import { gitIn, makeRepo, scriptedAgent, tsxLoader } from './harness.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -51,6 +52,7 @@ describe('operator MCP server', () => {
     const repo = realpathSync(makeRepo(base));
     writeFileSync(path.join(repo, 'orchestrator.yaml'), [
       `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'runner: { mode: spawn }',
       'checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'retryWindowMs: 5000', 'capacity: 2',
     ].join('\n'));
     env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
@@ -111,7 +113,104 @@ describe('operator MCP server', () => {
     expect(await tool('stop')).toMatchObject({ status: 200, stopped: true });
     const after = await client.callTool({ name: 'status', arguments: {} });
     expect(after.isError).toBe(true);
+    expect(parse(after)['error']).toMatch(/stopped at .*start/);
+    expect((await listRuns(env)).find((r) => r.repo === repo)).toMatchObject({ alive: false, exit: { reason: 'stop' } });
   }, 120_000);
+
+  it('defaults a plugin-started run to pull, yields to a configured mode, and leaves a running daemon alone', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 2'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    const started = await tool('start');
+    expect(started).toMatchObject({ status: 200, started: true, mode: 'pull' });
+    expect(await tool('import_graph', { content: 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n' })).toMatchObject({ accepted: true });
+    for (let i = 0; i < 50 && ((await tool('status'))['claimable'] as string[]).length === 0; i++) await new Promise((r) => setTimeout(r, 100));
+    expect((await tool('status'))['claimable']).toEqual(['T1']);
+    expect(await tool('start')).toMatchObject({ started: false, mode: 'pull' });
+    expect((await tool('status'))['runner']).toMatchObject({ mode: 'pull' });
+    // The session's attachment is registered and shows in status with the server's pid first.
+    const attachments = (await tool('status'))['attachments'] as Array<{ id: string; pids: number[]; launches: string[] }>;
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]!.pids.length).toBeGreaterThanOrEqual(2);
+    // A claim through the tool carries the attachment; ending it through the route flags the next call and the server registers again.
+    const claimed = await tool('claim', { workerId: 'w1' });
+    expect(claimed).toMatchObject({ status: 200, taskId: 'T1' });
+    const url = String(started['url']);
+    const launchesOf = async () => ((await tool('status'))['attachments'] as Array<{ id: string; launches: string[] }>);
+    expect((await launchesOf())[0]!.launches).toEqual([claimed['launchId']]);
+    const first = attachments[0]!.id;
+    await fetch(`${url}/v1/attachments/${first}/end`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason: 'test' }) });
+    const flagged = await fetch(`${url}/v1/status`, { headers: { 'x-orch-attachment': first } });
+    expect(flagged.headers.get('x-orch-attachment')).toBe('unknown');
+    expect(await tool('status')).toMatchObject({ status: 200 }); // sees the unknown flag and registers again
+    const again = (await tool('status'))['attachments'] as Array<{ id: string; launches: string[] }>;
+    expect(again).toHaveLength(1);
+    expect(again[0]!.id).toBe(first); // the same server re-registers its own id
+    // The ended attachment's launch was handed back at no cost and parked again; the next claim carries the fresh attachment.
+    for (let i = 0; i < 50; i++) {
+      const s = await tool('status');
+      if ((s['claimable'] as string[]).includes('T1') && (s['attachments'] as Array<{ launches: string[] }>)[0]?.launches.length === 0) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(await tool('status')).toMatchObject({ claimable: ['T1'] });
+    const second = await tool('claim', { workerId: 'w1' });
+    expect(second).toMatchObject({ status: 200, taskId: 'T1', repeated: false });
+    expect(second['launchId']).not.toBe(claimed['launchId']);
+    expect((await launchesOf())[0]!.launches).toEqual([second['launchId']]);
+    // Closing the transport ends the attachment; the daemon releases the launch within a tick.
+    await client.close();
+    client = undefined;
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const s = await fetch(`${url}/v1/status`).then((r) => r.json() as Promise<Record<string, unknown>>);
+      // The attachment is gone and T1's launch was handed back untouched: parked again for the next worker.
+      if ((s['attachments'] as unknown[]).length === 0 && (s['claimable'] as string[]).includes('T1')) break;
+      if (Date.now() > deadline) throw new Error(`attachment not released: ${JSON.stringify(s['attachments'])}`);
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    await stopDaemon({ repo, env, reap: true });
+
+    const configured = realpathSync(makeRepo(mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'))));
+    dirs.push(path.dirname(configured));
+    writeFileSync(path.join(configured, 'orchestrator.yaml'), ['checkCommand: "true"', 'runner: { mode: spawn }'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: configured };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    expect(await tool('start')).toMatchObject({ started: true, mode: 'spawn' });
+  }, 120_000);
+
+  it('revives the daemon after an idle exit and refuses after a stop', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 100', 'daemon: { idleExitMs: 800, exitWhileAttached: true }'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    const started = await tool('start');
+    expect(started).toMatchObject({ status: 200, started: true });
+    const pid = Number(started['pid']);
+    const deadline = Date.now() + 15_000;
+    while (pidAlive(pid)) {
+      if (Date.now() > deadline) throw new Error('daemon did not exit idle');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect((await tool('runs'))['runs']).toMatchObject([{ repo, alive: false, exit: { reason: 'idle' } }]);
+    const revived = await tool('status');
+    expect(revived).toMatchObject({ status: 200 });
+    expect((await tool('runs'))['runs']).toMatchObject([{ repo, alive: true }]);
+    expect(await tool('stop')).toMatchObject({ stopped: true });
+    const refused = await client.callTool({ name: 'status', arguments: {} });
+    expect(refused.isError).toBe(true);
+    expect(parse(refused)['error']).toMatch(/stopped at .*start/);
+    expect((await tool('runs'))['runs']).toMatchObject([{ repo, alive: false, exit: { reason: 'stop' } }]);
+  }, 60_000);
 
   it('records the tracker at import and drives the outbox: list, ack with a result, ack with an error, local argument error', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
@@ -120,6 +219,7 @@ describe('operator MCP server', () => {
     const repo = realpathSync(makeRepo(base));
     writeFileSync(path.join(repo, 'orchestrator.yaml'), [
       `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'runner: { mode: spawn }',
       'checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'retryWindowMs: 5000', 'capacity: 2',
     ].join('\n'));
     env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
@@ -166,6 +266,7 @@ describe('operator MCP server', () => {
     const repo = realpathSync(makeRepo(base));
     writeFileSync(path.join(repo, 'orchestrator.yaml'), [
       `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'runner: { mode: spawn }',
       'checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'retryWindowMs: 5000', 'capacity: 3',
     ].join('\n'));
     env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
@@ -214,6 +315,7 @@ describe('operator MCP server', () => {
     const repo = realpathSync(makeRepo(base));
     writeFileSync(path.join(repo, 'orchestrator.yaml'), [
       `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'runner: { mode: spawn }',
       'checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'retryWindowMs: 5000', 'capacity: 2',
       'health:', '  stuckAfterMs: 1500', '  stuckFailAfterMs: 0',
     ].join('\n'));

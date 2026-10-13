@@ -560,3 +560,90 @@ describe('scope filter', () => {
     expect(deferredOf(y)).toHaveLength(1);
   });
 });
+
+describe('kept release', () => {
+  const open: Harness[] = [];
+  afterEach(() => {
+    for (const x of open.splice(0)) x.cleanup();
+  });
+  const pullHarness = (config: Partial<Config> = {}) => {
+    const x = makeHarness({ config: { capacity: 2, runner: { mode: 'pull', claimWindowMs: 60_000 }, ...config } });
+    open.push(x);
+    return x;
+  };
+  const claim = async (x: Harness, taskId: string) => {
+    const c = await x.orch.claim({ workerId: `w-${taskId}-${x.orch.entry(taskId).launches}`, taskId });
+    expect(c.status).toBe(200);
+    return String(c.body['launchId']);
+  };
+
+  it('after progress leaves attempts unchanged, stores the interrupted context, and the next brief carries it until the launch goes live', async () => {
+    const x = pullHarness();
+    await x.orch.tick();
+    const l1 = await claim(x, 'T1');
+    x.workspace.markProgress(l1, 'c1', true);
+    const r = await x.orch.release(l1, 'closing the laptop', { keep: true });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ ok: true, outcome: 'unstarted', progressed: true, kept: true, branch: 'task/T1/l1', headSha: `wip-${l1.slice(0, 8)}`, wipCommit: `wip-${l1.slice(0, 8)}` });
+    const e = x.orch.entry('T1');
+    expect(e).toMatchObject({ status: { kind: 'unstarted' }, attempts: 0, interruptions: 1 });
+    expect(e.carry?.interrupted).toEqual({ priorLaunchId: l1, priorBranch: 'task/T1/l1', headSha: `wip-${l1.slice(0, 8)}`, wipCommit: `wip-${l1.slice(0, 8)}`, reason: 'closing the laptop', interruptions: 1 });
+    expect(x.store.getLaunch(l1)).toMatchObject({ status: 'ended', endReason: 'released' });
+    expect(x.workspace.worktrees.has(l1)).toBe(false);
+    expect(x.store.listEvents({ kind: 'launch.released', launchId: l1 })[0]?.payload).toMatchObject({ keep: true, kept: true, progressed: true });
+    await x.orch.tick();
+    const l2 = x.store.listLaunches({ taskId: 'T1', status: 'claimable' })[0]!;
+    expect(l2.interruptions).toBe(1);
+    expect(x.workspace.briefs.get(l2.launchId)?.carry?.interrupted).toMatchObject({ priorLaunchId: l1 });
+    await claim(x, 'T1');
+    expect(x.orch.entry('T1').carry).toBeUndefined();
+    expect(x.orch.status().liveLaunches.find((l) => l.taskId === 'T1')?.interruptions).toBe(1);
+  });
+
+  it('while waiting blocks with the question and the context; without progress stores nothing', async () => {
+    const x = pullHarness();
+    await x.orch.tick();
+    const l1 = await claim(x, 'T1');
+    void x.block('T1');
+    await new Promise((r) => setImmediate(r));
+    expect(x.statusOf('T1')).toBe('waiting');
+    x.workspace.markProgress(l1, 'c1');
+    const r = await x.orch.release(l1, 'session ended', { keep: true });
+    expect(r.body).toMatchObject({ outcome: 'blocked', kept: true });
+    const e = x.orch.entry('T1');
+    expect(e.status).toMatchObject({ kind: 'blocked', reason: { kind: 'needsDecision', message: 'which way?' } });
+    expect(e).toMatchObject({ attempts: 0, interruptions: 1 });
+    expect(e.carry?.interrupted).toMatchObject({ priorLaunchId: l1, headSha: 'c1' });
+    expect(x.orch.unblock('T1', { answer: 'left' })).toEqual({ ok: true });
+    expect(x.orch.entry('T1').carry).toMatchObject({ answer: 'left', interrupted: { priorLaunchId: l1 } });
+
+    const l5 = await claim(x, 'T5');
+    const untouched = await x.orch.release(l5, 'never mind', { keep: true });
+    expect(untouched.body).toMatchObject({ outcome: 'unstarted', progressed: false, kept: false });
+    expect(x.orch.entry('T5')).toMatchObject({ attempts: 0, interruptions: 0 });
+    expect(x.orch.entry('T5').carry).toBeUndefined();
+  });
+
+  it('is bounded by daemon.maxKeptReleases and the counter resets on submit', async () => {
+    const x = pullHarness({ daemon: { idleExitMs: 0, exitWhileAttached: false, maxKeptReleases: 2 } });
+    await x.orch.tick();
+    for (let i = 1; i <= 2; i++) {
+      const l = await claim(x, 'T1');
+      x.workspace.markProgress(l, `c${i}`);
+      expect((await x.orch.release(l, 'again', { keep: true })).body).toMatchObject({ kept: true });
+      expect(x.orch.entry('T1')).toMatchObject({ attempts: 0, interruptions: i });
+      await x.orch.tick();
+    }
+    const l3 = await claim(x, 'T1');
+    x.workspace.markProgress(l3, 'c3');
+    const third = await x.orch.release(l3, 'again', { keep: true });
+    expect(third.body).toMatchObject({ outcome: 'failed', kept: false, progressed: true });
+    expect(x.orch.entry('T1')).toMatchObject({ status: { kind: 'unstarted' }, attempts: 1, interruptions: 2 });
+    expect(x.orch.entry('T1').carry?.priorFailure).toMatchObject({ kind: 'released' });
+    await x.orch.tick();
+    const l4 = await claim(x, 'T1');
+    const sub = await x.orch.agentCall(l4, x.store.getLaunch(l4)!.token, 'report', { seq: 1, kind: 'submit', summary: 'done' });
+    expect(sub.status).toBe(200);
+    expect(x.orch.entry('T1').interruptions).toBe(0);
+  });
+});

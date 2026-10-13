@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pidAlive } from '../../src/runner/subprocess.js';
-import { daemonState, health, listRuns, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
+import { daemonState, health, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
 import { readDaemonJson, resolveRepoPath, resolveRunConfig, runDirFor, runPaths } from '../../src/runs/runDir.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { makeRepo, scriptedAgent, tsxLoader } from '../slice/harness.js';
@@ -146,4 +146,76 @@ describe('run directory and daemon lifecycle', () => {
     expect(readDaemonJson(runPaths(repoA, env).runDir)?.repo).toBe(repoA);
     await stopDaemon({ repo: repoA, env });
   });
+
+  it('exits on its own when idle, records why, and is revived with its state intact', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home };
+    const repo = realpathSync(makeRepo(fresh()));
+    configFor(repo);
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), `${readFileSync(path.join(repo, 'orchestrator.yaml'), 'utf8')}daemon: { idleExitMs: 1500 }\n`);
+    const paths = runPaths(repo, env);
+    mkdirSync(paths.runDir, { recursive: true });
+    writeFileSync(paths.graphPath, 'nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit, description: d, acceptanceCriteria: [a] }\n');
+    const first = await startDaemon({ repo, env });
+    expect(first.mode).toBe('spawn');
+    await waitFor(async () => Boolean((await health(first.url))?.['finished']), 40_000);
+    // Probes do not delay the exit: keep probing while the window elapses.
+    await waitFor(async () => !pidAlive(first.pid), 15_000);
+    const state = await daemonState(paths.runDir);
+    expect(state.alive).toBe(false);
+    expect(state.exit).toMatchObject({ reason: 'idle', reap: false, digest: { finished: true } });
+    expect(readDaemonJson(paths.runDir)?.exit?.reason).toBe('idle');
+    const listed = (await listRuns(env)).find((r) => r.repo === repo);
+    expect(listed).toMatchObject({ alive: false, exit: { reason: 'idle' } });
+    const store = new SqliteStore(path.join(paths.runDir, 'store.sqlite'));
+    const events = store.listEvents().length;
+    expect(store.listEvents({ kind: 'daemon.idleExit' })).toHaveLength(1);
+    store.close();
+
+    const revived = await reviveDaemon({ repo, env });
+    expect(revived).toMatchObject({ started: true, port: first.port, url: first.url });
+    expect(readDaemonJson(paths.runDir)?.exit).toBeUndefined();
+    const s = await health(first.url);
+    expect(s?.['finished']).toBe(true);
+    const again = new SqliteStore(path.join(paths.runDir, 'store.sqlite'));
+    expect(again.listEvents().length).toBeGreaterThanOrEqual(events);
+    expect(again.getEntry('T1')?.status.kind).toBe('done');
+    again.close();
+    expect(await reviveDaemon({ repo, env })).toBeUndefined(); // healthy: nothing to revive
+
+    const stopped = await stopDaemon({ repo, env });
+    expect(stopped.stopped).toBe(true);
+    expect((await daemonState(paths.runDir)).exit?.reason).toBe('stop');
+    await expect(reviveDaemon({ repo, env })).rejects.toThrow(/stopped at .*start/);
+    expect(await reviveDaemon({ repo: realpathSync(makeRepo(fresh())), env })).toBeUndefined(); // no store: nothing to revive
+  }, 90_000);
+
+  it('adopts --default-mode only when nothing chose a mode, and keeps it across restarts', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home };
+    const repo = realpathSync(makeRepo(fresh()));
+    configFor(repo);
+    const paths = runPaths(repo, env);
+    mkdirSync(paths.runDir, { recursive: true });
+    const first = await startDaemon({ repo, env, defaultMode: 'pull' });
+    expect(first.mode).toBe('pull');
+    await stopDaemon({ repo, env });
+    const second = await startDaemon({ repo, env });
+    expect(second.mode).toBe('pull'); // durable
+    await stopDaemon({ repo, env });
+
+    const chosen = realpathSync(makeRepo(fresh()));
+    configFor(chosen);
+    const third = await startDaemon({ repo: chosen, env, mode: 'spawn' });
+    expect(third.mode).toBe('spawn');
+    await stopDaemon({ repo: chosen, env });
+    expect((await startDaemon({ repo: chosen, env, defaultMode: 'pull' })).mode).toBe('spawn'); // the store's choice wins
+    await stopDaemon({ repo: chosen, env });
+
+    const configured = realpathSync(makeRepo(fresh()));
+    configFor(configured);
+    writeFileSync(path.join(configured, 'orchestrator.yaml'), `${readFileSync(path.join(configured, 'orchestrator.yaml'), 'utf8')}runner: { mode: spawn }\n`);
+    expect((await startDaemon({ repo: configured, env, defaultMode: 'pull' })).mode).toBe('spawn'); // the file wins
+    await stopDaemon({ repo: configured, env });
+  }, 90_000);
 });

@@ -198,14 +198,42 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
   // Pull runner: claims, releases, and the mode override. See specs/operator-control "Claims and releases".
   server.addRoute('POST', /^\/v1\/claims$/, async (_req, body) => {
     if (!orch.hasGraph()) return { status: 409, body: { ok: false, reason: 'graph not loaded' } };
-    const args = { workerId: String(body['workerId'] ?? ''), taskId: typeof body['taskId'] === 'string' ? body['taskId'] : undefined, access: typeof body['access'] === 'string' ? body['access'] : undefined };
+    const args = {
+      workerId: String(body['workerId'] ?? ''),
+      taskId: typeof body['taskId'] === 'string' ? body['taskId'] : undefined,
+      access: typeof body['access'] === 'string' ? body['access'] : undefined,
+      attachment: typeof body['attachment'] === 'string' && body['attachment'] ? body['attachment'] : undefined,
+    };
     orch.store.appendEvent({ kind: 'operator.claim', taskId: args.taskId, payload: { ...args } }, orch.now());
     return orch.claim(args);
   });
   server.addRoute('POST', /^\/v1\/launches\/([^/]+)\/release$/, async (_req, body, [id]) => {
     const reason = String(body['reason'] ?? 'released by worker');
-    orch.store.appendEvent({ kind: 'operator.release', launchId: id as string, payload: { reason } }, orch.now());
-    return orch.release(id as string, reason);
+    const keep = body['keep'] === true || body['keep'] === 'true';
+    orch.store.appendEvent({ kind: 'operator.release', launchId: id as string, payload: { reason, keep } }, orch.now());
+    return orch.release(id as string, reason, { keep });
+  });
+  // Session attachments: a session's operator server registers, ends on close, and a session end posts its ancestry. See specs/operator-control "Session attachments".
+  server.addRoute('POST', /^\/v1\/attachments$/, async (_req, body) => {
+    const id = typeof body['id'] === 'string' ? body['id'].trim() : '';
+    const pids = Array.isArray(body['pids']) ? (body['pids'] as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+    if (!id || !pids.length) return { status: 400, body: { error: 'id and a non-empty pids list are required' } };
+    orch.attach({ id, pids });
+    return { status: 200, body: { ok: true, id, pids } };
+  });
+  server.addRoute('POST', /^\/v1\/attachments\/([^/]+)\/end$/, async (_req, body, [id]) => {
+    const reason = String(body['reason'] ?? 'sessionEnded');
+    orch.store.appendEvent({ kind: 'operator.attachmentEnd', payload: { id, reason } }, orch.now());
+    const ended = orch.endAttachment(id as string, reason);
+    return { status: 200, body: { ok: true, id, ended } };
+  });
+  server.addRoute('POST', /^\/v1\/attachments\/ended$/, async (_req, body) => {
+    const pids = Array.isArray(body['pids']) ? (body['pids'] as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+    const reason = String(body['reason'] ?? 'sessionEnded');
+    if (!pids.length) return { status: 400, body: { error: 'pids is required' } };
+    orch.store.appendEvent({ kind: 'operator.attachmentEnd', payload: { pids, reason } }, orch.now());
+    const ended = orch.endAttachmentsByPids(pids, reason);
+    return { status: 200, body: { ok: true, ended } };
   });
   server.addRoute('PUT', /^\/v1\/runner$/, async (_req, body) => {
     const mode = body['mode'];
@@ -315,7 +343,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
   server.addRoute('POST', /^\/v1\/shutdown$/, async (_req, body) => {
     const reap = body['reap'] === true || body['reap'] === 'true';
     if (!orch.requestShutdown) return { status: 409, body: { ok: false, reason: 'shutdown not available in this host' } };
-    setTimeout(() => orch.requestShutdown?.(reap), 50);
+    setTimeout(() => orch.requestShutdown?.('stop', reap), 50);
     return { status: 200, body: { ok: true, reap } };
   });
   server.addRoute('POST', /^\/v1\/tick$/, async () => {

@@ -14,7 +14,7 @@
  *   orchestrator-ctl pause | resume [--override-budget]
  *   orchestrator-ctl mode <spawn|pull|mixed>
  *   orchestrator-ctl claim <workerId> [--task <id>]
- *   orchestrator-ctl release <launchId> --reason <text>
+ *   orchestrator-ctl release <launchId> --reason <text> [--keep]
  *   orchestrator-ctl nudge <task> <message>
  *   orchestrator-ctl logs <task> [--launch <n>]
  *   orchestrator-ctl outbox [--after <id>] [--limit <n>]
@@ -23,7 +23,7 @@
  */
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { daemonState, listRuns, startDaemon, stopDaemon } from '../runs/lifecycle.js';
+import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 import { SqliteStore } from '../state/sqlite.js';
 import { isEntrypoint } from '../entry.js';
@@ -41,6 +41,12 @@ export async function resolveUrl(opts: { url?: string; dataDir?: string; repo?: 
       const repo = await resolveRepoPath({ repo: opts.repo });
       const state = await daemonState(runPaths(repo).runDir);
       if (state.healthy && state.url) return state.url;
+      // An idle exit or a crash is revived on demand; an explicit stop is refused by reviveDaemon. See specs/operator-control "Revive on demand".
+      const revived = await reviveDaemon({ repo });
+      if (revived) {
+        process.stderr.write(`daemon revived (pid ${revived.pid})\n`);
+        return revived.url;
+      }
       if (!process.env['ORCH_DATA_DIR']) throw new Error(`no running daemon for ${repo} (run dir ${state.runDir}); run \`orchestrator-ctl start\``);
     } catch (err) {
       if (!process.env['ORCH_DATA_DIR']) throw err;
@@ -85,7 +91,7 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl pause | resume [--override-budget]   resume is refused over the cost ceiling without the flag
   orchestrator-ctl mode <spawn|pull|mixed>         who executes launches: the daemon, workers, or both
   orchestrator-ctl claim <workerId> [--task <id>]  hand a parked launch to a worker (prints its brief, token, worktree)
-  orchestrator-ctl release <launchId> --reason <text>
+  orchestrator-ctl release <launchId> --reason <text> [--keep]   keep: preserve the work on the branch at no attempt cost
   orchestrator-ctl nudge <task> <message>       queue a message for the task's running agent
   orchestrator-ctl logs <task> [--launch <n>]
   orchestrator-ctl outbox [--after <id>] [--limit <n>]   pending tracker effects and the policy
@@ -107,6 +113,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       'data-dir': { type: 'string' },
       repo: { type: 'string' },
       reap: { type: 'boolean', default: false },
+      keep: { type: 'boolean', default: false },
       release: { type: 'boolean', default: false },
       reason: { type: 'string' },
       answer: { type: 'string' },
@@ -176,7 +183,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       return call(base, 'POST', '/v1/claims', { workerId: a, taskId: values.task, access: values.access });
     case 'release':
       if (!a) throw new Error('release needs a launch id');
-      return call(base, 'POST', `/v1/launches/${a}/release`, { reason: values.reason ?? rest.join(' ') });
+      return call(base, 'POST', `/v1/launches/${a}/release`, { reason: values.reason ?? rest.join(' '), ...(values.keep ? { keep: true } : {}) });
     case 'nudge':
       if (!a) throw new Error('nudge needs a task id and a message');
       return call(base, 'POST', `/v1/tasks/${a}/nudge`, { message: rest.join(' ') });

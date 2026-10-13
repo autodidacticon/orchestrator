@@ -1,7 +1,6 @@
 {
-  "name": "orchestrator",
+  "name": "@autodidacticon/orchestrator",
   "version": "0.1.0",
-  "private": true,
   "description": "Parallel coding-agent orchestrator over a task DAG",
   "type": "module",
   "engines": {
@@ -42,7 +41,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev": "tsx src/main.ts"
+    "dev": "tsx src/main.ts",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -55,5 +55,8 @@
     "tsx": "^4.19.0",
     "typescript": "^5.6.0",
     "vitest": "^3.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

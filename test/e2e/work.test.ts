@@ -4,7 +4,7 @@
  * Needs a logged-in `claude` and the Workflow tool available to headless sessions.
  */
 import { execFile } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { listRuns, stopDaemon } from '../../src/runs/lifecycle.js';
 import { runPaths } from '../../src/runs/runDir.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
-import { gitIn, makeRepo, tsxLoader } from '../slice/harness.js';
+import { gitIn, makeRepo } from '../slice/harness.js';
 
 const execFileP = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,14 +24,10 @@ describe.skipIf(!enabled)('e2e: a Claude Code session works a run in pull mode',
   it('two workers drain a three-task graph and every task lands as a trailer commit', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-work-home-'));
     const base = mkdtempSync(path.join(tmpdir(), 'orch-work-repo-'));
-    const binDir = path.join(base, 'bin');
-    mkdirSync(binDir);
-    const wrapper = path.join(binDir, 'orchestrator-mcp');
-    writeFileSync(wrapper, `#!/bin/sh\nexec "${process.execPath}" --import "${tsxLoader}" "${path.join(root, 'src/operator/mcp.ts')}" "$@"\n`);
-    chmodSync(wrapper, 0o755);
+    // Nothing on PATH: the plugin's launcher runs the checkout.
     const repo = realpathSync(makeRepo(base));
     writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 200', 'leaseTtlMs: 600000', 'capacity: 2'].join('\n'));
-    const env: Record<string, string> = { ...(process.env as Record<string, string>), ORCH_HOME: home, PATH: `${binDir}:${process.env['PATH']}` };
+    const env: Record<string, string> = { ...(process.env as Record<string, string>), ORCH_HOME: home };
     delete env['CLAUDECODE'];
     delete env['CLAUDE_CODE_ENTRYPOINT'];
     const paths = runPaths(repo, env);

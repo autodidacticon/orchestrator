@@ -25,8 +25,9 @@ import {
   type RevisionContext,
   type Status,
   type StatusKind,
+  type InterruptedContext,
 } from '../state/status.js';
-import { type Launch, type RunnerMode, runIdOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
+import { type Attachment, type Launch, type RunnerMode, runIdOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CascadeStep } from '../graph/query.js';
@@ -36,6 +37,7 @@ import type { VerifierBackend } from '../verify/job.js';
 import type { BriefInput, FallbackReport, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
 import { chainPolicy, type Deferral, type Policy } from './schedule.js';
+import { pidAlive } from '../runner/subprocess.js';
 import { runTick } from './tick.js';
 import { deriveEffects } from '../tracker/effects.js';
 import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, runCostUsd } from '../health/budgets.js';
@@ -132,6 +134,8 @@ export interface StatusReport {
     idleMs: number;
     stuck: boolean;
     costUsd?: number;
+    /** Kept releases the task had absorbed when this launch was created. */
+    interruptions: number;
   }>;
   /** Health: flagged tasks, why admission is paused, cost and the configured budgets. See specs/health-monitoring. */
   stuck: Id[];
@@ -156,6 +160,10 @@ export interface StatusReport {
   trackerErrors: TrackerError[];
   /** Candidates skipped by the scope filter in the last admission pass; empty while paused. See specs/operator-control "Status report: deferred candidates". */
   deferred: Deferral[];
+  /** The daemon's own life: quiescence, idle time, and the configured window. See specs/operator-control "Idle exit". */
+  idle: { quiescent: boolean; idleMs: number; exitAfterMs: number };
+  /** Live session attachments and the claimed launches each holds. See specs/operator-control "Session attachments". */
+  attachments: Array<{ id: string; pids: number[]; since: number; launches: string[] }>;
 }
 
 export interface TrackerError {
@@ -190,11 +198,15 @@ export class Orchestrator implements OrchestratorCore {
   apiBaseUrl: string;
   foreignCommits: string[] = [];
   /** Set by the daemon entrypoint; the shutdown route calls it after responding. */
-  requestShutdown: ((reap: boolean) => void) | undefined;
+  requestShutdown: ((reason: 'idle' | 'stop', reap?: boolean) => void) | undefined;
 
   private readonly clock: () => number;
   private _graph: Graph | undefined;
   private _deferred: Deferral[] = [];
+  /** Idle exit accounting. See specs/operator-control "Idle exit". */
+  private readonly startedAt: number;
+  private lastActivityAt: number;
+  private inFlightRequests = 0;
   private _graphRejected: { reasons: string[] } | undefined;
   private readonly waiters = new Map<string, Waiter[]>();
   private verifierInFlight: Promise<void> | undefined;
@@ -217,7 +229,118 @@ export class Orchestrator implements OrchestratorCore {
     this.clock = deps.clock ?? (() => Date.now());
     this.log = deps.log ?? silentLog;
     this.apiBaseUrl = deps.apiBaseUrl ?? 'http://127.0.0.1:0';
+    this.startedAt = this.now();
+    this.lastActivityAt = this.startedAt;
     if (!runIdOf(this.store)) setRunId(this.store, randomUUID().slice(0, 16));
+  }
+
+  // ---- idle exit (specs/operator-control "Idle exit") ----
+
+  /** Nothing a tick would act on: no launch preparing, launching, live, or due to spawn; no verifier job unapplied; no pending cascade. */
+  quiescent(): boolean {
+    if (this.store.listLaunches({ status: ['preparing', 'launching', 'live'] }).length) return false;
+    // In spawn and mixed modes a parked launch will be spawned by a tick, now or after the window; in pull mode it waits for a worker and is durable.
+    if (this.effectiveMode() !== 'pull' && this.store.listLaunches({ status: 'claimable' }).length) return false;
+    if (this.store.listJobs({ applied: false }).length) return false;
+    if (this.pendingCascade()) return false;
+    return true;
+  }
+
+  requestBegan(): void {
+    this.inFlightRequests++;
+  }
+
+  /** A probe (`GET /v1/status?probe=1`) never counts as activity. */
+  requestEnded(probe: boolean): void {
+    this.inFlightRequests = Math.max(0, this.inFlightRequests - 1);
+    if (!probe) this.lastActivityAt = this.now();
+  }
+
+  /** After every tick: a non-quiescent tick, or an attached session while exitWhileAttached is off, is activity. */
+  noteTickEnded(): void {
+    if (!this.quiescent() || (this.attached() && !this.config.daemon.exitWhileAttached)) this.lastActivityAt = this.now();
+  }
+
+  idleMs(): number {
+    if (this.inFlightRequests > 0 || !this.quiescent()) return 0;
+    if (this.attached() && !this.config.daemon.exitWhileAttached) return 0;
+    return Math.max(0, this.now() - this.lastActivityAt);
+  }
+
+  idleExitDue(): boolean {
+    const window = this.config.daemon.idleExitMs;
+    return window > 0 && this.idleMs() >= window;
+  }
+
+  // ---- session attachments (specs/operator-control "Session attachments") ----
+
+  /** Register or refresh a session's attachment; `attachment.started` on first sight or after an end. */
+  attach(a: { id: string; pids: number[] }): void {
+    const existing = this.store.listAttachments().find((x) => x.id === a.id);
+    const now = this.now();
+    this.store.transaction(() => {
+      if (!existing || existing.ended) this.store.appendEvent({ kind: 'attachment.started', payload: { id: a.id, pids: a.pids } }, now);
+      this.store.putAttachment({ id: a.id, pids: a.pids, since: existing && !existing.ended ? existing.since : now });
+    });
+  }
+
+  endAttachment(id: string, reason: string): boolean {
+    const a = this.store.listAttachments().find((x) => x.id === id);
+    if (!a || a.ended) return false;
+    this.store.putAttachment({ ...a, ended: { at: this.now(), reason } });
+    this.wake();
+    return true;
+  }
+
+  /** End every live attachment whose chain contains any of the pids (a session end posts its ancestry). */
+  endAttachmentsByPids(pids: number[], reason: string): string[] {
+    const ended: string[] = [];
+    for (const a of this.store.listAttachments()) {
+      if (a.ended || !a.pids.some((p) => pids.includes(p))) continue;
+      this.store.putAttachment({ ...a, ended: { at: this.now(), reason } });
+      ended.push(a.id);
+    }
+    if (ended.length) this.wake();
+    return ended;
+  }
+
+  isLiveAttachment(id: string): boolean {
+    const a = this.store.listAttachments().find((x) => x.id === id);
+    return Boolean(a && !a.ended);
+  }
+
+  /** Live attachments with the claimed launches each holds. */
+  attachments(): Array<{ id: string; pids: number[]; since: number; launches: string[] }> {
+    const live = this.store.listLaunches({ status: 'live' });
+    return this.store
+      .listAttachments()
+      .filter((a) => !a.ended)
+      .map((a) => ({ id: a.id, pids: a.pids, since: a.since, launches: live.filter((l) => l.worker?.attachment === a.id).map((l) => l.launchId) }));
+  }
+
+  /** A session is attached while some live attachment's own process is alive. */
+  attached(): boolean {
+    return this.store.listAttachments().some((a) => !a.ended && a.pids[0] !== undefined && pidAlive(a.pids[0]));
+  }
+
+  /** Attachments found dead or ended: release their launches with keep, then forget them. Runs at reconcile. */
+  async sweepAttachments(): Promise<void> {
+    const all: Attachment[] = this.store.listAttachments();
+    if (!all.length) return;
+    for (const a of all) {
+      if (!a.ended && !(a.pids[0] !== undefined && pidAlive(a.pids[0]))) this.endAttachment(a.id, 'processDead');
+    }
+    for (const a of this.store.listAttachments()) {
+      if (!a.ended) continue;
+      for (const l of this.store.listLaunches({ status: 'live' })) {
+        if (l.worker?.attachment !== a.id) continue;
+        await this.release(l.launchId, `session ended (${a.ended.reason})`, { keep: true, reasonCode: 'sessionEnded' });
+      }
+      this.store.transaction(() => {
+        this.store.appendEvent({ kind: 'attachment.ended', payload: { id: a.id, pids: a.pids, reason: a.ended?.reason, since: a.since } }, this.now());
+        this.store.deleteAttachment(a.id);
+      });
+    }
   }
 
   // ---- OrchestratorCore ----
@@ -611,7 +734,7 @@ export class Orchestrator implements OrchestratorCore {
       this.store.appendEvent({ kind: 'proposal.created', taskId: launch.taskId, launchId: launch.launchId, payload: { id, title: p.title } }, this.now());
     });
     // The agent's claim is recorded as submitted; structural checks are the verifier's first step.
-    this.transition(launch.taskId, { kind: 'submitted' }, 'agent', 'submit');
+    this.transition(launch.taskId, { kind: 'submitted' }, 'agent', 'submit', { interruptions: 0 });
     const check = checkSubmission({
       sealedSha,
       baseSha: launch.baseSha,
@@ -935,7 +1058,7 @@ export class Orchestrator implements OrchestratorCore {
    * Hand a parked launch to a worker. Idempotent per worker id. See specs/pull-runner
    * "Claim", "Worker identity", and "Access modes".
    */
-  async claim(opts: { workerId: string; taskId?: Id; access?: string }): Promise<ApiResponse> {
+  async claim(opts: { workerId: string; taskId?: Id; access?: string; attachment?: string }): Promise<ApiResponse> {
     const access = opts.access ?? 'local';
     if (access === 'remote') return { status: 501, body: { error: 'access remote is reserved for a later change; only local workers are supported', access } };
     if (access !== 'local') return { status: 400, body: { error: `unknown access ${access}` } };
@@ -972,7 +1095,7 @@ export class Orchestrator implements OrchestratorCore {
     const now = this.now();
     const lease = entry.lease;
     this.store.transaction(() => {
-      this.store.updateLaunch(launch!.launchId, { status: 'live', worker: { id: workerId, claimedAt: now }, progressAt: now, lastSignal: 'claimed' });
+      this.store.updateLaunch(launch!.launchId, { status: 'live', worker: { id: workerId, claimedAt: now, ...(opts.attachment ? { attachment: opts.attachment } : {}) }, progressAt: now, lastSignal: 'claimed' });
       this.store.setEntry(launch!.taskId, { ...entry, lease: { ...lease, claimedAt: now, expiresAt: now + this.config.leaseTtlMs }, carry: undefined, updatedAt: now });
       this.store.appendEvent({ kind: 'launch.claimed', taskId: launch!.taskId, launchId: launch!.launchId, payload: { workerId, access } }, now);
     });
@@ -1017,8 +1140,13 @@ export class Orchestrator implements OrchestratorCore {
     };
   }
 
-  /** Hand a claimed launch back. Without progress the task returns to unstarted at no cost. See specs/pull-runner "Release". */
-  async release(launchId: string, reason: string): Promise<ApiResponse> {
+  /**
+   * Hand a claimed launch back. Without progress the task returns to unstarted at no
+   * cost; with progress it is a failed attempt, unless `keep` and the task's kept
+   * releases are under the bound: then the work is preserved on the branch and the
+   * task returns to unstarted with an `interrupted` context. See specs/pull-runner "Release".
+   */
+  async release(launchId: string, reason: string, opts: { keep?: boolean; reasonCode?: string } = {}): Promise<ApiResponse> {
     const launch = this.store.getLaunch(launchId);
     if (!launch || launch.status !== 'live' || !launch.worker) {
       return { status: 409, body: { ok: false, reason: `launch ${launchId} is not a live claimed launch` } };
@@ -1036,14 +1164,38 @@ export class Orchestrator implements OrchestratorCore {
     const touched = fingerprint !== undefined && launch.fingerprint !== undefined && fingerprint !== launch.fingerprint;
     const called = launch.lastSignal !== undefined && launch.lastSignal !== 'claimed' && launch.lastSignal !== 'spawned';
     const progressed = touched || called;
+    const bound = this.config.daemon.maxKeptReleases;
+    const interruptions = entry.interruptions ?? 0;
+    const wantsKeep = Boolean(opts.keep) && (progressed || entry.status.kind === 'waiting');
+    const underBound = bound === 0 || interruptions < bound;
+    let preserved: { headSha: string; wipCommit?: string } | undefined;
+    let keepError: string | undefined;
+    if (wantsKeep && underBound) {
+      try {
+        preserved = await this.workspace.preserve(launch);
+      } catch (err) {
+        keepError = String(err);
+        this.log.warn('could not preserve the worktree; releasing without keep', { launchId, err: keepError });
+      }
+    } else if (wantsKeep) {
+      keepError = `kept releases exhausted (${interruptions} of ${bound})`;
+    }
+    const kept = preserved !== undefined;
+    const interrupted: InterruptedContext | undefined = kept
+      ? { priorLaunchId: launchId, priorBranch: launch.branch, headSha: preserved!.headSha, ...(preserved!.wipCommit ? { wipCommit: preserved!.wipCommit } : {}), reason: opts.reasonCode ?? reason, interruptions: interruptions + 1 }
+      : undefined;
     let outcome: 'unstarted' | 'failed' | 'blocked';
     this.store.transaction(() => {
-      this.store.appendEvent({ kind: 'launch.released', taskId: launch.taskId, launchId, payload: { reason, progressed, workerId: launch.worker?.id } }, this.now());
+      this.store.appendEvent({ kind: 'launch.released', taskId: launch.taskId, launchId, payload: { reason, progressed, keep: Boolean(opts.keep), kept, workerId: launch.worker?.id } }, this.now());
+      const keptPatch: Partial<Entry> = interrupted ? { carry: { ...(entry.carry ?? {}), interrupted }, interruptions: interrupted.interruptions } : {};
       if (entry.status.kind === 'waiting') {
-        this.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');
+        this.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead', keptPatch);
         outcome = 'blocked';
       } else if (!progressed) {
         this.transition(launch.taskId, { kind: 'unstarted' }, 'orchestrator', 'released');
+        outcome = 'unstarted';
+      } else if (kept) {
+        this.transition(launch.taskId, { kind: 'unstarted' }, 'orchestrator', 'released', keptPatch);
         outcome = 'unstarted';
       } else {
         const out = this.fail(launch.taskId, { kind: 'released', message: reason }, 'orchestrator', 'deadOrExpired');
@@ -1053,7 +1205,10 @@ export class Orchestrator implements OrchestratorCore {
     });
     await this.workspace.remove(launch);
     this.wake();
-    return { status: 200, body: { ok: true, launchId, taskId: launch.taskId, outcome: outcome!, progressed } };
+    return {
+      status: 200,
+      body: { ok: true, launchId, taskId: launch.taskId, outcome: outcome!, progressed, kept, ...(kept ? { branch: launch.branch, headSha: preserved!.headSha, ...(preserved!.wipCommit ? { wipCommit: preserved!.wipCommit } : {}) } : {}), ...(keepError ? { keepError } : {}) },
+    };
   }
 
   pause(): void {
@@ -1160,6 +1315,7 @@ export class Orchestrator implements OrchestratorCore {
       idleMs: idleMsOf(l, now),
       stuck: l.stuckSince !== undefined,
       costUsd: l.costUsd,
+      interruptions: l.interruptions ?? 0,
     }));
     return {
       finished: q.finished(g, o),
@@ -1196,6 +1352,8 @@ export class Orchestrator implements OrchestratorCore {
       outboxPending: this.store.countOutbox('pending'),
       trackerErrors: this.trackerErrors(),
       deferred: this.isPaused() ? [] : this._deferred,
+      idle: { quiescent: this.quiescent(), idleMs: this.idleMs(), exitAfterMs: this.config.daemon.idleExitMs },
+      attachments: this.attachments(),
     };
   }
 
@@ -1226,6 +1384,7 @@ export class Orchestrator implements OrchestratorCore {
     if (this.ticking) return this.ticking;
     this.ticking = runTick(this).finally(() => {
       this.ticking = undefined;
+      this.noteTickEnded();
     });
     return this.ticking;
   }
@@ -1321,6 +1480,17 @@ export class Orchestrator implements OrchestratorCore {
         await this.tick();
       } catch (err) {
         this.log.error('tick failed', { err: String(err) });
+      }
+      if (!this.stopping && this.idleExitDue()) {
+        const idleMs = this.idleMs();
+        this.store.appendEvent({ kind: 'daemon.idleExit', payload: { idleMs } }, this.now());
+        this.log.info('idle; exiting', { idleMs, exitAfterMs: this.config.daemon.idleExitMs });
+        if (this.requestShutdown) {
+          this.requestShutdown('idle', false);
+          return;
+        }
+        this.stopping = true;
+        return;
       }
       await new Promise<void>((resolve) => {
         this.wakeResolve = resolve;

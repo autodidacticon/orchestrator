@@ -4,3 +4,4 @@ dist/
 *.sqlite-wal
 *.sqlite-shm
 .orchestrator-run/
+hosts/claude-code/node_modules/

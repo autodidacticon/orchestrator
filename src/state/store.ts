@@ -9,6 +9,15 @@ export type LaunchStatus = 'preparing' | 'claimable' | 'launching' | 'live' | 'e
 
 export type RunnerMode = 'spawn' | 'pull' | 'mixed';
 
+/** A session's operator MCP server registered with the daemon: its pid chain and, once ended, why. */
+export interface Attachment {
+  id: string;
+  /** The registering process's pid followed by its ancestors. */
+  pids: number[];
+  since: number;
+  ended?: { at: number; reason: string };
+}
+
 export interface Launch {
   launchId: string;
   taskId: Id;
@@ -27,7 +36,9 @@ export interface Launch {
   /** Pull and mixed modes: when the launch was parked for a worker. See specs/pull-runner. */
   claimableAt?: number;
   /** Set when a worker claimed the launch; such a launch has no pid and is governed by its lease. */
-  worker?: { id: string; claimedAt: number };
+  worker?: { id: string; claimedAt: number; attachment?: string };
+  /** The task's kept releases when this launch was created. See specs/pull-runner "Release". */
+  interruptions?: number;
   endedAt?: number;
   endReason?: string;
   createdAt: number;
@@ -206,6 +217,11 @@ export interface Store {
 
   getKv(key: string): string | undefined;
   setKv(key: string, value: string): void;
+
+  /** Session attachments, kept under kv `attachment:<id>`. See specs/operator-control "Session attachments". */
+  listAttachments(): Attachment[];
+  putAttachment(a: Attachment): void;
+  deleteAttachment(id: string): void;
 
   /** Insert an effect; returns the new id, or undefined when (sourceSeq, taskId, kind) already exists. */
   insertOutbox(e: NewOutboxEffect): number | undefined;

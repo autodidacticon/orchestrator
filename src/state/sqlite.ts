@@ -11,6 +11,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { Id } from '../graph/model.js';
 import type { Entry } from './status.js';
 import type {
+  Attachment,
   EffectStatus,
   EventInput,
   JobStatus,
@@ -372,6 +373,19 @@ export class SqliteStore implements Store {
 
   setKv(key: string, value: string): void {
     this.db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(key, value);
+  }
+
+  listAttachments(): Attachment[] {
+    const rows = this.db.prepare("SELECT value FROM kv WHERE key LIKE 'attachment:%' ORDER BY key").all() as unknown as Array<{ value: string }>;
+    return rows.map((r) => JSON.parse(r.value) as Attachment);
+  }
+
+  putAttachment(a: Attachment): void {
+    this.setKv(`attachment:${a.id}`, JSON.stringify(a));
+  }
+
+  deleteAttachment(id: string): void {
+    this.db.prepare('DELETE FROM kv WHERE key = ?').run(`attachment:${id}`);
   }
 
   insertOutbox(e: NewOutboxEffect): number | undefined {

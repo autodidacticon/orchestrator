@@ -63,6 +63,30 @@ describe('revision section', () => {
   });
 });
 
+describe('interrupted context', () => {
+  it('names the branch, head, and WIP commit and tells the agent to continue or start over', () => {
+    const launch = { launchId: 'L2', taskId: 'T2', attempt: 1, launchNo: 2, status: 'live', token: 't', branch: 'task/T2/l2', worktree: '/w', baseSha: 'base2', graphRev: 'r', createdAt: 1 } as const;
+    const { markdown, json } = composeBrief(
+      {
+        launch: launch as unknown as Parameters<typeof composeBrief>[0]['launch'],
+        node: { id: 'T2', kind: 'task', payload: { title: 'x', description: 'd', acceptanceCriteria: ['a'] }, deps: [] },
+        depReports: [],
+        carry: { interrupted: { priorLaunchId: 'L1', priorBranch: 'task/T2/l1', headSha: 'H1', wipCommit: 'W1', reason: 'sessionEnded', interruptions: 1 } },
+        apiBaseUrl: 'http://127.0.0.1:1',
+        retryWindowMs: 1000,
+        checkCommand: 'true',
+        integrationBranch: 'main',
+      },
+      { fallbackPath: '/x' },
+    );
+    expect(markdown).toContain('launch `L1` was interrupted (sessionEnded)');
+    expect(markdown).toContain('branch `task/T2/l1` holds the work so far at `H1`');
+    expect(markdown).toContain('commit `W1` is a work-in-progress commit');
+    expect(markdown).toContain('squash the work-in-progress commit before submitting');
+    expect(json.context).toMatchObject({ interrupted: { priorLaunchId: 'L1', headSha: 'H1', wipCommit: 'W1' } });
+  });
+});
+
 describe('slot validation', () => {
   it('reports missing required slots; arrays count; milestones are skipped', () => {
     const g = parseGraph(graph);

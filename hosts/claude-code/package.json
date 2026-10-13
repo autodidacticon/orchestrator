@@ -1,0 +1,7 @@
+{
+  "name": "orchestrator-claude-code-plugin",
+  "private": true,
+  "dependencies": {
+    "@autodidacticon/orchestrator": "0.1.0"
+  }
+}

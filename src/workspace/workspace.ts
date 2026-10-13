@@ -43,4 +43,6 @@ export interface Workspace {
   fingerprint(launch: Launch): Promise<string>;
   /** Whether the launch's worktree and brief are present. */
   exists(launch: Launch): Promise<boolean>;
+  /** Commit uncommitted changes as a work-in-progress commit on the launch branch; the head afterwards. See specs/pull-runner "Release". */
+  preserve(launch: Launch): Promise<{ headSha: string; wipCommit?: string }>;
 }

@@ -30,10 +30,10 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 | running | failed | agent | fail report |
 | running | blocked | agent | block delivered through the fallback file after exit |
 | running | waiting | agent | block through the long-poll |
-| running | failed | orchestrator | process dead without a report, lease expired, or a claimed launch released after progress |
-| running | unstarted | orchestrator | claimed launch released without progress |
+| running | failed | orchestrator | process dead without a report, lease expired, or a claimed launch released after progress without keep |
+| running | unstarted | orchestrator | claimed launch released without progress, or released with keep after progress |
 | waiting | running | orchestrator | answer persisted and a slot admitted |
-| waiting | blocked | orchestrator | maxWait elapsed or process dead |
+| waiting | blocked | orchestrator | maxWait elapsed, process dead, or a claimed launch released |
 | submitted | done | verifier | published |
 | submitted | failed | verifier | checks red, undeclared empty diff, missing acceptance evidence, or integration cap hit |
 | submitted | unstarted | verifier | rebase conflict under the cap |
@@ -73,6 +73,10 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 - **WHEN** a claimed launch is released before any progress was observed
 - **THEN** the orchestrator applies `running -> unstarted` with `attempts` unchanged and the lease cleared
 
+#### Scenario: Kept release after progress returns to unstarted
+- **WHEN** a claimed launch with commits is released with `keep`
+- **THEN** the orchestrator applies `running -> unstarted` with trigger `released`, `attempts` unchanged, the lease cleared, and `carry.interrupted` set
+
 ### Requirement: Admission
 The orchestrator SHALL admit `unstarted` ready tasks and resumable `waiting` tasks into run slots up to the configured capacity, admitting resumables before new launches and otherwise in first-in first-out order. A `waiting` task SHALL NOT hold a run slot, and the number of `waiting` tasks SHALL be bounded by `maxWaiting`.
 
@@ -89,7 +93,7 @@ The orchestrator SHALL admit `unstarted` ready tasks and resumable `waiting` tas
 - **THEN** that block is answered with a timeout and the task becomes `blocked` with its question preserved
 
 ### Requirement: Counters
-`launches` SHALL increase by one for every spawned process and SHALL never be reset; it names the branch `task/<id>/l<launches>` and the worktree. `attempts` SHALL increase by one when a launch ends in `failed` by the agent's fail report, by process death without a report, by lease expiry, or by a verifier red check or cap hit, and SHALL NOT increase on daemon-caused relaunch or on integration conflict. `integrationRetries` SHALL increase by one on each rebase conflict. `attempts` and `integrationRetries` SHALL be reset to zero on human unblock, reopen, and uncancel, and on every node reset by a cascade reopen.
+`launches` SHALL increase by one for every spawned process and SHALL never be reset; it names the branch `task/<id>/l<launches>` and the worktree. `attempts` SHALL increase by one when a launch ends in `failed` by the agent's fail report, by process death without a report, by lease expiry, or by a verifier red check or cap hit, and SHALL NOT increase on daemon-caused relaunch, on integration conflict, or on a release with `keep`. `integrationRetries` SHALL increase by one on each rebase conflict. `interruptions` SHALL increase by one on every release with `keep` that stores an `interrupted` context and SHALL be reset to zero when the task submits. `attempts` and `integrationRetries` SHALL be reset to zero on human unblock, reopen, and uncancel, and on every node reset by a cascade reopen.
 
 #### Scenario: Conflict does not spend an attempt
 - **WHEN** a submitted task hits a rebase conflict under the cap
@@ -102,6 +106,14 @@ The orchestrator SHALL admit `unstarted` ready tasks and resumable `waiting` tas
 #### Scenario: Cascade resets budgets
 - **WHEN** T2 had one attempt and one integration retry and is reset by a cascade reopen of T1
 - **THEN** T2's `attempts` and `integrationRetries` are zero and its `launches` is unchanged
+
+#### Scenario: Kept release does not spend an attempt
+- **WHEN** a claimed launch on its second attempt is released with `keep` after progress and `maxAttempts` is 2
+- **THEN** `attempts` stays at one, `interruptions` is one, the task is `unstarted`, and `launches` increases when it is relaunched
+
+#### Scenario: Interruptions reset on submit
+- **WHEN** a task with `interruptions` 2 submits
+- **THEN** `interruptions` is zero
 
 ### Requirement: Leases
 A `running` or `waiting` task SHALL hold a lease recording `launchId`, `token`, `claimedAt`, `spawnedAt`, `expiresAt`, `baseSha`, and `graphRev`. A heartbeat, any API call, and an open long-poll SHALL renew the lease. For a launch whose process the daemon can observe, the daemon SHALL also renew the lease on every tick while the runner reports the process alive, including the first tick after adoption, so that the lease TTL bounds silence only for launches the daemon cannot observe. The orchestrator SHALL treat an expired lease on a `running` task as failure with reason `leaseExpired`. Silence from a live process SHALL NOT fail the task; it is handled by stuck detection.

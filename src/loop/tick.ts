@@ -84,6 +84,8 @@ export async function applyPendingCascade(o: Orchestrator): Promise<void> {
 /** Phase 1. */
 export async function reconcile(o: Orchestrator): Promise<void> {
   await applyPendingCascade(o);
+  // Sessions that died or ended hand their claimed launches back with keep. See specs/operator-control "Session attachments".
+  await o.sweepAttachments();
   const now = o.now();
   for (const launch of o.store.listLaunches({ status: 'live' })) {
     const entry = o.entry(launch.taskId);

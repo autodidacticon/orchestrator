@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "operator": {
-      "command": "orchestrator-mcp",
-      "args": [],
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/orchestrator.mjs", "mcp"],
       "timeout": 180000
     }
   }

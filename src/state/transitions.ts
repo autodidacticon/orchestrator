@@ -30,8 +30,10 @@ export const TRANSITIONS: readonly TransitionRow[] = [
   { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'deadOrExpired', effects: ['attempts++'] },
   { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'stuck', effects: ['attempts++'] },
   { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'timeBudget', effects: ['attempts++'] },
+  // A claimed launch released without progress, or with keep after progress (attempts unchanged, interruptions counted by the caller).
   { from: 'running', to: 'unstarted', actor: 'orchestrator', nodeKind: 'task', trigger: 'released', effects: [] },
   { from: 'waiting', to: 'running', actor: 'orchestrator', nodeKind: 'task', trigger: 'resumed', effects: [] },
+  // maxWait elapsed, process dead, or a claimed launch released while waiting.
   { from: 'waiting', to: 'blocked', actor: 'orchestrator', nodeKind: 'task', trigger: 'maxWaitOrDead', effects: [] },
   { from: 'submitted', to: 'done', actor: 'verifier', nodeKind: 'task', trigger: 'published', effects: [] },
   { from: 'submitted', to: 'failed', actor: 'verifier', nodeKind: 'task', trigger: 'verificationFailed', effects: ['attempts++'] },

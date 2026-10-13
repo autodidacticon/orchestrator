@@ -1,22 +1,24 @@
 ---
 name: work
-description: Execute an orchestrated run's launches with this session's own subagents through the bundled workflow, instead of (or alongside) headless agents the daemon spawns. Use when the user wants the work done visibly in this session, with its permissions and login, or asks to "work the run", "run the tasks here", or use pull mode.
+description: Add this session's subagents as workers to an orchestrated run, or switch the run's mode, through the bundled workflow. The run skill already works a pull-mode run; use this to add workers from another session, to work a run that was started in spawn mode, or when the user asks to "work the run" or "run the tasks here".
 ---
 
 # Work a run with session subagents
 
 The daemon prepares each launch (worktree, brief, token) and parks it; your workers claim
-launches, do the work in the prepared worktree, and report through the operator tools. You
-run the bundled workflow and handle what it hands back: questions, reviews, and the end.
+launches, do the work in the prepared worktree, and report through the operator tools. The
+`run` skill does this by itself for a run in `pull` mode. Use this skill to add workers from a
+second session, to work a run that is in `spawn` mode, or to switch modes; then handle what
+the workflow hands back: questions, reviews, and the end.
 
 ## 1. Prerequisites
 
-- The package's executables must be on PATH (`npm link` in a checkout, or a global install);
-  the plugin's MCP server is `orchestrator-mcp`.
 - A graph must be loaded: call `start` and then `status`; if no graph is loaded, use the
   `import` skill first.
-- Call `start` with `mode: "pull"` (workers only) or `mode: "mixed"` (the daemon spawns
-  whatever nobody claims within its claim window). This also switches a daemon already running.
+- `start` reports the mode in force. A plugin-started run is already `pull`. To work a run in
+  `spawn` mode, call `start` with `mode: "pull"` (workers only) or `mode: "mixed"` (the
+  daemon spawns whatever nobody claims within its claim window); this switches a daemon
+  already running.
 
 ## 2. Run the workflow
 
@@ -53,5 +55,10 @@ digest says the run is finished.
 
 ## 4. Stopping
 
-The run survives the session: parked launches stay claimable and claimed launches are
-governed by their leases. `stop` without `reap` leaves everything for the next `start`.
+The run survives the session: parked launches stay claimable, and a launch held by one of
+this session's workers is handed back with `keep` when the session ends (its branch kept,
+uncommitted work committed on it, no attempt spent). A worker that must stop for an outside
+reason does the same itself with `release` and `keep: true`; a worker that gives up on the
+task releases without `keep`, which spends the attempt and briefs the retry with its reason.
+`stop` without `reap` leaves everything for the next `start`; after an idle exit the daemon
+comes back on the next tool call.

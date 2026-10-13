@@ -114,6 +114,8 @@ export interface Entry {
   integrationRetries: number;
   /** Monotone process counter. Never reset. Names branches and worktrees. */
   launches: number;
+  /** Kept releases since the task last submitted; bounded by daemon.maxKeptReleases. Absent in rows written before it existed. */
+  interruptions?: number;
   lease?: Lease;
   updatedAt: number;
   /** Milestones only. */
@@ -131,6 +133,7 @@ export function defaultEntry(now = 0): Entry {
     attempts: 0,
     integrationRetries: 0,
     launches: 0,
+    interruptions: 0,
     updatedAt: now,
     reviewVersion: 0,
   };
@@ -193,4 +196,18 @@ export interface AttemptContext {
   question?: Question;
   answer?: string;
   revision?: RevisionContext;
+  /** A kept release handed the launch back with its branch intact. See specs/pull-runner "Release". */
+  interrupted?: InterruptedContext;
+}
+
+/** Context for the launch after a release with keep: where the previous launch's work sits. */
+export interface InterruptedContext {
+  priorLaunchId: string;
+  priorBranch: string;
+  headSha: string;
+  /** Present when uncommitted changes were committed as a work-in-progress commit. */
+  wipCommit?: string;
+  reason: string;
+  /** Kept releases this task has absorbed since it last submitted. */
+  interruptions: number;
 }

@@ -12,6 +12,8 @@ export class FakeWorkspace implements Workspace {
   readonly fallbacks = new Map<string, FallbackReport>();
   /** Scripted fingerprints by launch id; default: the head with a clean tree. */
   readonly fingerprints = new Map<string, string>();
+  /** Launches with uncommitted changes, which `preserve` turns into a synthetic WIP commit. */
+  readonly dirty = new Set<string>();
   private counter = 0;
 
   async integrationHead(): Promise<string> {
@@ -57,6 +59,21 @@ export class FakeWorkspace implements Workspace {
 
   async exists(launch: Launch): Promise<boolean> {
     return this.worktrees.has(launch.launchId);
+  }
+
+  async preserve(launch: Launch): Promise<{ headSha: string; wipCommit?: string }> {
+    const head = (this.fingerprints.get(launch.launchId) ?? `${this.head}:clean`).split(':')[0] ?? this.head;
+    if (!this.dirty.has(launch.launchId)) return { headSha: head };
+    this.dirty.delete(launch.launchId);
+    const wipCommit = `wip-${launch.launchId.slice(0, 8)}`;
+    this.fingerprints.set(launch.launchId, `${wipCommit}:clean`);
+    return { headSha: wipCommit, wipCommit };
+  }
+
+  /** Test helper: the worker touched the tree (a commit at `head`, plus uncommitted changes when `uncommitted`). */
+  markProgress(launchId: string, head = 'wip-head', uncommitted = false): void {
+    this.fingerprints.set(launchId, `${head}:${uncommitted ? 'dirty' : 'clean'}`);
+    if (uncommitted) this.dirty.add(launchId);
   }
 
   /** Test helper: a submission that is empty (sealedSha == baseSha). */

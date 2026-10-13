@@ -1,4 +1,5 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { gitIn, makeSlice, type SliceHarness } from './harness.js';
 
@@ -116,4 +117,85 @@ describe('claim and release over the real API', () => {
     expect(replay.body).toEqual({ answer: 'left' });
     expect(h.orch.entry('T1').lease!.expiresAt).toBeGreaterThan(Date.now() + 50_000);
   }, 30_000);
+
+  it('a dead or ended attachment releases its launches with keep, matched by any pid in its chain', async () => {
+    h = await makeSlice({ graph: G, config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
+    await h.orch.tick();
+    // A first pid that is not alive: the next reconcile ends the attachment and hands the launch back.
+    expect((await http(h, 'POST', '/v1/attachments', { id: 'dead', pids: [999_999, 999_998, process.pid] })).status).toBe(200);
+    const c1 = await http(h, 'POST', '/v1/claims', { workerId: 'w1', taskId: 'T1', attachment: 'dead' });
+    expect(c1.status).toBe(200);
+    expect(h.store.getLaunch(String(c1.body['launchId']))?.worker).toMatchObject({ id: 'w1', attachment: 'dead' });
+    expect(h.orch.status().attachments).toMatchObject([{ id: 'dead', launches: [c1.body['launchId']] }]);
+    await h.orch.tick();
+    expect(h.store.getLaunch(String(c1.body['launchId']))).toMatchObject({ status: 'ended', endReason: 'released' });
+    // No progress: back to unstarted at no cost, and the same tick parks a fresh launch for the next worker.
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 0, interruptions: 0 });
+    expect(h.store.listLaunches({ taskId: 'T1', status: 'claimable' })).toHaveLength(1);
+    expect(h.orch.status().attachments).toEqual([]);
+    expect(h.store.listEvents({ kind: 'attachment.ended' })).toHaveLength(1);
+    // The unknown header for an ended id; nothing for a live one.
+    const live = { id: 'live', pids: [process.pid, process.ppid, 424_242] };
+    expect((await http(h, 'POST', '/v1/attachments', live)).status).toBe(200);
+    const withDead = await fetch(`${h.orch.apiBaseUrl}/v1/status`, { headers: { 'x-orch-attachment': 'dead' } });
+    expect(withDead.status).toBe(200);
+    expect(withDead.headers.get('x-orch-attachment')).toBe('unknown');
+    const withLive = await fetch(`${h.orch.apiBaseUrl}/v1/status`, { headers: { 'x-orch-attachment': 'live' } });
+    expect(withLive.headers.get('x-orch-attachment')).toBeNull();
+    // Session end by ancestry: a pid from the third position matches; one outside the chain does not.
+    await h.orch.tick();
+    const c2 = await http(h, 'POST', '/v1/claims', { workerId: 'w2', taskId: 'T2', attachment: 'live' });
+    expect(c2.status).toBe(200);
+    expect((await http(h, 'POST', '/v1/attachments/ended', { pids: [555_555], reason: 'other' })).body).toMatchObject({ ended: [] });
+    expect(h.orch.isLiveAttachment('live')).toBe(true);
+    const ended = await http(h, 'POST', '/v1/attachments/ended', { pids: [777_777, 424_242], reason: 'clear' });
+    expect(ended.body).toMatchObject({ ended: ['live'] });
+    expect(h.orch.isLiveAttachment('live')).toBe(false);
+    await h.orch.tick();
+    expect(h.store.getLaunch(String(c2.body['launchId']))).toMatchObject({ status: 'ended', endReason: 'released' });
+    expect(h.store.listLaunches({ taskId: 'T2', status: 'claimable' })).toHaveLength(1);
+    expect(h.orch.status().attachments).toEqual([]);
+    // An attachment holding nothing is removed silently.
+    expect((await http(h, 'POST', '/v1/attachments', { id: 'idle', pids: [process.pid] })).status).toBe(200);
+    expect((await http(h, 'POST', '/v1/attachments/idle/end', { reason: 'bye' })).body).toMatchObject({ ended: true });
+    await h.orch.tick();
+    expect(h.orch.status().attachments).toEqual([]);
+    expect(h.store.listEvents({ kind: 'launch.released' })).toHaveLength(2);
+  });
+
+  it('a kept release preserves uncommitted work on the branch and briefs the next claim with it', async () => {
+    h = await makeSlice({ graph: G, config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
+    await h.orch.tick();
+    const c1 = await http(h, 'POST', '/v1/claims', { workerId: 'w1', taskId: 'T1' });
+    expect(c1.status).toBe(200);
+    const worktree = String(c1.body['worktree']);
+    const launchId = String(c1.body['launchId']);
+    const token = String(c1.body['token']);
+    writeFileSync(path.join(worktree, 'done.txt'), 'committed\n');
+    gitIn(worktree, 'add', 'done.txt');
+    gitIn(worktree, 'commit', '-q', '-m', 'first commit');
+    const committed = gitIn(worktree, 'rev-parse', 'HEAD');
+    writeFileSync(path.join(worktree, 'wip.txt'), 'not committed\n');
+    const r = await http(h, 'POST', `/v1/launches/${launchId}/release`, { reason: 'session ending', keep: true });
+    expect(r.status).toBe(200);
+    expect(r.body, JSON.stringify(r.body)).toMatchObject({ ok: true, outcome: 'unstarted', progressed: true, kept: true, branch: 'task/T1/l1' });
+    const head = String(r.body['headSha']);
+    expect(r.body['wipCommit']).toBe(head);
+    expect(gitIn(h.repo, 'rev-parse', 'task/T1/l1')).toBe(head);
+    expect(gitIn(h.repo, 'rev-parse', 'task/T1/l1~1')).toBe(committed);
+    expect(gitIn(h.repo, 'show', `${head}:wip.txt`)).toBe('not committed');
+    expect(gitIn(h.repo, 'log', '-1', '--format=%s', head)).toMatch(/^WIP/);
+    expect(existsSync(worktree)).toBe(false);
+    expect(h.orch.entry('T1')).toMatchObject({ status: { kind: 'unstarted' }, attempts: 0, interruptions: 1 });
+    expect((await http(h, 'POST', `/v1/launches/${launchId}/heartbeat`, {}, token)).status).toBe(401);
+    await h.orch.tick();
+    const c2 = await http(h, 'POST', '/v1/claims', { workerId: 'w2', taskId: 'T1' });
+    expect(c2.status).toBe(200);
+    expect(c2.body['launchId']).not.toBe(launchId);
+    const brief = c2.body['brief'] as { context?: { interrupted?: Record<string, unknown> } };
+    expect(brief.context?.interrupted).toMatchObject({ priorLaunchId: launchId, priorBranch: 'task/T1/l1', headSha: head, wipCommit: head, interruptions: 1 });
+    const md = readFileSync(String(c2.body['briefPath']), 'utf8');
+    expect(md).toContain('task/T1/l1');
+    expect(md).toContain('work-in-progress commit');
+  });
 });

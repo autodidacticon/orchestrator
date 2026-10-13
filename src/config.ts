@@ -105,6 +105,17 @@ export const configSchema = z.object({
       scopes: z.boolean().default(true),
     })
     .default({}),
+  /** The daemon's own life. See specs/operator-control "Idle exit" and specs/pull-runner "Release". */
+  daemon: z
+    .object({
+      /** Quiet time, with no session attached unless exitWhileAttached, before the daemon exits on its own; 0 disables. */
+      idleExitMs: z.number().int().nonnegative().default(600_000),
+      /** Count an attached session as activity (false) or let the daemon exit while one is attached (true). */
+      exitWhileAttached: z.boolean().default(false),
+      /** Kept releases a task may absorb before a release with keep spends an attempt; 0 means unlimited. */
+      maxKeptReleases: z.number().int().nonnegative().default(3),
+    })
+    .default({}),
   /** Brief template slots: name -> { source, required, minLength }. */
   briefSlots: z
     .record(

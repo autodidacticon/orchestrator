@@ -5,7 +5,9 @@
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema, trackerSchema } from '../import/mapping.js';
-import { daemonState, listRuns, startDaemon, stopDaemon } from '../runs/lifecycle.js';
+import { randomUUID } from 'node:crypto';
+import { ancestorPids } from '../runs/ancestry.js';
+import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 
 /** The cap keeps every tool call under Claude Code's two-minute foreground limit; ORCH_WAIT_CAP_MS shortens it for tests. */
@@ -50,31 +52,82 @@ export interface OperatorContext {
 }
 
 export class OperatorClient {
+  /** This session's attachment: registered with the daemon on first contact, carried on claims, ended on close. See specs/operator-mcp "Operator MCP server". */
+  readonly attachmentId = randomUUID();
+  private pids: number[] | undefined;
+  private attachedToPid: number | undefined;
+
   constructor(private readonly ctx: OperatorContext) {}
 
   async repo(): Promise<string> {
     return resolveRepoPath({ repo: this.ctx.repo, env: this.ctx.env });
   }
 
+  /** The daemon's URL, reviving it after an idle exit or a crash; refused after an explicit stop or for a repository with no run directory. */
   async url(): Promise<string> {
     const repo = await this.repo();
     const paths = runPaths(repo, this.ctx.env);
     const state = await daemonState(paths.runDir);
-    if (!state.healthy || !state.url) {
-      throw new Error(`no running daemon for ${repo} (run dir ${paths.runDir}); call the start tool first`);
+    if (state.healthy && state.url) {
+      await this.ensureAttached(state.url, state.pid);
+      return state.url;
     }
-    return state.url;
+    const revived = await reviveDaemon({ repo, env: this.ctx.env });
+    if (revived) {
+      await this.ensureAttached(revived.url, revived.pid);
+      return revived.url;
+    }
+    throw new Error(`no running daemon for ${repo} (run dir ${paths.runDir}); call the start tool first`);
+  }
+
+  /** Register the attachment once per daemon process (the pid changes on every restart). */
+  private async ensureAttached(base: string, daemonPid: number | undefined): Promise<void> {
+    if (daemonPid !== undefined && this.attachedToPid === daemonPid) return;
+    await this.register(base);
+    this.attachedToPid = daemonPid;
+  }
+
+  async register(base?: string): Promise<void> {
+    const url = base ?? (await this.url());
+    this.pids ??= await ancestorPids(process.pid);
+    await fetch(`${url}/v1/attachments`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id: this.attachmentId, pids: this.pids }),
+      signal: AbortSignal.timeout(3000),
+    }).catch(() => undefined);
+  }
+
+  /** Tell the daemon this session is gone; best effort, half a second at most. */
+  async detach(reason = 'sessionEnded'): Promise<void> {
+    if (this.attachedToPid === undefined) return;
+    try {
+      const repo = await this.repo();
+      const state = await daemonState(runPaths(repo, this.ctx.env).runDir);
+      if (!state.healthy || !state.url) return;
+      await fetch(`${state.url}/v1/attachments/${encodeURIComponent(this.attachmentId)}/end`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reason }),
+        signal: AbortSignal.timeout(500),
+      });
+    } catch {
+      /* best effort */
+    }
   }
 
   async call(method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>, timeoutMs = 30_000, headers: Record<string, string> = {}): Promise<{ status: number; body: Record<string, unknown> }> {
     const base = await this.url();
     const res = await fetch(`${base}${route}`, {
       method,
-      headers: { 'content-type': 'application/json', ...headers },
+      headers: { 'content-type': 'application/json', 'x-orch-attachment': this.attachmentId, ...headers },
       body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    const out = { status: res.status, body: (await res.json()) as Record<string, unknown> };
+    // The operation stands; a session that survived its SessionEnd (for example /clear) registers again for the next call.
+    if (res.headers.get('x-orch-attachment') === 'unknown') await this.register(base);
+    return out;
   }
 
   async wait(opts: { afterSeq?: number; timeoutMs?: number; until?: Until }): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -133,10 +186,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   server.registerTool(
     'start',
     {
-      description: 'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path. mode: spawn (the daemon runs headless agents), pull (workers claim launches), or mixed; applied to a daemon already running too.',
+      description: 'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path, and the runner mode in force. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull unless orchestrator.yaml sets runner.mode or the run chose a mode before; a running daemon keeps its mode. After an idle exit or a crash every other tool revives the daemon by itself.',
       inputSchema: { mode: z.enum(['spawn', 'pull', 'mixed']).optional() },
     },
-    async (a) => guarded(async () => ({ status: 200, body: await startDaemon({ repo: values.repo, env, mode: a.mode }) })),
+    async (a) => guarded(async () => ({ status: 200, body: await startDaemon({ repo: values.repo, env, mode: a.mode, ...(a.mode ? {} : { defaultMode: 'pull' as const }) }) })),
   );
   server.registerTool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a) =>
     guarded(async () => {
@@ -144,10 +197,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       return { status: r.stopped ? 200 : 409, body: r };
     }),
   );
-  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health, and deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps).', inputSchema: {} }, async () =>
+  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, and attachments: the sessions attached and the launches each holds.', inputSchema: {} }, async () =>
     guarded(() => client.call('GET', '/v1/status')),
   );
-  server.registerTool('runs', { description: 'List every run under ORCH_HOME with its repository and daemon liveness.', inputSchema: {} }, async () =>
+  server.registerTool('runs', { description: 'List every run under ORCH_HOME with its repository, daemon liveness, and, for a daemon that is gone, its exit record (idle, stop, or signal with the last digest) or none after a crash.', inputSchema: {} }, async () =>
     guarded(async () => ({ status: 200, body: { runs: await listRuns(env) } })),
   );
   server.registerTool(
@@ -270,10 +323,19 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, and pending when a question is open. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable or the run is paused.',
       inputSchema: { workerId: z.string(), taskId: z.string().optional(), access: z.enum(['local', 'remote']).optional() },
     },
-    async (a) => guarded(() => client.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access })),
+    async (a) =>
+      guarded(async () => {
+        await client.register();
+        return client.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access, attachment: client.attachmentId });
+      }),
   );
-  server.registerTool('release', { description: 'Hand a claimed launch back with a reason. Untouched: the task returns to unstarted at no cost; after progress: a failed attempt.', inputSchema: { launchId: z.string(), reason: z.string() } }, async (a) =>
-    guarded(() => client.call('POST', `/v1/launches/${encodeURIComponent(a.launchId)}/release`, { reason: a.reason })),
+  server.registerTool(
+    'release',
+    {
+      description: 'Hand a claimed launch back with a reason. Untouched: the task returns to unstarted at no cost; after progress: a failed attempt, unless keep is true, which commits uncommitted work on the launch branch, keeps the branch, and returns the task to unstarted at no cost with an interrupted context for the next brief (bounded by daemon.maxKeptReleases).',
+      inputSchema: { launchId: z.string(), reason: z.string(), keep: z.boolean().optional() },
+    },
+    async (a) => guarded(() => client.call('POST', `/v1/launches/${encodeURIComponent(a.launchId)}/release`, { reason: a.reason, ...(a.keep ? { keep: true } : {}) })),
   );
   const scoped = { launchId: z.string(), token: z.string() };
   const forwardLaunch = (op: 'heartbeat' | 'report' | 'block' | 'log' | 'inbox', launchId: string, token: string, body: Record<string, unknown>, timeoutMs = 30_000) =>
@@ -334,5 +396,16 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     guarded(() => forwardLaunch('log', launchId, token, body)),
   );
 
-  await server.connect(new StdioServerTransport());
+  const transport = new StdioServerTransport();
+  // The session is gone when the transport closes or the process is signalled: end this attachment so the daemon hands back claimed launches with keep.
+  let ending = false;
+  const end = async (exitCode: number | undefined) => {
+    if (ending) return;
+    ending = true;
+    await client.detach('sessionEnded');
+    if (exitCode !== undefined) process.exit(exitCode);
+  };
+  server.server.onclose = () => void end(0);
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.on(sig, () => void end(0));
+  await server.connect(transport);
 }

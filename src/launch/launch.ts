@@ -62,6 +62,7 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
       baseSha,
       graphRev: lease.graphRev,
       createdAt: now,
+      interruptions: entry.interruptions ?? 0,
     };
     store.createLaunch(row);
     if (opts.sameAttempt) {

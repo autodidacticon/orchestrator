@@ -84,12 +84,21 @@ export function readRepoFile(runDir: string): string | undefined {
   }
 }
 
+/** Why a daemon last exited; absent after a crash. See specs/operator-control "Exit record". */
+export interface ExitRecord {
+  at: number;
+  reason: 'idle' | 'stop' | 'signal';
+  reap: boolean;
+  digest: Record<string, unknown>;
+}
+
 export interface DaemonInfo {
   pid: number;
   url: string;
   port: number;
   startedAt: number;
   repo: string;
+  exit?: ExitRecord;
 }
 
 export function readDaemonJson(runDir: string): DaemonInfo | undefined {
@@ -102,6 +111,25 @@ export function readDaemonJson(runDir: string): DaemonInfo | undefined {
 
 export function writeDaemonJson(runDir: string, info: DaemonInfo): void {
   writeFileSync(path.join(runDir, DAEMON_JSON), `${JSON.stringify(info, null, 2)}\n`, 'utf8');
+}
+
+/** Merge the exit record into the existing daemon.json (written after a graceful stop, before the process ends). */
+export function writeExitRecord(runDir: string, exit: ExitRecord): void {
+  const info = readDaemonJson(runDir);
+  if (!info) return;
+  writeDaemonJson(runDir, { ...info, exit });
+}
+
+/** The repository's orchestrator.yaml as parsed, without defaults; undefined when absent or unparseable. */
+export function readRepoConfigRaw(realRepoPath: string): Record<string, unknown> | undefined {
+  const file = path.join(realRepoPath, CONFIG_FILE);
+  if (!existsSync(file)) return undefined;
+  try {
+    const raw = parseYaml(readFileSync(file, 'utf8')) as unknown;
+    return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

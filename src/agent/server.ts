@@ -63,12 +63,21 @@ export class ApiServer {
       if (r.method !== req.method) continue;
       const m = r.pattern.exec(url.pathname);
       if (!m) continue;
+      // A probe is a liveness check that must not count as activity. See specs/operator-control "Idle exit".
+      const probe = req.method === 'GET' && url.pathname === '/v1/status' && url.searchParams.get('probe') === '1';
+      const attachment = req.headers['x-orch-attachment'];
+      const attachmentId = typeof attachment === 'string' && attachment ? attachment : undefined;
+      this.orch.requestBegan();
       try {
         const body = req.method === 'POST' || req.method === 'PUT' ? await readJson(req) : Object.fromEntries(url.searchParams.entries());
         const out = await r.handler(req, body, m.slice(1));
-        send(res, out.status, out.body);
+        // The operation stands; the caller learns its attachment is unknown and registers again. See specs/operator-control "Session attachments".
+        const headers = attachmentId && !this.orch.isLiveAttachment(attachmentId) ? { 'x-orch-attachment': 'unknown' } : undefined;
+        send(res, out.status, out.body, headers);
       } catch (err) {
         send(res, 500, { error: String(err) });
+      } finally {
+        this.orch.requestEnded(probe);
       }
       return;
     }
@@ -81,9 +90,9 @@ function bearer(req: http.IncomingMessage): string {
   return h.startsWith('Bearer ') ? h.slice(7).trim() : '';
 }
 
-function send(res: http.ServerResponse, status: number, body: unknown): void {
+function send(res: http.ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
   const text = JSON.stringify(body ?? {});
-  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text) });
+  res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(text), ...headers });
   res.end(text);
 }
 

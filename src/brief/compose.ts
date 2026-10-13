@@ -118,6 +118,14 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
       const k = c['conflict'] as { files?: string[]; since?: string[]; previousBranch?: string };
       lines.push(`- Your previous branch \`${k.previousBranch ?? ''}\` conflicted on rebase in: ${(k.files ?? []).join(', ')}. Tasks published since your base: ${(k.since ?? []).join(', ') || 'none'}. Rebase that branch or start over from the new base.`);
     }
+    if (c['interrupted']) {
+      const k = c['interrupted'] as import('../state/status.js').InterruptedContext;
+      lines.push(
+        `- Your previous launch \`${k.priorLaunchId}\` was interrupted (${k.reason}); this is interruption ${k.interruptions} for this task. Its branch \`${k.priorBranch}\` holds the work so far at \`${k.headSha}\`${
+          k.wipCommit ? `, and commit \`${k.wipCommit}\` is a work-in-progress commit of changes it had not committed` : ''
+        }. Continue from that branch by merging or cherry-picking it onto your base, or inspect it and start over${k.wipCommit ? '; squash the work-in-progress commit before submitting' : ''}.`,
+      );
+    }
     if (c['question'] || c['answer']) lines.push(`- Question asked earlier: ${JSON.stringify(c['question'])}`, `- Human answer: ${String(c['answer'] ?? '')}`);
     lines.push('');
   }

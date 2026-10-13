@@ -7,7 +7,7 @@ import { existsSync, openSync, readdirSync, readFileSync, writeFileSync } from '
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pidAlive } from '../runner/subprocess.js';
-import { DAEMON_PID, ensureRunDir, orchHome, readDaemonJson, readRepoFile, resolveRepoPath, runPaths, type DaemonInfo, type RunPaths } from './runDir.js';
+import { DAEMON_PID, ensureRunDir, orchHome, readDaemonJson, readRepoFile, resolveRepoPath, runPaths, type DaemonInfo, type ExitRecord, type RunPaths } from './runDir.js';
 
 export interface DaemonState {
   runDir: string;
@@ -16,11 +16,14 @@ export interface DaemonState {
   port?: number;
   alive: boolean;
   healthy: boolean;
+  /** Why the last daemon exited; absent while alive, and after a crash. See specs/operator-control "Exit record". */
+  exit?: ExitRecord;
 }
 
+/** A liveness probe; `probe=1` keeps it from counting as activity for the idle exit. */
 export async function health(url: string, timeoutMs = 1500): Promise<Record<string, unknown> | undefined> {
   try {
-    const res = await fetch(`${url}/v1/status`, { signal: AbortSignal.timeout(timeoutMs) });
+    const res = await fetch(`${url}/v1/status?probe=1`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return undefined;
     return (await res.json()) as Record<string, unknown>;
   } catch {
@@ -40,7 +43,7 @@ export async function daemonState(runDir: string): Promise<DaemonState> {
   const alive = pid !== undefined && pidAlive(pid);
   const url = info?.url;
   const healthy = alive && url !== undefined && info?.pid === pid && (await health(url)) !== undefined;
-  return { runDir, pid, url, port: info?.port, alive, healthy };
+  return { runDir, pid, url, port: info?.port, alive, healthy, ...(!alive && info?.exit ? { exit: info.exit } : {}) };
 }
 
 /** The daemon entrypoint: built .js next to this file's tree, else the .ts via tsx. */
@@ -62,13 +65,21 @@ export interface StartOptions {
   timeoutMs?: number;
   /** Runner mode for the run: passed to a daemon this call spawns, set through the runner route on one already running. */
   mode?: 'spawn' | 'pull' | 'mixed';
+  /** The mode a spawned daemon adopts when neither the store nor orchestrator.yaml chose one; ignored for a running daemon. */
+  defaultMode?: 'spawn' | 'pull' | 'mixed';
 }
 
 export interface StartResult extends DaemonInfo {
   runDir: string;
   graphPath: string;
   started: boolean;
+  /** The runner mode in force after the start. */
   mode?: 'spawn' | 'pull' | 'mixed';
+}
+
+function modeOf(status: Record<string, unknown> | undefined): 'spawn' | 'pull' | 'mixed' | undefined {
+  const m = (status?.['runner'] as { mode?: unknown } | undefined)?.mode;
+  return m === 'spawn' || m === 'pull' || m === 'mixed' ? m : undefined;
 }
 
 /** Idempotent start: reuse a healthy daemon, otherwise spawn one detached and wait for health. */
@@ -82,11 +93,13 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
     if (opts.mode) {
       await fetch(`${state.url}/v1/runner`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: opts.mode }), signal: AbortSignal.timeout(3000) });
     }
-    return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false, ...(opts.mode ? { mode: opts.mode } : {}) };
+    const mode = opts.mode ?? modeOf(await health(state.url));
+    return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false, ...(mode ? { mode } : {}) };
   }
   const { command, args } = daemonCommand();
   const fd = openSync(paths.daemonLog, 'a');
-  const child = spawn(command, [...args, '--repo', repo, ...(opts.mode ? ['--mode', opts.mode] : [])], {
+  const modeArgs = opts.mode ? ['--mode', opts.mode] : opts.defaultMode ? ['--default-mode', opts.defaultMode] : [];
+  const child = spawn(command, [...args, '--repo', repo, ...modeArgs], {
     cwd: repo,
     env: { ...env, ...opts.extraEnv },
     detached: true,
@@ -98,8 +111,10 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
   const deadline = Date.now() + (opts.timeoutMs ?? 20_000);
   while (Date.now() < deadline) {
     const info = readDaemonJson(paths.runDir);
-    if (info && info.pid === child.pid && (await health(info.url))) {
-      return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: true, ...(opts.mode ? { mode: opts.mode } : {}) };
+    const status = info && info.pid === child.pid ? await health(info.url) : undefined;
+    if (info && status) {
+      const mode = modeOf(status) ?? opts.mode;
+      return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: true, ...(mode ? { mode } : {}) };
     }
     if (!pidAlive(child.pid)) break;
     await new Promise((r) => setTimeout(r, 150));
@@ -165,6 +180,27 @@ export interface RunListing {
   alive: boolean;
   healthy: boolean;
   digest?: Record<string, unknown>;
+  /** For a run whose daemon is not alive: why it exited, or absent after a crash. */
+  exit?: ExitRecord;
+}
+
+/**
+ * Start the daemon again for a run directory that holds a store, when the last
+ * exit was idle or a crash; refuse after an explicit stop or signal. Returns
+ * undefined when there is nothing to revive (no store, or a daemon already
+ * healthy). See specs/operator-control "Revive on demand".
+ */
+export async function reviveDaemon(opts: StartOptions = {}): Promise<StartResult | undefined> {
+  const env = opts.env ?? process.env;
+  const repo = await resolveRepoPath({ repo: opts.repo, cwd: opts.cwd, env });
+  const paths = runPaths(repo, env);
+  if (!existsSync(path.join(paths.runDir, 'store.sqlite'))) return undefined;
+  const state = await daemonState(paths.runDir);
+  if (state.healthy) return undefined;
+  if (state.exit && state.exit.reason !== 'idle') {
+    throw new Error(`the daemon for ${repo} was stopped at ${new Date(state.exit.at).toISOString()} (${state.exit.reason}); call start to run it again`);
+  }
+  return startDaemon(opts);
 }
 
 export async function listRuns(env: NodeJS.ProcessEnv = process.env): Promise<RunListing[]> {
@@ -184,7 +220,7 @@ export async function listRuns(env: NodeJS.ProcessEnv = process.env): Promise<Ru
       const s = await health(state.url);
       if (s) digest = { finished: s['finished'], stalled: s['stalled'], paused: s['paused'], running: (s['byStatus'] as Record<string, string[]> | undefined)?.['running'] };
     }
-    out.push({ runDir, repo: readRepoFile(runDir), pid: state.pid, url: state.url, alive: state.alive, healthy: state.healthy, digest });
+    out.push({ runDir, repo: readRepoFile(runDir), pid: state.pid, url: state.url, alive: state.alive, healthy: state.healthy, digest, ...(state.exit ? { exit: state.exit } : {}) });
   }
   return out;
 }
