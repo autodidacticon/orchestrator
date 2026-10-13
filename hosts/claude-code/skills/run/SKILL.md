@@ -19,7 +19,8 @@ call `status`. If no graph is loaded, say so and suggest the `import` skill.
 Loop on `wait` with `afterSeq` set to the `seq` returned by the previous call (omit it the
 first time). Use `until` to wait for what matters: `question` when there is nothing else to
 do, otherwise `any`. Each call returns within ninety seconds; call it again until the run
-ends. After each return, act on the digest:
+ends. After each return: first drain the tracker outbox (section 2a), then relay comment
+answers (section 2b), then act on the digest:
 
 - **openQuestions** non-empty: for each task, call `status` or `logs` only if you need
   context, then present the question to the user verbatim and wait for their reply. Send the
@@ -33,6 +34,40 @@ ends. After each return, act on the digest:
   criteria are missing and offer to add them in the tracker and re-import.
 
 Between actions, give the user a one-line progress note: running, waiting, done counts.
+
+### 2a. Drain the tracker outbox
+
+Call `outbox`. If `policy.enabled` is false or `effects` is empty, skip this section. Each
+effect names its `issue` (the tracker key), an optional `url`, and is either
+`setState { state }` or `comment { body, marker }`. Apply them in `id` order with the
+tracker tools in this session, acknowledging each one before the next:
+
+- `setState`: map `state` by state TYPE, never by name. Linear: the team's workflow state of
+  type `started` for `inProgress`, `completed` for `done`, `canceled` for `cancelled`. Jira:
+  transition to a status in category In Progress or Done; for `cancelled`, a canceled-type
+  status when the workflow has one. When the tracker has no canceled-type state, leave the
+  status, post a comment saying the task was cancelled, and acknowledge. On success call
+  `ack { id, result: { stateId } }`.
+- `comment`: list the issue's recent comments first. If one already contains the effect's
+  `marker`, call `ack { id, result: { commentId } }` with that comment's id and do not post
+  again (a previous session posted it and crashed before acknowledging). Otherwise post
+  `body`, a blank line, and the `marker` as the last line, then `ack { id, result: { commentId } }`.
+- On a tracker error: `ack { id, error: "<message>" }`, then skip the remaining effects for
+  that issue in this drain; they come back next time. The daemon retries a rejected effect
+  up to its cap and then lists it in `trackerErrors`; when the digest shows `trackerErrors`,
+  tell the user once which effects failed and why, and carry on.
+
+Report one line: "tracker: applied N, rejected M". Never paste effect payloads into the
+conversation.
+
+### 2b. Relay answers from the tracker
+
+When `policy.answersFromComments` is true and the digest lists `openQuestions`: for each
+task, list its issue's comments; ignore any containing "— orchestrator run"; take the first
+human comment posted after the latest marked comment that you have not relayed before; send
+it with `answer`; remember that comment's id so you never relay it twice. If the daemon
+answers 409, the task is no longer waiting or blocked (someone answered first): tell the
+user and do not retry. Answers typed in this session still work; the first answer wins.
 
 ## 3. Pausing and stopping
 

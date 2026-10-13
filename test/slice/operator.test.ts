@@ -49,6 +49,29 @@ describe('operator CLI and routes', () => {
     await expect(runCli(['bogus', '--url', url])).rejects.toThrow(/unknown command/);
   });
 
+  it('outbox and ack commands reach the outbox routes', async () => {
+    const tracked = `nodes:
+  - { id: T1, deps: [], behavior: hang, url: "https://tracker.example/T1" }
+  - { id: T2, deps: [], behavior: hang, url: "https://tracker.example/T2" }`;
+    h = await makeSlice({
+      graph: tracked,
+      config: { leaseTtlMs: 60_000, tracker: { enabled: 'always', maxAttempts: 3, parentInProgress: true, commentOnDone: false, commentOnFail: false, doneAt: 'integration', answersFromComments: true } },
+    });
+    const url = h.orch.apiBaseUrl;
+    const cli = (...args: string[]) => runCli([...args, '--url', url]);
+    await h.orch.tick();
+    const listed = await cli('outbox');
+    expect(listed.status).toBe(200);
+    const effects = (listed.body as { effects: Array<{ id: number; taskId: string }> }).effects;
+    expect(effects.map((e) => e.taskId)).toEqual(['T1', 'T2']);
+    const [first, second] = effects;
+    expect((await cli('ack', String(first!.id), '--result', '{"stateId":"s1"}')).body).toMatchObject({ ok: true, effect: { status: 'applied', result: { stateId: 's1' } } });
+    expect((await cli('ack', String(second!.id), '--error', 'no such state')).body).toMatchObject({ ok: true, effect: { status: 'pending', attempts: 1, error: 'no such state' } });
+    const paged = await cli('outbox', '--after', String(first!.id), '--limit', '1');
+    expect((paged.body as { effects: Array<{ id: number }> }).effects.map((e) => e.id)).toEqual([second!.id]);
+    await expect(cli('ack')).rejects.toThrow(/effect id/);
+  });
+
   it('graceful stop keeps agents for adoption; --reap stops them', async () => {
     h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000 } });
     await h.orch.tick();

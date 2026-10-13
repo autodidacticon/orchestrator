@@ -10,6 +10,8 @@
  *   orchestrator-ctl reject <milestone> --note <text>
  *   orchestrator-ctl pause | resume
  *   orchestrator-ctl logs <task> [--launch <n>]
+ *   orchestrator-ctl outbox [--after <id>] [--limit <n>]
+ *   orchestrator-ctl ack <id> [--result <json>] [--error <text>]
  * The daemon URL comes from --url, ORCH_URL, or the store under --data-dir.
  */
 import path from 'node:path';
@@ -48,6 +50,7 @@ export async function resolveUrl(opts: { url?: string; dataDir?: string; repo?: 
 }
 
 export async function call(base: string, method: 'GET' | 'POST', route: string, body?: Record<string, unknown>): Promise<CliResult> {
+  // Bodies are JSON documents; a result may be any JSON value.
   const res = await fetch(`${base}${route}`, {
     method,
     headers: { 'content-type': 'application/json' },
@@ -70,6 +73,8 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl reject <milestone> --note <text>
   orchestrator-ctl pause | resume
   orchestrator-ctl logs <task> [--launch <n>]
+  orchestrator-ctl outbox [--after <id>] [--limit <n>]   pending tracker effects and the policy
+  orchestrator-ctl ack <id> [--result <json>] [--error <text>]   acknowledge (or, with --error, reject) an effect
 
 The daemon is found by --url, ORCH_URL, the run directory of --repo or the
 current repository (ORCH_HOME, default ~/.orchestrator), or --data-dir.
@@ -95,6 +100,10 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       version: { type: 'string' },
       note: { type: 'string' },
       launch: { type: 'string' },
+      after: { type: 'string' },
+      limit: { type: 'string' },
+      result: { type: 'string' },
+      error: { type: 'string' },
     },
   });
   const [cmd, a, ...rest] = positionals;
@@ -131,6 +140,18 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       return call(base, 'POST', '/v1/resume');
     case 'logs':
       return call(base, 'GET', `/v1/tasks/${a}/logs${values.launch ? `?launch=${values.launch}` : ''}`);
+    case 'outbox': {
+      const q = new URLSearchParams();
+      if (values.after) q.set('after', values.after);
+      if (values.limit) q.set('limit', values.limit);
+      const qs = q.toString();
+      return call(base, 'GET', `/v1/outbox${qs ? `?${qs}` : ''}`);
+    }
+    case 'ack': {
+      if (!a) throw new Error('ack needs an effect id');
+      if (values.error !== undefined) return call(base, 'POST', `/v1/outbox/${a}/nack`, { error: values.error });
+      return call(base, 'POST', `/v1/outbox/${a}/ack`, { result: values.result ? (JSON.parse(values.result) as unknown) : {} });
+    }
     case 'tick':
       return call(base, 'POST', '/v1/tick');
     default:

@@ -74,6 +74,34 @@ export interface StoredReport {
   createdAt: number;
 }
 
+export type EffectKind = 'setState' | 'comment';
+export type EffectStatus = 'pending' | 'applied' | 'failed';
+
+/** A tracker-bound effect derived from a transition. See specs/tracker-sync "Durable outbox". */
+export interface OutboxEffect {
+  id: number;
+  /** Sequence of the transition event that produced it. */
+  sourceSeq: number;
+  /** The issue: the node id the effect targets (a task or its parent milestone). */
+  taskId: Id;
+  kind: EffectKind;
+  payload: Record<string, unknown>;
+  status: EffectStatus;
+  attempts: number;
+  result?: unknown;
+  error?: string;
+  createdAt: number;
+  appliedAt?: number;
+}
+
+export type NewOutboxEffect = Pick<OutboxEffect, 'sourceSeq' | 'taskId' | 'kind' | 'payload' | 'createdAt'>;
+
+export interface TrackerRecord {
+  kind: 'linear' | 'atlassian';
+  workspace?: string;
+  recordedAt: number;
+}
+
 export interface EventInput {
   kind: string;
   taskId?: Id;
@@ -125,5 +153,35 @@ export interface Store {
   getKv(key: string): string | undefined;
   setKv(key: string, value: string): void;
 
+  /** Insert an effect; returns the new id, or undefined when (sourceSeq, taskId, kind) already exists. */
+  insertOutbox(e: NewOutboxEffect): number | undefined;
+  listOutbox(filter?: { status?: EffectStatus; afterId?: number; limit?: number }): OutboxEffect[];
+  getOutbox(id: number): OutboxEffect | undefined;
+  /** Mark applied with the drainer's result; an applied effect is returned unchanged. */
+  ackOutbox(id: number, result: unknown, now: number): OutboxEffect | undefined;
+  /** Record a rejection: attempts + 1, pending below maxAttempts, failed at it. */
+  nackOutbox(id: number, error: string, maxAttempts: number): OutboxEffect | undefined;
+  countOutbox(status: EffectStatus): number;
+  /** State of the latest setState effect recorded for an issue, whatever its status. */
+  lastSetState(taskId: Id): string | undefined;
+
   close(): void;
+}
+
+/** Typed kv helpers shared by the daemon and its routes. */
+export function trackerOf(store: Store): TrackerRecord | undefined {
+  const raw = store.getKv('tracker');
+  return raw ? (JSON.parse(raw) as TrackerRecord) : undefined;
+}
+
+export function setTracker(store: Store, rec: TrackerRecord): void {
+  store.setKv('tracker', JSON.stringify(rec));
+}
+
+export function runIdOf(store: Store): string | undefined {
+  return store.getKv('runId');
+}
+
+export function setRunId(store: Store, id: string): void {
+  store.setKv('runId', id);
 }

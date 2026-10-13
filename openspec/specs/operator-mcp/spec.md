@@ -1,7 +1,7 @@
 # Operator MCP Specification
 
 ## Purpose
-The operator MCP server a host session uses to start, drive, wait on, and review a run: a stdio server that forwards every operator operation to the daemon's HTTP routes, the tool set it exposes, and the behaviour of the `wait`, `start`, and `review` tools.
+The operator MCP server a host session uses to start, drive, wait on, and review a run: a stdio server that forwards every operator operation to the daemon's HTTP routes, the tool set it exposes, the behaviour of the `wait`, `start`, and `review` tools, and the `outbox` and `ack` tools through which a session drains tracker-bound effects.
 
 ## Requirements
 
@@ -17,11 +17,11 @@ The package SHALL provide `orchestrator-mcp`, a stdio MCP server that exposes op
 - **THEN** the tool returns an error naming the run directory and suggesting `start`
 
 ### Requirement: Tool set
-The server SHALL expose `start`, `stop`, `status`, `runs`, `import_issues`, `import_graph`, `wait`, `review`, `answer`, `cancel`, `reopen`, `unblock`, `accept`, `reject`, `pause`, `resume`, and `logs`. Mutating tools SHALL require the same arguments as the corresponding CLI commands. Every tool result SHALL be a single JSON text block.
+The server SHALL expose at least `start`, `stop`, `status`, `runs`, `import_issues`, `import_graph`, `wait`, `review`, `answer`, `cancel`, `reopen`, `unblock`, `accept`, `reject`, `pause`, `resume`, and `logs`, which form the base set, plus every tool another requirement of this capability adds. Mutating tools SHALL require the same arguments as the corresponding CLI commands. Every tool result SHALL be a single JSON text block. The implementation SHALL keep one list of tool names that the tests compare against the server's advertised tools, so that adding a tool is one change in one place.
 
 #### Scenario: Tool list
 - **WHEN** a client lists tools
-- **THEN** exactly these seventeen tools are present with input schemas
+- **THEN** every tool of the base set is present with an input schema, and every advertised tool is in the implementation's list of names
 
 ### Requirement: Wait tool
 `wait` SHALL take `afterSeq`, an optional `timeoutMs` defaulting to sixty seconds and capped at ninety seconds so that the call stays a foreground tool call in Claude Code, and an optional `until` filter of `question`, `review`, `finished`, `stalled`, or `any`. It SHALL return the events since `afterSeq`, the latest sequence number, and the digest. When `until` is set it SHALL return early only when the digest satisfies the filter, otherwise at the timeout.
@@ -47,3 +47,18 @@ The server SHALL expose `start`, `stop`, `status`, `runs`, `import_issues`, `imp
 #### Scenario: Review then accept
 - **WHEN** `review` is called for a submitted milestone and then `accept` is called with the returned sha and version
 - **THEN** the milestone becomes done
+
+### Requirement: Outbox tools
+The server SHALL expose `outbox`, taking optional `after` and `limit` and forwarding to the daemon's `outbox` route, and `ack`, taking an effect `id` and exactly one of `result` or `error`, forwarding to the `ack` route when `result` is given and to the `nack` route when `error` is given. A call with neither or both SHALL return an error without reaching the daemon. Both tools SHALL return the route's response as a single JSON text block.
+
+#### Scenario: Tool list includes the outbox tools
+- **WHEN** a client lists tools
+- **THEN** `outbox` and `ack` are present with input schemas alongside the base set
+
+#### Scenario: Acknowledge with an error
+- **WHEN** `ack` is called with `id` 7 and `error` "rate limited"
+- **THEN** the daemon records the rejection for effect 7 and the tool returns the route's response
+
+#### Scenario: Neither result nor error
+- **WHEN** `ack` is called with only `id`
+- **THEN** the tool returns an error naming the missing argument and nothing is sent to the daemon

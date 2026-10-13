@@ -6,15 +6,48 @@ import Database from 'better-sqlite3';
 import type { Id } from '../graph/model.js';
 import type { Entry } from './status.js';
 import type {
+  EffectStatus,
   EventInput,
   JobStatus,
   Launch,
   LaunchStatus,
+  NewOutboxEffect,
+  OutboxEffect,
   Store,
   StoredEvent,
   StoredReport,
   VerifierJob,
 } from './store.js';
+
+interface OutboxRow {
+  id: number;
+  source_seq: number;
+  task_id: string;
+  kind: string;
+  payload: string;
+  status: string;
+  attempts: number;
+  result: string | null;
+  error: string | null;
+  created_at: number;
+  applied_at: number | null;
+}
+
+function rowToEffect(r: OutboxRow): OutboxEffect {
+  return {
+    id: r.id,
+    sourceSeq: r.source_seq,
+    taskId: r.task_id,
+    kind: r.kind as OutboxEffect['kind'],
+    payload: JSON.parse(r.payload) as Record<string, unknown>,
+    status: r.status as EffectStatus,
+    attempts: r.attempts,
+    result: r.result === null ? undefined : (JSON.parse(r.result) as unknown),
+    error: r.error ?? undefined,
+    createdAt: r.created_at,
+    appliedAt: r.applied_at ?? undefined,
+  };
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS overlay (id TEXT PRIMARY KEY, entry TEXT NOT NULL);
@@ -29,6 +62,9 @@ CREATE TABLE IF NOT EXISTS reports (launch_id TEXT PRIMARY KEY, task_id TEXT NOT
 CREATE TABLE IF NOT EXISTS payload_overlays (task_id TEXT NOT NULL, graph_rev TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (task_id, graph_rev));
 CREATE TABLE IF NOT EXISTS graph_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), rev TEXT NOT NULL, content TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, source_seq INTEGER NOT NULL, task_id TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT, created_at INTEGER NOT NULL, applied_at INTEGER);
+CREATE UNIQUE INDEX IF NOT EXISTS outbox_key ON outbox(source_seq, task_id, kind);
+CREATE INDEX IF NOT EXISTS outbox_status ON outbox(status);
 `;
 
 export class SqliteStore implements Store {
@@ -260,6 +296,70 @@ export class SqliteStore implements Store {
 
   setKv(key: string, value: string): void {
     this.db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(key, value);
+  }
+
+  insertOutbox(e: NewOutboxEffect): number | undefined {
+    const res = this.db
+      .prepare(
+        "INSERT OR IGNORE INTO outbox (source_seq, task_id, kind, payload, status, attempts, created_at) VALUES (?, ?, ?, ?, 'pending', 0, ?)",
+      )
+      .run(e.sourceSeq, e.taskId, e.kind, JSON.stringify(e.payload), e.createdAt);
+    return res.changes ? Number(res.lastInsertRowid) : undefined;
+  }
+
+  listOutbox(filter: { status?: EffectStatus; afterId?: number; limit?: number } = {}): OutboxEffect[] {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (filter.status) {
+      where.push('status = ?');
+      args.push(filter.status);
+    }
+    if (filter.afterId !== undefined) {
+      where.push('id > ?');
+      args.push(filter.afterId);
+    }
+    const limit = filter.limit && filter.limit > 0 ? ` LIMIT ${Math.floor(filter.limit)}` : '';
+    const sql = `SELECT * FROM outbox${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY id${limit}`;
+    return (this.db.prepare(sql).all(...args) as OutboxRow[]).map(rowToEffect);
+  }
+
+  getOutbox(id: number): OutboxEffect | undefined {
+    const row = this.db.prepare('SELECT * FROM outbox WHERE id = ?').get(id) as OutboxRow | undefined;
+    return row ? rowToEffect(row) : undefined;
+  }
+
+  ackOutbox(id: number, result: unknown, now: number): OutboxEffect | undefined {
+    const cur = this.getOutbox(id);
+    if (!cur) return undefined;
+    if (cur.status === 'applied') return cur;
+    this.db
+      .prepare("UPDATE outbox SET status = 'applied', result = ?, error = NULL, applied_at = ? WHERE id = ?")
+      .run(JSON.stringify(result ?? null), now, id);
+    return this.getOutbox(id);
+  }
+
+  nackOutbox(id: number, error: string, maxAttempts: number): OutboxEffect | undefined {
+    const cur = this.getOutbox(id);
+    if (!cur) return undefined;
+    if (cur.status === 'applied') return cur;
+    const attempts = cur.attempts + 1;
+    const status: EffectStatus = attempts >= maxAttempts ? 'failed' : 'pending';
+    this.db.prepare('UPDATE outbox SET status = ?, attempts = ?, error = ? WHERE id = ?').run(status, attempts, error, id);
+    return this.getOutbox(id);
+  }
+
+  countOutbox(status: EffectStatus): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS n FROM outbox WHERE status = ?').get(status) as { n: number };
+    return row.n;
+  }
+
+  lastSetState(taskId: Id): string | undefined {
+    const row = this.db
+      .prepare("SELECT payload FROM outbox WHERE task_id = ? AND kind = 'setState' ORDER BY id DESC LIMIT 1")
+      .get(taskId) as { payload: string } | undefined;
+    if (!row) return undefined;
+    const state = (JSON.parse(row.payload) as { state?: unknown }).state;
+    return typeof state === 'string' ? state : undefined;
   }
 
   close(): void {

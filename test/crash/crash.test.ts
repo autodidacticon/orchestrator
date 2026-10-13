@@ -4,6 +4,11 @@ import { CRASH_POINTS } from '../../src/crash.js';
 import { checkInvariants, CRASH_EXIT_CODE, setupCrashRun } from './harness.js';
 
 const EXPECTED_STATUS = { done: ['T1', 'T2', 'T3', 'T4', 'T5'], submitted: ['MVP'] };
+/** One row per derivable transition, whatever was retried: in progress once and done once per task; the parent in progress once plus its review comment. */
+const EXPECTED_OUTBOX = {
+  T1: ['inProgress', 'done'], T2: ['inProgress', 'done'], T3: ['inProgress', 'done'], T4: ['inProgress', 'done'], T5: ['inProgress', 'done'],
+  MVP: ['inProgress', 'comment'],
+};
 
 async function assertConverged(run: Awaited<ReturnType<typeof setupCrashRun>>, label: string) {
   const inv = await checkInvariants(run);
@@ -16,6 +21,8 @@ async function assertConverged(run: Awaited<ReturnType<typeof setupCrashRun>>, l
   expect(inv.pidOverlaps, ctx).toEqual([]);
   expect(inv.alivePids, ctx).toEqual([]);
   expect(inv.byStatus, ctx).toEqual(EXPECTED_STATUS);
+  expect(inv.outboxSummary, ctx).toEqual(EXPECTED_OUTBOX);
+  expect(inv.outboxOrphans, ctx).toEqual([]);
 }
 
 describe('crash suite', () => {

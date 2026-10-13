@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { BriefValidator } from '../../src/brief/validate.js';
 import { defaultConfig, type Config } from '../../src/config.js';
 import { StaticGraphSource } from '../../src/graph/source.js';
 import { Orchestrator, type ApiResponse } from '../../src/loop/orchestrator.js';
@@ -30,7 +31,7 @@ export interface Harness {
   cleanup(): void;
 }
 
-export function makeHarness(opts: { graph?: string; config?: Partial<Config>; dir?: string } = {}): Harness {
+export function makeHarness(opts: { graph?: string; config?: Partial<Config>; dir?: string; briefValidator?: BriefValidator } = {}): Harness {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-'));
   const config = defaultConfig({ dataDir: dir, capacity: 4, maxWaiting: 4, ...opts.config });
   const store = new SqliteStore(path.join(dir, 'store.sqlite'));
@@ -47,6 +48,7 @@ export function makeHarness(opts: { graph?: string; config?: Partial<Config>; di
     workspace,
     verifier,
     clock: () => now.value,
+    briefValidator: opts.briefValidator,
   });
   // keep fake verifier head and workspace head aligned
   const origRun = verifier.run.bind(verifier);

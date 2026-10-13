@@ -17,7 +17,9 @@ import { registerOperatorRoutes } from './operator/routes.js';
 import { ClaudeCodeRunner } from './runner/claude-code.js';
 import { SqliteStore } from './state/sqlite.js';
 import { GitVerifierBackend } from './verify/verifier.js';
-import { ensureRunDir, resolveRepoPath, resolveRunConfig, writeDaemonJson } from './runs/runDir.js';
+import { ensureRunDir, resolveRepoPath, resolveRunConfig, runIdFor, writeDaemonJson } from './runs/runDir.js';
+import { runIdOf, setRunId } from './state/store.js';
+import { randomUUID } from 'node:crypto';
 import { revParse } from './workspace/git.js';
 import { GitWorkspace } from './workspace/git-workspace.js';
 
@@ -56,15 +58,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     return;
   }
   let config;
+  let runId: string | undefined;
   if (values.config) {
     config = await loadConfig(values.config);
   } else {
     const repo = await resolveRepoPath({ repo: values.repo });
     ensureRunDir(repo);
     config = await resolveRunConfig(repo);
+    runId = runIdFor(repo);
   }
   await mkdir(config.dataDir, { recursive: true });
   const store = new SqliteStore(path.join(config.dataDir, 'store.sqlite'));
+  // The run id names this run in tracker comments; by repository under a run directory, otherwise once per store.
+  if (runId) setRunId(store, runId);
+  else if (!runIdOf(store)) setRunId(store, randomUUID().slice(0, 16));
   if (!store.getKv('baselineHead')) store.setKv('baselineHead', await revParse(config.repoPath, config.integrationBranch));
 
   const runner = new ClaudeCodeRunner({ command: config.runnerCommand, logDir: path.join(config.dataDir, 'logs'), retryWindowMs: config.retryWindowMs });

@@ -25,13 +25,14 @@ import {
   type Status,
   type StatusKind,
 } from '../state/status.js';
-import type { Launch, Store, VerifierJob } from '../state/store.js';
+import { type Launch, runIdOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
 import type { BriefInput, FallbackReport, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
 import { fifoPolicy, type Policy } from './schedule.js';
 import { runTick } from './tick.js';
+import { deriveEffects } from '../tracker/effects.js';
 
 export const questionSchema = z.object({
   kind: z.enum(['needsDecision', 'needsAccess', 'impossible', 'dependencyCancelled', 'outOfScope', 'insufficientSpec', 'milestoneRejected']),
@@ -96,6 +97,18 @@ export interface StatusReport {
   daemonPid: number;
   daemonUrl: string;
   latestSeq: number;
+  /** Tracker sync: the recorded tracker, pending effects, and effects that failed at the retry cap. */
+  tracker: TrackerRecord | undefined;
+  outboxPending: number;
+  trackerErrors: TrackerError[];
+}
+
+export interface TrackerError {
+  id: number;
+  taskId: Id;
+  kind: string;
+  attempts: number;
+  error: string | undefined;
 }
 
 const silentLog: Logger = { info() {}, warn() {}, error() {} };
@@ -144,6 +157,7 @@ export class Orchestrator implements OrchestratorCore {
     this.clock = deps.clock ?? (() => Date.now());
     this.log = deps.log ?? silentLog;
     this.apiBaseUrl = deps.apiBaseUrl ?? 'http://127.0.0.1:0';
+    if (!runIdOf(this.store)) setRunId(this.store, randomUUID().slice(0, 16));
   }
 
   // ---- OrchestratorCore ----
@@ -183,9 +197,23 @@ export class Orchestrator implements OrchestratorCore {
     return this.store.allEntries();
   }
 
-  recordTransition(id: Id, from: StatusKind, to: StatusKind, actor: Actor, trigger: string, extra: Record<string, unknown> = {}): void {
-    this.store.appendEvent({ kind: 'transition', taskId: id, payload: { from, to, actor, trigger, ...extra } }, this.now());
+  recordTransition(id: Id, from: StatusKind, to: StatusKind, actor: Actor, trigger: string, extra: Record<string, unknown> = {}): number {
+    const seq = this.store.appendEvent({ kind: 'transition', taskId: id, payload: { from, to, actor, trigger, ...extra } }, this.now());
     this.log.info(`transition ${id}: ${from} -> ${to} (${actor}/${trigger})`, extra);
+    this.deriveTrackerEffects(id, from, to, actor, trigger, seq, extra);
+    return seq;
+  }
+
+  /** Tracker-bound effects for a transition, inserted in the caller's transaction. See specs/tracker-sync. */
+  private deriveTrackerEffects(id: Id, from: StatusKind, to: StatusKind, actor: Actor, trigger: string, seq: number, extra: Record<string, unknown>): void {
+    if (!this._graph) return;
+    const node = this._graph.nodes.get(id);
+    if (!node) return;
+    const effects = deriveEffects(
+      { graph: this._graph, store: this.store, config: this.config, runId: runIdOf(this.store) ?? 'run', now: this.now() },
+      { id, node, from, to, actor, trigger, entry: this.entry(id), seq, extra },
+    );
+    for (const e of effects) this.store.insertOutbox(e);
   }
 
   /** Effective payload: node payload merged with any remediation overlay for the current rev. */
@@ -234,13 +262,13 @@ export class Orchestrator implements OrchestratorCore {
   // ---- transitions ----
 
   /** Apply a transition inside a store transaction and record the event. */
-  transition(id: Id, next: Status, actor: Actor, trigger: string, patch?: Partial<Entry>): Entry {
+  transition(id: Id, next: Status, actor: Actor, trigger: string, patch?: Partial<Entry>, extra?: Record<string, unknown>): Entry {
     return this.store.transaction(() => {
       const node = this.requireNode(id);
       const prev = this.entry(id);
       const out = applyTransition(prev, next, { nodeId: id, nodeKind: node.kind, actor, trigger, now: this.now(), patch });
       this.store.setEntry(id, out);
-      this.recordTransition(id, prev.status.kind, next.kind, actor, trigger);
+      this.recordTransition(id, prev.status.kind, next.kind, actor, trigger, extra);
       return out;
     });
   }
@@ -260,7 +288,9 @@ export class Orchestrator implements OrchestratorCore {
         kind: 'impossible',
         message: `attempts exhausted after ${failed.attempts}: ${reason.kind}${reason.message ? `: ${reason.message}` : ''}`,
       };
-      return this.transition(id, { kind: 'blocked', reason: blocked }, 'orchestrator', 'exhausted');
+      const unblock = reason.detail?.['whatWouldUnblock'];
+      const extra = typeof unblock === 'string' && unblock.trim() ? { whatWouldUnblock: unblock } : {};
+      return this.transition(id, { kind: 'blocked', reason: blocked }, 'orchestrator', 'exhausted', undefined, extra);
     });
   }
 
@@ -645,7 +675,7 @@ export class Orchestrator implements OrchestratorCore {
     }
     this.store.transaction(() => {
       this.operatorEvent('accept', id, { sha, version });
-      this.transition(id, { kind: 'done' }, 'human', 'accept', { accepted: { sha, version } });
+      this.transition(id, { kind: 'done' }, 'human', 'accept', { accepted: { sha, version } }, { sha, version });
     });
     this.wake();
     return { ok: true };
@@ -659,7 +689,7 @@ export class Orchestrator implements OrchestratorCore {
     if (!note.trim()) return { ok: false, reason: 'a note is required' };
     this.store.transaction(() => {
       this.operatorEvent('reject', id, { note });
-      this.transition(id, { kind: 'blocked', reason: { kind: 'milestoneRejected', message: note, note } }, 'human', 'reject');
+      this.transition(id, { kind: 'blocked', reason: { kind: 'milestoneRejected', message: note, note } }, 'human', 'reject', undefined, { note });
     });
     return { ok: true };
   }
@@ -742,7 +772,14 @@ export class Orchestrator implements OrchestratorCore {
       daemonPid: process.pid,
       daemonUrl: this.apiBaseUrl,
       latestSeq: this.store.latestEventSeq(),
+      tracker: trackerOf(this.store),
+      outboxPending: this.store.countOutbox('pending'),
+      trackerErrors: this.trackerErrors(),
     };
+  }
+
+  trackerErrors(): TrackerError[] {
+    return this.store.listOutbox({ status: 'failed' }).map((e) => ({ id: e.id, taskId: e.taskId, kind: e.kind, attempts: e.attempts, error: e.error }));
   }
 
   /** Phase 5 helper: refresh the foreign-commit list if the backend supports it. */

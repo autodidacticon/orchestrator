@@ -111,7 +111,8 @@ export function drainVerification(o: Orchestrator): void {
     o.store.transaction(() => {
       if (entry.status.kind === 'submitted') {
         if (job.status === 'published') {
-          o.transition(job.taskId, { kind: 'done' }, 'verifier', 'published', { carry: undefined });
+          const summary = String(o.store.getCompletionReport(job.taskId)?.body['summary'] ?? '');
+          o.transition(job.taskId, { kind: 'done' }, 'verifier', 'published', { carry: undefined }, { publishedSha: job.publishedSha, summary });
         } else if (job.status === 'conflict') {
           if (entry.integrationRetries < o.config.integrationRetries) {
             const launch = o.store.getLaunch(job.launchId);
@@ -149,7 +150,24 @@ export async function completeMilestones(o: Orchestrator): Promise<void> {
     if (c.outcome === 'done') {
       o.transition(c.id, { kind: 'done' }, 'orchestrator', 'milestoneAuto');
     } else {
-      const entry = o.transition(c.id, { kind: 'submitted' }, 'orchestrator', 'milestoneGated', { integrationSha: c.integrationSha });
+      const sha = c.integrationSha ?? head;
+      const baseline = o.store.getKv('baselineHead') ?? '';
+      let diffStat = '';
+      if (baseline) {
+        try {
+          diffStat = await o.workspace.diffStat(baseline, sha);
+        } catch {
+          diffStat = '';
+        }
+      }
+      const closure = [...q.closure(g, c.id)]
+        .filter((t) => g.nodes.get(t)?.kind === 'task')
+        .map((t) => ({
+          taskId: t,
+          publishedSha: o.store.listJobs({ taskId: t, status: 'published' }).at(-1)?.publishedSha,
+          summary: String(o.store.getCompletionReport(t)?.body['summary'] ?? ''),
+        }));
+      const entry = o.transition(c.id, { kind: 'submitted' }, 'orchestrator', 'milestoneGated', { integrationSha: c.integrationSha }, { integrationSha: sha, diffStat, closure });
       await o.workspace.tagMilestone(c.id, entry.reviewVersion, c.integrationSha ?? head);
       crashPoint('milestone.afterTag');
       o.store.setKv(`tagged:${c.id}:${entry.reviewVersion}`, c.integrationSha ?? head);

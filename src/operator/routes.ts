@@ -7,14 +7,19 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { stringify as toYaml } from 'yaml';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
+import { trackerSchema } from '../import/mapping.js';
 import { logPath } from '../runner/subprocess.js';
+import { setTracker, trackerOf } from '../state/store.js';
+import { policyReport } from '../tracker/policy.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [] };
+  const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
     graphLoaded: true,
+    ...tracker,
     openQuestions: s.openQuestions,
     /** Milestones awaiting a human; tasks awaiting the verifier are `verifying`. */
     awaitingReview: s.awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'milestone'),
@@ -51,6 +56,10 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           openQuestions: [],
           liveLaunches: [],
           foreignCommits: [],
+          latestSeq: orch.store.latestEventSeq(),
+          tracker: trackerOf(orch.store),
+          outboxPending: orch.store.countOutbox('pending'),
+          trackerErrors: orch.trackerErrors(),
           error: 'graph not loaded',
         },
   }));
@@ -111,6 +120,15 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
       if (err instanceof GraphValidationError) return { status: 400, body: { error: err.message, code: err.code, details: err.details } };
       throw err;
     }
+    if (body['tracker'] !== undefined) {
+      const parsed = trackerSchema.safeParse(body['tracker']);
+      if (!parsed.success) return { status: 400, body: { error: 'invalid tracker', issues: parsed.error.issues } };
+      const rec = { ...parsed.data, recordedAt: orch.now() };
+      orch.store.transaction(() => {
+        setTracker(orch.store, rec);
+        orch.store.appendEvent({ kind: 'tracker.recorded', payload: { ...rec } }, orch.now());
+      });
+    }
     const target = orch.config.graphPath;
     await mkdir(path.dirname(target), { recursive: true });
     const tmp = `${target}.${process.pid}.tmp`;
@@ -121,6 +139,36 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     const active = orch.hasGraph() ? orch.graph().rev : undefined;
     const accepted = active === rev;
     return { status: 200, body: { rev, accepted, active, reasons: accepted ? [] : (orch.graphRejected()?.reasons ?? []), path: target } };
+  });
+  // Tracker outbox: what a drainer reads and acknowledges. See specs/tracker-sync "Drainer contract".
+  server.addRoute('GET', /^\/v1\/outbox$/, async (_req, query) => {
+    const after = Number(query['after'] ?? 0);
+    const limit = Math.max(1, Math.min(500, Number(query['limit'] ?? 50)));
+    const effects = orch.store.listOutbox({ status: 'pending', afterId: Number.isFinite(after) ? after : 0, limit });
+    return { status: 200, body: { effects, policy: policyReport(orch.config, orch.store) } };
+  });
+  server.addRoute('POST', /^\/v1\/outbox\/([^/]+)\/ack$/, async (_req, body, [idStr]) => {
+    const id = Number(idStr);
+    const cur = orch.store.getOutbox(id);
+    if (!cur) return { status: 404, body: { error: `no effect ${idStr}` } };
+    if (cur.status === 'applied') return { status: 200, body: { ok: true, effect: cur, duplicate: true } };
+    const effect = orch.store.transaction(() => {
+      orch.store.appendEvent({ kind: 'operator.ack', taskId: cur.taskId, payload: { effectId: id, result: body['result'] ?? null } }, orch.now());
+      return orch.store.ackOutbox(id, body['result'] ?? null, orch.now());
+    });
+    return { status: 200, body: { ok: true, effect } };
+  });
+  server.addRoute('POST', /^\/v1\/outbox\/([^/]+)\/nack$/, async (_req, body, [idStr]) => {
+    const id = Number(idStr);
+    const cur = orch.store.getOutbox(id);
+    if (!cur) return { status: 404, body: { error: `no effect ${idStr}` } };
+    if (cur.status === 'applied') return { status: 409, body: { ok: false, reason: `effect ${id} is already applied`, effect: cur } };
+    const error = String(body['error'] ?? 'unknown error');
+    const effect = orch.store.transaction(() => {
+      orch.store.appendEvent({ kind: 'operator.nack', taskId: cur.taskId, payload: { effectId: id, error } }, orch.now());
+      return orch.store.nackOutbox(id, error, orch.config.tracker.maxAttempts);
+    });
+    return { status: 200, body: { ok: true, effect } };
   });
   server.addRoute('POST', /^\/v1\/shutdown$/, async (_req, body) => {
     const reap = body['reap'] === true || body['reap'] === 'true';

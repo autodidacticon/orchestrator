@@ -25,6 +25,17 @@ describe('description splitting', () => {
   });
 });
 
+describe('tracker record', () => {
+  it('is validated and passed through without changing the mapping', () => {
+    const plain = mapIssues(epic);
+    const tracked = mapIssues({ ...epic, tracker: { kind: 'linear', workspace: 'acme' } });
+    expect(tracked.content).toBe(plain.content);
+    expect(tracked.rev).toBe(plain.rev);
+    expect(() => mapIssues({ ...epic, tracker: { kind: 'jira' } })).toThrow(ImportError);
+    expect(() => mapIssues({ ...epic, tracker: { kind: 'atlassian', workspace: '' } })).toThrow(ImportError);
+  });
+});
+
 describe('mapping rules', () => {
   it('maps an epic with mixed children', () => {
     const r = mapIssues(epic);

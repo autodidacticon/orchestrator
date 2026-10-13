@@ -1,7 +1,7 @@
 # Graph Import Specification
 
 ## Purpose
-Mapping normalized tracker issue records into a task graph: the normalized record shape and its validation, the rules that map an epic's children and their blocking relations to tasks, external nodes, and a gated milestone, the extraction of acceptance criteria from issue descriptions, and the import outcome returned through the daemon.
+Mapping normalized tracker issue records into a task graph: the normalized record shape and its validation, the rules that map an epic's children and their blocking relations to tasks, external nodes, and a gated milestone, the extraction of acceptance criteria from issue descriptions, the import outcome returned through the daemon, and the recording of the source tracker at import so that a run can be mirrored back to it.
 
 ## Requirements
 
@@ -40,3 +40,18 @@ The import SHALL validate the mapped graph with the graph loader, write it throu
 #### Scenario: Re-import after a tracker change
 - **WHEN** an epic is re-imported after an external blocker was closed in the tracker
 - **THEN** the external node's `done` flag becomes true, the reload is compatible, and dependents become ready
+
+### Requirement: Tracker record
+`import_issues` SHALL accept an optional `tracker` of `{ kind: linear | atlassian, workspace? }` and SHALL pass it to the daemon's `import` route with the mapped graph. When present, the route SHALL record it in the store under the key `tracker` and SHALL append a `tracker.recorded` event; when absent, a previously recorded tracker SHALL remain in force. The mapping SHALL be unchanged by `tracker`. `status` SHALL report the recorded tracker.
+
+#### Scenario: Tracker recorded at import
+- **WHEN** `import_issues` is called with `tracker: { kind: linear, workspace: acme }`
+- **THEN** the store holds `tracker` with that kind and workspace, a `tracker.recorded` event is appended, and `status` reports it
+
+#### Scenario: Re-import keeps the record
+- **WHEN** the same root is re-imported without `tracker`
+- **THEN** the recorded tracker is unchanged
+
+#### Scenario: File import records nothing
+- **WHEN** a hand-written graph is imported through `import_graph` in a run with no tracker recorded
+- **THEN** no tracker is recorded and `status` reports none

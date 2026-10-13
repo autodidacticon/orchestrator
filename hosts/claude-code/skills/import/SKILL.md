@@ -50,9 +50,15 @@ One record per issue you fetched, including the root:
 
 ## 4. Import
 
-Call `import_issues` with `{ root, issues, options? }`. Options: `criteriaHeading`,
+Call `import_issues` with `{ root, issues, tracker, options? }`. Options: `criteriaHeading`,
 `inProgress` (`external` by default: issues a human is working on are not taken over; set
 `task` to orchestrate them), `gated` (the root milestone waits for human review, default true).
+
+Always pass `tracker`: `{ kind: "linear" }` when you fetched through the Linear tools,
+`{ kind: "atlassian" }` through the Atlassian tools, plus `workspace` naming the Linear
+workspace (its URL key) or the Jira site when the connector reports it. The daemon records it
+and from then on mirrors the run back to the tracker through the `run` skill: issues move to
+in progress, done, or cancelled, and comments appear where a human is needed.
 
 ## 5. Report
 

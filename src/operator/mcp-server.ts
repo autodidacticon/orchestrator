@@ -4,7 +4,7 @@
  */
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
-import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema } from '../import/mapping.js';
+import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema, trackerSchema } from '../import/mapping.js';
 import { daemonState, listRuns, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 
@@ -16,6 +16,7 @@ const POLL_SLICE_MS = 20_000;
 export const TOOL_NAMES = [
   'start', 'stop', 'status', 'runs', 'import_issues', 'import_graph', 'wait', 'review',
   'answer', 'cancel', 'reopen', 'unblock', 'accept', 'reject', 'pause', 'resume', 'logs',
+  'outbox', 'ack',
 ] as const;
 
 export function clampWait(ms: number | undefined): number {
@@ -147,7 +148,12 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     {
       description:
         'Map normalized tracker issues to the run graph and import it. Children of root become tasks; blockedBy becomes deps; blockers outside the set, done, cancelled and in-progress issues become external nodes; root becomes a gated milestone. Acceptance criteria are parsed from the description under the configured heading.',
-      inputSchema: { root: z.string(), issues: z.array(issueRecordSchema), options: importOptionsSchema.partial().optional() },
+      inputSchema: {
+        root: z.string(),
+        issues: z.array(issueRecordSchema),
+        options: importOptionsSchema.partial().optional(),
+        tracker: trackerSchema.optional().describe('The tracker these issues came from; recorded by the daemon so the run skill can mirror states and comments back.'),
+      },
     },
     async (a) =>
       guarded(async () => {
@@ -158,7 +164,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
           if (err instanceof ImportError) return { status: 400, body: { error: err.message, details: err.details } };
           throw err;
         }
-        const r = await client.call('PUT', '/v1/graph', { content: mapped.content });
+        const r = await client.call('PUT', '/v1/graph', { content: mapped.content, ...(a.tracker ? { tracker: a.tracker } : {}) });
         return { status: r.status, body: { ...r.body, summary: mapped.summary } };
       }),
   );
@@ -198,6 +204,31 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   server.registerTool('resume', { description: 'Resume admission after pause.', inputSchema: {} }, async () => guarded(() => client.call('POST', '/v1/resume')));
   server.registerTool('logs', { description: 'Captured output of a task\'s launch (latest by default).', inputSchema: { ...task, launch: z.number().int().optional() } }, async (a) =>
     guarded(() => client.call('GET', `/v1/tasks/${encodeURIComponent(a.task)}/logs${a.launch ? `?launch=${a.launch}` : ''}`)),
+  );
+
+  server.registerTool(
+    'outbox',
+    {
+      description: 'Pending tracker effects (setState, comment) in id order with the tracker policy. Apply each with the session\'s tracker tools, then ack.',
+      inputSchema: { after: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() },
+    },
+    async (a) => guarded(() => client.call('GET', `/v1/outbox?after=${a.after ?? 0}&limit=${a.limit ?? 50}`)),
+  );
+  server.registerTool(
+    'ack',
+    {
+      description: 'Acknowledge an outbox effect with the vendor result (e.g. { commentId }), or reject it with error text; exactly one of result or error.',
+      inputSchema: { id: z.number().int(), result: z.record(z.unknown()).optional(), error: z.string().optional() },
+    },
+    async (a) =>
+      guarded(async () => {
+        const hasResult = a.result !== undefined;
+        const hasError = a.error !== undefined;
+        if (hasResult === hasError) return { status: 400, body: { error: 'exactly one of result or error is required' } };
+        return hasError
+          ? client.call('POST', `/v1/outbox/${a.id}/nack`, { error: a.error })
+          : client.call('POST', `/v1/outbox/${a.id}/ack`, { result: a.result });
+      }),
   );
 
   await server.connect(new StdioServerTransport());

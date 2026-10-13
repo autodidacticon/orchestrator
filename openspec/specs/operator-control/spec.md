@@ -1,7 +1,7 @@
 # Operator Control Specification
 
 ## Purpose
-The HTTP-backed operator interface, reached through both a CLI and an MCP server, and its operations: status, answers, cancellation, reopen and unblock, milestone review, pause and resume, shutdown, and logs, together with per-user run directories, daemon lifecycle and discovery, the event stream, the review bundle, and graph import through the daemon, where every human action is recorded as an event.
+The HTTP-backed operator interface, reached through both a CLI and an MCP server, and its operations: status, answers, cancellation, reopen and unblock, milestone review, pause and resume, shutdown, and logs, together with per-user run directories, daemon lifecycle and discovery, the event stream, the review bundle, graph import through the daemon, and the tracker outbox routes a drainer uses to list, acknowledge, and reject tracker-bound effects, where every human action is recorded as an event.
 
 ## Requirements
 
@@ -150,3 +150,18 @@ The daemon SHALL expose `events` returning events after a given sequence number,
 #### Scenario: Invalid graph is not written
 - **WHEN** the imported content has a dependency cycle
 - **THEN** nothing is written and the response lists the cycle path
+
+### Requirement: Tracker outbox
+The daemon SHALL expose `outbox`, returning pending effects with `id` greater than `after` in `id` order, limited in count, together with the tracker policy; `ack`, marking an effect `applied` with the drainer's result; and `nack`, recording the error and either keeping the effect `pending` with `attempts` increased or marking it `failed` at `tracker.maxAttempts`. An unknown effect id SHALL be answered 404. Both the CLI and the MCP server SHALL expose `outbox` and `ack`, the latter taking a result or an error. `status` SHALL additionally report `tracker` (the recorded kind and workspace, or none), `outboxPending` (the count of pending effects), and `trackerErrors` (every `failed` effect with its id, issue, kind, attempts, and error); the event stream digest SHALL carry `outboxPending` and `trackerErrors`.
+
+#### Scenario: List then acknowledge
+- **WHEN** two effects are pending and `ack` is posted for the first with result `{ commentId: "c1" }`
+- **THEN** `outbox` returns only the second and `status` shows `outboxPending` 1
+
+#### Scenario: Rejected effect retried then surfaced
+- **WHEN** `nack` is posted for an effect three times with `maxAttempts` 3
+- **THEN** the effect is returned by `outbox` after the first two, and after the third it is absent from `outbox` and present in `trackerErrors` with its last error
+
+#### Scenario: Status reports the tracker
+- **WHEN** a tracker of kind `linear` was recorded at import
+- **THEN** `status` includes `tracker.kind` `linear`

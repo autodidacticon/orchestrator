@@ -28,10 +28,20 @@ export const importOptionsSchema = z.object({
   gated: z.boolean().default(true),
 });
 
+/** The tracker an import came from; recorded by the daemon so effects can be derived. See specs/graph-import "Tracker record". */
+export const trackerSchema = z.object({
+  kind: z.enum(['linear', 'atlassian']),
+  workspace: z.string().min(1).optional(),
+});
+
+export type TrackerInput = z.infer<typeof trackerSchema>;
+
 export const importInputSchema = z.object({
   root: z.string().min(1),
   issues: z.array(issueRecordSchema),
   options: importOptionsSchema.default({}),
+  /** Passed through to the daemon's import route; the mapping ignores it. */
+  tracker: trackerSchema.optional(),
 });
 
 export type ImportInput = z.infer<typeof importInputSchema>;

@@ -19,12 +19,12 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const mainTs = path.resolve(here, '../../src/main.ts');
 
 export const crashGraph = `nodes:
-  - { id: T1, title: Schema migration, description: "add the schema migration", acceptanceCriteria: [migrates], deps: [],   behavior: commitAndSubmit }
-  - { id: T2, title: Feature A API,    description: "build feature A API",      acceptanceCriteria: [serves A], deps: [T1], behavior: commitAndSubmit }
-  - { id: T3, title: Feature B API,    description: "build feature B API",      acceptanceCriteria: [serves B], deps: [T1], behavior: commitAndSubmit }
-  - { id: T4, title: Feature A UI,     description: "build feature A UI",       acceptanceCriteria: [renders A], deps: [T2], behavior: commitAndSubmit }
-  - { id: T5, title: Changelog,        description: "write the changelog",      acceptanceCriteria: [lists changes], deps: [],   behavior: commitAndSubmit }
-  - { id: MVP, kind: milestone, gated: true, deps: [T3, T4] }
+  - { id: T1, title: Schema migration, description: "add the schema migration", acceptanceCriteria: [migrates], deps: [],   behavior: commitAndSubmit, url: "https://tracker.example/T1" }
+  - { id: T2, title: Feature A API,    description: "build feature A API",      acceptanceCriteria: [serves A], deps: [T1], behavior: commitAndSubmit, url: "https://tracker.example/T2" }
+  - { id: T3, title: Feature B API,    description: "build feature B API",      acceptanceCriteria: [serves B], deps: [T1], behavior: commitAndSubmit, url: "https://tracker.example/T3" }
+  - { id: T4, title: Feature A UI,     description: "build feature A UI",       acceptanceCriteria: [renders A], deps: [T2], behavior: commitAndSubmit, url: "https://tracker.example/T4" }
+  - { id: T5, title: Changelog,        description: "write the changelog",      acceptanceCriteria: [lists changes], deps: [],   behavior: commitAndSubmit, url: "https://tracker.example/T5" }
+  - { id: MVP, kind: milestone, gated: true, deps: [T3, T4], url: "https://tracker.example/MVP" }
 `;
 
 export interface CrashRun {
@@ -68,6 +68,8 @@ export async function setupCrashRun(): Promise<CrashRun> {
       'retryWindowMs: 2500',
       'checkCommand: "true"',
       `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'tracker:',
+      '  enabled: always',
     ].join('\n'),
   );
   const baseline = gitIn(repo, 'rev-parse', 'main');
@@ -147,6 +149,10 @@ export interface InvariantReport {
   pidOverlaps: string[];
   alivePids: number[];
   byStatus: Record<string, string[]>;
+  /** Outbox rows per issue in id order: a state name or `comment`. */
+  outboxSummary: Record<string, string[]>;
+  /** Outbox rows whose source event is not a transition in the event log. */
+  outboxOrphans: number[];
 }
 
 export async function checkInvariants(run: CrashRun): Promise<InvariantReport> {
@@ -170,9 +176,16 @@ export async function checkInvariants(run: CrashRun): Promise<InvariantReport> {
   const store = new SqliteStore(path.join(run.dataDir, 'store.sqlite'));
   let liveLaunches = 0;
   const byStatus: Record<string, string[]> = {};
+  const outboxSummary: Record<string, string[]> = {};
+  const outboxOrphans: number[] = [];
   try {
     liveLaunches = store.listLaunches({ status: ['preparing', 'launching', 'live'] }).length;
     for (const [id, e] of store.allEntries()) (byStatus[e.status.kind] ??= []).push(id);
+    const transitionSeqs = new Set(store.listEvents({ kind: 'transition' }).map((e) => e.seq));
+    for (const row of store.listOutbox()) {
+      (outboxSummary[row.taskId] ??= []).push(row.kind === 'setState' ? String(row.payload['state']) : 'comment');
+      if (!transitionSeqs.has(row.sourceSeq)) outboxOrphans.push(row.id);
+    }
   } finally {
     store.close();
   }
@@ -203,7 +216,7 @@ export async function checkInvariants(run: CrashRun): Promise<InvariantReport> {
       if (prev.end !== undefined && prev.end > cur.start) pidOverlaps.push(`${task}: pid ${prev.pid} ended ${prev.end} after pid ${cur.pid} started ${cur.start}`);
     }
   }
-  return { trailerCommitsPerTask: perTask, foreign, worktrees, tempDirs, liveLaunches, pidOverlaps, alivePids, byStatus };
+  return { trailerCommitsPerTask: perTask, foreign, worktrees, tempDirs, liveLaunches, pidOverlaps, alivePids, byStatus, outboxSummary, outboxOrphans };
 }
 
 function readdirSafe(p: string): string[] {

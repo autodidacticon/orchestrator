@@ -34,6 +34,23 @@ export const configSchema = z.object({
   onInsufficient: z.enum(['block', 'remediate']).default('block'),
   remediateMode: z.enum(['review', 'auto']).default('review'),
   cancelReleasesDependentsDefault: z.boolean().default(false),
+  /** Tracker mirroring policy. See specs/tracker-sync. */
+  tracker: z
+    .object({
+      /** auto: only when a tracker was recorded at import; always; never. */
+      enabled: z.enum(['auto', 'always', 'never']).default('auto'),
+      /** Drainer rejections before an effect is marked failed. */
+      maxAttempts: z.number().int().positive().default(3),
+      /** The parent issue goes in progress when its first child task starts. */
+      parentInProgress: z.boolean().default(true),
+      commentOnDone: z.boolean().default(false),
+      commentOnFail: z.boolean().default(false),
+      /** When a task's issue becomes done: at publication, or when its gated milestone is accepted. */
+      doneAt: z.enum(['integration', 'milestoneAccepted']).default('integration'),
+      /** The run skill relays human comments under a question as the answer. */
+      answersFromComments: z.boolean().default(true),
+    })
+    .default({}),
   /** Brief template slots: name -> { source, required, minLength }. */
   briefSlots: z
     .record(

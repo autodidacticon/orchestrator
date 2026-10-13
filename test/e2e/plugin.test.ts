@@ -4,7 +4,7 @@
  * Agents are scripted (free); only the operating session is a real model.
  */
 import { execFile } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,19 @@ const execFileP = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const enabled = process.env['ORCH_E2E_CLAUDE_PLUGIN'] === '1';
+
+describe('plugin skills', () => {
+  it('the run skill drains the outbox with a marker check and relays comment answers; the import skill records the tracker', () => {
+    const run = readFileSync(path.join(root, 'hosts/claude-code/skills/run/SKILL.md'), 'utf8');
+    for (const needle of ['`outbox`', '`ack { id, result: { commentId } }`', '`ack { id, error: "<message>" }`', 'marker', 'state TYPE', 'answersFromComments', '`answer`', '409']) {
+      expect(run, needle).toContain(needle);
+    }
+    const imp = readFileSync(path.join(root, 'hosts/claude-code/skills/import/SKILL.md'), 'utf8');
+    expect(imp).toContain('{ root, issues, tracker, options? }');
+    expect(imp).toContain('kind: "linear"');
+    expect(imp).toContain('kind: "atlassian"');
+  });
+});
 
 describe.skipIf(!enabled)('e2e: Claude Code session operates a run through the plugin', () => {
   it('runs the graph to completion and reviews the milestone', async () => {

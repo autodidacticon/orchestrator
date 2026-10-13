@@ -33,7 +33,8 @@ export interface OrchestratorCore {
   graphRev(): string;
   requireNode(id: Id): GraphNode;
   entry(id: Id): Entry;
-  recordTransition(id: Id, from: StatusKind, to: StatusKind, actor: Actor, trigger: string, extra?: Record<string, unknown>): void;
+  /** Append the transition event and derive tracker effects in the caller's transaction; returns the event seq. */
+  recordTransition(id: Id, from: StatusKind, to: StatusKind, actor: Actor, trigger: string, extra?: Record<string, unknown>): number;
   briefInput(launch: Launch): BriefInput;
   agentEnv(launch: Launch): Record<string, string>;
 }
