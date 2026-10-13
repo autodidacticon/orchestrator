@@ -4,12 +4,39 @@
   "private": true,
   "description": "Parallel coding-agent orchestrator over a task DAG",
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "bin": {
     "orchestrator": "./dist/src/main.js",
     "orchestrator-ctl": "./dist/src/operator/cli.js",
+    "orchestrator-mcp": "./dist/src/operator/mcp.js",
     "orchestrator-mcp-shim": "./dist/src/agent/mcp-shim.js"
   },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/src/index.js"
+    },
+    "./daemon": {
+      "types": "./src/main.ts",
+      "default": "./dist/src/main.js"
+    },
+    "./operator-mcp": {
+      "types": "./src/operator/mcp.ts",
+      "default": "./dist/src/operator/mcp.js"
+    },
+    "./agent-shim": {
+      "types": "./src/agent/mcp-shim.ts",
+      "default": "./dist/src/agent/mcp-shim.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/src",
+    "hosts",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

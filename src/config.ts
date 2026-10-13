@@ -11,6 +11,8 @@ export const configSchema = z.object({
   graphPath: z.string().default('graph.yaml'),
   /** Directory for the SQLite store, worktrees, logs. */
   dataDir: z.string().default('.orchestrator-run'),
+  /** The per-user run directory when started by repository; reported in status. */
+  runDir: z.string().optional(),
   capacity: z.number().int().positive().default(2),
   maxWaiting: z.number().int().nonnegative().default(4),
   leaseTtlMs: z.number().int().positive().default(10 * 60_000),

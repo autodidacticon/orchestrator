@@ -17,6 +17,7 @@ import { registerOperatorRoutes } from './operator/routes.js';
 import { ClaudeCodeRunner } from './runner/claude-code.js';
 import { SqliteStore } from './state/sqlite.js';
 import { GitVerifierBackend } from './verify/verifier.js';
+import { ensureRunDir, resolveRepoPath, resolveRunConfig, writeDaemonJson } from './runs/runDir.js';
 import { revParse } from './workspace/git.js';
 import { GitWorkspace } from './workspace/git-workspace.js';
 
@@ -26,15 +27,42 @@ export const stderrLogger: Logger = {
   error: (msg, data) => process.stderr.write(`${new Date().toISOString()} ERROR ${msg}${data ? ` ${JSON.stringify(data)}` : ''}\n`),
 };
 
+export const USAGE = `orchestrator: the daemon.
+
+  orchestrator [--repo <path>] [--config orchestrator.yaml] [--reap-on-exit]
+
+With --repo (or inside a repository), run data lives under ORCH_HOME
+(~/.orchestrator) keyed by the repository path, and <repo>/orchestrator.yaml is
+read when present. With --config, the file's dataDir and graphPath are used.
+
+Runs one orchestration for one repository: loads the graph file, launches
+agents up to capacity, verifies and publishes their work, and serves the agent
+and operator APIs on loopback. SIGTERM stops it gracefully; agents keep running
+and are adopted on the next start unless --reap-on-exit is set.
+`;
+
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const { values } = parseArgs({
     args: argv,
     options: {
-      config: { type: 'string', short: 'c', default: 'orchestrator.yaml' },
+      config: { type: 'string', short: 'c' },
+      repo: { type: 'string' },
       'reap-on-exit': { type: 'boolean', default: false },
+      help: { type: 'boolean', short: 'h', default: false },
     },
   });
-  const config = await loadConfig(values.config as string);
+  if (values.help) {
+    process.stdout.write(USAGE);
+    return;
+  }
+  let config;
+  if (values.config) {
+    config = await loadConfig(values.config);
+  } else {
+    const repo = await resolveRepoPath({ repo: values.repo });
+    ensureRunDir(repo);
+    config = await resolveRunConfig(repo);
+  }
   await mkdir(config.dataDir, { recursive: true });
   const store = new SqliteStore(path.join(config.dataDir, 'store.sqlite'));
   if (!store.getKv('baselineHead')) store.setKv('baselineHead', await revParse(config.repoPath, config.integrationBranch));
@@ -61,9 +89,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   });
   const server = new ApiServer(orch);
   registerOperatorRoutes(server, orch);
-  const url = await server.listen(config.apiPort);
+  // Reuse the recorded port when the config does not pin one, so agents launched before a restart reconnect.
+  const recorded = Number(store.getKv('apiPort') ?? 0);
+  let url: string;
+  try {
+    url = await server.listen(config.apiPort || recorded);
+  } catch (err) {
+    if (config.apiPort) throw err;
+    stderrLogger.warn('recorded port unavailable, picking a new one', { recorded, err: String(err) });
+    url = await server.listen(0);
+  }
   store.setKv('apiBaseUrl', url);
-  stderrLogger.info('listening', { url, pid: process.pid });
+  store.setKv('apiPort', String(server.port));
+  writeDaemonJson(config.dataDir, { pid: process.pid, url, port: server.port, startedAt: Date.now(), repo: config.repoPath });
+  stderrLogger.info('listening', { url, pid: process.pid, dataDir: config.dataDir });
 
   let stopping = false;
   const shutdown = async (signal: string) => {
@@ -77,6 +116,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
+  orch.requestShutdown = (reap) => {
+    values['reap-on-exit'] = reap || Boolean(values['reap-on-exit']);
+    void shutdown('route');
+  };
 
   await orch.start();
 }

@@ -1,0 +1,39 @@
+---
+name: review
+description: Review a gated milestone that the orchestrator has submitted, judge the integrated work against its acceptance criteria, and accept or reject it. Use when a milestone is awaiting review or the user asks to review one.
+---
+
+# Review a milestone
+
+A gated milestone is submitted when every task in its closure has been verified and
+published. Verification only proves the checks were green; you judge whether the work is what
+was asked for.
+
+## 1. Get the bundle
+
+Call `review` with the milestone id. It returns the pinned integration sha, the review
+version, the tag `milestone/<id>/v<n>`, a diff stat against the run's baseline, the closure
+tasks with their published shas and completion summaries, and the milestone's acceptance
+criteria if any.
+
+## 2. Judge
+
+- Read the diff for the tag in the repository (`git diff <baseline>..<sha>`, or per task
+  with the published shas) where the stat suggests it matters.
+- For each task, compare its completion report and acceptance evidence against the task's
+  acceptance criteria. Evidence that merely restates the criterion is not evidence.
+- For the milestone, check its own criteria, such as a demo scenario, against the integrated
+  result. Run it if the repository offers a way to.
+- If workflows are enabled in this session, you may fan the closure out to reviewers, one per
+  task, and verify their findings before deciding. Keep the final decision yours.
+
+## 3. Decide
+
+- Accept: call `accept` with the exact `integrationSha` and `reviewVersion` from the bundle.
+  A stale sha or version is refused; call `review` again.
+- Reject: call `reject` with a note that says what is missing, task by task. The milestone
+  becomes blocked. The repair is new or amended tasks upstream in the tracker and a re-import,
+  then `unblock` on the milestone; it will be resubmitted as a new version.
+
+Report your decision and the reasons to the user in a few lines. Never accept on the
+strength of green checks alone.

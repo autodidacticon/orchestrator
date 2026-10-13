@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "operator": {
+      "command": "orchestrator-mcp",
+      "args": [],
+      "timeout": 180000
+    }
+  }
+}

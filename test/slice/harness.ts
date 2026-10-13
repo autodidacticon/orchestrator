@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { ApiServer } from '../../src/agent/server.js';
 import { defaultConfig, type Config } from '../../src/config.js';
-import { StaticGraphSource } from '../../src/graph/source.js';
+import { FileGraphSource, StaticGraphSource } from '../../src/graph/source.js';
 import { Orchestrator } from '../../src/loop/orchestrator.js';
 import { registerOperatorRoutes } from '../../src/operator/routes.js';
 import { SubprocessRunner } from '../../src/runner/subprocess.js';
@@ -54,6 +54,7 @@ export interface SliceHarness {
   workspace: GitWorkspace;
   source: StaticGraphSource;
   config: Config;
+  graphPath: string;
   pidlog: string;
   /** Reopen the same store/repo with a fresh orchestrator (simulates a daemon restart). */
   restart(): Promise<void>;
@@ -63,7 +64,7 @@ export interface SliceHarness {
   cleanup(): Promise<void>;
 }
 
-export async function makeSlice(opts: { graph: string; config?: Partial<Config>; verifier?: VerifierBackend; realVerifier?: boolean; dir?: string; repo?: string }): Promise<SliceHarness> {
+export async function makeSlice(opts: { graph: string; config?: Partial<Config>; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string }): Promise<SliceHarness> {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-slice-'));
   const repo = opts.repo ?? makeRepo(dir);
   const dataDir = path.join(dir, 'run');
@@ -80,10 +81,13 @@ export async function makeSlice(opts: { graph: string; config?: Partial<Config>;
     retryWindowMs: 3000,
     checkCommand: 'true',
     runnerCommand: `node --import ${tsxLoader} ${scriptedAgent} {briefJson}`,
+    graphPath: path.join(dataDir, 'graph.yaml'),
     ...opts.config,
   });
   const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
-  const source = new StaticGraphSource(opts.graph);
+  const graphPath = path.join(dataDir, 'graph.yaml');
+  if (opts.fileGraph) writeFileSync(graphPath, opts.graph);
+  const source = opts.fileGraph ? new FileGraphSource(graphPath) : new StaticGraphSource(opts.graph);
   const runner = new SubprocessRunner({ command: config.runnerCommand, logDir: path.join(dataDir, 'logs'), graceMs: 500, extraEnv: { ORCH_PIDLOG: pidlog } });
   const workspace = new GitWorkspace(repo, config.integrationBranch, path.join(dataDir, 'worktrees'));
   const verifier =
@@ -125,8 +129,9 @@ export async function makeSlice(opts: { graph: string; config?: Partial<Config>;
     },
     runner,
     workspace,
-    source,
+    source: source as StaticGraphSource,
     config,
+    graphPath,
     pidlog,
     restart: async () => {
       await server.close();

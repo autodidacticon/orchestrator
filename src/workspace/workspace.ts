@@ -17,7 +17,7 @@ export interface FallbackReport {
 export interface BriefInput {
   launch: Launch;
   node: { id: Id; kind: string; payload: Record<string, unknown>; deps: readonly Id[] };
-  depReports: Array<{ taskId: Id; report: StoredReport | undefined; cancelled?: { reason: string } }>;
+  depReports: Array<{ taskId: Id; report: StoredReport | undefined; cancelled?: { reason: string }; external?: { done: boolean; title?: string } }>;
   carry?: Record<string, unknown>;
   apiBaseUrl: string;
   retryWindowMs: number;
@@ -37,4 +37,6 @@ export interface Workspace {
   /** Launch ids that currently have a worktree. */
   listWorktrees(): Promise<string[]>;
   tagMilestone(id: Id, version: number, sha: string): Promise<void>;
+  /** `git diff --stat from..to`, or an empty string when unavailable. */
+  diffStat(from: string, to: string): Promise<string>;
 }

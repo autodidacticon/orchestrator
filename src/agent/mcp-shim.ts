@@ -98,8 +98,19 @@ export async function startShim(env: ShimEnv): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
+export const USAGE = `orchestrator-mcp-shim: MCP façade for an agent launch.
+
+  orchestrator-mcp-shim
+
+A stdio MCP server exposing heartbeat, report, block, inbox, and log, forwarded
+to the daemon with the launch token. Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN,
+ORCH_RETRY_WINDOW_MS. The orchestrator writes this into each launch's mcp.json.
+`;
+
 const isEntry = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
-if (isEntry) {
+if (isEntry && (process.argv.includes('--help') || process.argv.includes('-h'))) {
+  process.stdout.write(USAGE);
+} else if (isEntry) {
   startShim(envFromProcess()).catch((err) => {
     process.stderr.write(`${String(err)}\n`);
     process.exit(1);

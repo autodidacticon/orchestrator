@@ -11,7 +11,7 @@ import type { AgentOp, ApiResponse, Orchestrator } from '../loop/orchestrator.js
 export type RouteHandler = (req: http.IncomingMessage, body: Record<string, unknown>, params: string[]) => Promise<ApiResponse>;
 
 export interface Route {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT';
   pattern: RegExp;
   handler: RouteHandler;
 }
@@ -39,8 +39,12 @@ export class ApiServer {
 
   async listen(port = 0): Promise<string> {
     await new Promise<void>((resolve, reject) => {
-      this.server.once('error', reject);
-      this.server.listen(port, '127.0.0.1', () => resolve());
+      const onError = (err: Error) => reject(err);
+      this.server.once('error', onError);
+      this.server.listen(port, '127.0.0.1', () => {
+        this.server.off('error', onError);
+        resolve();
+      });
     });
     this.port = (this.server.address() as AddressInfo).port;
     const url = `http://127.0.0.1:${this.port}`;
@@ -60,7 +64,7 @@ export class ApiServer {
       const m = r.pattern.exec(url.pathname);
       if (!m) continue;
       try {
-        const body = req.method === 'POST' ? await readJson(req) : Object.fromEntries(url.searchParams.entries());
+        const body = req.method === 'POST' || req.method === 'PUT' ? await readJson(req) : Object.fromEntries(url.searchParams.entries());
         const out = await r.handler(req, body, m.slice(1));
         send(res, out.status, out.body);
       } catch (err) {

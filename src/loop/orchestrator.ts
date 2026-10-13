@@ -85,11 +85,17 @@ export interface StatusReport {
   graphRev: string | undefined;
   graphRejected: { reasons: string[] } | undefined;
   byStatus: Record<StatusKind, Id[]>;
+  external: Array<{ id: Id; done: boolean }>;
   stallRoots: Id[];
   awaitingReview: Id[];
   openQuestions: Id[];
   liveLaunches: Array<{ launchId: string; taskId: Id; pid?: number }>;
   foreignCommits: string[];
+  runDir: string;
+  graphPath: string;
+  daemonPid: number;
+  daemonUrl: string;
+  latestSeq: number;
 }
 
 const silentLog: Logger = { info() {}, warn() {}, error() {} };
@@ -112,6 +118,8 @@ export class Orchestrator implements OrchestratorCore {
   readonly graphSource: GraphSource;
   apiBaseUrl: string;
   foreignCommits: string[] = [];
+  /** Set by the daemon entrypoint; the shutdown route calls it after responding. */
+  requestShutdown: ((reap: boolean) => void) | undefined;
 
   private readonly clock: () => number;
   private _graph: Graph | undefined;
@@ -190,6 +198,10 @@ export class Orchestrator implements OrchestratorCore {
     const node = this.requireNode(launch.taskId);
     const entry = this.entry(launch.taskId);
     const depReports = node.deps.map((d) => {
+      const dn = this.graph().nodes.get(d);
+      if (dn?.kind === 'external') {
+        return { taskId: d, report: undefined, cancelled: undefined, external: { done: dn.done, title: String(dn.payload['title'] ?? '') } };
+      }
       const ds = this.entry(d).status;
       return {
         taskId: d,
@@ -302,6 +314,13 @@ export class Orchestrator implements OrchestratorCore {
     this._graph = polled.graph;
     this._graphRejected = undefined;
     this.store.setSnapshot(polled.graph.rev, polled.content);
+    if (!this.store.getKv('baselineHead')) {
+      try {
+        this.store.setKv('baselineHead', await this.workspace.integrationHead());
+      } catch (err) {
+        this.log.warn('could not record baseline head', { err: String(err) });
+      }
+    }
     this.store.appendEvent({ kind: 'graph.loaded', payload: { rev: polled.graph.rev } }, this.now());
   }
 
@@ -660,11 +679,50 @@ export class Orchestrator implements OrchestratorCore {
     return this.store.getKv('paused') === '1';
   }
 
+  /** Review bundle for a submitted gated milestone. See operator-control "Review bundle". */
+  async reviewBundle(id: Id): Promise<{ ok: true; bundle: Record<string, unknown> } | { ok: false; reason: string }> {
+    const node = this.graph().nodes.get(id);
+    if (!node || node.kind !== 'milestone') return { ok: false, reason: `${id} is not a milestone` };
+    const entry = this.entry(id);
+    if (entry.status.kind !== 'submitted' || !entry.integrationSha) return { ok: false, reason: `${id} is ${entry.status.kind}, not submitted` };
+    const baseline = this.store.getKv('baselineHead') ?? '';
+    const diffStat = baseline ? await this.workspace.diffStat(baseline, entry.integrationSha) : '';
+    const closure = [...q.closure(this.graph(), id)]
+      .filter((t) => this.graph().nodes.get(t)?.kind === 'task')
+      .map((t) => {
+        const published = this.store.listJobs({ taskId: t, status: 'published' }).at(-1);
+        const report = this.store.getCompletionReport(t);
+        return {
+          taskId: t,
+          status: this.entry(t).status.kind,
+          publishedSha: published?.publishedSha,
+          summary: report ? String(report.body['summary'] ?? '') : undefined,
+          acceptance: report?.body['acceptance'],
+        };
+      });
+    return {
+      ok: true,
+      bundle: {
+        milestone: id,
+        integrationSha: entry.integrationSha,
+        reviewVersion: entry.reviewVersion,
+        tag: `milestone/${id}/v${entry.reviewVersion}`,
+        baseline,
+        diffStat,
+        closure,
+        acceptanceCriteria: this.acceptanceCriteria(node),
+      },
+    };
+  }
+
   status(): StatusReport {
     const g = this.graph();
     const o = this.overlay();
     const byStatus: Record<StatusKind, Id[]> = { unstarted: [], running: [], waiting: [], submitted: [], done: [], failed: [], blocked: [], cancelled: [] };
-    for (const id of g.nodes.keys()) byStatus[this.entry(id).status.kind].push(id);
+    for (const node of g.nodes.values()) {
+      if (node.kind === 'external') continue;
+      byStatus[this.entry(node.id).status.kind].push(node.id);
+    }
     const live = new Set<Id>([...byStatus.running, ...byStatus.waiting]);
     return {
       finished: q.finished(g, o),
@@ -673,11 +731,17 @@ export class Orchestrator implements OrchestratorCore {
       graphRev: g.rev,
       graphRejected: this._graphRejected,
       byStatus,
+      external: q.externals(g),
       stallRoots: q.stallRoots(g, o),
       awaitingReview: q.awaitingReview(g, o),
       openQuestions: q.openQuestions(g, o),
       liveLaunches: this.store.listLaunches({ status: 'live' }).map((l) => ({ launchId: l.launchId, taskId: l.taskId, pid: l.pid })),
       foreignCommits: this.foreignCommits,
+      runDir: this.config.runDir ?? this.config.dataDir,
+      graphPath: this.config.graphPath,
+      daemonPid: process.pid,
+      daemonUrl: this.apiBaseUrl,
+      latestSeq: this.store.latestEventSeq(),
     };
   }
 

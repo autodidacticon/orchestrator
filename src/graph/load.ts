@@ -27,8 +27,9 @@ export class GraphValidationError extends Error {
 const nodeSchema = z
   .object({
     id: z.string().min(1),
-    kind: z.enum(['task', 'milestone']).default('task'),
+    kind: z.enum(['task', 'milestone', 'external']).default('task'),
     gated: z.boolean().default(false),
+    done: z.boolean().default(false),
     deps: z.array(z.string().min(1)).default([]),
   })
   .passthrough();
@@ -61,8 +62,8 @@ export function parseGraph(content: string): Graph {
     if (nodes.has(n.id)) {
       throw new GraphValidationError(`duplicate node id "${n.id}"`, 'duplicateId', { id: n.id });
     }
-    const { id, kind, gated, deps, ...payload } = n;
-    nodes.set(id, { id, kind, gated, deps: [...new Set(deps)], payload });
+    const { id, kind, gated, done, deps, ...payload } = n;
+    nodes.set(id, { id, kind, gated, done: kind === 'external' ? done : false, deps: [...new Set(deps)], payload });
   }
 
   for (const node of nodes.values()) {

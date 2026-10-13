@@ -6,13 +6,15 @@
  */
 export type Id = string;
 
-export type NodeKind = 'task' | 'milestone';
+export type NodeKind = 'task' | 'milestone' | 'external';
 
 export interface GraphNode {
   id: Id;
   kind: NodeKind;
   /** Milestones only: requires human accept/reject instead of auto-completion. */
   gated: boolean;
+  /** External nodes only: satisfied iff true. Never scheduled here. */
+  done: boolean;
   deps: readonly Id[];
   /** Everything else from the source file (title, description, acceptanceCriteria, behavior...). */
   payload: Readonly<Record<string, unknown>>;

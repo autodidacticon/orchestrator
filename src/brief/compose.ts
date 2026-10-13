@@ -25,7 +25,7 @@ export interface BriefJson {
   launchNo: number;
   task: Record<string, unknown>;
   acceptanceCriteria: string[];
-  dependencies: Array<{ taskId: string; summary?: string; report?: Record<string, unknown>; cancelled?: { reason: string } }>;
+  dependencies: Array<{ taskId: string; summary?: string; report?: Record<string, unknown>; cancelled?: { reason: string }; external?: { done: boolean; title?: string } }>;
   context?: Record<string, unknown>;
 }
 
@@ -61,6 +61,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
       summary: d.report ? String(d.report.body['summary'] ?? '') : undefined,
       report: d.report?.body,
       cancelled: d.cancelled,
+      external: d.external,
     })),
     context: input.carry,
   };
@@ -88,7 +89,9 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   lines.push('## Dependencies', '');
   if (!input.depReports.length) lines.push('- none');
   for (const d of input.depReports) {
-    if (d.cancelled) {
+    if (d.external) {
+      lines.push(`- **${d.taskId}**${d.external.title ? ` (${d.external.title})` : ''} is outside this run and is ${d.external.done ? 'done' : 'not done'}. Its work was not produced by an agent here; look at the repository for what it delivered.`);
+    } else if (d.cancelled) {
       lines.push(`- **${d.taskId}** was cancelled: ${d.cancelled.reason}. Its work does not exist; plan accordingly.`);
     } else if (d.report) {
       const b = d.report.body;

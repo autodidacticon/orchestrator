@@ -33,18 +33,34 @@ export function milestones(g: Graph): Id[] {
   return [...g.nodes.values()].filter((n) => n.kind === 'milestone').map((n) => n.id);
 }
 
-export function satisfied(overlay: Overlay, id: Id): boolean {
+/** External nodes are satisfied by their flag; everything else by status. */
+export function satisfied(g: Graph, overlay: Overlay, id: Id): boolean {
+  const node = g.nodes.get(id);
+  if (node?.kind === 'external') return node.done;
   return isSatisfied(entryOf(overlay, id).status);
 }
 
 export function depsSatisfied(g: Graph, overlay: Overlay, id: Id): boolean {
-  return deps(g, id).every((d) => satisfied(overlay, d));
+  return deps(g, id).every((d) => satisfied(g, overlay, d));
+}
+
+export function externals(g: Graph): Array<{ id: Id; done: boolean }> {
+  return [...g.nodes.values()].filter((n) => n.kind === 'external').map((n) => ({ id: n.id, done: n.done }));
+}
+
+/** Ids of open external nodes that `id` directly depends on. */
+export function openExternalDeps(g: Graph, id: Id): Id[] {
+  return deps(g, id).filter((d) => {
+    const n = g.nodes.get(d);
+    return n?.kind === 'external' && !n.done;
+  });
 }
 
 function withStatus(g: Graph, overlay: Overlay, pred: (s: Status, id: Id) => boolean): Id[] {
   const out: Id[] = [];
-  for (const id of g.nodes.keys()) {
-    if (pred(entryOf(overlay, id).status, id)) out.push(id);
+  for (const node of g.nodes.values()) {
+    if (node.kind === 'external') continue;
+    if (pred(entryOf(overlay, node.id).status, node.id)) out.push(node.id);
   }
   return out;
 }
@@ -107,7 +123,10 @@ export function stalled(g: Graph, overlay: Overlay, live: ReadonlySet<Id>): bool
   );
 }
 
-/** Incomplete nodes that are failed or blocked, or depend on an unreleased cancellation. */
+/**
+ * Incomplete nodes that are failed or blocked, depend on an unreleased
+ * cancellation, or depend on an open external node.
+ */
 export function stallRoots(g: Graph, overlay: Overlay): Id[] {
   const out: Id[] = [];
   for (const id of incomplete(g, overlay)) {
@@ -120,7 +139,7 @@ export function stallRoots(g: Graph, overlay: Overlay): Id[] {
       const ds = entryOf(overlay, d).status;
       return ds.kind === 'cancelled' && !ds.releasesDependents;
     });
-    if (onCancelled) out.push(id);
+    if (onCancelled || openExternalDeps(g, id).length > 0) out.push(id);
   }
   return out;
 }
@@ -129,6 +148,7 @@ export type Revocable = { ok: true } | { ok: false; blockers: Id[]; reason: stri
 
 /** done/cancelled nodes may be reopened only if no dependent is started. */
 export function revocable(g: Graph, overlay: Overlay, id: Id): Revocable {
+  if (g.nodes.get(id)?.kind === 'external') return { ok: false, blockers: [], reason: `node ${id} is external; change its done flag in the graph file` };
   const s = entryOf(overlay, id).status;
   if (s.kind !== 'done' && s.kind !== 'cancelled') {
     return { ok: false, blockers: [], reason: `node ${id} is ${s.kind}, not done or cancelled` };

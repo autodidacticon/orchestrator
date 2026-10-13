@@ -95,4 +95,9 @@ export class GitWorkspace implements Workspace {
   async tagMilestone(id: Id, version: number, sha: string): Promise<void> {
     await tagIdempotent(this.repo, `milestone/${id}/v${version}`, sha);
   }
+
+  async diffStat(from: string, to: string): Promise<string> {
+    const r = await git(this.repo, ['diff', '--stat', `${from}..${to}`], { allowFail: true });
+    return r.code === 0 ? r.stdout.trim() : '';
+  }
 }

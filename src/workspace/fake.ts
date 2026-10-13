@@ -45,6 +45,10 @@ export class FakeWorkspace implements Workspace {
     if (!this.tags.some((t) => t.id === id && t.version === version)) this.tags.push({ id, version, sha });
   }
 
+  async diffStat(from: string, to: string): Promise<string> {
+    return `fake diff ${from}..${to}`;
+  }
+
   /** Test helper: a submission that is empty (sealedSha == baseSha). */
   scriptEmpty(taskId: Id, baseSha: string): void {
     this.sealScript.set(taskId, { ok: true, sealedSha: baseSha });

@@ -21,7 +21,7 @@ export const dagArb = fc
     for (let i = 0; i < n; i++) {
       const id = `N${i}`;
       const deps = [...new Set((rawDeps[i] ?? []).filter((d) => d < i).map((d) => `N${d}`))];
-      nodes.set(id, { id, kind: ms[i] ? 'milestone' : 'task', gated: Boolean(gated[i]), deps, payload: {} });
+      nodes.set(id, { id, kind: ms[i] ? 'milestone' : 'task', gated: Boolean(gated[i]), done: false, deps, payload: {} });
     }
     return makeGraph('rev', nodes);
   });

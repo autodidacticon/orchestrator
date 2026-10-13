@@ -94,7 +94,8 @@ export interface Store {
   allEntries(): Map<Id, Entry>;
 
   appendEvent(ev: EventInput, ts: number): number;
-  listEvents(filter?: { kind?: string; taskId?: Id; launchId?: string }): StoredEvent[];
+  listEvents(filter?: { kind?: string; kinds?: string[]; taskId?: Id; launchId?: string; afterSeq?: number; limit?: number }): StoredEvent[];
+  latestEventSeq(): number;
 
   getDedup(launchId: string, seq: number): unknown | undefined;
   putDedup(launchId: string, seq: number, response: unknown): void;

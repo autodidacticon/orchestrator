@@ -68,12 +68,16 @@ export class SqliteStore implements Store {
     return Number(res.lastInsertRowid);
   }
 
-  listEvents(filter: { kind?: string; taskId?: Id; launchId?: string } = {}): StoredEvent[] {
+  listEvents(filter: { kind?: string; kinds?: string[]; taskId?: Id; launchId?: string; afterSeq?: number; limit?: number } = {}): StoredEvent[] {
     const where: string[] = [];
     const args: unknown[] = [];
     if (filter.kind) {
       where.push('kind = ?');
       args.push(filter.kind);
+    }
+    if (filter.kinds && filter.kinds.length) {
+      where.push(`kind IN (${filter.kinds.map(() => '?').join(',')})`);
+      args.push(...filter.kinds);
     }
     if (filter.taskId) {
       where.push('task_id = ?');
@@ -83,7 +87,12 @@ export class SqliteStore implements Store {
       where.push('launch_id = ?');
       args.push(filter.launchId);
     }
-    const sql = `SELECT seq, ts, kind, task_id, launch_id, payload FROM events${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY seq`;
+    if (filter.afterSeq !== undefined) {
+      where.push('seq > ?');
+      args.push(filter.afterSeq);
+    }
+    const limit = filter.limit && filter.limit > 0 ? ` LIMIT ${Math.floor(filter.limit)}` : '';
+    const sql = `SELECT seq, ts, kind, task_id, launch_id, payload FROM events${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY seq${limit}`;
     const rows = this.db.prepare(sql).all(...args) as Array<{
       seq: number;
       ts: number;
@@ -100,6 +109,11 @@ export class SqliteStore implements Store {
       launchId: r.launch_id ?? undefined,
       payload: r.payload ? (JSON.parse(r.payload) as Record<string, unknown>) : undefined,
     }));
+  }
+
+  latestEventSeq(): number {
+    const row = this.db.prepare('SELECT COALESCE(MAX(seq), 0) AS seq FROM events').get() as { seq: number };
+    return row.seq;
   }
 
   getDedup(launchId: string, seq: number): unknown | undefined {

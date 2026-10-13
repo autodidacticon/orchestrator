@@ -14,6 +14,8 @@
  */
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { daemonState, listRuns, startDaemon, stopDaemon } from '../runs/lifecycle.js';
+import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 import { SqliteStore } from '../state/sqlite.js';
 
 export interface CliResult {
@@ -21,9 +23,19 @@ export interface CliResult {
   body: unknown;
 }
 
-export async function resolveUrl(opts: { url?: string; dataDir?: string }): Promise<string> {
+export async function resolveUrl(opts: { url?: string; dataDir?: string; repo?: string }): Promise<string> {
   if (opts.url) return opts.url;
   if (process.env['ORCH_URL']) return process.env['ORCH_URL'] as string;
+  if (!opts.dataDir) {
+    try {
+      const repo = await resolveRepoPath({ repo: opts.repo });
+      const state = await daemonState(runPaths(repo).runDir);
+      if (state.healthy && state.url) return state.url;
+      if (!process.env['ORCH_DATA_DIR']) throw new Error(`no running daemon for ${repo} (run dir ${state.runDir}); run \`orchestrator-ctl start\``);
+    } catch (err) {
+      if (!process.env['ORCH_DATA_DIR']) throw err;
+    }
+  }
   const dataDir = opts.dataDir ?? process.env['ORCH_DATA_DIR'] ?? '.orchestrator-run';
   const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
   try {
@@ -44,13 +56,37 @@ export async function call(base: string, method: 'GET' | 'POST', route: string, 
   return { status: res.status, body: await res.json() };
 }
 
+export const USAGE = `orchestrator-ctl: operate a running orchestrator.
+
+  orchestrator-ctl start [--repo <path>]       start the daemon for a repository (idempotent)
+  orchestrator-ctl stop [--reap] [--repo <path>]
+  orchestrator-ctl runs                         list runs under ORCH_HOME
+  orchestrator-ctl status
+  orchestrator-ctl answer <task> <text>
+  orchestrator-ctl cancel <task> [--release] [--reason <text>]
+  orchestrator-ctl reopen <task>
+  orchestrator-ctl unblock <task> [--answer <text>] [--accept-candidate]
+  orchestrator-ctl accept <milestone> --sha <sha> --version <n>
+  orchestrator-ctl reject <milestone> --note <text>
+  orchestrator-ctl pause | resume
+  orchestrator-ctl logs <task> [--launch <n>]
+
+The daemon is found by --url, ORCH_URL, the run directory of --repo or the
+current repository (ORCH_HOME, default ~/.orchestrator), or --data-dir.
+`;
+
 export async function runCli(argv: string[]): Promise<CliResult> {
+  if (argv.includes('--help') || argv.includes('-h') || argv.length === 0) {
+    return { status: 0, body: { usage: USAGE } };
+  }
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
     options: {
       url: { type: 'string' },
       'data-dir': { type: 'string' },
+      repo: { type: 'string' },
+      reap: { type: 'boolean', default: false },
       release: { type: 'boolean', default: false },
       reason: { type: 'string' },
       answer: { type: 'string' },
@@ -62,7 +98,18 @@ export async function runCli(argv: string[]): Promise<CliResult> {
     },
   });
   const [cmd, a, ...rest] = positionals;
-  const base = await resolveUrl({ url: values.url, dataDir: values['data-dir'] });
+  if (cmd === 'start') {
+    const r = await startDaemon({ repo: values.repo });
+    return { status: 200, body: r };
+  }
+  if (cmd === 'stop') {
+    const r = await stopDaemon({ repo: values.repo, reap: values.reap });
+    return { status: r.stopped ? 200 : 409, body: r };
+  }
+  if (cmd === 'runs') {
+    return { status: 200, body: { runs: await listRuns() } };
+  }
+  const base = await resolveUrl({ url: values.url, dataDir: values['data-dir'], repo: values.repo });
   switch (cmd) {
     case 'status':
       return call(base, 'GET', '/v1/status');
@@ -95,8 +142,9 @@ const isEntry = process.argv[1] && import.meta.url === new URL(`file://${path.re
 if (isEntry) {
   runCli(process.argv.slice(2))
     .then((r) => {
-      const body = r.body as { log?: string } | undefined;
-      if (body && typeof body.log === 'string') process.stdout.write(body.log);
+      const body = r.body as { log?: string; usage?: string } | undefined;
+      if (body && typeof body.usage === 'string') process.stdout.write(body.usage);
+      else if (body && typeof body.log === 'string') process.stdout.write(body.log);
       else process.stdout.write(`${JSON.stringify(r.body, null, 2)}\n`);
       process.exit(r.status < 400 ? 0 : 1);
     })

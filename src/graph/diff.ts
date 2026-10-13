@@ -41,7 +41,7 @@ export function classifyReload(prev: Graph, next: Graph, overlay: Overlay): Relo
     }
     const depsChanged = !sameSet(old.deps, nu.deps);
     const kindChanged = old.kind !== nu.kind;
-    const otherChanged = old.gated !== nu.gated || JSON.stringify(old.payload) !== JSON.stringify(nu.payload);
+    const otherChanged = old.gated !== nu.gated || old.done !== nu.done || JSON.stringify(old.payload) !== JSON.stringify(nu.payload);
     if (depsChanged || kindChanged || otherChanged) changed.push(id);
     if (started && depsChanged) {
       reasons.push({ id, code: 'depsChangedStarted', message: `deps of ${id} changed while started` });
