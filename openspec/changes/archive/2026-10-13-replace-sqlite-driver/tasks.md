@@ -1,0 +1,31 @@
+## 1. Driver swap in the store
+
+- [x] 1.1 `src/state/sqlite.ts`: replace `import Database from 'better-sqlite3'` with `import { DatabaseSync, type SQLInputValue } from 'node:sqlite'`, preceded by `import { releaseSqliteWarningFilter } from './sqlite-warning.js'`; the constructor runs `new DatabaseSync(path)`, then `PRAGMA journal_mode = WAL`, `PRAGMA synchronous = NORMAL`, `PRAGMA busy_timeout = 5000`, and `SCHEMA` through `exec`; type the `args` arrays of `listEvents`, `listLaunches`, `listJobs`, `listProposals`, and `listOutbox` as `SQLInputValue[]`; the header comment names `node:sqlite` and the error shape (`code` `ERR_SQLITE_ERROR`, `errcode`, `errstr`, SQLite's message)
+- [x] 1.2 `src/state/sqlite.ts` `transaction(fn)`: a private depth counter; depth 0 issues `BEGIN`, then `COMMIT` or `ROLLBACK`; depth n issues `SAVEPOINT orch_n`, then `RELEASE orch_n` or `ROLLBACK TO orch_n` followed by `RELEASE orch_n`; the rollback statements run in a try that ignores their own failure; the original error is rethrown; the counter is restored in `finally`
+- [x] 1.3 `src/state/sqlite.ts`: `getSnapshot()` returns `{ rev, content }` copied from the row; `close()` returns at once when the store is already closed
+- [x] 1.4 New `src/state/sqlite-warning.ts`: at module evaluation, take `process.listeners('warning')`, remove them, and install one listener that forwards every warning to the removed listeners in order, except a warning whose `name` is `ExperimentalWarning` and whose message matches `/SQLite/`, on which it restores: removes itself and re-adds the removed listeners in their original order ahead of any listener added meanwhile (`prependListener` over the reversed list); export `releaseSqliteWarningFilter()`, which arms the same restore on an `unref`'d `setImmediate`; restore runs at most once. `src/state/sqlite.ts` calls `releaseSqliteWarningFilter()` right after its imports, so the fallback is armed only after `node:sqlite` has evaluated. `src/state/store.ts`: the header comment names `node:sqlite` instead of better-sqlite3
+
+## 2. Dependencies and the Node floor
+
+- [x] 2.1 `package.json`: remove `better-sqlite3` from `dependencies` and `@types/better-sqlite3` from `devDependencies`; set `engines.node` to `>=22.13.0`; run `npm install` so that `package-lock.json` drops `better-sqlite3` and its 34 transitive packages; confirm `npm ls --omit=dev --all` lists 96 packages and none named `better-sqlite3`
+- [x] 2.2 `README.md`: the prerequisites line says Node 22.13 or newer; the `host-integration` line of the spec index gains "no native dependencies, quiet SQLite binding" and the `crash-recovery` line gains "store transactions"; `openspec/config.yaml`: the tech stack line names `node:sqlite` instead of `better-sqlite3`
+
+## 3. Store tests at the seams
+
+- [x] 3.1 `test/state/sqlite.test.ts`: "an inner transaction that throws is undone while the outer commits" (outer `setEntry` T1; inner `transaction` does `setEntry` T2 and throws; the outer catches and returns; T1 present, T2 absent) and "an outer throw undoes an inner transaction's writes" (inner `setEntry` T3 returns; the outer throws; T3 absent)
+- [x] 3.2 `test/state/sqlite.test.ts`: "a duplicate launch id throws and rolls back the transaction" (`appendEvent` then `createLaunch` with an existing id inside one `transaction`; `toThrow(/UNIQUE constraint failed/)`; `listEvents()` unchanged); "appendEvent and insertOutbox return numbers"; "getSnapshot returns a plain object" (`Object.getPrototypeOf` is `Object.prototype`); "close twice is a no-op"; `test/state/outbox.test.ts` "a duplicate key keeps one row" stays as the guard for `changes` 0
+- [x] 3.3 New helper `test/state/hold-write.ts` (not a test file): snapshots `process.listeners('warning')`, dynamically imports `../../src/state/sqlite.js`, opens the store at `argv[2]`, inside `transaction` calls `setKv('held', 'child')`, writes the flag file `argv[3]`, and blocks 1500 ms with `Atomics.wait`; after the transaction it calls `process.emitWarning('probe')` and prints one JSON line `{ restored }`, true when `process.listeners('warning')` equals the snapshot element for element; `test/state/sqlite.test.ts`: "a writer in another process makes this one wait, and a reader is not blocked": `setKv('held', 'before')`, spawn `node --import <tsxLoader> hold-write.ts <db> <flag>` capturing stderr, wait for the flag, assert `getKv('held')` is `before`, then `setKv('held', 'parent')` succeeds after at least one second, the final value is `parent`, the child's stderr contains `probe` and no `ExperimentalWarning`, and its stdout reports `restored` true
+- [x] 3.4 New `test/state/warning.test.ts`, with no static import of the store: "the warning filter restores the process's listeners after one turn": snapshot `process.listeners('warning')`, `await import('../../src/state/sqlite.js')`, `await new Promise((r) => setImmediate(r))`, then assert `process.listeners('warning')` equals the snapshot element for element
+
+## 4. Host guards
+
+- [x] 4.1 `test/host/package.test.ts`: "the production dependency tree has no native module": parse `package-lock.json`; for every `packages` entry other than the root without `dev: true`, assert no `hasInstallScript` and no `binding.gyp` under its path; assert `better-sqlite3` is absent from `dependencies`, `@types/better-sqlite3` from `devDependencies`, and `engines.node` equals `>=22.13.0`
+- [x] 4.2 `test/host/package.test.ts`: "orchestrator-ctl against an empty data dir is warning-free": run `node --import <tsxLoader> src/operator/cli.ts --data-dir <mkdtemp> status`; expect exit code 2 and stderr equal to the single `no daemon url recorded` line
+- [x] 4.3 `test/runs/lifecycle.test.ts`: after the restart test's final `stopDaemon`, assert `readFileSync(paths.daemonLog, 'utf8')` contains no `ExperimentalWarning`
+
+## 5. Verification
+
+- [x] 5.1 `npm run typecheck` passes against the `sqlite.d.ts` in `@types/node`
+- [x] 5.2 `npm test`: the full suite including `test/crash` and the scripted end to end, green, with no `ExperimentalWarning` in the vitest output
+- [x] 5.3 `npm run build`, then `node dist/src/operator/cli.js --help` and `node dist/src/main.js --help` print usage with an empty stderr
+- [x] 5.4 `claude plugin validate --strict hosts/claude-code` reports validation passed; nothing under `hosts/` changes

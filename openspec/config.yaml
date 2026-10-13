@@ -21,7 +21,7 @@ schema: spec-driven
 
 context: |
   Domain: orchestration of parallel coding agents over a task DAG against one git repository.
-  Tech stack: TypeScript (ESM), Node 22+, npm, better-sqlite3, zod, yaml, @modelcontextprotocol/sdk; tests with vitest and fast-check.
-  Entry points for context: README.md, plans/0-orchestrator-v1/plan.md (design record and phases), openspec/changes/add-orchestrator-v1/.
+  Tech stack: TypeScript (ESM), Node 22.13+, npm, node:sqlite (Node's built-in SQLite, no native dependency), zod, yaml, @modelcontextprotocol/sdk; tests with vitest and fast-check.
+  Entry points for context: README.md, the specs under openspec/specs/, and the archived changes under openspec/changes/archive/ (each with proposal, design, tasks).
   Conventions: every external effect sits between two durable records; the orchestrator is the sole writer of task state; agents and humans submit intents as events; done means integrated, not correct.
   Specs use SHALL/MUST requirements with WHEN/THEN scenarios, one scenario per testable behavior.

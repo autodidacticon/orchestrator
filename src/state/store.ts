@@ -1,5 +1,5 @@
 /**
- * Store interface. Synchronous on purpose: better-sqlite3 is synchronous, which
+ * Store interface. Synchronous on purpose: node:sqlite is synchronous, which
  * makes a claim, a dedup write, or a transition one transaction.
  */
 import type { Id } from '../graph/model.js';

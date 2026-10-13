@@ -78,4 +78,32 @@ describe('package entrypoints', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('the production dependency tree has no native module', () => {
+    const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8')) as { packages: Record<string, { dev?: boolean; hasInstallScript?: boolean }> };
+    const prod = Object.entries(lock.packages).filter(([p, e]) => p !== '' && !e.dev);
+    expect(prod.length).toBeGreaterThan(0);
+    expect(prod.filter(([, e]) => e.hasInstallScript).map(([p]) => p)).toEqual([]);
+    expect(prod.filter(([p]) => existsSync(path.join(root, p, 'binding.gyp'))).map(([p]) => p)).toEqual([]);
+    const manifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { dependencies: Record<string, string>; devDependencies: Record<string, string>; engines: { node: string } };
+    expect(manifest.dependencies['better-sqlite3']).toBeUndefined();
+    expect(manifest.devDependencies['@types/better-sqlite3']).toBeUndefined();
+    expect(manifest.engines.node).toBe('>=22.13.0');
+  });
+
+  it('orchestrator-ctl against an empty data dir is warning-free', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-empty-'));
+    try {
+      await execFileP('node', ['--import', tsxLoader, path.join(root, 'src/operator/cli.ts'), '--data-dir', dir, 'status'], { cwd: root });
+      expect.unreachable('the command must fail without a daemon');
+    } catch (err) {
+      const e = err as { code?: number; stderr?: string };
+      expect(e.code).toBe(2);
+      const lines = (e.stderr ?? '').trim().split('\n');
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('no daemon url recorded');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

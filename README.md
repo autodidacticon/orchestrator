@@ -4,7 +4,7 @@ An orchestrator that runs many coding agents in parallel from a dependency graph
 
 ## Running locally
 
-Prerequisites: Node 22 or newer, git, and, for real agents, the Claude Code CLI (`claude`) logged in. Scripted agents need nothing else.
+Prerequisites: Node 22.13 or newer (the store uses Node's built-in SQLite), git, and, for real agents, the Claude Code CLI (`claude`) logged in. Scripted agents need nothing else.
 
 ```
 git clone git@github.com:autodidacticon/orchestrator.git && cd orchestrator
@@ -111,18 +111,18 @@ Graph mutation. Milestones hold no work, so they never block a reopen: reopening
 
 ### Requirements
 
-Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, `add-graph-mutation`, `add-pull-runner`, and `add-scheduling-policy`:
+Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, `add-graph-mutation`, `add-pull-runner`, `add-scheduling-policy`, and `replace-sqlite-driver`:
 
 - Capability specs
   - [task-graph](openspec/specs/task-graph/spec.md): loading, validation, external nodes, readiness, milestones, stall detection, revisions, reload compatibility, revocability through milestones and the cascade plan, critical path length
   - [task-lifecycle](openspec/specs/task-lifecycle/spec.md): states, transitions by actor, admission, counters, leases, retry, reopen guard, cascade reopen, milestone reset and review, cancellation
   - [agent-protocol](openspec/specs/agent-protocol/spec.md): the brief, the API, deduplication, sealing, no-op and acceptance checks, blocking and resume, fallback, fencing, MCP façade, brief validation
   - [integration-pipeline](openspec/specs/integration-pipeline/spec.md): worktrees, the verifier, publication, conflicts, foreign commits, milestone tags
-  - [crash-recovery](openspec/specs/crash-recovery/spec.md): durable records, recovery per boundary, adoption, fencing, sweeps, crash points, invariants
+  - [crash-recovery](openspec/specs/crash-recovery/spec.md): durable records, recovery per boundary, adoption, fencing, sweeps, crash points, invariants, store transactions
   - [operator-control](openspec/specs/operator-control/spec.md): operator routes shared by the CLI and the MCP server, status, run directories, daemon lifecycle, event stream, review bundle, graph import, pause and resume, shutdown, logs
   - [operator-mcp](openspec/specs/operator-mcp/spec.md): the operator MCP server a host session drives: tool set, wait, start, review
   - [graph-import](openspec/specs/graph-import/spec.md): normalized issue records, mapping rules, acceptance criteria and scope extraction, priority normalisation, import outcome
-  - [host-integration](openspec/specs/host-integration/spec.md): package entrypoints, per-host wrappers, skills
+  - [host-integration](openspec/specs/host-integration/spec.md): package entrypoints, per-host wrappers, skills, no native dependencies, quiet SQLite binding
   - [tracker-sync](openspec/specs/tracker-sync/spec.md): the durable outbox of tracker effects, effect kinds and marker, mirroring policy, done semantics, the drainer contract
   - [health-monitoring](openspec/specs/health-monitoring/spec.md): process liveness, progress signals, stuck detection and escalation, the diagnosis hook, launch and run budgets, usage accounting, the base-moved notice
   - [pull-runner](openspec/specs/pull-runner/spec.md): runner modes and the claim window, claim and release, worker identity and idempotent re-claim, access modes with remote reserved
@@ -134,3 +134,9 @@ Current specs in `openspec/specs/`, synced from the archived changes `add-orches
 - Archived change `add-graph-mutation` (transparent milestones, cascade reopen, proposals): [Proposal](openspec/changes/archive/2026-10-12-add-graph-mutation/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-graph-mutation/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-graph-mutation/tasks.md)
 - Archived change `add-pull-runner` (workers claim launches; the work skill and workflow): [Proposal](openspec/changes/archive/2026-10-13-add-pull-runner/proposal.md), [Design](openspec/changes/archive/2026-10-13-add-pull-runner/design.md), [Tasks](openspec/changes/archive/2026-10-13-add-pull-runner/tasks.md)
 - Archived change `add-scheduling-policy` (ordering chain, scopes, deferrals): [Proposal](openspec/changes/archive/2026-10-13-add-scheduling-policy/proposal.md), [Design](openspec/changes/archive/2026-10-13-add-scheduling-policy/design.md), [Tasks](openspec/changes/archive/2026-10-13-add-scheduling-policy/tasks.md)
+- Archived change `replace-sqlite-driver` (Node's built-in SQLite, no native dependency): [Proposal](openspec/changes/archive/2026-10-13-replace-sqlite-driver/proposal.md), [Design](openspec/changes/archive/2026-10-13-replace-sqlite-driver/design.md), [Tasks](openspec/changes/archive/2026-10-13-replace-sqlite-driver/tasks.md)
+
+Active changes, planned 2026-10-13 from the first end-to-end walkthrough, in apply order:
+
+1. `add-daemon-lifecycle`: visible session subagents as the plugin's default, a daemon that exits when idle and revives on demand, session attachments with a kept release, a self-contained plugin launcher, session hooks. [Proposal](openspec/changes/add-daemon-lifecycle/proposal.md), [Design](openspec/changes/add-daemon-lifecycle/design.md), [Tasks](openspec/changes/add-daemon-lifecycle/tasks.md)
+2. `add-toolchain-discovery`: the check command, integration branch, and spawned agents' allowed tools detected from the repository with provenance, runtime overrides through a `configure` tool, no `orchestrator.yaml` required. [Proposal](openspec/changes/add-toolchain-discovery/proposal.md), [Design](openspec/changes/add-toolchain-discovery/design.md), [Tasks](openspec/changes/add-toolchain-discovery/tasks.md)

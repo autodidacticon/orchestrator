@@ -113,6 +113,8 @@ describe('run directory and daemon lifecycle', () => {
     expect(second.url).toBe(first.url);
     await waitFor(async () => Boolean((await health(second.url))?.['finished']), 40_000);
     await stopDaemon({ repo, env });
+    // The node:sqlite ExperimentalWarning never reaches the daemon log. See specs/host-integration "Quiet SQLite binding".
+    expect(readFileSync(paths.daemonLog, 'utf8')).not.toContain('ExperimentalWarning');
     const store = new SqliteStore(path.join(paths.runDir, 'store.sqlite'));
     try {
       expect(store.listLaunches({ taskId: 'T1' })).toHaveLength(1);

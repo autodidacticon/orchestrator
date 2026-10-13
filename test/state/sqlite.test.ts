@@ -1,10 +1,15 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
 import { applyTransition } from '../../src/state/transitions.js';
+import { tsxLoader } from '../slice/harness.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 let dir: string;
 let store: SqliteStore;
@@ -135,4 +140,86 @@ describe('sqlite store', () => {
     store.updateJob('J2', { status: 'published', publishedSha: 'p', changedFiles: ['README.md', 'src/a.ts'] });
     expect(store.getJob('J2')?.changedFiles).toEqual(['README.md', 'src/a.ts']);
   });
+
+  it('an inner transaction that throws is undone while the outer commits', () => {
+    store.transaction(() => {
+      store.setEntry('T1', defaultEntry());
+      try {
+        store.transaction(() => {
+          store.setEntry('T2', defaultEntry());
+          throw new Error('inner');
+        });
+      } catch (err) {
+        expect((err as Error).message).toBe('inner');
+      }
+    });
+    expect(store.getEntry('T1')).toBeDefined();
+    expect(store.getEntry('T2')).toBeUndefined();
+  });
+
+  it("an outer throw undoes an inner transaction's writes", () => {
+    expect(() =>
+      store.transaction(() => {
+        store.transaction(() => store.setEntry('T3', defaultEntry()));
+        throw new Error('outer');
+      }),
+    ).toThrow('outer');
+    expect(store.getEntry('T3')).toBeUndefined();
+    // The store is usable afterwards at depth zero.
+    store.setKv('after', '1');
+    expect(store.getKv('after')).toBe('1');
+  });
+
+  it('a duplicate launch id throws and rolls back the transaction', () => {
+    const launch = { launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'preparing' as const, token: 'tok', branch: 'b', worktree: 'w', baseSha: 's', graphRev: 'r', createdAt: 1 };
+    store.createLaunch(launch);
+    expect(() =>
+      store.transaction(() => {
+        store.appendEvent({ kind: 'x' }, 1);
+        store.createLaunch({ ...launch, token: 'tok2' });
+      }),
+    ).toThrow(/UNIQUE constraint failed/);
+    expect(store.listEvents()).toEqual([]);
+    expect(store.listLaunches()).toHaveLength(1);
+  });
+
+  it('appendEvent and insertOutbox return numbers, getSnapshot returns a plain object, close twice is a no-op', () => {
+    const seq = store.appendEvent({ kind: 'x' }, 1);
+    expect(typeof seq).toBe('number');
+    const id = store.insertOutbox({ sourceSeq: seq, taskId: 'T1', kind: 'setState', payload: { state: 'done' }, createdAt: 1 });
+    expect(typeof id).toBe('number');
+    store.setSnapshot('rev', 'nodes: []');
+    const snap = store.getSnapshot()!;
+    expect(Object.getPrototypeOf(snap)).toBe(Object.prototype);
+    expect(snap).toEqual({ rev: 'rev', content: 'nodes: []' });
+    store.close();
+    expect(() => store.close()).not.toThrow();
+    store = new SqliteStore(path.join(dir, 's.sqlite'));
+  });
+
+  it('a writer in another process makes this one wait, and a reader is not blocked', async () => {
+    store.setKv('held', 'before');
+    const flag = path.join(dir, 'flag');
+    const child = execFile('node', ['--import', tsxLoader, path.join(here, 'hold-write.ts'), path.join(dir, 's.sqlite'), flag], { cwd: dir });
+    let stderr = '';
+    let stdout = '';
+    child.stderr?.on('data', (d: Buffer) => (stderr += d.toString()));
+    child.stdout?.on('data', (d: Buffer) => (stdout += d.toString()));
+    const exit = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(flag)) {
+      if (Date.now() > deadline) throw new Error('child never started its transaction');
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    // The child's transaction is open with an uncommitted write: a reader sees the old value and is not blocked.
+    expect(store.getKv('held')).toBe('before');
+    const t0 = Date.now();
+    store.setKv('held', 'parent');
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(1000);
+    expect(store.getKv('held')).toBe('parent');
+    expect(await exit).toBe(0);
+    expect(stderr).toContain('probe');
+    expect(stderr).not.toContain('ExperimentalWarning');
+    expect(JSON.parse(stdout.trim())).toEqual({ restored: true });
+  }, 20_000);
 });

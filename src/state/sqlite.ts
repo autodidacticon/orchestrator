@@ -1,8 +1,13 @@
 /**
- * SQLite implementation of the Store (better-sqlite3, WAL mode).
- * Rows hold JSON documents; the shape is the TypeScript type.
+ * SQLite implementation of the Store over Node's built-in `node:sqlite` binding,
+ * WAL mode, no native dependency. Rows hold JSON documents; the shape is the
+ * TypeScript type. A constraint violation throws an Error with `code`
+ * `ERR_SQLITE_ERROR`, the extended result code in `errcode`, SQLite's short
+ * text in `errstr`, and SQLite's own message (`UNIQUE constraint failed: ...`).
+ * See specs/crash-recovery "Store transactions" and specs/host-integration "Quiet SQLite binding".
  */
-import Database from 'better-sqlite3';
+import { releaseSqliteWarningFilter } from './sqlite-warning.js';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import type { Id } from '../graph/model.js';
 import type { Entry } from './status.js';
 import type {
@@ -20,6 +25,9 @@ import type {
   StoredReport,
   VerifierJob,
 } from './store.js';
+
+// Armed after `node:sqlite` has evaluated, so its queued warning is handled before the fallback restore.
+releaseSqliteWarningFilter();
 
 interface OutboxRow {
   id: number;
@@ -72,17 +80,44 @@ CREATE INDEX IF NOT EXISTS outbox_status ON outbox(status);
 `;
 
 export class SqliteStore implements Store {
-  private readonly db: Database.Database;
+  private readonly db: DatabaseSync;
+  private depth = 0;
+  private closed = false;
 
   constructor(public readonly path: string) {
-    this.db = new Database(path);
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = NORMAL');
+    this.db = new DatabaseSync(path);
+    this.db.exec('PRAGMA journal_mode = WAL');
+    this.db.exec('PRAGMA synchronous = NORMAL');
+    // better-sqlite3 waited five seconds for a locked database by default; node:sqlite waits zero.
+    this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec(SCHEMA);
   }
 
+  /**
+   * One deferred transaction at the top level; a call made inside a transaction
+   * nests as a savepoint, so an inner throw undoes only the inner writes and the
+   * outer function decides whether to continue, and an outer throw undoes both.
+   */
   transaction<T>(fn: () => T): T {
-    return this.db.transaction(fn)();
+    const level = this.depth;
+    const savepoint = `orch_${level}`;
+    this.db.exec(level === 0 ? 'BEGIN' : `SAVEPOINT ${savepoint}`);
+    this.depth = level + 1;
+    try {
+      const out = fn();
+      this.db.exec(level === 0 ? 'COMMIT' : `RELEASE ${savepoint}`);
+      return out;
+    } catch (err) {
+      try {
+        // SQLite ends the transaction itself on FULL, IOERR, NOMEM, and INTERRUPT; the caller must see the original error.
+        this.db.exec(level === 0 ? 'ROLLBACK' : `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
+      } catch {
+        /* ignore: the original error is rethrown */
+      }
+      throw err;
+    } finally {
+      this.depth = level;
+    }
   }
 
   getEntry(id: Id): Entry | undefined {
@@ -110,7 +145,7 @@ export class SqliteStore implements Store {
 
   listEvents(filter: { kind?: string; kinds?: string[]; taskId?: Id; launchId?: string; afterSeq?: number; limit?: number } = {}): StoredEvent[] {
     const where: string[] = [];
-    const args: unknown[] = [];
+    const args: SQLInputValue[] = [];
     if (filter.kind) {
       where.push('kind = ?');
       args.push(filter.kind);
@@ -196,7 +231,7 @@ export class SqliteStore implements Store {
 
   listLaunches(filter: { status?: LaunchStatus | LaunchStatus[]; taskId?: Id } = {}): Launch[] {
     const where: string[] = [];
-    const args: unknown[] = [];
+    const args: SQLInputValue[] = [];
     if (filter.status) {
       const list = Array.isArray(filter.status) ? filter.status : [filter.status];
       where.push(`status IN (${list.map(() => '?').join(',')})`);
@@ -232,7 +267,7 @@ export class SqliteStore implements Store {
 
   listJobs(filter: { status?: JobStatus | JobStatus[]; taskId?: Id; applied?: boolean } = {}): VerifierJob[] {
     const where: string[] = [];
-    const args: unknown[] = [];
+    const args: SQLInputValue[] = [];
     if (filter.status) {
       const list = Array.isArray(filter.status) ? filter.status : [filter.status];
       where.push(`status IN (${list.map(() => '?').join(',')})`);
@@ -274,7 +309,7 @@ export class SqliteStore implements Store {
 
   listProposals(filter: { status?: ProposalStatus; taskId?: Id } = {}): Proposal[] {
     const where: string[] = [];
-    const args: unknown[] = [];
+    const args: SQLInputValue[] = [];
     if (filter.status) {
       where.push('status = ?');
       args.push(filter.status);
@@ -319,9 +354,9 @@ export class SqliteStore implements Store {
   }
 
   getSnapshot(): { rev: string; content: string } | undefined {
-    return this.db.prepare('SELECT rev, content FROM graph_snapshot WHERE id = 1').get() as
-      | { rev: string; content: string }
-      | undefined;
+    const row = this.db.prepare('SELECT rev, content FROM graph_snapshot WHERE id = 1').get() as { rev: string; content: string } | undefined;
+    // node:sqlite rows have a null prototype; hand out a plain object.
+    return row ? { rev: row.rev, content: row.content } : undefined;
   }
 
   setSnapshot(rev: string, content: string): void {
@@ -350,7 +385,7 @@ export class SqliteStore implements Store {
 
   listOutbox(filter: { status?: EffectStatus; afterId?: number; limit?: number } = {}): OutboxEffect[] {
     const where: string[] = [];
-    const args: unknown[] = [];
+    const args: SQLInputValue[] = [];
     if (filter.status) {
       where.push('status = ?');
       args.push(filter.status);
@@ -361,11 +396,11 @@ export class SqliteStore implements Store {
     }
     const limit = filter.limit && filter.limit > 0 ? ` LIMIT ${Math.floor(filter.limit)}` : '';
     const sql = `SELECT * FROM outbox${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY id${limit}`;
-    return (this.db.prepare(sql).all(...args) as OutboxRow[]).map(rowToEffect);
+    return (this.db.prepare(sql).all(...args) as unknown as OutboxRow[]).map(rowToEffect);
   }
 
   getOutbox(id: number): OutboxEffect | undefined {
-    const row = this.db.prepare('SELECT * FROM outbox WHERE id = ?').get(id) as OutboxRow | undefined;
+    const row = this.db.prepare('SELECT * FROM outbox WHERE id = ?').get(id) as unknown as OutboxRow | undefined;
     return row ? rowToEffect(row) : undefined;
   }
 
@@ -404,6 +439,8 @@ export class SqliteStore implements Store {
   }
 
   close(): void {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 }
