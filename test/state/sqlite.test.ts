@@ -107,4 +107,17 @@ describe('sqlite store', () => {
     expect(store.getPayloadOverlay('T1', 'r')).toEqual({ acceptanceCriteria: ['a'] });
     expect(store.getPayloadOverlay('T1', 'other')).toBeUndefined();
   });
+
+  it('health and usage fields round-trip on launches and jobs, and an undefined patch removes a field', () => {
+    store.createLaunch({ launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'live', token: 'tok', branch: 'b', worktree: 'w', baseSha: 's', graphRev: 'r', createdAt: 1, spawnedAt: 2 });
+    store.updateLaunch('L1', { progressAt: 50, lastSignal: 'worktree', progressText: 'editing', fingerprint: 'h:1', stuckSince: 60, waitedMs: 7, waitingSince: 70, costUsd: 1.25, turns: 3, durationMs: 900 });
+    expect(store.getLaunch('L1')).toMatchObject({ progressAt: 50, lastSignal: 'worktree', progressText: 'editing', fingerprint: 'h:1', stuckSince: 60, waitedMs: 7, waitingSince: 70, costUsd: 1.25, turns: 3, durationMs: 900 });
+    store.updateLaunch('L1', { stuckSince: undefined, waitingSince: undefined });
+    const l = store.getLaunch('L1')!;
+    expect('stuckSince' in l).toBe(false);
+    expect('waitingSince' in l).toBe(false);
+    store.createJob({ jobId: 'J2', taskId: 'T1', launchId: 'L1', sealedSha: 'x', baseSha: 's', status: 'queued', applied: false, createdAt: 1, updatedAt: 1 });
+    store.updateJob('J2', { status: 'published', publishedSha: 'p', changedFiles: ['README.md', 'src/a.ts'] });
+    expect(store.getJob('J2')?.changedFiles).toEqual(['README.md', 'src/a.ts']);
+  });
 });

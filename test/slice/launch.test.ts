@@ -127,14 +127,22 @@ describe('slice: launch, API, recovery', () => {
     expect(h.orch.entry('T1').status).toMatchObject({ kind: 'blocked', reason: { kind: 'needsAccess', message: 'need credentials' } });
   });
 
-  it('exit without report fails the attempt; lease expiry reaps a hung agent', async () => {
-    h = await makeSlice({ graph: `nodes:\n  - { id: A, deps: [], behavior: exitSilently }\n  - { id: B, deps: [], behavior: hang }`, config: { leaseTtlMs: 800, maxAttempts: 1 } });
+  it('exit without report fails the attempt; lease expiry reaps a hung agent only when the runner cannot observe it', async () => {
+    h = await makeSlice({ graph: `nodes:\n  - { id: A, deps: [], behavior: exitSilently }`, config: { leaseTtlMs: 800, maxAttempts: 1 } });
     await h.orch.tick();
-    const lb = h.launchOf('B');
-    await h.waitFor(() => h!.orch.entry('A').status.kind === 'blocked' && h!.orch.entry('B').status.kind === 'blocked', 20_000);
+    await h.waitFor(() => h!.orch.entry('A').status.kind === 'blocked', 20_000);
     expect(h.orch.entry('A').status).toMatchObject({ kind: 'blocked', reason: { message: expect.stringContaining('exitedWithoutReport') } });
-    expect(h.orch.entry('B').status).toMatchObject({ kind: 'blocked', reason: { message: expect.stringContaining('leaseExpired') } });
-    expect(pidAlive(lb.pid!)).toBe(false);
+
+    const h2 = await makeSlice({ graph: `nodes:\n  - { id: B, deps: [], behavior: hang }`, config: { leaseTtlMs: 800, maxAttempts: 1 }, unobserved: true });
+    try {
+      await h2.orch.tick();
+      const lb = h2.launchOf('B');
+      await h2.waitFor(() => h2.orch.entry('B').status.kind === 'blocked', 20_000);
+      expect(h2.orch.entry('B').status).toMatchObject({ kind: 'blocked', reason: { message: expect.stringContaining('leaseExpired') } });
+      expect(pidAlive(lb.pid!)).toBe(false);
+    } finally {
+      await h2.cleanup();
+    }
   });
 
   it('heartbeats keep a slow agent alive past the TTL', async () => {
@@ -147,11 +155,13 @@ describe('slice: launch, API, recovery', () => {
     h = await makeSlice({ graph: single('ignore401') });
     await h.orch.tick();
     const l = h.launchOf('T1');
-    await h.waitFor(() => h!.pidEvents().some((e) => e.includes('start')));
     const before = h.orch.entry('T1');
+    // Revoke before the agent's first call, as recovery does for a launch whose spawn it could not confirm.
     h.store.updateLaunch(l.launchId, { status: 'revoked' });
     const mainBefore = gitIn(h.repo, 'rev-parse', 'main');
-    await new Promise((r) => setTimeout(r, 2500));
+    const deadline = Date.now() + 20_000;
+    while (!h.pidEvents().some((e) => e.includes('got401')) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 500));
     expect(h.pidEvents().filter((e) => e.includes('got401')).length).toBeGreaterThan(0);
     expect(h.orch.entry('T1')).toEqual(before);
     expect(gitIn(h.repo, 'rev-parse', 'main')).toBe(mainBefore);

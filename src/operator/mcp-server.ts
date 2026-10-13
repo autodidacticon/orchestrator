@@ -16,7 +16,7 @@ const POLL_SLICE_MS = 20_000;
 export const TOOL_NAMES = [
   'start', 'stop', 'status', 'runs', 'import_issues', 'import_graph', 'wait', 'review',
   'answer', 'cancel', 'reopen', 'unblock', 'accept', 'reject', 'pause', 'resume', 'logs',
-  'outbox', 'ack',
+  'outbox', 'ack', 'nudge',
 ] as const;
 
 export function clampWait(ms: number | undefined): number {
@@ -137,7 +137,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       return { status: r.stopped ? 200 : 409, body: r };
     }),
   );
-  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts.', inputSchema: {} }, async () =>
+  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health.', inputSchema: {} }, async () =>
     guarded(() => client.call('GET', '/v1/status')),
   );
   server.registerTool('runs', { description: 'List every run under ORCH_HOME with its repository and daemon liveness.', inputSchema: {} }, async () =>
@@ -174,7 +174,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   server.registerTool(
     'wait',
     {
-      description: `Block until something happens. Returns events after afterSeq (default: now), the latest seq, and a digest. until: question | review | finished | stalled | any. timeoutMs default ${WAIT_DEFAULT_MS}, cap ${WAIT_CAP_MS}. Loop on this instead of polling status.`,
+      description: `Block until something happens. Returns events after afterSeq (default: now), the latest seq, and a digest (openQuestions, awaitingReview, finished, stalled, stuck, pausedReason, outboxPending, trackerErrors). until: question | review | finished | stalled | any; any also returns on launch.stuck, launch.unstuck, and budget.exceeded. timeoutMs default ${WAIT_DEFAULT_MS}, cap ${WAIT_CAP_MS}. Loop on this instead of polling status.`,
       inputSchema: { afterSeq: z.number().int().nonnegative().optional(), timeoutMs: z.number().int().nonnegative().optional(), until: z.enum(['question', 'review', 'finished', 'stalled', 'any']).optional() },
     },
     async (a) => guarded(() => client.wait(a)),
@@ -201,7 +201,12 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     guarded(() => client.call('POST', `/v1/milestones/${encodeURIComponent(a.milestone)}/reject`, { note: a.note })),
   );
   server.registerTool('pause', { description: 'Stop admitting new launches; running work continues and is verified.', inputSchema: {} }, async () => guarded(() => client.call('POST', '/v1/pause')));
-  server.registerTool('resume', { description: 'Resume admission after pause.', inputSchema: {} }, async () => guarded(() => client.call('POST', '/v1/resume')));
+  server.registerTool('resume', { description: 'Resume admission after a pause. Refused with 409 while the run cost is at or above the ceiling unless overrideBudget is true, which raises the ceiling by one budget.', inputSchema: { overrideBudget: z.boolean().optional() } }, async (a) =>
+    guarded(() => client.call('POST', '/v1/resume', { overrideBudget: a.overrideBudget ?? false })),
+  );
+  server.registerTool('nudge', { description: 'Queue a message for a running task\'s agent (delivered on its next inbox call). 409 when the task has no live launch.', inputSchema: { ...task, message: z.string() } }, async (a) =>
+    guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/nudge`, { message: a.message })),
+  );
   server.registerTool('logs', { description: 'Captured output of a task\'s launch (latest by default).', inputSchema: { ...task, launch: z.number().int().optional() } }, async (a) =>
     guarded(() => client.call('GET', `/v1/tasks/${encodeURIComponent(a.task)}/logs${a.launch ? `?launch=${a.launch}` : ''}`)),
   );

@@ -32,6 +32,15 @@ answers (section 2b), then act on the digest:
   re-importing. Wait for the user.
 - **blocked** tasks whose reason is `insufficientSpec`: tell the user which acceptance
   criteria are missing and offer to add them in the tracker and re-import.
+- **stuck** non-empty: call `status` and show each stuck task with its `idleMs` and
+  `lastSignal` from `liveLaunches`. Offer the user three choices: a nudge with a message
+  (send it with `nudge`; the agent sees it on its next inbox call), cancellation (`cancel`),
+  or waiting. The daemon fails a launch that stays stuck past `budgets.stuckFailAfterMs`
+  and retries it like any other failure; say so.
+- **pausedReason** is `costBudget`: the run cost reached its ceiling. Report `cost.runUsd`
+  and `cost.ceilingUsd` from `status`, then offer `resume` with `overrideBudget: true`
+  (raises the ceiling by one budget) or stopping. Never override the budget unless the user
+  says so.
 
 Between actions, give the user a one-line progress note: running, waiting, done counts.
 

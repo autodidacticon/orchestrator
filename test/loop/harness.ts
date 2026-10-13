@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { BriefValidator } from '../../src/brief/validate.js';
+import type { StuckDiagnoser } from '../../src/health/stuck.js';
 import { defaultConfig, type Config } from '../../src/config.js';
 import { StaticGraphSource } from '../../src/graph/source.js';
 import { Orchestrator, type ApiResponse } from '../../src/loop/orchestrator.js';
@@ -27,11 +28,13 @@ export interface Harness {
   submit(taskId: string, extra?: Record<string, unknown>, seq?: number): Promise<ApiResponse>;
   failTask(taskId: string, why?: string, seq?: number): Promise<ApiResponse>;
   block(taskId: string, message?: string, seq?: number): Promise<ApiResponse>;
+  /** Drain the live launch's inbox through the agent API. */
+  inbox(taskId: string): Promise<Array<{ kind: string; [k: string]: unknown }>>;
   statusOf(taskId: string): string;
   cleanup(): void;
 }
 
-export function makeHarness(opts: { graph?: string; config?: Partial<Config>; dir?: string; briefValidator?: BriefValidator } = {}): Harness {
+export function makeHarness(opts: { graph?: string; config?: Partial<Config>; dir?: string; briefValidator?: BriefValidator; stuckDiagnoser?: StuckDiagnoser } = {}): Harness {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-'));
   const config = defaultConfig({ dataDir: dir, capacity: 4, maxWaiting: 4, ...opts.config });
   const store = new SqliteStore(path.join(dir, 'store.sqlite'));
@@ -49,6 +52,7 @@ export function makeHarness(opts: { graph?: string; config?: Partial<Config>; di
     verifier,
     clock: () => now.value,
     briefValidator: opts.briefValidator,
+    stuckDiagnoser: opts.stuckDiagnoser,
   });
   // keep fake verifier head and workspace head aligned
   const origRun = verifier.run.bind(verifier);
@@ -86,6 +90,11 @@ export function makeHarness(opts: { graph?: string; config?: Partial<Config>; di
     block: (taskId, message = 'which way?', seq = 2) => {
       const l = h.launchOf(taskId);
       return orch.agentCall(l.launchId, l.token, 'block', { seq, kind: 'needsDecision', message });
+    },
+    inbox: async (taskId) => {
+      const l = h.launchOf(taskId);
+      const r = await orch.agentCall(l.launchId, l.token, 'inbox');
+      return (r.body['notices'] ?? []) as Array<{ kind: string; [k: string]: unknown }>;
     },
     statusOf: (taskId) => orch.entry(taskId).status.kind,
     cleanup: () => {

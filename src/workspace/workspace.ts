@@ -39,4 +39,6 @@ export interface Workspace {
   tagMilestone(id: Id, version: number, sha: string): Promise<void>;
   /** `git diff --stat from..to`, or an empty string when unavailable. */
   diffStat(from: string, to: string): Promise<string>;
+  /** Progress fingerprint: the worktree head sha, a colon, and a hash of its status and diff. */
+  fingerprint(launch: Launch): Promise<string>;
 }

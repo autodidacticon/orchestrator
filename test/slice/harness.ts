@@ -64,7 +64,7 @@ export interface SliceHarness {
   cleanup(): Promise<void>;
 }
 
-export async function makeSlice(opts: { graph: string; config?: Partial<Config>; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string }): Promise<SliceHarness> {
+export async function makeSlice(opts: { graph: string; config?: Partial<Config>; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean }): Promise<SliceHarness> {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-slice-'));
   const repo = opts.repo ?? makeRepo(dir);
   const dataDir = path.join(dir, 'run');
@@ -89,6 +89,8 @@ export async function makeSlice(opts: { graph: string; config?: Partial<Config>;
   if (opts.fileGraph) writeFileSync(graphPath, opts.graph);
   const source = opts.fileGraph ? new FileGraphSource(graphPath) : new StaticGraphSource(opts.graph);
   const runner = new SubprocessRunner({ command: config.runnerCommand, logDir: path.join(dataDir, 'logs'), graceMs: 500, extraEnv: { ORCH_PIDLOG: pidlog } });
+  // A runner that cannot observe its processes: the lease TTL is the only bound on silence.
+  if (opts.unobserved) runner.liveness = async () => 'unknown';
   const workspace = new GitWorkspace(repo, config.integrationBranch, path.join(dataDir, 'worktrees'));
   const verifier =
     opts.verifier ??

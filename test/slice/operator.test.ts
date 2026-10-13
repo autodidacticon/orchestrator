@@ -27,7 +27,11 @@ describe('operator CLI and routes', () => {
     expect(status.body).toMatchObject({ openQuestions: ['T1'], byStatus: { waiting: ['T1'], running: ['T5'] }, paused: false, graphRev: h.orch.graph().rev, foreignCommits: [] });
 
     expect((await cli('pause')).body).toMatchObject({ ok: true, paused: true });
-    expect((await cli('resume')).body).toMatchObject({ ok: true, paused: false });
+    expect((await cli('status')).body).toMatchObject({ paused: true, pausedReason: 'operator' });
+    expect((await cli('resume', '--override-budget')).body).toMatchObject({ ok: true, paused: false });
+    expect((await cli('nudge', 'T5', 'commit', 'what', 'you', 'have')).body).toEqual({ ok: true });
+    expect(h.store.getLaunch(h.launchOf('T5').launchId)?.notices).toEqual([{ kind: 'nudge', message: 'commit what you have' }]);
+    expect((await cli('nudge', 'T2', 'hello')).status).toBe(409);
     expect((await cli('answer', 'T1', 'option', 'b')).body).toEqual({ ok: true });
     await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done', 20_000);
     expect((await cli('reopen', 'T1')).status).toBe(409); // T2 is started
@@ -45,7 +49,7 @@ describe('operator CLI and routes', () => {
     expect((await cli('logs', 'NOPE')).status).toBe(404);
 
     const kinds = h.store.listEvents().map((e) => e.kind);
-    for (const k of ['operator.pause', 'operator.resume', 'operator.answer', 'operator.reject', 'operator.unblock', 'operator.cancel']) expect(kinds).toContain(k);
+    for (const k of ['operator.pause', 'operator.resume', 'operator.nudge', 'operator.answer', 'operator.reject', 'operator.unblock', 'operator.cancel']) expect(kinds).toContain(k);
     await expect(runCli(['bogus', '--url', url])).rejects.toThrow(/unknown command/);
   });
 

@@ -11,7 +11,7 @@ export const USAGE = `orchestrator-mcp: operator MCP server for a host session.
 
 A stdio MCP server exposing start, stop, status, runs, import_issues,
 import_graph, wait, review, answer, cancel, reopen, unblock, accept, reject,
-pause, resume, logs, outbox, and ack. Forwards to the daemon over loopback HTTP; never opens
+pause, resume, logs, outbox, ack, and nudge. Forwards to the daemon over loopback HTTP; never opens
 the store. The run is resolved from --repo, ORCH_REPO, or the git top level of
 the working directory. ORCH_HOME overrides ~/.orchestrator.
 `;

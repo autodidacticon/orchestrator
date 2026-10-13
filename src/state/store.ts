@@ -29,6 +29,19 @@ export interface Launch {
   pendingAnswer?: { seq: number; answer: string };
   /** Notices for the agent's inbox (pull). */
   notices?: Array<{ kind: string; [k: string]: unknown }>;
+  /** Health: when progress was last observed and what it was. See specs/health-monitoring. */
+  progressAt?: number;
+  lastSignal?: string;
+  progressText?: string;
+  fingerprint?: string;
+  stuckSince?: number;
+  /** Time spent waiting on questions, excluded from the launch time budget. */
+  waitedMs?: number;
+  waitingSince?: number;
+  /** Usage read from the runner when the launch ended. */
+  costUsd?: number;
+  turns?: number;
+  durationMs?: number;
 }
 
 export type JobStatus =
@@ -54,6 +67,8 @@ export interface VerifierJob {
   verifiedSha?: string;
   squashSha?: string;
   publishedSha?: string;
+  /** Files the published commit touched; the base-moved notice lists them. */
+  changedFiles?: string[];
   output?: string;
   /** Conflict details. */
   conflictFiles?: string[];

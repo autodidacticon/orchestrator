@@ -59,7 +59,7 @@ describe('operator MCP server', () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(tools.tools).toHaveLength(19);
+    expect(tools.tools).toHaveLength(20);
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);
@@ -156,6 +156,40 @@ describe('operator MCP server', () => {
     const both = await client.callTool({ name: 'ack', arguments: { id: second!.id, result: {}, error: 'x' } });
     expect(both.isError).toBe(true);
     expect(((await tool('outbox', { after: first!.id, limit: 10 }))['effects'] as Array<{ id: number }>).map((e) => e.id)).toEqual([second!.id]);
+    expect(await tool('stop', { reap: true })).toMatchObject({ status: 200, stopped: true });
+  }, 60_000);
+
+  it('wait returns on a stuck flag and nudge reaches the launch', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), [
+      `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'retryWindowMs: 5000', 'capacity: 2',
+      'health:', '  stuckAfterMs: 1500', '  stuckFailAfterMs: 0',
+    ].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    await tool('start');
+    expect(await tool('import_graph', { content: 'nodes:\n  - { id: T1, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }\n' })).toMatchObject({ accepted: true });
+    const t0 = Date.now();
+    const w = await tool('wait', { afterSeq: 0, until: 'any', timeoutMs: 20_000 });
+    expect(w).toMatchObject({ matched: true });
+    let digest = w['digest'] as Record<string, unknown>;
+    let seq = w['seq'] as number;
+    while (!(digest['stuck'] as string[]).includes('T1') && Date.now() - t0 < 20_000) {
+      const n = await tool('wait', { afterSeq: seq, until: 'any', timeoutMs: 10_000 });
+      digest = n['digest'] as Record<string, unknown>;
+      seq = n['seq'] as number;
+    }
+    expect(digest['stuck']).toEqual(['T1']);
+    expect(Date.now() - t0).toBeLessThan(15_000);
+    expect(await tool('nudge', { task: 'T1', message: 'commit what you have' })).toMatchObject({ status: 200, ok: true });
+    const status = await tool('status');
+    expect(status).toMatchObject({ stuck: ['T1'], paused: false });
+    expect((status['liveLaunches'] as Array<Record<string, unknown>>)[0]).toMatchObject({ taskId: 'T1', stuck: true });
     expect(await tool('stop', { reap: true })).toMatchObject({ status: 200, stopped: true });
   }, 60_000);
 });

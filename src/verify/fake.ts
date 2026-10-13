@@ -23,7 +23,7 @@ export class FakeVerifierBackend implements VerifierBackend {
     const next = queue?.shift();
     const outcome: VerifierOutcome =
       next === undefined
-        ? { kind: 'published', publishedSha: `pub-${job.taskId}-${++this.counter}`, verifiedSha: `ver-${job.taskId}` }
+        ? { kind: 'published', publishedSha: `pub-${job.taskId}-${++this.counter}`, verifiedSha: `ver-${job.taskId}`, changedFiles: [`${job.taskId}.txt`] }
         : typeof next === 'function'
           ? next(job)
           : next;

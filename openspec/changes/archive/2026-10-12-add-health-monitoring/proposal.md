@@ -5,7 +5,7 @@ The lease is renewed only by an agent's own API calls, and nothing heartbeats au
 ## What Changes
 
 - Liveness replaces silence as the failure signal. The daemon checks process liveness every tick and renews the lease while the process is alive. Lease expiry remains only for launches whose runner cannot observe the process, the split the pending `add-pull-runner` change relies on.
-- Progress signals: a cheap worktree fingerprint (head sha plus a hash of `git status --porcelain`), any agent API call, and a changed heartbeat text record `progressAt` and `lastSignal` on the launch row.
+- Progress signals: a cheap worktree fingerprint (head sha plus a hash of `git status --porcelain` and `git diff HEAD`), any agent API call, and a changed heartbeat text record `progressAt` and `lastSignal` on the launch row.
 - Stuck detection with escalation: flag after `health.stuckAfterMs`, queue a `stuck` inbox notice, fail with reason `stuck` after `health.stuckFailAfterMs`. A `StuckDiagnoser` hook with the remediation hook's shape, default human.
 - Operator `nudge <task> <message>` as a route, a CLI command, and an MCP tool; it queues a `nudge` inbox notice.
 - Budgets: `budgets.maxLaunchMs` kills an overlong launch with reason `timeBudget`; `budgets.maxRunCostUsd` pauses admission with `pausedReason: 'costBudget'`, and `resume` needs `overrideBudget` while over the ceiling. Cost comes from a runner-specific usage parser over the launch log.

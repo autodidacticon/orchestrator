@@ -14,12 +14,14 @@ import { policyReport } from '../tracker/policy.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], ...tracker };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
     graphLoaded: true,
     ...tracker,
+    stuck: s.stuck,
+    pausedReason: s.pausedReason,
     openQuestions: s.openQuestions,
     /** Milestones awaiting a human; tasks awaiting the verifier are `verifying`. */
     awaitingReview: s.awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'milestone'),
@@ -55,6 +57,8 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           awaitingReview: [],
           openQuestions: [],
           liveLaunches: [],
+          stuck: [],
+          pausedReason: orch.pausedReason(),
           foreignCommits: [],
           latestSeq: orch.store.latestEventSeq(),
           tracker: trackerOf(orch.store),
@@ -77,10 +81,11 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     orch.pause();
     return { status: 200, body: { ok: true, paused: true } };
   });
-  server.addRoute('POST', /^\/v1\/resume$/, async () => {
-    orch.resume();
-    return { status: 200, body: { ok: true, paused: false } };
+  server.addRoute('POST', /^\/v1\/resume$/, async (_req, body) => {
+    const r = orch.resume({ overrideBudget: body['overrideBudget'] === true || body['overrideBudget'] === 'true' });
+    return r.ok ? { status: 200, body: { ok: true, paused: false } } : { status: 409, body: { ok: false, reason: r.reason, runUsd: r.runUsd, ceilingUsd: r.ceilingUsd, paused: orch.isPaused() } };
   });
+  server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/nudge$/, async (_req, body, [id]) => result(orch.nudge(id as string, String(body['message'] ?? ''))));
   server.addRoute('GET', /^\/v1\/tasks\/([^/]+)\/logs$/, async (_req, query, [id]) => {
     const launches = orch.store.listLaunches({ taskId: id as string });
     const wanted = query['launch'] ? Number(query['launch']) : undefined;

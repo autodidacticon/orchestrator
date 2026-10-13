@@ -77,7 +77,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   lines.push('', '## Definition of done', '');
   lines.push(
     `- Commit all work on branch \`${launch.branch}\` in this worktree. Uncommitted or untracked files make your submission be rejected with 409 and the file list; commit and resubmit.`,
-    `- Never merge, rebase onto, or touch \`${input.integrationBranch}\`. The orchestrator integrates your branch after verification.`,
+    `- Never merge into, push to, or check out \`${input.integrationBranch}\`. You may rebase your launch branch onto it when a baseMoved notice says it advanced; the orchestrator integrates your branch after verification.`,
     `- Run the check command before submitting: \`${input.checkCommand}\`.`,
     '- If the task needs no changes, say so explicitly with `noChanges: { justification }` in your report.',
     '- Your report must give evidence for every acceptance criterion above.',
@@ -85,7 +85,11 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     '',
   );
   lines.push('## Workspace', '');
-  lines.push(`- Worktree: \`${launch.worktree}\``, `- Branch: \`${launch.branch}\``, `- Base commit: \`${launch.baseSha}\``, `- Integration branch: \`${input.integrationBranch}\``, '');
+  lines.push(`- Worktree: \`${launch.worktree}\``, `- Branch: \`${launch.branch}\``, `- Base commit: \`${launch.baseSha}\``, `- Integration branch: \`${input.integrationBranch}\``);
+  lines.push(
+    '- Notices may arrive in your inbox (the `inbox` operation): `stuck` when no progress has been observed for a while, `nudge` with a message from the operator, and `baseMoved` with the new integration `head` and the `files` that changed. Check the inbox after long steps.',
+    '',
+  );
   lines.push('## Dependencies', '');
   if (!input.depReports.length) lines.push('- none');
   for (const d of input.depReports) {

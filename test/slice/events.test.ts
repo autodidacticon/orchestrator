@@ -24,7 +24,7 @@ describe('event stream, review bundle, status facts', () => {
     expect(Date.now() - t0).toBeLessThan(3000);
     expect((r.body['events'] as Array<{ kind: string }>).map((e) => e.kind)).toEqual(['operator.pause']);
     expect(r.body['seq']).toBe(seq + 1);
-    expect(r.body['digest']).toMatchObject({ graphLoaded: true, running: ['T1'], paused: true, finished: false });
+    expect(r.body['digest']).toMatchObject({ graphLoaded: true, running: ['T1'], paused: true, pausedReason: 'operator', stuck: [], finished: false });
     const t1 = Date.now();
     const empty = await get(h, `/v1/events?after=${seq + 1}&wait=700`);
     expect(Date.now() - t1).toBeGreaterThanOrEqual(600);
@@ -48,5 +48,6 @@ describe('event stream, review bundle, status facts', () => {
     const s = await get(h, '/v1/status');
     expect(s.body).toMatchObject({ runDir: h.config.dataDir, graphPath: h.config.graphPath, daemonPid: process.pid, daemonUrl: h.orch.apiBaseUrl, external: [] });
     expect(s.body['latestSeq']).toBe(h.store.latestEventSeq());
+    expect(s.body).toMatchObject({ stuck: [], cost: { runUsd: 0, byTask: {}, overrides: 0 }, budgets: { maxLaunchMs: h.config.budgets.maxLaunchMs, stuckAfterMs: h.config.health.stuckAfterMs } });
   });
 });

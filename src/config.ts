@@ -34,6 +34,25 @@ export const configSchema = z.object({
   onInsufficient: z.enum(['block', 'remediate']).default('block'),
   remediateMode: z.enum(['review', 'auto']).default('review'),
   cancelReleasesDependentsDefault: z.boolean().default(false),
+  /** Stuck detection and the base-moved notice. See specs/health-monitoring. */
+  health: z
+    .object({
+      /** Idle time before a launch is flagged stuck and nudged; 0 disables. */
+      stuckAfterMs: z.number().int().nonnegative().default(15 * 60_000),
+      /** Idle time before a stuck launch is failed; 0 disables. */
+      stuckFailAfterMs: z.number().int().nonnegative().default(45 * 60_000),
+      baseMovedNotice: z.boolean().default(true),
+    })
+    .default({}),
+  /** Wall time per launch and cost per run. */
+  budgets: z
+    .object({
+      /** 0 disables. */
+      maxLaunchMs: z.number().int().nonnegative().default(2 * 3600_000),
+      /** 0 means unlimited. */
+      maxRunCostUsd: z.number().nonnegative().default(0),
+    })
+    .default({}),
   /** Tracker mirroring policy. See specs/tracker-sync. */
   tracker: z
     .object({

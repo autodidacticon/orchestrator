@@ -107,6 +107,21 @@ describe('slice: verifier and publication', () => {
     expect(await backend.recoverPublishing({ ...job, launchId: 'never' })).toBe('requeue');
   });
 
+  it('a branch rebased onto the head after a baseMoved notice verifies to one trailer commit with only its files; changedFiles recorded', async () => {
+    h = await makeSlice({ graph: `nodes:\n  - { id: A, deps: [], behavior: commitAndSubmit }\n  - { id: B, deps: [], behavior: "rebaseThenSubmit:20000" }`, realVerifier: true, config: { tickIntervalMs: 100 } });
+    await h.waitFor(() => h!.orch.entry('A').status.kind === 'done' && h!.orch.entry('B').status.kind === 'done', 40_000);
+    const commits = gitIn(h.repo, 'rev-list', '--first-parent', 'HEAD~2..main').split('\n').filter(Boolean);
+    expect(commits).toHaveLength(2);
+    const bCommit = commits.find((sha) => gitIn(h!.repo, 'show', '-s', '--format=%(trailers:key=Orchestrator-Task,valueonly)', sha).trim() === 'B')!;
+    expect(gitIn(h.repo, 'show', '--name-only', '--format=', bCommit).split('\n').filter(Boolean).sort()).toEqual(['B-after.txt', 'B.txt']);
+    const jobs = h.store.listJobs({ status: 'published' });
+    expect(jobs.find((j) => j.taskId === 'A')?.changedFiles).toEqual(['A.txt']);
+    expect(jobs.find((j) => j.taskId === 'B')?.changedFiles).toEqual(['B-after.txt', 'B.txt']);
+    const bLaunch = h.store.listLaunches({ taskId: 'B' })[0]!;
+    expect(bLaunch.notices ?? []).toEqual([]); // drained by the agent
+    expect(h.store.listEvents({ kind: 'launch.notice', taskId: 'B' })).toMatchObject([{ payload: { kind: 'baseMoved' } }]);
+  }, 60_000);
+
   it('foreign commit sweep flags a manual commit', async () => {
     h = await makeSlice({ graph: single('commitAndSubmit'), realVerifier: true });
     await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');

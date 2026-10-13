@@ -33,6 +33,9 @@ import type { Logger, OrchestratorCore } from './core.js';
 import { fifoPolicy, type Policy } from './schedule.js';
 import { runTick } from './tick.js';
 import { deriveEffects } from '../tracker/effects.js';
+import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, runCostUsd } from '../health/budgets.js';
+import { recordSignal } from '../health/progress.js';
+import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 
 export const questionSchema = z.object({
   kind: z.enum(['needsDecision', 'needsAccess', 'impossible', 'dependencyCancelled', 'outOfScope', 'insufficientSpec', 'milestoneRejected']),
@@ -74,6 +77,7 @@ export interface OrchestratorDeps {
   policy?: Policy;
   briefValidator?: BriefValidator;
   remediator?: Remediator;
+  stuckDiagnoser?: StuckDiagnoser;
   clock?: () => number;
   log?: Logger;
   apiBaseUrl?: string;
@@ -90,7 +94,22 @@ export interface StatusReport {
   stallRoots: Id[];
   awaitingReview: Id[];
   openQuestions: Id[];
-  liveLaunches: Array<{ launchId: string; taskId: Id; pid?: number }>;
+  liveLaunches: Array<{
+    launchId: string;
+    taskId: Id;
+    pid?: number;
+    elapsedMs: number;
+    progressAt?: number;
+    lastSignal?: string;
+    idleMs: number;
+    stuck: boolean;
+    costUsd?: number;
+  }>;
+  /** Health: flagged tasks, why admission is paused, cost and the configured budgets. See specs/health-monitoring. */
+  stuck: Id[];
+  pausedReason: PausedReason | undefined;
+  cost: { runUsd: number; byTask: Record<Id, number>; ceilingUsd: number | undefined; overrides: number };
+  budgets: { maxLaunchMs: number; maxRunCostUsd: number; stuckAfterMs: number; stuckFailAfterMs: number };
   foreignCommits: string[];
   runDir: string;
   graphPath: string;
@@ -111,6 +130,8 @@ export interface TrackerError {
   error: string | undefined;
 }
 
+export type PausedReason = 'operator' | 'costBudget';
+
 const silentLog: Logger = { info() {}, warn() {}, error() {} };
 
 interface Waiter {
@@ -127,6 +148,7 @@ export class Orchestrator implements OrchestratorCore {
   readonly policy: Policy;
   readonly briefValidator: BriefValidator;
   readonly remediator: Remediator;
+  readonly stuckDiagnoser: StuckDiagnoser;
   readonly log: Logger;
   readonly graphSource: GraphSource;
   apiBaseUrl: string;
@@ -154,6 +176,7 @@ export class Orchestrator implements OrchestratorCore {
     this.policy = deps.policy ?? fifoPolicy;
     this.briefValidator = deps.briefValidator ?? alwaysValid;
     this.remediator = deps.remediator ?? noRemediation;
+    this.stuckDiagnoser = deps.stuckDiagnoser ?? humanDiagnoser;
     this.clock = deps.clock ?? (() => Date.now());
     this.log = deps.log ?? silentLog;
     this.apiBaseUrl = deps.apiBaseUrl ?? 'http://127.0.0.1:0';
@@ -363,17 +386,55 @@ export class Orchestrator implements OrchestratorCore {
     return launch;
   }
 
-  private renewLease(launch: Launch): void {
+  /** Extend the lease by the TTL. Called on every agent call and, for observed-alive processes, every tick. */
+  renewLease(launch: Launch): void {
     const e = this.entry(launch.taskId);
     if ((e.status.kind === 'running' || e.status.kind === 'waiting') && e.lease?.launchId === launch.launchId) {
       this.store.setEntry(launch.taskId, { ...e, lease: { ...e.lease, expiresAt: this.now() + this.config.leaseTtlMs } });
     }
   }
 
+  /** Every API call is progress; a heartbeat with new text is progress with the text kept. */
+  private recordProgress(launch: Launch, op: AgentOp, body: Record<string, unknown>): void {
+    const cur = this.store.getLaunch(launch.launchId);
+    if (!cur) return;
+    const text = body['progress'];
+    if (op === 'heartbeat' && typeof text === 'string' && text && text !== cur.progressText) {
+      recordSignal(this, cur, 'heartbeatText', text);
+      return;
+    }
+    recordSignal(this, cur, op);
+  }
+
+  /** Append a notice to a launch's inbox. See specs/agent-protocol "Inbox notices for health". */
+  queueNotice(launchId: string, notice: { kind: string; [k: string]: unknown }): boolean {
+    const l = this.store.getLaunch(launchId);
+    if (!l) return false;
+    this.store.transaction(() => {
+      this.store.updateLaunch(launchId, { notices: [...(l.notices ?? []), notice] });
+      this.store.appendEvent({ kind: 'launch.notice', taskId: l.taskId, launchId, payload: { kind: notice.kind } }, this.now());
+    });
+    return true;
+  }
+
+  /** Read and store the launch's usage once, when it is observed dead or ended. */
+  async recordUsage(launch: Launch): Promise<void> {
+    if (!this.runner.readUsage) return;
+    const cur = this.store.getLaunch(launch.launchId);
+    if (!cur || cur.costUsd !== undefined || cur.durationMs !== undefined || cur.turns !== undefined) return;
+    const u = await this.runner.readUsage(cur).catch(() => undefined);
+    if (!u || (u.costUsd === undefined && u.durationMs === undefined && u.turns === undefined)) return;
+    this.store.transaction(() => {
+      this.store.updateLaunch(cur.launchId, { costUsd: u.costUsd, turns: u.turns, durationMs: u.durationMs });
+      this.store.appendEvent({ kind: 'launch.usage', taskId: cur.taskId, launchId: cur.launchId, payload: { ...u } }, this.now());
+    });
+  }
+
   async agentCall(launchId: string, token: string, op: AgentOp, body: Record<string, unknown> = {}): Promise<ApiResponse> {
     const launch = this.authenticate(launchId, token);
     if (!launch) return { status: 401, body: { error: 'unauthorized' } };
     this.renewLease(launch);
+    this.recordProgress(launch, op, body);
     switch (op) {
       case 'heartbeat':
         this.store.appendEvent({ kind: 'agent.heartbeat', taskId: launch.taskId, launchId, payload: body }, this.now());
@@ -524,6 +585,7 @@ export class Orchestrator implements OrchestratorCore {
     }
     this.store.transaction(() => {
       this.transition(launch.taskId, { kind: 'waiting', question, askedAt: this.now(), seq }, 'agent', 'block', { lease: entry.lease });
+      this.store.updateLaunch(launch.launchId, { waitingSince: this.now() });
       this.store.appendEvent({ kind: 'agent.block', taskId: launch.taskId, launchId: launch.launchId, payload: { seq, question } }, this.now());
     });
     crashPoint('api.afterEventCommit');
@@ -694,19 +756,66 @@ export class Orchestrator implements OrchestratorCore {
     return { ok: true };
   }
 
-  pause(): void {
-    this.operatorEvent('pause', undefined, {});
-    this.store.setKv('paused', '1');
+  /** Queue a message for the task's live launch. See specs/operator-control "Nudge". */
+  nudge(taskId: Id, message: string): { ok: true } | { ok: false; reason: string } {
+    const entry = this.entry(taskId);
+    const live = entry.lease ? this.store.getLaunch(entry.lease.launchId) : undefined;
+    if (!live || live.status !== 'live' || (entry.status.kind !== 'running' && entry.status.kind !== 'waiting')) {
+      return { ok: false, reason: `task ${taskId} is ${entry.status.kind}; no live launch to nudge` };
+    }
+    this.store.transaction(() => {
+      this.operatorEvent('nudge', taskId, { message });
+      this.queueNotice(live.launchId, { kind: 'nudge', message });
+    });
+    return { ok: true };
   }
 
-  resume(): void {
-    this.operatorEvent('resume', undefined, {});
-    this.store.setKv('paused', '0');
+  pause(): void {
+    this.store.transaction(() => {
+      this.operatorEvent('pause', undefined, {});
+      this.store.setKv('paused', '1');
+      this.store.setKv('pausedReason', 'operator');
+    });
+  }
+
+  /** Admission stops when the run cost reaches the ceiling. See specs/health-monitoring "Run cost budget". */
+  pauseForBudget(runUsd: number, ceiling: number): void {
+    this.store.transaction(() => {
+      this.store.appendEvent({ kind: 'budget.exceeded', payload: { runUsd, ceilingUsd: ceiling } }, this.now());
+      this.store.setKv('paused', '1');
+      this.store.setKv('pausedReason', 'costBudget');
+    });
+    this.log.warn('run cost budget reached; admission paused', { runUsd, ceiling });
+  }
+
+  resume(opts: { overrideBudget?: boolean } = {}): { ok: true } | { ok: false; reason: string; runUsd?: number; ceilingUsd?: number } {
+    const ceiling = ceilingUsd(this.config, this.store);
+    const cost = runCostUsd(this.store);
+    const over = ceiling !== undefined && cost >= ceiling;
+    if (over && !opts.overrideBudget) {
+      return { ok: false, reason: `costBudget: run cost ${cost} USD is at or above the ceiling ${ceiling} USD; resume with overrideBudget to raise it`, runUsd: cost, ceilingUsd: ceiling };
+    }
+    this.store.transaction(() => {
+      if (over && opts.overrideBudget) {
+        const overrides = budgetOverrides(this.store) + 1;
+        this.store.setKv('budgetOverrides', String(overrides));
+        this.store.appendEvent({ kind: 'budget.overridden', payload: { runUsd: cost, ceilingUsd: ceilingUsd(this.config, this.store), overrides } }, this.now());
+      }
+      this.operatorEvent('resume', undefined, { overrideBudget: Boolean(opts.overrideBudget) });
+      this.store.setKv('paused', '0');
+      this.store.setKv('pausedReason', '');
+    });
     this.wake();
+    return { ok: true };
   }
 
   isPaused(): boolean {
     return this.store.getKv('paused') === '1';
+  }
+
+  pausedReason(): PausedReason | undefined {
+    if (!this.isPaused()) return undefined;
+    return this.store.getKv('pausedReason') === 'costBudget' ? 'costBudget' : 'operator';
   }
 
   /** Review bundle for a submitted gated milestone. See operator-control "Review bundle". */
@@ -754,6 +863,18 @@ export class Orchestrator implements OrchestratorCore {
       byStatus[this.entry(node.id).status.kind].push(node.id);
     }
     const live = new Set<Id>([...byStatus.running, ...byStatus.waiting]);
+    const now = this.now();
+    const liveLaunches = this.store.listLaunches({ status: 'live' }).map((l) => ({
+      launchId: l.launchId,
+      taskId: l.taskId,
+      pid: l.pid,
+      elapsedMs: elapsedMs(l, now),
+      progressAt: l.progressAt,
+      lastSignal: l.lastSignal,
+      idleMs: idleMsOf(l, now),
+      stuck: l.stuckSince !== undefined,
+      costUsd: l.costUsd,
+    }));
     return {
       finished: q.finished(g, o),
       stalled: q.stalled(g, o, live),
@@ -765,7 +886,16 @@ export class Orchestrator implements OrchestratorCore {
       stallRoots: q.stallRoots(g, o),
       awaitingReview: q.awaitingReview(g, o),
       openQuestions: q.openQuestions(g, o),
-      liveLaunches: this.store.listLaunches({ status: 'live' }).map((l) => ({ launchId: l.launchId, taskId: l.taskId, pid: l.pid })),
+      liveLaunches,
+      stuck: liveLaunches.filter((l) => l.stuck).map((l) => l.taskId),
+      pausedReason: this.pausedReason(),
+      cost: { runUsd: runCostUsd(this.store), byTask: costByTask(this.store), ceilingUsd: ceilingUsd(this.config, this.store), overrides: budgetOverrides(this.store) },
+      budgets: {
+        maxLaunchMs: this.config.budgets.maxLaunchMs,
+        maxRunCostUsd: this.config.budgets.maxRunCostUsd,
+        stuckAfterMs: this.config.health.stuckAfterMs,
+        stuckFailAfterMs: this.config.health.stuckFailAfterMs,
+      },
       foreignCommits: this.foreignCommits,
       runDir: this.config.runDir ?? this.config.dataDir,
       graphPath: this.config.graphPath,
@@ -841,7 +971,7 @@ export class Orchestrator implements OrchestratorCore {
       publishedSince: async (baseSha) => this.publishedSince(baseSha),
     });
     if (outcome.kind === 'published') {
-      this.store.updateJob(job.jobId, { status: 'published', publishedSha: outcome.publishedSha, verifiedSha: outcome.verifiedSha, updatedAt: this.now() });
+      this.store.updateJob(job.jobId, { status: 'published', publishedSha: outcome.publishedSha, verifiedSha: outcome.verifiedSha, changedFiles: outcome.changedFiles, updatedAt: this.now() });
     } else if (outcome.kind === 'requeue') {
       this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId } }, this.now());
       this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, updatedAt: this.now() });
@@ -903,6 +1033,7 @@ export class Orchestrator implements OrchestratorCore {
     if (opts.reap) {
       for (const l of this.store.listLaunches({ status: 'live' })) {
         await this.runner.reap(l);
+        await this.recordUsage(l);
         const e = this.entry(l.taskId);
         if ((e.status.kind === 'running' || e.status.kind === 'waiting') && e.lease?.launchId === l.launchId) {
           if (e.status.kind === 'waiting') {

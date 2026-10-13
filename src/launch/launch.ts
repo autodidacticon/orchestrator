@@ -92,7 +92,7 @@ export async function startLaunch(core: OrchestratorCore, taskId: Id, opts: Star
 
   const spawnedAt = core.now();
   store.transaction(() => {
-    store.updateLaunch(launchId, { status: 'live', pid, spawnedAt });
+    store.updateLaunch(launchId, { status: 'live', pid, spawnedAt, progressAt: spawnedAt, lastSignal: 'spawned' });
     const entry = core.entry(taskId);
     if (entry.lease?.launchId === launchId) {
       store.setEntry(taskId, { ...entry, lease: { ...entry.lease, spawnedAt }, carry: undefined, updatedAt: spawnedAt });
@@ -100,5 +100,5 @@ export async function startLaunch(core: OrchestratorCore, taskId: Id, opts: Star
     store.appendEvent({ kind: 'launch.live', taskId, launchId, payload: { pid } }, spawnedAt);
   });
   crashPoint('launch.afterPid');
-  return { ...launch, status: 'live', pid, spawnedAt };
+  return { ...launch, status: 'live', pid, spawnedAt, progressAt: spawnedAt, lastSignal: 'spawned' };
 }

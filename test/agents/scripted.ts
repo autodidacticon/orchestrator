@@ -151,6 +151,23 @@ async function main(): Promise<void> {
       await api('report', submitBody());
       break;
     }
+    case 'rebaseThenSubmit': {
+      // Commit, wait for a baseMoved notice, rebase onto the new head, commit again, submit.
+      writeAndCommit();
+      const deadline = Date.now() + Number(param ?? 10000);
+      let head: string | undefined;
+      while (!head && Date.now() < deadline) {
+        const r = await api('inbox', {}, 'GET');
+        const notices = (r.body['notices'] as Array<{ kind: string; head?: string }> | undefined) ?? [];
+        head = notices.find((n) => n.kind === 'baseMoved')?.head;
+        if (!head) await sleep(100);
+      }
+      if (!head) throw new Error('no baseMoved notice arrived');
+      git('rebase', head);
+      writeAndCommit(`${brief.taskId}-after.txt`, `after rebase onto ${head}\n`);
+      await api('report', submitBody());
+      break;
+    }
     case 'hang': {
       // A pending promise alone does not keep Node alive; hold a timer.
       await new Promise(() => setInterval(() => undefined, 1 << 30));

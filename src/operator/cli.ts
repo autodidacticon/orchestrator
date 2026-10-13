@@ -8,7 +8,8 @@
  *   orchestrator-ctl unblock <task> [--answer <text>] [--accept-candidate]
  *   orchestrator-ctl accept <milestone> --sha <sha> --version <n>
  *   orchestrator-ctl reject <milestone> --note <text>
- *   orchestrator-ctl pause | resume
+ *   orchestrator-ctl pause | resume [--override-budget]
+ *   orchestrator-ctl nudge <task> <message>
  *   orchestrator-ctl logs <task> [--launch <n>]
  *   orchestrator-ctl outbox [--after <id>] [--limit <n>]
  *   orchestrator-ctl ack <id> [--result <json>] [--error <text>]
@@ -71,7 +72,8 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl unblock <task> [--answer <text>] [--accept-candidate]
   orchestrator-ctl accept <milestone> --sha <sha> --version <n>
   orchestrator-ctl reject <milestone> --note <text>
-  orchestrator-ctl pause | resume
+  orchestrator-ctl pause | resume [--override-budget]   resume is refused over the cost ceiling without the flag
+  orchestrator-ctl nudge <task> <message>       queue a message for the task's running agent
   orchestrator-ctl logs <task> [--launch <n>]
   orchestrator-ctl outbox [--after <id>] [--limit <n>]   pending tracker effects and the policy
   orchestrator-ctl ack <id> [--result <json>] [--error <text>]   acknowledge (or, with --error, reject) an effect
@@ -104,6 +106,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       limit: { type: 'string' },
       result: { type: 'string' },
       error: { type: 'string' },
+      'override-budget': { type: 'boolean', default: false },
     },
   });
   const [cmd, a, ...rest] = positionals;
@@ -137,7 +140,10 @@ export async function runCli(argv: string[]): Promise<CliResult> {
     case 'pause':
       return call(base, 'POST', '/v1/pause');
     case 'resume':
-      return call(base, 'POST', '/v1/resume');
+      return call(base, 'POST', '/v1/resume', { overrideBudget: values['override-budget'] });
+    case 'nudge':
+      if (!a) throw new Error('nudge needs a task id and a message');
+      return call(base, 'POST', `/v1/tasks/${a}/nudge`, { message: rest.join(' ') });
     case 'logs':
       return call(base, 'GET', `/v1/tasks/${a}/logs${values.launch ? `?launch=${values.launch}` : ''}`);
     case 'outbox': {

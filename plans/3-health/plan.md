@@ -29,7 +29,7 @@ scheduling policy. This change isolates the lease path the pull runner will reus
    handled as before. Rejected: keep API-call renewal and rely on agents heartbeating;
    Claude Code does not reliably call tools mid-work.
 2. **Progress signals.** Each tick the daemon fingerprints every running launch's worktree
-   (head sha plus a hash of `git status --porcelain`, through `Workspace.fingerprint`). Any
+   (head sha plus a hash of `git status --porcelain` and `git diff HEAD`, through `Workspace.fingerprint`). Any
    fingerprint change, any agent API call, a changed heartbeat text, and a resume record
    `progressAt` and `lastSignal` on the launch row. Rejected: commits and API calls only,
    because a long uncommitted edit looks stuck.

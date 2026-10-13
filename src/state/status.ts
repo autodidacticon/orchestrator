@@ -71,7 +71,9 @@ export type FailedKind =
   | 'missingAcceptanceEvidence'
   | 'integrationCapExceeded'
   | 'reaped'
-  | 'malformedReport';
+  | 'malformedReport'
+  | 'stuck'
+  | 'timeBudget';
 
 export interface FailedReason {
   kind: FailedKind;

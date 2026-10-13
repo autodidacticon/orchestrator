@@ -61,8 +61,10 @@ export class GitVerifierBackend implements VerifierBackend {
     await rm(temp, { recursive: true, force: true });
     await worktreeAddDetached(repo, temp, expectedHead);
     try {
-      // 1. Rebase the sealed range onto the current head.
-      const rebase = await git(temp, ['rebase', '--onto', 'HEAD', job.baseSha, job.sealedSha], { allowFail: true, env: identity });
+      // 1. Rebase the sealed range onto the current head, from the merge base so a branch the
+      //    agent already rebased onto a newer head does not replay published commits.
+      const mergeBase = (await git(temp, ['merge-base', expectedHead, job.sealedSha], { allowFail: true })).stdout.trim() || job.baseSha;
+      const rebase = await git(temp, ['rebase', '--onto', 'HEAD', mergeBase, job.sealedSha], { allowFail: true, env: identity });
       if (rebase.code !== 0) {
         const unmerged = (await git(temp, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true })).stdout.trim().split('\n').filter(Boolean);
         await git(temp, ['rebase', '--abort'], { allowFail: true });
@@ -101,11 +103,12 @@ export class GitVerifierBackend implements VerifierBackend {
       ctx.progress({ status: 'publishing', squashSha });
 
       // 4. Compare-and-swap publication.
+      const changedFiles = (await git(temp, ['diff', '--name-only', expectedHead, rebasedSha], { allowFail: true })).stdout.trim().split('\n').filter(Boolean).sort();
       const ok = await updateRefCas(repo, this.ref, squashSha, expectedHead);
       crashPoint('verify.afterPublish');
       if (!ok) return { kind: 'requeue' };
       await this.syncPrimaryWorktree();
-      return { kind: 'published', publishedSha: squashSha, verifiedSha: rebasedSha };
+      return { kind: 'published', publishedSha: squashSha, verifiedSha: rebasedSha, changedFiles };
     } finally {
       await worktreeRemove(repo, temp);
       await rm(temp, { recursive: true, force: true });

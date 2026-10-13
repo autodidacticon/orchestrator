@@ -210,9 +210,10 @@ describe('inproc scenarios on the standard fixture', () => {
     expect(h.orch.entry('T1').status).toMatchObject({ kind: 'blocked', reason: { kind: 'needsAccess' } });
   });
 
-  it('lease expiry fails the task and reaps the process', async () => {
+  it('lease expiry fails the task and reaps the process when the runner cannot observe it', async () => {
     await h.orch.tick();
     const l1 = h.launchOf('T1');
+    h.runner.unknownForAll = true;
     h.advance(h.orch.config.leaseTtlMs + 1);
     await h.orch.tick();
     expect(h.runner.isAlive(l1.launchId)).toBe(false);

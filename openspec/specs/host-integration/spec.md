@@ -1,7 +1,7 @@
 # Host Integration Specification
 
 ## Purpose
-How the orchestrator is packaged for host sessions: the npm package's subpath exports and executables, thin per-host wrappers under `hosts/<host>/` such as the Claude Code plugin, and the import, run, and review skills those wrappers ship, including how the import skill records the tracker and the run skill mirrors the run back to it by draining the outbox.
+How the orchestrator is packaged for host sessions: the npm package's subpath exports and executables, thin per-host wrappers under `hosts/<host>/` such as the Claude Code plugin, and the import, run, and review skills those wrappers ship, including how the import skill records the tracker and how the run skill mirrors the run back to it by draining the outbox and handles stuck tasks and budget pauses on the user's say.
 
 ## Requirements
 
@@ -63,3 +63,14 @@ After every `wait` return, before acting on the digest, the `run` skill SHALL dr
 #### Scenario: Terminal answer wins
 - **WHEN** the user answered ENG-12 in the session and a comment answer is relayed afterwards
 - **THEN** the daemon answers 409 with a reason naming ENG-12's current status and the skill reports it without retrying
+
+### Requirement: Run skill handles health events
+The `run` skill SHALL act on two more digest conditions. When `stuck` is non-empty it SHALL show each task with its idle time and last signal from `status` and offer the user a nudge with a message, cancellation, or continuing to wait, acting through `nudge` or `cancel`. When `pausedReason` is `costBudget` it SHALL report the run cost and the ceiling from `status` and offer `resume` with `overrideBudget` or stopping; it SHALL NOT override the budget without the user's say.
+
+#### Scenario: Stuck task surfaced
+- **WHEN** `wait` returns a digest with T3 under `stuck`
+- **THEN** the skill shows T3 with its idle time and offers nudge, cancel, or wait, and sends the user's message through `nudge` if chosen
+
+#### Scenario: Budget pause surfaced
+- **WHEN** `wait` returns a digest with `pausedReason` `costBudget`
+- **THEN** the skill reports the run cost and the ceiling and calls `resume` with `overrideBudget` only after the user agrees

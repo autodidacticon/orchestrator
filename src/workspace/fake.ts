@@ -10,6 +10,8 @@ export class FakeWorkspace implements Workspace {
   readonly tags: Array<{ id: Id; version: number; sha: string }> = [];
   readonly sealScript = new Map<Id, SealResult>();
   readonly fallbacks = new Map<string, FallbackReport>();
+  /** Scripted fingerprints by launch id; default: the head with a clean tree. */
+  readonly fingerprints = new Map<string, string>();
   private counter = 0;
 
   async integrationHead(): Promise<string> {
@@ -47,6 +49,10 @@ export class FakeWorkspace implements Workspace {
 
   async diffStat(from: string, to: string): Promise<string> {
     return `fake diff ${from}..${to}`;
+  }
+
+  async fingerprint(launch: Launch): Promise<string> {
+    return this.fingerprints.get(launch.launchId) ?? `${this.head}:clean`;
   }
 
   /** Test helper: a submission that is empty (sealedSha == baseSha). */

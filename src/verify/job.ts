@@ -7,7 +7,7 @@ import type { FailedReason } from '../state/status.js';
 import type { VerifierJob } from '../state/store.js';
 
 export type VerifierOutcome =
-  | { kind: 'published'; publishedSha: string; verifiedSha: string }
+  | { kind: 'published'; publishedSha: string; verifiedSha: string; changedFiles?: string[] }
   | { kind: 'failed'; reason: FailedReason }
   | { kind: 'conflict'; files: string[]; since: Id[] }
   /** Compare-and-swap lost: the integration head moved. The job goes back to queued. */

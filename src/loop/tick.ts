@@ -11,9 +11,12 @@ import * as q from '../graph/query.js';
 import { startLaunch } from '../launch/launch.js';
 import type { Id } from '../graph/model.js';
 import type { AttemptContext, Entry, FailedKind } from '../state/status.js';
-import type { Launch } from '../state/store.js';
+import type { Launch, VerifierJob } from '../state/store.js';
 import type { Orchestrator } from './orchestrator.js';
 import { admit } from './schedule.js';
+import { ceilingUsd, checkTimeBudget, runCostUsd } from '../health/budgets.js';
+import { observeFingerprint, recordSignal } from '../health/progress.js';
+import { checkStuck } from '../health/stuck.js';
 
 export async function runTick(o: Orchestrator): Promise<void> {
   await o.loadGraph();
@@ -47,25 +50,38 @@ export async function reconcile(o: Orchestrator): Promise<void> {
     if (entry.status.kind === 'cancelled' || (!active && !owns)) {
       // Cancelled, or superseded: reap and end.
       if (await o.runner.alive(launch)) await o.runner.reap(launch);
+      await o.recordUsage(launch);
       o.endLaunch(launch, entry.status.kind === 'cancelled' ? 'cancelled' : entry.status.kind === 'submitted' || entry.status.kind === 'done' ? 'reported' : 'superseded');
       await o.workspace.remove(launch);
       continue;
     }
 
-    const alive = await o.runner.alive(launch);
-    if (!alive) {
+    const liveness = await o.runner.liveness(launch);
+    if (liveness === 'dead') {
       await handleDeadLaunch(o, launch, entry);
-      continue;
-    }
-    if (active && entry.status.kind === 'running' && entry.lease && entry.lease.expiresAt <= now) {
-      await o.runner.reap(launch);
-      o.fail(launch.taskId, { kind: 'leaseExpired', message: `no contact for ${o.config.leaseTtlMs}ms` }, 'orchestrator', 'deadOrExpired');
-      o.endLaunch(launch, 'leaseExpired');
-      await o.workspace.remove(launch);
       continue;
     }
     if (!active) {
       // Task left running/waiting (submitted/done/failed/blocked) while the process lingers; nothing to do.
+      continue;
+    }
+    if (liveness === 'alive') {
+      // An observed process keeps its lease; silence is a health matter, not a failure. See specs/health-monitoring.
+      o.renewLease(launch);
+      if (entry.status.kind === 'running') {
+        const observed = await observeFingerprint(o, launch);
+        if (await checkTimeBudget(o, observed)) continue;
+        await checkStuck(o, observed);
+      }
+      continue;
+    }
+    // Unknown liveness: the lease TTL is the only bound on silence.
+    if (entry.status.kind === 'running' && entry.lease && entry.lease.expiresAt <= now) {
+      await o.runner.reap(launch);
+      await o.recordUsage(launch);
+      o.fail(launch.taskId, { kind: 'leaseExpired', message: `no contact for ${o.config.leaseTtlMs}ms` }, 'orchestrator', 'deadOrExpired');
+      o.endLaunch(launch, 'leaseExpired');
+      await o.workspace.remove(launch);
       continue;
     }
   }
@@ -85,6 +101,7 @@ export async function reconcile(o: Orchestrator): Promise<void> {
 }
 
 async function handleDeadLaunch(o: Orchestrator, launch: Launch, entry: Entry): Promise<void> {
+  await o.recordUsage(launch);
   const fb = await o.workspace.readFallback(launch);
   if (fb && entry.status.kind === 'running') {
     if (fb.kind === 'submit') {
@@ -113,6 +130,7 @@ export function drainVerification(o: Orchestrator): void {
         if (job.status === 'published') {
           const summary = String(o.store.getCompletionReport(job.taskId)?.body['summary'] ?? '');
           o.transition(job.taskId, { kind: 'done' }, 'verifier', 'published', { carry: undefined }, { publishedSha: job.publishedSha, summary });
+          if (o.config.health.baseMovedNotice && job.publishedSha && job.publishedSha !== job.expectedHead) notifyBaseMoved(o, job);
         } else if (job.status === 'conflict') {
           if (entry.integrationRetries < o.config.integrationRetries) {
             const launch = o.store.getLaunch(job.launchId);
@@ -139,6 +157,16 @@ export function drainVerification(o: Orchestrator): void {
     }
   }
   o.startVerifierIfIdle();
+}
+
+/** Tell every other live launch that the integration head moved. Runs inside the publish transaction. */
+function notifyBaseMoved(o: Orchestrator, job: VerifierJob): void {
+  for (const other of o.store.listLaunches({ status: 'live' })) {
+    if (other.launchId === job.launchId || other.taskId === job.taskId) continue;
+    const kind = o.entry(other.taskId).status.kind;
+    if (kind !== 'running' && kind !== 'waiting') continue;
+    o.queueNotice(other.launchId, { kind: 'baseMoved', head: job.publishedSha, files: job.changedFiles ?? [], task: job.taskId });
+  }
 }
 
 /** Phase 3. */
@@ -178,6 +206,13 @@ export async function completeMilestones(o: Orchestrator): Promise<void> {
 
 /** Phase 4. */
 export async function admitAndLaunch(o: Orchestrator): Promise<void> {
+  if (!o.isPaused()) {
+    const ceiling = ceilingUsd(o.config, o.store);
+    if (ceiling !== undefined) {
+      const cost = runCostUsd(o.store);
+      if (cost >= ceiling) o.pauseForBudget(cost, ceiling);
+    }
+  }
   if (o.isPaused()) return;
   const g = o.graph();
   const overlay = o.overlay();
@@ -209,7 +244,11 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
     const launchId = e.lease.launchId;
     o.store.transaction(() => {
       o.transition(id, { kind: 'running' }, 'orchestrator', 'resumed', { lease: e.lease });
-      o.store.updateLaunch(launchId, { pendingAnswer: { seq, answer } });
+      const l = o.store.getLaunch(launchId);
+      const now = o.now();
+      const waited = l?.waitingSince !== undefined ? now - l.waitingSince : 0;
+      o.store.updateLaunch(launchId, { pendingAnswer: { seq, answer }, waitedMs: (l?.waitedMs ?? 0) + waited, waitingSince: undefined });
+      if (l) recordSignal(o, { ...l, waitedMs: (l.waitedMs ?? 0) + waited }, 'resumed');
       o.store.putDedup(launchId, seq, { status: 200, body: { answer } });
     });
     o.resolveWaiters(launchId, { status: 200, body: { answer } });

@@ -28,6 +28,8 @@ export const TRANSITIONS: readonly TransitionRow[] = [
   { from: 'running', to: 'blocked', actor: 'agent', nodeKind: 'task', trigger: 'fallbackBlock', effects: [] },
   { from: 'running', to: 'waiting', actor: 'agent', nodeKind: 'task', trigger: 'block', effects: [] },
   { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'deadOrExpired', effects: ['attempts++'] },
+  { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'stuck', effects: ['attempts++'] },
+  { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'timeBudget', effects: ['attempts++'] },
   { from: 'waiting', to: 'running', actor: 'orchestrator', nodeKind: 'task', trigger: 'resumed', effects: [] },
   { from: 'waiting', to: 'blocked', actor: 'orchestrator', nodeKind: 'task', trigger: 'maxWaitOrDead', effects: [] },
   { from: 'submitted', to: 'done', actor: 'verifier', nodeKind: 'task', trigger: 'published', effects: [] },

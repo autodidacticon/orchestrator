@@ -56,7 +56,7 @@ export async function startShim(env: ShimEnv): Promise<void> {
     isError: r.status >= 400,
   });
 
-  server.registerTool('heartbeat', { description: 'Renew the lease; optionally report progress.', inputSchema: { progress: z.string().optional() } }, async (args) => text(await forward(env, 'heartbeat', args)));
+  server.registerTool('heartbeat', { description: 'Renew the lease and report progress; a changed progress text counts as progress for stuck detection.', inputSchema: { progress: z.string().optional() } }, async (args) => text(await forward(env, 'heartbeat', args)));
   server.registerTool(
     'report',
     {
@@ -92,7 +92,7 @@ export async function startShim(env: ShimEnv): Promise<void> {
     },
     async (args) => text(await forward({ ...env, retryWindowMs: Math.max(env.retryWindowMs, 24 * 3600_000) }, 'block', args)),
   );
-  server.registerTool('inbox', { description: 'Fetch pending notices from the orchestrator.', inputSchema: {} }, async () => text(await forward(env, 'inbox', {}, 'GET')));
+  server.registerTool('inbox', { description: 'Fetch pending notices from the orchestrator: stuck (no progress observed), nudge (a message from the operator), baseMoved (the integration branch advanced; head and files). Check after long steps.', inputSchema: {} }, async () => text(await forward(env, 'inbox', {}, 'GET')));
   server.registerTool('log', { description: 'Append a log line to the launch log.', inputSchema: { text: z.string(), seq: z.number().int().optional() } }, async (args) => text(await forward(env, 'log', args)));
 
   await server.connect(new StdioServerTransport());

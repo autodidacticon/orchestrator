@@ -23,7 +23,14 @@ export async function recover(o: Orchestrator): Promise<void> {
     const entry = o.entry(launch.taskId);
     const owns = entry.lease?.launchId === launch.launchId;
     if (!owns || (entry.status.kind !== 'running' && entry.status.kind !== 'waiting')) continue;
-    if (await runner.alive(launch)) continue; // adopt
+    const liveness = await runner.liveness(launch);
+    if (liveness === 'alive') {
+      // Adopt, and renew first: an outage longer than the TTL must not fail a surviving agent.
+      o.renewLease(launch);
+      continue;
+    }
+    if (liveness === 'unknown') continue; // adopt; the lease bounds its silence
+    await o.recordUsage(launch);
     const fb = await workspace.readFallback(launch);
     if (fb && entry.status.kind === 'running') {
       if (fb.kind === 'submit') {

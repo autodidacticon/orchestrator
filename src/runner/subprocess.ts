@@ -8,7 +8,7 @@ import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Launch } from '../state/store.js';
-import type { AgentRunner, SpawnResult } from './runner.js';
+import type { AgentRunner, Liveness, SpawnResult } from './runner.js';
 
 const execFileP = promisify(execFile);
 
@@ -65,6 +65,10 @@ export class SubprocessRunner implements AgentRunner {
   async alive(launch: Launch): Promise<boolean> {
     if (!launch.pid) return false;
     return pidAlive(launch.pid);
+  }
+
+  async liveness(launch: Launch): Promise<Liveness> {
+    return (await this.alive(launch)) ? 'alive' : 'dead';
   }
 
   async reap(launch: Launch): Promise<void> {

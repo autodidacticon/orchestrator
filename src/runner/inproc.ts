@@ -4,12 +4,17 @@
  * agent-call API directly.
  */
 import type { Launch } from '../state/store.js';
-import type { AgentRunner, SpawnResult } from './runner.js';
+import type { AgentRunner, Liveness, SpawnResult, Usage } from './runner.js';
 
 export class InprocRunner implements AgentRunner {
   readonly spawned: Launch[] = [];
   private readonly aliveSet = new Set<string>();
   private nextPid = 1000;
+  /** Test script: report `unknown` liveness for these launch ids (or all, when `unknownForAll`). */
+  readonly unknownLiveness = new Set<string>();
+  unknownForAll = false;
+  /** Test script: usage returned for a launch id or a task id. */
+  readonly usageScript = new Map<string, Usage>();
 
   async spawn(launch: Launch): Promise<SpawnResult> {
     this.spawned.push(launch);
@@ -19,6 +24,15 @@ export class InprocRunner implements AgentRunner {
 
   async alive(launch: Launch): Promise<boolean> {
     return this.aliveSet.has(launch.launchId);
+  }
+
+  async liveness(launch: Launch): Promise<Liveness> {
+    if (this.unknownForAll || this.unknownLiveness.has(launch.launchId)) return 'unknown';
+    return this.aliveSet.has(launch.launchId) ? 'alive' : 'dead';
+  }
+
+  async readUsage(launch: Launch): Promise<Usage | undefined> {
+    return this.usageScript.get(launch.launchId) ?? this.usageScript.get(launch.taskId);
   }
 
   async reap(launch: Launch): Promise<void> {
