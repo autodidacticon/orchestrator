@@ -31,6 +31,38 @@ function withValidator(opts: Parameters<typeof makeHarness>[0], remediator?: Sta
   return base;
 }
 
+describe('revision section', () => {
+  const launch = { launchId: 'L2', taskId: 'T2', attempt: 1, launchNo: 2, status: 'live', token: 't', branch: 'task/T2/l2', worktree: '/w', baseSha: 'base2', graphRev: 'r', createdAt: 1 } as const;
+  const input = (revision: Record<string, unknown>) => ({
+    launch: launch as unknown as Parameters<typeof composeBrief>[0]['launch'],
+    node: { id: 'T2', kind: 'task', payload: { title: 'x', description: 'd', acceptanceCriteria: ['a'] }, deps: ['T1'] },
+    depReports: [],
+    carry: { revision },
+    apiBaseUrl: 'http://127.0.0.1:1',
+    retryWindowMs: 1000,
+    checkCommand: 'true',
+    integrationBranch: 'main',
+  });
+
+  it('names the published prior commit, the upstream cause, and tells the agent to revise', () => {
+    const { markdown, json } = composeBrief(input({ cause: 'upstreamReopened', upstream: 'T1', priorLaunchId: 'L1', priorBranch: 'task/T2/l1', priorPublishedSha: 'P1', priorReportSummary: 'did T2' }), { fallbackPath: '/x' });
+    expect(markdown).toContain('## Revision');
+    expect(markdown).toContain('upstream task `T1` was reopened');
+    expect(markdown).toContain('published commit `P1`, which remains on `main` and is contained in your base commit `base2`');
+    expect(markdown).toContain('Prior report: did T2');
+    expect(markdown).toContain('Revise the prior work rather than redoing it');
+    expect(json.context).toMatchObject({ revision: { cause: 'upstreamReopened', upstream: 'T1', priorPublishedSha: 'P1' } });
+  });
+
+  it('a killed prior launch is briefed with its branch and no sha', () => {
+    const { markdown } = composeBrief(input({ cause: 'upstreamReopened', upstream: 'T1', priorLaunchId: 'L1', priorBranch: 'task/T2/l1' }), { fallbackPath: '/x' });
+    expect(markdown).toContain('worked on branch `task/T2/l1` and did not publish');
+    expect(markdown).not.toContain('published commit');
+    const reopened = composeBrief(input({ cause: 'reopened', priorLaunchId: 'L1', priorBranch: 'task/T2/l1', priorPublishedSha: 'P1' }), { fallbackPath: '/x' }).markdown;
+    expect(reopened).toContain('This task was reopened for revision.');
+  });
+});
+
 describe('slot validation', () => {
   it('reports missing required slots; arrays count; milestones are skipped', () => {
     const g = parseGraph(graph);

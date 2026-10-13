@@ -20,6 +20,7 @@ type Action =
   | { t: 'accept'; i: number }
   | { t: 'reject'; i: number }
   | { t: 'unblock'; i: number }
+  | { t: 'cascade'; i: number }
   | { t: 'advance' };
 
 const actionArb: fc.Arbitrary<Action> = fc.oneof(
@@ -35,6 +36,7 @@ const actionArb: fc.Arbitrary<Action> = fc.oneof(
   fc.record({ t: fc.constant('accept' as const), i: fc.nat(9) }),
   fc.record({ t: fc.constant('reject' as const), i: fc.nat(9) }),
   fc.record({ t: fc.constant('unblock' as const), i: fc.nat(9) }),
+  fc.record({ t: fc.constant('cascade' as const), i: fc.nat(9) }),
   fc.constant<Action>({ t: 'advance' }),
 );
 
@@ -116,6 +118,9 @@ describe('reachable-state stall property', () => {
               case 'unblock':
                 h.orch.unblock(id);
                 break;
+              case 'cascade':
+                h.orch.reopen(id, { cascade: true });
+                break;
             }
           }
           // Reach quiescence: settle verification and ticks.
@@ -127,6 +132,12 @@ describe('reachable-state stall property', () => {
           const quiet = quiescent(g, o, { live, now: h.now.value, pendingVerifierResults: h.store.listJobs({ applied: false }).length });
           if (quiet && stalled(g, o, live)) {
             expect(stallRoots(g, o).length).toBeGreaterThan(0);
+          }
+          // After cascades: no started task depends on an unstarted node.
+          for (const [id, e] of o) {
+            if (g.nodes.get(id)?.kind !== 'task') continue;
+            if (!['running', 'waiting', 'submitted', 'done'].includes(e.status.kind)) continue;
+            for (const d of g.nodes.get(id)!.deps) expect(o.get(d)?.status.kind ?? 'unstarted', `${id} (${e.status.kind}) depends on ${d}`).not.toBe('unstarted');
           }
           // Store invariants: at most one live launch per task; milestones never running.
           const liveLaunches = h.store.listLaunches({ status: 'live' });

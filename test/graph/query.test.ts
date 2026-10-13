@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { parseGraph } from '../../src/graph/load.js';
 import {
   awaitingReview,
+  cascadePlan,
   finished,
   incomplete,
   milestoneFixedPoint,
@@ -12,7 +14,7 @@ import {
   stallRoots,
   stalled,
 } from '../../src/graph/query.js';
-import { loadFixture, overlayWith } from './helpers.js';
+import { fixtureText, loadFixture, overlayWith } from './helpers.js';
 
 const g = loadFixture('standard.yaml');
 const none = new Set<string>();
@@ -117,14 +119,36 @@ describe('terminal conditions', () => {
 describe('revocable guard', () => {
   it('refused while a dependent runs, allowed after it fails', () => {
     expect(revocable(g, overlayWith({ T1: 'done', T2: 'running' }), 'T1')).toMatchObject({ ok: false, blockers: ['T2'] });
-    expect(revocable(g, overlayWith({ T1: 'done', T2: 'failed', T3: 'blocked' }), 'T1')).toEqual({ ok: true });
-    expect(revocable(g, overlayWith({ T1: 'done', T2: 'done' }), 'T1')).toMatchObject({ ok: false });
+    expect(revocable(g, overlayWith({ T1: 'done', T2: 'failed', T3: 'blocked' }), 'T1')).toEqual({ ok: true, resets: [] });
+    expect(revocable(g, overlayWith({ T1: 'done', T2: 'done' }), 'T1')).toMatchObject({ ok: false, blockers: ['T2'] });
     expect(revocable(g, overlayWith({ T1: 'running' }), 'T1')).toMatchObject({ ok: false });
   });
 
-  it('a done milestone guards its constituents', () => {
+  it('milestones are transparent: a done milestone resets instead of blocking; a started task behind it blocks', () => {
     const o = overlayWith({ T1: 'done', T2: 'done', T3: 'done', T4: 'done', MVP: 'done' });
-    expect(revocable(g, o, 'T3')).toMatchObject({ ok: false, blockers: ['MVP'] });
-    expect(revocable(g, o, 'MVP')).toEqual({ ok: true });
+    expect(revocable(g, o, 'T3')).toEqual({ ok: true, resets: ['MVP'] });
+    expect(revocable(g, o, 'MVP')).toEqual({ ok: true, resets: [] });
+    // Resets are reached only through milestone-only paths; MVP sits behind T3, a task, so T1 does not reset it.
+    expect(revocable(g, o, 'T1')).toMatchObject({ ok: false, blockers: ['T2', 'T3'], resets: [] });
+    const g8 = parseGraph(`${fixtureText('standard.yaml')}  - { id: T8, deps: [MVP] }\n`);
+    const o8 = overlayWith({ T1: 'done', T2: 'done', T3: 'done', T4: 'done', MVP: 'done', T8: 'running' });
+    expect(revocable(g8, o8, 'T3')).toMatchObject({ ok: false, blockers: ['T8'], resets: ['MVP'] });
+    const sub = overlayWith({ T1: 'done', T2: 'done', T3: 'done', T4: 'done', MVP: 'submitted' });
+    expect(revocable(g, sub, 'T4')).toEqual({ ok: true, resets: ['MVP'] });
+  });
+
+  it('cascade plan is the started closure, dependents before their dependencies', () => {
+    const o = overlayWith({ T1: 'done', T2: 'running', T3: 'done', T4: 'done', MVP: 'submitted' });
+    const plan = cascadePlan(g, o, 'T1');
+    expect(plan.map((s) => s.id).sort()).toEqual(['MVP', 'T1', 'T2', 'T3', 'T4']);
+    expect(plan).toContainEqual({ id: 'T2', from: 'running' });
+    expect(plan).toContainEqual({ id: 'MVP', from: 'submitted' });
+    expect(plan).toContainEqual({ id: 'T1', from: 'done' });
+    const at = (id: string) => plan.findIndex((s) => s.id === id);
+    expect(at('T4')).toBeLessThan(at('T2'));
+    expect(at('MVP')).toBeLessThan(at('T3'));
+    expect(at('MVP')).toBeLessThan(at('T4'));
+    expect(at('T1')).toBe(plan.length - 1);
+    expect(cascadePlan(g, overlayWith({ T1: 'done' }), 'T1')).toEqual([{ id: 'T1', from: 'done' }]);
   });
 });

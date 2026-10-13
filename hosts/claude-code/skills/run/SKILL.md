@@ -37,6 +37,14 @@ answers (section 2b), then act on the digest:
   (send it with `nudge`; the agent sees it on its next inbox call), cancellation (`cancel`),
   or waiting. The daemon fails a launch that stays stuck past `budgets.stuckFailAfterMs`
   and retries it like any other failure; say so.
+- **proposals** non-empty: agents proposed follow-up tasks. For each pending proposal (from
+  `proposals`), show its title, description, acceptance criteria, and deps, and wait for the
+  user's decision. On acceptance in a run imported from a tracker, first create the issue
+  with this session's tracker tools: a child of the epic, blocked by the proposing task's
+  issue, with the acceptance criteria under the configured heading in its description; then
+  call `accept_proposal` with the new issue's key as `nodeId`. In a file-based run call
+  `accept_proposal` without `nodeId` and report the new node id. On rejection call
+  `reject_proposal` with the user's note. Never accept a proposal the user has not approved.
 - **pausedReason** is `costBudget`: the run cost reached its ceiling. Report `cost.runUsd`
   and `cost.ceilingUsd` from `status`, then offer `resume` with `overrideBudget: true`
   (raises the ceiling by one budget) or stopping. Never override the budget unless the user
@@ -77,6 +85,17 @@ human comment posted after the latest marked comment that you have not relayed b
 it with `answer`; remember that comment's id so you never relay it twice. If the daemon
 answers 409, the task is no longer waiting or blocked (someone answered first): tell the
 user and do not retry. Answers typed in this session still work; the first answer wins.
+
+## 2c. Reopening a task
+
+When the user asks to reopen a done or cancelled task, call `reopen` without `cascade`. If it
+succeeds, report `reset`: the task and any milestones that were reset and will be reviewed
+again at their next version. If it is refused with `blockers`, those started tasks depend on
+it. Tell the user each blocker would be reset (killed if running, dropped if under
+verification, reopened if done) and relaunched with a revision brief, and that the
+integration branch is never rewritten. Only after the user agrees call `reopen` with
+`cascade: true` and show the returned plan. If the refusal names a `publishing` task, wait a
+moment and retry.
 
 ## 3. Pausing and stopping
 

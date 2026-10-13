@@ -13,6 +13,8 @@ import type {
   LaunchStatus,
   NewOutboxEffect,
   OutboxEffect,
+  Proposal,
+  ProposalStatus,
   Store,
   StoredEvent,
   StoredReport,
@@ -62,6 +64,8 @@ CREATE TABLE IF NOT EXISTS reports (launch_id TEXT PRIMARY KEY, task_id TEXT NOT
 CREATE TABLE IF NOT EXISTS payload_overlays (task_id TEXT NOT NULL, graph_rev TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY (task_id, graph_rev));
 CREATE TABLE IF NOT EXISTS graph_snapshot (id INTEGER PRIMARY KEY CHECK (id = 1), rev TEXT NOT NULL, content TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS proposals (id TEXT PRIMARY KEY, task_id TEXT NOT NULL, launch_id TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, doc TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS proposals_status ON proposals(status);
 CREATE TABLE IF NOT EXISTS outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, source_seq INTEGER NOT NULL, task_id TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, result TEXT, error TEXT, created_at INTEGER NOT NULL, applied_at INTEGER);
 CREATE UNIQUE INDEX IF NOT EXISTS outbox_key ON outbox(source_seq, task_id, kind);
 CREATE INDEX IF NOT EXISTS outbox_status ON outbox(status);
@@ -244,6 +248,43 @@ export class SqliteStore implements Store {
     }
     const sql = `SELECT doc FROM verifier_jobs${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at, job_id`;
     return (this.db.prepare(sql).all(...args) as Array<{ doc: string }>).map((r) => JSON.parse(r.doc) as VerifierJob);
+  }
+
+  dropJob(jobId: string): void {
+    this.updateJob(jobId, { status: 'dropped', applied: true });
+  }
+
+  createProposal(p: Proposal): void {
+    this.db
+      .prepare('INSERT INTO proposals (id, task_id, launch_id, status, created_at, doc) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(p.id, p.taskId, p.launchId, p.status, p.createdAt, JSON.stringify(p));
+  }
+
+  updateProposal(id: string, patch: Partial<Proposal>): void {
+    const cur = this.getProposal(id);
+    if (!cur) throw new Error(`proposal ${id} not found`);
+    const next = { ...cur, ...patch };
+    this.db.prepare('UPDATE proposals SET status = ?, doc = ? WHERE id = ?').run(next.status, JSON.stringify(next), id);
+  }
+
+  getProposal(id: string): Proposal | undefined {
+    const row = this.db.prepare('SELECT doc FROM proposals WHERE id = ?').get(id) as { doc: string } | undefined;
+    return row ? (JSON.parse(row.doc) as Proposal) : undefined;
+  }
+
+  listProposals(filter: { status?: ProposalStatus; taskId?: Id } = {}): Proposal[] {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (filter.status) {
+      where.push('status = ?');
+      args.push(filter.status);
+    }
+    if (filter.taskId) {
+      where.push('task_id = ?');
+      args.push(filter.taskId);
+    }
+    const sql = `SELECT doc FROM proposals${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at, id`;
+    return (this.db.prepare(sql).all(...args) as Array<{ doc: string }>).map((r) => JSON.parse(r.doc) as Proposal);
   }
 
   putReport(r: StoredReport): void {

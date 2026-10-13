@@ -54,6 +54,16 @@ describe('reload classification', () => {
     if (!r.compatible) expect(r.reasons[0]?.code).toBe('kindChangedStarted');
   });
 
+  it('a dependency change on a submitted milestone is compatible and listed; payload edits of started tasks are listed', () => {
+    const o = overlayWith({ T1: 'done', T2: 'done', T3: 'done', T4: 'done', MVP: 'submitted' });
+    const next = variant(`nodes:${standardNodes.replace('deps: [T3, T4] }', 'deps: [T3, T4, T5] }')}`);
+    expect(classifyReload(base, next, o)).toMatchObject({ compatible: true, changed: ['MVP'], milestoneDepsChanged: ['MVP'], payloadChanged: [] });
+    const payload = variant(`nodes:${standardNodes.replace('Feature A API', 'Feature A API v2')}`);
+    expect(classifyReload(base, payload, running)).toMatchObject({ compatible: true, changed: ['T2'], payloadChanged: ['T2'], milestoneDepsChanged: [] });
+    const unstartedMilestone = variant(`nodes:${standardNodes.replace('deps: [T3, T4] }', 'deps: [T3, T4, T5] }')}`);
+    expect(classifyReload(base, unstartedMilestone, running)).toMatchObject({ compatible: true, milestoneDepsChanged: [] });
+  });
+
   it('deps change on an unstarted node is compatible', () => {
     const next = variant(`nodes:${standardNodes.replace('deps: [T2] }', 'deps: [T2, T3] }')}`);
     expect(classifyReload(base, next, running)).toMatchObject({ compatible: true, changed: ['T4'] });

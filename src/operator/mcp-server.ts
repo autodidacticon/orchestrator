@@ -16,7 +16,7 @@ const POLL_SLICE_MS = 20_000;
 export const TOOL_NAMES = [
   'start', 'stop', 'status', 'runs', 'import_issues', 'import_graph', 'wait', 'review',
   'answer', 'cancel', 'reopen', 'unblock', 'accept', 'reject', 'pause', 'resume', 'logs',
-  'outbox', 'ack', 'nudge',
+  'outbox', 'ack', 'nudge', 'proposals', 'accept_proposal', 'reject_proposal',
 ] as const;
 
 export function clampWait(ms: number | undefined): number {
@@ -188,8 +188,28 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   server.registerTool('cancel', { description: 'Cancel a task. release: let dependents proceed as if it were done.', inputSchema: { ...task, reason: z.string().optional(), release: z.boolean().optional() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/cancel`, { reason: a.reason ?? 'cancelled by operator', release: a.release ?? false })),
   );
-  server.registerTool('reopen', { description: 'Reopen a done or cancelled task (only when no dependent has started).', inputSchema: task }, async (a) =>
-    guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/reopen`)),
+  server.registerTool(
+    'reopen',
+    {
+      description:
+        'Reopen a done or cancelled task. Without cascade it is refused with blockers when a started task depends on it (milestones are transparent and reset). With cascade it records a plan that resets every started dependent and returns it as reset: [{ id, from }].',
+      inputSchema: { ...task, cascade: z.boolean().optional() },
+    },
+    async (a) => guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/reopen`, { cascade: a.cascade ?? false })),
+  );
+  server.registerTool('proposals', { description: 'Agent proposals for follow-up tasks: pending by default, or accepted, rejected, all.', inputSchema: { status: z.enum(['pending', 'accepted', 'rejected', 'all']).optional() } }, async (a) =>
+    guarded(() => client.call('GET', `/v1/proposals${a.status ? `?status=${a.status}` : ''}`)),
+  );
+  server.registerTool(
+    'accept_proposal',
+    {
+      description: 'Accept a proposal into the graph: appends a task depending on the proposer (and joins its gated milestone). nodeId: the tracker issue key when the session created one; payload: extra fields for the node.',
+      inputSchema: { id: z.string(), nodeId: z.string().optional(), payload: z.record(z.unknown()).optional() },
+    },
+    async (a) => guarded(() => client.call('POST', `/v1/proposals/${encodeURIComponent(a.id)}/accept`, { nodeId: a.nodeId, payload: a.payload })),
+  );
+  server.registerTool('reject_proposal', { description: 'Reject a proposal with a note.', inputSchema: { id: z.string(), note: z.string() } }, async (a) =>
+    guarded(() => client.call('POST', `/v1/proposals/${encodeURIComponent(a.id)}/reject`, { note: a.note })),
   );
   server.registerTool('unblock', { description: 'Return a blocked task to unstarted, optionally with an answer or accepting a remediation candidate.', inputSchema: { ...task, answer: z.string().optional(), acceptCandidate: z.boolean().optional() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/unblock`, { answer: a.answer, acceptCandidate: a.acceptCandidate ?? false })),

@@ -39,8 +39,51 @@ export async function runTick(o: Orchestrator): Promise<void> {
   crashPoint('tick.afterPhase5');
 }
 
+/**
+ * Apply a recorded cascade plan, dependents first, one transaction per node.
+ * Idempotent: nodes already reset are skipped; a publishing node is deferred.
+ * See specs/task-lifecycle "Cascade reopen" and specs/crash-recovery "Cascade is resumable".
+ */
+export async function applyPendingCascade(o: Orchestrator): Promise<void> {
+  const pending = o.pendingCascade();
+  if (!pending) return;
+  let deferred = false;
+  for (const step of pending.plan) {
+    const node = o.graph().nodes.get(step.id);
+    if (!node) continue;
+    const entry = o.entry(step.id);
+    const kind = entry.status.kind;
+    if (node.kind === 'milestone') {
+      if (kind === 'done' || kind === 'submitted') o.resetMilestone(step.id, 'upstreamReopened', pending.target);
+      continue;
+    }
+    const isTarget = step.id === pending.target;
+    if (kind === 'unstarted' || kind === 'failed' || kind === 'blocked') continue;
+    if (kind === 'cancelled' && !isTarget) continue;
+    if (kind === 'submitted' && o.store.listJobs({ taskId: step.id, status: 'publishing' }).length) {
+      deferred = true;
+      continue;
+    }
+    const live = o.store.listLaunches({ taskId: step.id, status: 'live' }).filter((l) => entry.lease?.launchId === l.launchId);
+    for (const l of live) {
+      await o.runner.reap(l);
+      await o.recordUsage(l);
+    }
+    o.store.transaction(() => {
+      for (const j of o.store.listJobs({ taskId: step.id, status: ['queued', 'checking', 'verified'] })) o.store.dropJob(j.jobId);
+      for (const l of live) o.endLaunch(l, 'cascade');
+      const revision = o.revisionContext(step.id, isTarget ? 'reopened' : 'upstreamReopened', isTarget ? undefined : pending.target);
+      const trigger = isTarget ? (kind === 'cancelled' ? 'uncancel' : 'reopen') : 'cascade';
+      o.transition(step.id, { kind: 'unstarted' }, 'human', trigger, { carry: revision ? { revision } : undefined, accepted: undefined, integrationSha: undefined }, { cascade: pending.target });
+    });
+    for (const l of live) await o.workspace.remove(l);
+  }
+  if (!deferred) o.clearPendingCascade();
+}
+
 /** Phase 1. */
 export async function reconcile(o: Orchestrator): Promise<void> {
+  await applyPendingCascade(o);
   const now = o.now();
   for (const launch of o.store.listLaunches({ status: 'live' })) {
     const entry = o.entry(launch.taskId);

@@ -2,11 +2,15 @@
  * Startup recovery, run before the first tick. Idempotent. See specs/crash-recovery.
  */
 import type { Orchestrator } from '../loop/orchestrator.js';
+import { applyPendingCascade } from '../loop/tick.js';
 import { startLaunch } from './launch.js';
 
 export async function recover(o: Orchestrator): Promise<void> {
   if (!o.hasGraph()) return;
   const { store, runner, workspace } = o;
+
+  // A cascade recorded before the crash resumes first; nodes already reset are skipped.
+  await applyPendingCascade(o);
 
   for (const launch of store.listLaunches({ status: ['preparing', 'launching'] })) {
     const entry = o.entry(launch.taskId);

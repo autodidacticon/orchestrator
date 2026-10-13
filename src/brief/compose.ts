@@ -121,6 +121,24 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     if (c['question'] || c['answer']) lines.push(`- Question asked earlier: ${JSON.stringify(c['question'])}`, `- Human answer: ${String(c['answer'] ?? '')}`);
     lines.push('');
   }
+  const revision = input.carry?.['revision'] as import('../state/status.js').RevisionContext | undefined;
+  if (revision) {
+    lines.push('## Revision', '');
+    lines.push(
+      revision.cause === 'upstreamReopened'
+        ? `- This task is being revised because its upstream task \`${revision.upstream ?? ''}\` was reopened and its work may change.`
+        : '- This task was reopened for revision.',
+    );
+    lines.push(
+      `- Your prior launch \`${revision.priorLaunchId}\` worked on branch \`${revision.priorBranch}\`${
+        revision.priorPublishedSha
+          ? ` and published commit \`${revision.priorPublishedSha}\`, which remains on \`${input.integrationBranch}\` and is contained in your base commit \`${launch.baseSha}\``
+          : ' and did not publish'
+      }.`,
+    );
+    if (revision.priorReportSummary) lines.push(`- Prior report: ${revision.priorReportSummary}`);
+    lines.push('- Revise the prior work rather than redoing it: build on what the base commit already contains, and commit the delta.', '');
+  }
   lines.push('## Reporting', '');
   lines.push(
     `- API: \`${input.apiBaseUrl}/v1/launches/${launch.launchId}/...\` with header \`Authorization: Bearer <token from brief.json>\`.`,

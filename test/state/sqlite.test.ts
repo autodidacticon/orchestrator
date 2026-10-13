@@ -108,6 +108,21 @@ describe('sqlite store', () => {
     expect(store.getPayloadOverlay('T1', 'other')).toBeUndefined();
   });
 
+  it('proposals round-trip and a dropped job is applied', () => {
+    store.createProposal({ id: 'T2-p1', taskId: 'T2', launchId: 'L1', status: 'pending', payload: { title: 'Follow-up', description: 'd', acceptanceCriteria: ['works'], deps: ['T3'] }, createdAt: 5 });
+    store.createProposal({ id: 'T2-p2', taskId: 'T2', launchId: 'L1', status: 'pending', payload: { title: 'Second', description: 'd', acceptanceCriteria: ['x'] }, createdAt: 6 });
+    expect(store.listProposals({ status: 'pending' }).map((p) => p.id)).toEqual(['T2-p1', 'T2-p2']);
+    store.updateProposal('T2-p1', { status: 'accepted', nodeId: 'ENG-77', decidedAt: 9 });
+    expect(store.getProposal('T2-p1')).toMatchObject({ status: 'accepted', nodeId: 'ENG-77', decidedAt: 9, payload: { deps: ['T3'] } });
+    expect(store.listProposals({ status: 'pending' }).map((p) => p.id)).toEqual(['T2-p2']);
+    expect(store.listProposals({ taskId: 'T2' })).toHaveLength(2);
+    expect(store.listProposals({ taskId: 'T9' })).toEqual([]);
+    store.createJob({ jobId: 'J3', taskId: 'T2', launchId: 'L1', sealedSha: 'x', baseSha: 's', status: 'queued', applied: false, createdAt: 1, updatedAt: 1 });
+    store.dropJob('J3');
+    expect(store.getJob('J3')).toMatchObject({ status: 'dropped', applied: true });
+    expect(store.listJobs({ status: 'queued' })).toEqual([]);
+  });
+
   it('health and usage fields round-trip on launches and jobs, and an undefined patch removes a field', () => {
     store.createLaunch({ launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'live', token: 'tok', branch: 'b', worktree: 'w', baseSha: 's', graphRev: 'r', createdAt: 1, spawnedAt: 2 });
     store.updateLaunch('L1', { progressAt: 50, lastSignal: 'worktree', progressText: 'editing', fingerprint: 'h:1', stuckSince: 60, waitedMs: 7, waitingSince: 70, costUsd: 1.25, turns: 3, durationMs: 900 });

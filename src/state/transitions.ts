@@ -40,11 +40,17 @@ export const TRANSITIONS: readonly TransitionRow[] = [
   { from: 'blocked', to: 'unstarted', actor: 'human', nodeKind: 'any', trigger: 'unblock', effects: ['resetBudgets'] },
   { from: 'done', to: 'unstarted', actor: 'human', nodeKind: 'any', trigger: 'reopen', effects: ['resetBudgets'] },
   { from: 'cancelled', to: 'unstarted', actor: 'human', nodeKind: 'any', trigger: 'uncancel', effects: ['resetBudgets'] },
+  { from: 'running', to: 'unstarted', actor: 'human', nodeKind: 'task', trigger: 'cascade', effects: ['resetBudgets'] },
+  { from: 'waiting', to: 'unstarted', actor: 'human', nodeKind: 'task', trigger: 'cascade', effects: ['resetBudgets'] },
+  { from: 'submitted', to: 'unstarted', actor: 'human', nodeKind: 'task', trigger: 'cascade', effects: ['resetBudgets'] },
+  { from: 'done', to: 'unstarted', actor: 'human', nodeKind: 'task', trigger: 'cascade', effects: ['resetBudgets'] },
   { from: 'nonTerminal', to: 'cancelled', actor: 'human', nodeKind: 'any', trigger: 'cancel', effects: [] },
   { from: 'unstarted', to: 'done', actor: 'orchestrator', nodeKind: 'milestone', trigger: 'milestoneAuto', effects: [] },
   { from: 'unstarted', to: 'submitted', actor: 'orchestrator', nodeKind: 'milestone', trigger: 'milestoneGated', effects: ['reviewVersion++'] },
   { from: 'submitted', to: 'done', actor: 'human', nodeKind: 'milestone', trigger: 'accept', effects: [] },
   { from: 'submitted', to: 'blocked', actor: 'human', nodeKind: 'milestone', trigger: 'reject', effects: [] },
+  { from: 'done', to: 'unstarted', actor: 'orchestrator', nodeKind: 'milestone', trigger: 'milestoneReset', effects: [] },
+  { from: 'submitted', to: 'unstarted', actor: 'orchestrator', nodeKind: 'milestone', trigger: 'milestoneReset', effects: [] },
 ];
 
 export class TransitionError extends Error {

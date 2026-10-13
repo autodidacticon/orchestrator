@@ -1,7 +1,7 @@
 # Host Integration Specification
 
 ## Purpose
-How the orchestrator is packaged for host sessions: the npm package's subpath exports and executables, thin per-host wrappers under `hosts/<host>/` such as the Claude Code plugin, and the import, run, and review skills those wrappers ship, including how the import skill records the tracker and how the run skill mirrors the run back to it by draining the outbox and handles stuck tasks and budget pauses on the user's say.
+How the orchestrator is packaged for host sessions: the npm package's subpath exports and executables, thin per-host wrappers under `hosts/<host>/` such as the Claude Code plugin, and the import, run, and review skills those wrappers ship, including how the import skill records the tracker and how the run skill mirrors the run back to it by draining the outbox, handles stuck tasks and budget pauses on the user's say, presents pending proposals for the user to accept or reject, creating the tracker issue first in a tracker-backed run, and offers `cascade` with its plan when a reopen is refused for its blockers.
 
 ## Requirements
 
@@ -74,3 +74,18 @@ The `run` skill SHALL act on two more digest conditions. When `stuck` is non-emp
 #### Scenario: Budget pause surfaced
 - **WHEN** `wait` returns a digest with `pausedReason` `costBudget`
 - **THEN** the skill reports the run cost and the ceiling and calls `resume` with `overrideBudget` only after the user agrees
+
+### Requirement: Run skill handles proposals
+When the digest's `proposals` is non-empty the run skill SHALL present each pending proposal to the user with its title, description, acceptance criteria, and deps, and SHALL wait for a decision. On acceptance in a run imported from a tracker, the skill SHALL create the issue through the session's tracker tools as a child of the epic, blocked by the proposing task's issue, with a description that carries the acceptance criteria under the configured heading, and SHALL call `accept_proposal` with the new issue's identifier as `nodeId`. In a file-based run it SHALL call `accept_proposal` without `nodeId`. On rejection it SHALL call `reject_proposal` with the user's note. The skill SHALL never accept a proposal without the user. When the user asks to reopen a task and `reopen` returns `blockers`, the skill SHALL show the blockers, offer `cascade`, and show the returned plan.
+
+#### Scenario: Tracker-backed acceptance
+- **WHEN** the run was imported from Linear and the user accepts `T2-p1`
+- **THEN** the skill creates a Linear issue under the epic blocked by T2's issue with the criteria in its description and calls `accept_proposal` with that issue's key as `nodeId`
+
+#### Scenario: File-based acceptance
+- **WHEN** the run came from a graph file and the user accepts `T2-p1`
+- **THEN** the skill calls `accept_proposal` with no `nodeId` and reports the new node `T2-p1`
+
+#### Scenario: Reopen refused then cascade offered
+- **WHEN** the user asks to reopen T1 and `reopen` returns `blockers` [T2]
+- **THEN** the skill tells the user T2 would be reset, and calls `reopen` with `cascade` only after the user agrees

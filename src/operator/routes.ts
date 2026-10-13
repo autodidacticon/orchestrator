@@ -5,8 +5,9 @@ import type { ApiServer } from '../agent/server.js';
 import type { ApiResponse, Orchestrator } from '../loop/orchestrator.js';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { stringify as toYaml } from 'yaml';
+import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
+import * as q from '../graph/query.js';
 import { trackerSchema } from '../import/mapping.js';
 import { logPath } from '../runner/subprocess.js';
 import { setTracker, trackerOf } from '../state/store.js';
@@ -14,7 +15,7 @@ import { policyReport } from '../tracker/policy.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), ...tracker };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
@@ -22,6 +23,7 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
     ...tracker,
     stuck: s.stuck,
     pausedReason: s.pausedReason,
+    proposals: s.proposals,
     openQuestions: s.openQuestions,
     /** Milestones awaiting a human; tasks awaiting the verifier are `verifying`. */
     awaitingReview: s.awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'milestone'),
@@ -35,6 +37,103 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
     done: s.byStatus.done.length,
     paused: s.paused,
   };
+}
+
+function validateGraphContent(content: string): ApiResponse | undefined {
+  try {
+    parseGraph(content);
+    return undefined;
+  } catch (err) {
+    if (err instanceof GraphValidationError) return { status: 400, body: { error: err.message, code: err.code, details: err.details } };
+    throw err;
+  }
+}
+
+/** Atomic write of the run's graph file, then an immediate reload. The caller validated the content. */
+export async function writeGraphAndReload(orch: Orchestrator, content: string): Promise<ApiResponse> {
+  const rev = parseGraph(content).rev;
+  const target = orch.config.graphPath;
+  await mkdir(path.dirname(target), { recursive: true });
+  const tmp = `${target}.${process.pid}.tmp`;
+  await writeFile(tmp, content, 'utf8');
+  await rename(tmp, target);
+  orch.store.appendEvent({ kind: 'graph.imported', payload: { rev, path: target } }, orch.now());
+  await orch.loadGraph();
+  const active = orch.hasGraph() ? orch.graph().rev : undefined;
+  const accepted = active === rev;
+  return { status: 200, body: { rev, accepted, active, reasons: accepted ? [] : (orch.graphRejected()?.reasons ?? []), path: target } };
+}
+
+type FileNode = Record<string, unknown> & { id: string; deps?: unknown };
+
+/** The run's graph file as a node list; rebuilt from the active graph when the file is missing. */
+async function readGraphFile(orch: Orchestrator): Promise<{ nodes: FileNode[] }> {
+  const text = await readFile(orch.config.graphPath, 'utf8').catch(() => undefined);
+  if (text) {
+    const parsed = parseYaml(text) as { nodes?: unknown } | undefined;
+    if (parsed && Array.isArray(parsed.nodes)) return { nodes: parsed.nodes as FileNode[] };
+  }
+  const nodes: FileNode[] = [...orch.graph().nodes.values()].map((n) => ({
+    id: n.id,
+    ...(n.kind !== 'task' ? { kind: n.kind } : {}),
+    ...(n.gated ? { gated: true } : {}),
+    ...(n.kind === 'external' ? { done: n.done } : {}),
+    deps: [...n.deps],
+    ...n.payload,
+  }));
+  return { nodes };
+}
+
+/**
+ * Accept a proposal: append its node to the graph file, join the proposer's gated
+ * milestones, write, reload, and mark it accepted. Idempotent on the node id.
+ */
+export async function acceptProposal(orch: Orchestrator, id: string, opts: { nodeId?: string; payload?: Record<string, unknown> }): Promise<ApiResponse> {
+  const p = orch.store.getProposal(id);
+  if (!p) return { status: 404, body: { error: `no proposal ${id}` } };
+  if (p.status === 'rejected') return { status: 409, body: { ok: false, reason: `proposal ${id} is rejected` } };
+  if (p.status === 'accepted') return { status: 200, body: { ok: true, id: p.id, nodeId: p.nodeId, duplicate: true, written: false } };
+  if (!orch.hasGraph()) return { status: 409, body: { ok: false, reason: 'graph not loaded' } };
+  const nodeId = opts.nodeId?.trim() || p.id;
+  const now = orch.now();
+  orch.store.appendEvent({ kind: 'operator.acceptProposal', taskId: p.taskId, payload: { id: p.id, nodeId, payload: opts.payload ?? null } }, now);
+  const doc = await readGraphFile(orch);
+  if (doc.nodes.some((n) => n.id === nodeId)) {
+    orch.store.updateProposal(p.id, { status: 'accepted', nodeId, decidedAt: now });
+    return { status: 200, body: { ok: true, id: p.id, nodeId, duplicate: true, written: false } };
+  }
+  const deps = [...new Set([...(p.payload.deps ?? []), p.taskId])];
+  doc.nodes.push({
+    id: nodeId,
+    deps,
+    title: p.payload.title,
+    description: p.payload.description,
+    acceptanceCriteria: p.payload.acceptanceCriteria,
+    ...(p.payload.labels ? { labels: p.payload.labels } : {}),
+    ...(p.payload.scope ? { scope: p.payload.scope } : {}),
+    ...(opts.payload ?? {}),
+    proposal: p.id,
+    proposedBy: p.taskId,
+  });
+  const joined: string[] = [];
+  if (orch.config.proposals.joinMilestone) {
+    const g = orch.graph();
+    for (const m of q.milestones(g)) {
+      const mn = g.nodes.get(m);
+      if (!mn?.gated || !q.closure(g, m).has(p.taskId)) continue;
+      const fileNode = doc.nodes.find((n) => n.id === m);
+      if (!fileNode) continue;
+      const mdeps = Array.isArray(fileNode.deps) ? (fileNode.deps as string[]) : [];
+      if (!mdeps.includes(nodeId)) fileNode.deps = [...mdeps, nodeId];
+      joined.push(m);
+    }
+  }
+  const content = toYaml({ nodes: doc.nodes });
+  const invalid = validateGraphContent(content);
+  if (invalid) return { status: 400, body: { ...invalid.body, ok: false, id: p.id, nodeId } };
+  const written = await writeGraphAndReload(orch, content);
+  orch.store.updateProposal(p.id, { status: 'accepted', nodeId, decidedAt: orch.now() });
+  return { status: 200, body: { ok: true, id: p.id, nodeId, joined, written: true, ...written.body } };
 }
 
 function result(r: { ok: true } | { ok: false; reason: string; blockers?: string[] }): ApiResponse {
@@ -59,6 +158,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           liveLaunches: [],
           stuck: [],
           pausedReason: orch.pausedReason(),
+          proposals: [],
           foreignCommits: [],
           latestSeq: orch.store.latestEventSeq(),
           tracker: trackerOf(orch.store),
@@ -71,7 +171,10 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
   server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/cancel$/, async (_req, body, [id]) =>
     result(orch.cancel(id as string, String(body['reason'] ?? 'cancelled by operator'), body['release'] === true || body['release'] === 'true')),
   );
-  server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/reopen$/, async (_req, _body, [id]) => result(orch.reopen(id as string)));
+  server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/reopen$/, async (_req, body, [id]) => {
+    const r = orch.reopen(id as string, { cascade: body['cascade'] === true || body['cascade'] === 'true' });
+    return r.ok ? { status: 200, body: { ok: true, reset: r.reset } } : { status: 409, body: { ok: false, reason: r.reason, blockers: r.blockers, publishing: r.publishing } };
+  });
   server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/unblock$/, async (_req, body, [id]) =>
     result(orch.unblock(id as string, { answer: body['answer'] ? String(body['answer']) : undefined, acceptCandidate: body['acceptCandidate'] === true })),
   );
@@ -118,13 +221,8 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     if (typeof body['content'] === 'string') content = body['content'];
     else if (Array.isArray(body['nodes'])) content = toYaml({ nodes: body['nodes'] });
     else return { status: 400, body: { error: 'content (string) or nodes (array) required' } };
-    let rev: string;
-    try {
-      rev = parseGraph(content).rev;
-    } catch (err) {
-      if (err instanceof GraphValidationError) return { status: 400, body: { error: err.message, code: err.code, details: err.details } };
-      throw err;
-    }
+    const invalid = validateGraphContent(content);
+    if (invalid) return invalid;
     if (body['tracker'] !== undefined) {
       const parsed = trackerSchema.safeParse(body['tracker']);
       if (!parsed.success) return { status: 400, body: { error: 'invalid tracker', issues: parsed.error.issues } };
@@ -134,16 +232,31 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
         orch.store.appendEvent({ kind: 'tracker.recorded', payload: { ...rec } }, orch.now());
       });
     }
-    const target = orch.config.graphPath;
-    await mkdir(path.dirname(target), { recursive: true });
-    const tmp = `${target}.${process.pid}.tmp`;
-    await writeFile(tmp, content, 'utf8');
-    await rename(tmp, target);
-    orch.store.appendEvent({ kind: 'graph.imported', payload: { rev, path: target } }, orch.now());
-    await orch.loadGraph();
-    const active = orch.hasGraph() ? orch.graph().rev : undefined;
-    const accepted = active === rev;
-    return { status: 200, body: { rev, accepted, active, reasons: accepted ? [] : (orch.graphRejected()?.reasons ?? []), path: target } };
+    return writeGraphAndReload(orch, content);
+  });
+  // Proposals: held until a human accepts or rejects them. See specs/operator-control "Proposals".
+  server.addRoute('GET', /^\/v1\/proposals$/, async (_req, query) => {
+    const status = typeof query['status'] === 'string' && query['status'] ? String(query['status']) : 'pending';
+    const proposals = status === 'all' ? orch.store.listProposals() : orch.store.listProposals({ status: status as 'pending' | 'accepted' | 'rejected' });
+    return { status: 200, body: { proposals } };
+  });
+  server.addRoute('POST', /^\/v1\/proposals\/([^/]+)\/accept$/, async (_req, body, [id]) =>
+    acceptProposal(orch, id as string, {
+      nodeId: typeof body['nodeId'] === 'string' ? body['nodeId'] : undefined,
+      payload: body['payload'] && typeof body['payload'] === 'object' ? (body['payload'] as Record<string, unknown>) : undefined,
+    }),
+  );
+  server.addRoute('POST', /^\/v1\/proposals\/([^/]+)\/reject$/, async (_req, body, [id]) => {
+    const p = orch.store.getProposal(id as string);
+    if (!p) return { status: 404, body: { error: `no proposal ${id}` } };
+    if (p.status !== 'pending') return { status: 409, body: { ok: false, reason: `proposal ${id} is ${p.status}` } };
+    const note = String(body['note'] ?? '').trim();
+    if (!note) return { status: 409, body: { ok: false, reason: 'a note is required' } };
+    orch.store.transaction(() => {
+      orch.store.appendEvent({ kind: 'operator.rejectProposal', taskId: p.taskId, payload: { id: p.id, note } }, orch.now());
+      orch.store.updateProposal(p.id, { status: 'rejected', note, decidedAt: orch.now() });
+    });
+    return { status: 200, body: { ok: true, id: p.id, rejected: true } };
   });
   // Tracker outbox: what a drainer reads and acknowledges. See specs/tracker-sync "Drainer contract".
   server.addRoute('GET', /^\/v1\/outbox$/, async (_req, query) => {

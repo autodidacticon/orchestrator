@@ -3,7 +3,7 @@
  * named crash point via ORCH_CRASH_AT, restarts it, and checks convergence.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,8 +27,24 @@ export const crashGraph = `nodes:
   - { id: MVP, kind: milestone, gated: true, deps: [T3, T4], url: "https://tracker.example/MVP" }
 `;
 
+/** A done task, a slow running dependent, and a submitted milestone: the state a cascade reopen of T1 resets. */
+export const cascadeGraph = `nodes:
+  - { id: T1, title: Schema migration, description: "add the schema migration", acceptanceCriteria: [migrates], deps: [],   behavior: commitAndSubmit, url: "https://tracker.example/T1" }
+  - { id: T2, title: Feature A API,    description: "build feature A API",      acceptanceCriteria: [serves A], deps: [T1], behavior: "slowSubmit:8000", url: "https://tracker.example/T2" }
+  - { id: MVP, kind: milestone, gated: true, deps: [T1], url: "https://tracker.example/MVP" }
+`;
+
+export type CrashScenario = 'standard' | 'cascade';
+
 export interface CrashRun {
   dir: string;
+  scenario: CrashScenario;
+  /** Arm a crash point for the running daemon through ORCH_CRASH_AT_FILE. */
+  armCrash(point: string): void;
+  disarmCrash(): void;
+  /** The daemon's URL from the store. */
+  url(): string;
+  waitUntil(pred: () => boolean, timeoutMs?: number): Promise<void>;
   repo: string;
   configPath: string;
   dataDir: string;
@@ -44,13 +60,16 @@ export interface CrashRun {
   cleanup(): void;
 }
 
-export async function setupCrashRun(): Promise<CrashRun> {
+export async function setupCrashRun(opts: { scenario?: CrashScenario } = {}): Promise<CrashRun> {
+  const scenario = opts.scenario ?? 'standard';
   const dir = mkdtempSync(path.join(tmpdir(), 'orch-crash-'));
   const repo = makeRepo(dir);
   const dataDir = path.join(dir, 'run');
   mkdirSync(dataDir);
   const graphPath = path.join(dir, 'graph.yaml');
-  writeFileSync(graphPath, crashGraph);
+  const graphText = scenario === 'cascade' ? cascadeGraph : crashGraph;
+  writeFileSync(graphPath, graphText);
+  const crashFile = path.join(dir, 'crash-at');
   const pidlog = path.join(dir, 'pids.log');
   const port = await freePort();
   const configPath = path.join(dir, 'orchestrator.yaml');
@@ -63,7 +82,8 @@ export async function setupCrashRun(): Promise<CrashRun> {
       'integrationBranch: main',
       `apiPort: ${port}`,
       'capacity: 3',
-      'tickIntervalMs: 150',
+      // The cascade scenario ticks only on wake, so an armed crash point fires in the tick that applies the cascade.
+      `tickIntervalMs: ${scenario === 'cascade' ? 30_000 : 150}`,
       'leaseTtlMs: 8000',
       'retryWindowMs: 2500',
       'checkCommand: "true"',
@@ -74,10 +94,37 @@ export async function setupCrashRun(): Promise<CrashRun> {
   );
   const baseline = gitIn(repo, 'rev-parse', 'main');
   const daemonLog = path.join(dir, 'daemon.log');
-  const graph = parseGraph(crashGraph);
+  const graph = parseGraph(graphText);
 
   const run: CrashRun = {
     dir,
+    scenario,
+    armCrash: (point) => writeFileSync(crashFile, point),
+    disarmCrash: () => {
+      try {
+        unlinkSync(crashFile);
+      } catch {
+        /* not armed */
+      }
+    },
+    url: () => {
+      const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
+      try {
+        const url = store.getKv('apiBaseUrl');
+        if (!url) throw new Error('daemon url not recorded yet');
+        return url;
+      } finally {
+        store.close();
+      }
+    },
+    waitUntil: async (pred, timeoutMs = 60_000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (existsSync(path.join(dataDir, 'store.sqlite')) && pred()) return;
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      throw new Error(`condition not reached; daemon log:\n${readFileSync(daemonLog, 'utf8').slice(-4000)}`);
+    },
     repo,
     configPath,
     dataDir,
@@ -88,7 +135,7 @@ export async function setupCrashRun(): Promise<CrashRun> {
       const fd = openSync(daemonLog, 'a');
       const extra = (env['ORCH_ARGS'] ?? '').split(' ').filter(Boolean);
       const child = spawn('node', ['--import', tsxLoader, mainTs, '--config', configPath, ...extra], {
-        env: { ...process.env, ORCH_PIDLOG: pidlog, ...env },
+        env: { ...process.env, ORCH_PIDLOG: pidlog, ORCH_CRASH_AT_FILE: crashFile, ...env },
         stdio: ['ignore', fd, fd],
       });
       return child;

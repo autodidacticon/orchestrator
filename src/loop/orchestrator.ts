@@ -22,10 +22,13 @@ import {
   type FailedReason,
   type Overlay,
   type Question,
+  type RevisionContext,
   type Status,
   type StatusKind,
 } from '../state/status.js';
 import { type Launch, runIdOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
+import type { CascadeStep } from '../graph/query.js';
+import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
 import type { BriefInput, FallbackReport, Workspace } from '../workspace/workspace.js';
@@ -43,6 +46,16 @@ export const questionSchema = z.object({
   options: z.array(z.string()).optional(),
 });
 
+/** A follow-up task an agent proposes; a human accepts it into the graph. See specs/agent-protocol "Proposals in the report". */
+export const proposalSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().min(1),
+  acceptanceCriteria: z.array(z.string().min(1)).min(1),
+  deps: z.array(z.string().min(1)).optional(),
+  scope: z.array(z.string()).optional(),
+  labels: z.array(z.string()).optional(),
+});
+
 export const submitBodySchema = z.object({
   summary: z.string().min(1),
   interfaces: z.array(z.string()).default([]),
@@ -52,7 +65,20 @@ export const submitBodySchema = z.object({
   tests: z.array(z.string()).default([]),
   acceptance: z.array(z.object({ criterion: z.string(), evidence: z.string() })).default([]),
   noChanges: z.object({ justification: z.string().min(1) }).optional(),
+  proposals: z.array(proposalSchema).default([]),
 });
+
+export type ReopenResult =
+  | { ok: true; reset: CascadeStep[] }
+  | { ok: false; reason: string; blockers?: Id[]; publishing?: Id };
+
+/** Thrown by the verifier progress callback when its job was dropped mid-flight. */
+export class JobDroppedError extends Error {
+  constructor(public readonly jobId: string) {
+    super(`job ${jobId} was dropped`);
+    this.name = 'JobDroppedError';
+  }
+}
 
 export const failBodySchema = z.object({
   tried: z.string().default(''),
@@ -116,6 +142,8 @@ export interface StatusReport {
   daemonPid: number;
   daemonUrl: string;
   latestSeq: number;
+  /** Pending agent proposals awaiting a human. See specs/operator-control "Status report: proposals". */
+  proposals: Array<{ id: string; taskId: Id; title: string }>;
   /** Tracker sync: the recorded tracker, pending effects, and effects that failed at the retry cap. */
   tracker: TrackerRecord | undefined;
   outboxPending: number;
@@ -340,8 +368,9 @@ export class Orchestrator implements OrchestratorCore {
       return;
     }
     if (!polled) return;
+    let cls: ReloadClassification | undefined;
     if (this._graph) {
-      const cls = classifyReload(this._graph, polled.graph, this.overlay());
+      cls = classifyReload(this._graph, polled.graph, this.overlay());
       if (!cls.compatible) {
         this._graphRejected = { reasons: cls.reasons.map((r: ReloadReason) => r.message) };
         this.store.appendEvent({ kind: 'graph.rejected', payload: { rev: polled.graph.rev, reasons: this._graphRejected.reasons } }, this.now());
@@ -375,6 +404,21 @@ export class Orchestrator implements OrchestratorCore {
       }
     }
     this.store.appendEvent({ kind: 'graph.loaded', payload: { rev: polled.graph.rev } }, this.now());
+    if (cls?.compatible) {
+      // Milestones hold no work: a dependency edit resets a done or submitted one. See specs/task-graph "Reload compatibility".
+      for (const m of cls.milestoneDepsChanged) this.resetMilestone(m, 'depsChanged');
+      // A payload edit reaches a live agent as a notice; its pinned brief stays. See specs/agent-protocol "Payload change notice".
+      if (this.config.graph.payloadChangedNotice) {
+        for (const id of cls.payloadChanged) {
+          const e = this.entry(id);
+          if ((e.status.kind !== 'running' && e.status.kind !== 'waiting') || !e.lease) continue;
+          this.store.transaction(() => {
+            this.queueNotice(e.lease!.launchId, { kind: 'payloadChanged', rev: polled!.graph.rev });
+            this.store.appendEvent({ kind: 'graph.payloadChanged', taskId: id, launchId: e.lease!.launchId, payload: { rev: polled!.graph.rev } }, this.now());
+          });
+        }
+      }
+    }
   }
 
   // ---- agent API (transport independent) ----
@@ -496,6 +540,10 @@ export class Orchestrator implements OrchestratorCore {
     if (kind !== 'submit') return { status: 400, body: { error: 'kind must be submit or fail' } };
     const parsed = submitBodySchema.safeParse(body);
     if (!parsed.success) return { status: 400, body: { error: 'malformed', issues: parsed.error.issues } };
+    const badDep = this.invalidProposalDep(parsed.data.proposals);
+    if (badDep) {
+      return { status: 400, body: { error: 'malformed', issues: [{ path: ['proposals', badDep.index, 'deps'], message: `proposal "${badDep.title}" depends on ${badDep.dep}, which is not in the graph` }] } };
+    }
 
     const seal = await this.workspace.seal(launch);
     if (!seal.ok) return { status: 409, body: { error: 'dirtyWorktree', files: seal.dirty } };
@@ -513,10 +561,27 @@ export class Orchestrator implements OrchestratorCore {
     return res;
   }
 
+  private invalidProposalDep(proposals: z.infer<typeof proposalSchema>[]): { index: number; title: string; dep: Id } | undefined {
+    for (let i = 0; i < proposals.length; i++) {
+      const p = proposals[i]!;
+      const dep = (p.deps ?? []).find((d) => !this.graph().nodes.has(d));
+      if (dep) return { index: i, title: p.title, dep };
+    }
+    return undefined;
+  }
+
   /** Structural checks, then submitted + verifier job. Runs inside a transaction. */
   acceptSubmission(launch: Launch, report: z.infer<typeof submitBodySchema>, sealedSha: string): ApiResponse {
     const node = this.requireNode(launch.taskId);
     this.store.putReport({ launchId: launch.launchId, taskId: launch.taskId, kind: 'submit', body: report, sealedSha, createdAt: this.now() });
+    // Proposals are held for a human; nothing joins the graph here. See specs/agent-protocol "Proposals in the report".
+    const existing = this.store.listProposals({ taskId: launch.taskId }).length;
+    report.proposals.forEach((p, i) => {
+      if ((p.deps ?? []).some((d) => !this.graph().nodes.has(d))) return;
+      const id = `${launch.taskId}-p${existing + i + 1}`;
+      this.store.createProposal({ id, taskId: launch.taskId, launchId: launch.launchId, status: 'pending', payload: p, createdAt: this.now() });
+      this.store.appendEvent({ kind: 'proposal.created', taskId: launch.taskId, launchId: launch.launchId, payload: { id, title: p.title } }, this.now());
+    });
     // The agent's claim is recorded as submitted; structural checks are the verifier's first step.
     this.transition(launch.taskId, { kind: 'submitted' }, 'agent', 'submit');
     const check = checkSubmission({
@@ -696,16 +761,84 @@ export class Orchestrator implements OrchestratorCore {
     return { ok: true };
   }
 
-  reopen(taskId: Id): { ok: true } | { ok: false; reason: string; blockers?: Id[] } {
+  /** Context for the next brief of a task relaunched after reopen, uncancel, or a cascade reset. */
+  revisionContext(id: Id, cause: RevisionContext['cause'], upstream?: Id): RevisionContext | undefined {
+    const prior = [...this.store.listLaunches({ taskId: id })].sort((a, b) => a.launchNo - b.launchNo).at(-1);
+    if (!prior) return undefined;
+    const published = this.store.listJobs({ taskId: id, status: 'published' }).at(-1);
+    const report = this.store.getCompletionReport(id);
+    return {
+      cause,
+      ...(upstream ? { upstream } : {}),
+      priorLaunchId: prior.launchId,
+      priorBranch: prior.branch,
+      ...(published?.publishedSha ? { priorPublishedSha: published.publishedSha } : {}),
+      ...(report ? { priorReportSummary: String(report.body['summary'] ?? '') } : {}),
+    };
+  }
+
+  /** Reset a done or submitted milestone to unstarted, keeping its review history. See specs/task-lifecycle "Milestone reset". */
+  resetMilestone(id: Id, reason: 'upstreamReopened' | 'depsChanged', upstream?: Id): boolean {
+    const entry = this.entry(id);
+    if (entry.status.kind !== 'done' && entry.status.kind !== 'submitted') return false;
+    this.store.transaction(() => {
+      this.transition(id, { kind: 'unstarted' }, 'orchestrator', 'milestoneReset', { accepted: undefined, integrationSha: undefined }, { reason, upstream });
+      this.store.appendEvent({ kind: 'milestone.reset', taskId: id, payload: { reason, upstream, from: entry.status.kind, reviewVersion: entry.reviewVersion } }, this.now());
+    });
+    return true;
+  }
+
+  /**
+   * Reopen a done or cancelled node. Plain reopen refuses when a started task is
+   * reachable through milestones; `cascade` records a plan the tick applies.
+   * See specs/task-lifecycle "Reopen guard" and "Cascade reopen".
+   */
+  reopen(taskId: Id, opts: { cascade?: boolean } = {}): ReopenResult {
+    if (opts.cascade) return this.cascadeReopen(taskId);
     const r = q.revocable(this.graph(), this.overlay(), taskId);
     if (!r.ok) return { ok: false, reason: r.reason, blockers: r.blockers };
     const entry = this.entry(taskId);
+    const node = this.requireNode(taskId);
+    const from = entry.status.kind;
+    const resets = r.resets.map((m) => ({ id: m, from: this.entry(m).status.kind }));
     this.store.transaction(() => {
-      this.operatorEvent('reopen', taskId, {});
-      this.transition(taskId, { kind: 'unstarted' }, 'human', entry.status.kind === 'done' ? 'reopen' : 'uncancel', { carry: undefined, accepted: undefined });
+      this.operatorEvent('reopen', taskId, { cascade: false, resets: r.resets });
+      const revision = node.kind === 'task' ? this.revisionContext(taskId, 'reopened') : undefined;
+      this.transition(taskId, { kind: 'unstarted' }, 'human', from === 'done' ? 'reopen' : 'uncancel', { carry: revision ? { revision } : undefined, accepted: undefined, integrationSha: undefined });
+      for (const m of r.resets) this.resetMilestone(m, 'upstreamReopened', taskId);
     });
     this.wake();
-    return { ok: true };
+    return { ok: true, reset: [{ id: taskId, from }, ...resets] };
+  }
+
+  private cascadeReopen(taskId: Id): ReopenResult {
+    const node = this.graph().nodes.get(taskId);
+    const entry = this.entry(taskId);
+    if (!node || node.kind === 'external') return { ok: false, reason: `node ${taskId} cannot be reopened` };
+    if (entry.status.kind !== 'done' && entry.status.kind !== 'cancelled') return { ok: false, reason: `node ${taskId} is ${entry.status.kind}, not done or cancelled` };
+    if (this.pendingCascade()) return { ok: false, reason: 'a cascade is already pending; retry after the next tick' };
+    const plan = q.cascadePlan(this.graph(), this.overlay(), taskId);
+    for (const step of plan) {
+      if (this.store.listJobs({ taskId: step.id, status: 'publishing' }).length) {
+        return { ok: false, reason: `${step.id} is publishing; retry after it settles`, publishing: step.id };
+      }
+    }
+    this.store.transaction(() => {
+      this.operatorEvent('reopen', taskId, { cascade: true, plan });
+      this.store.setKv('cascade.pending', JSON.stringify({ target: taskId, plan, recordedAt: this.now() }));
+    });
+    crashPoint('cascade.afterPlan');
+    this.wake();
+    return { ok: true, reset: plan };
+  }
+
+  pendingCascade(): { target: Id; plan: CascadeStep[]; recordedAt: number } | undefined {
+    const raw = this.store.getKv('cascade.pending');
+    return raw ? (JSON.parse(raw) as { target: Id; plan: CascadeStep[]; recordedAt: number }) : undefined;
+  }
+
+  clearPendingCascade(): void {
+    this.store.setKv('cascade.pending', '');
   }
 
   unblock(taskId: Id, opts: { answer?: string; acceptCandidate?: boolean } = {}): { ok: true } | { ok: false; reason: string } {
@@ -902,6 +1035,7 @@ export class Orchestrator implements OrchestratorCore {
       daemonPid: process.pid,
       daemonUrl: this.apiBaseUrl,
       latestSeq: this.store.latestEventSeq(),
+      proposals: this.store.listProposals({ status: 'pending' }).map((p) => ({ id: p.id, taskId: p.taskId, title: p.payload.title })),
       tracker: trackerOf(this.store),
       outboxPending: this.store.countOutbox('pending'),
       trackerErrors: this.trackerErrors(),
@@ -951,6 +1085,10 @@ export class Orchestrator implements OrchestratorCore {
     crashPoint('verify.afterQueued');
     this.verifierInFlight = this.runVerifierJob(job)
       .catch((err) => {
+        if (err instanceof JobDroppedError) {
+          this.log.info('verifier job dropped mid-flight', { jobId: job.jobId });
+          return;
+        }
         this.log.error('verifier job crashed', { jobId: job.jobId, err: String(err) });
         this.store.updateJob(job.jobId, { status: 'failed', failureKind: 'checkFailed', output: String(err), updatedAt: this.now() });
       })
@@ -967,9 +1105,19 @@ export class Orchestrator implements OrchestratorCore {
     const outcome = await this.verifier.run(job, {
       summary,
       noChanges,
-      progress: (patch) => this.store.updateJob(job.jobId, { ...patch, updatedAt: this.now() }),
+      progress: (patch) => {
+        // A job dropped by a cascade must not advance; throwing here stops the verifier before it publishes.
+        const cur = this.store.getJob(job.jobId);
+        if (!cur || cur.status === 'dropped') throw new JobDroppedError(job.jobId);
+        this.store.updateJob(job.jobId, { ...patch, updatedAt: this.now() });
+      },
       publishedSince: async (baseSha) => this.publishedSince(baseSha),
     });
+    const current = this.store.getJob(job.jobId);
+    if (!current || current.status === 'dropped' || current.applied) {
+      this.log.info('verifier outcome discarded; job no longer live', { jobId: job.jobId });
+      return;
+    }
     if (outcome.kind === 'published') {
       this.store.updateJob(job.jobId, { status: 'published', publishedSha: outcome.publishedSha, verifiedSha: outcome.verifiedSha, changedFiles: outcome.changedFiles, updatedAt: this.now() });
     } else if (outcome.kind === 'requeue') {

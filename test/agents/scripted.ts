@@ -151,6 +151,18 @@ async function main(): Promise<void> {
       await api('report', submitBody());
       break;
     }
+    case 'proposeThenSubmit': {
+      writeAndCommit();
+      const count = Number(param ?? 2);
+      const proposals = Array.from({ length: count }, (_, i) => ({
+        title: `Follow-up ${i + 1} from ${brief.taskId}`,
+        description: `Follow-up work discovered while doing ${brief.taskId}.`,
+        acceptanceCriteria: [`follow-up ${i + 1} works`],
+        ...(i === 0 ? { labels: ['follow-up'] } : {}),
+      }));
+      await api('report', submitBody({ proposals }));
+      break;
+    }
     case 'rebaseThenSubmit': {
       // Commit, wait for a baseMoved notice, rebase onto the new head, commit again, submit.
       writeAndCommit();

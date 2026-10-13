@@ -2,39 +2,108 @@
 
 An orchestrator that runs many coding agents in parallel from a dependency graph of tasks against one repository. Dependencies gate admission. Each agent works in its own git worktree and reports through a local API. Humans resolve blockers and review milestones. A task is done only after its sealed work has been rebased, checked, and published to the integration branch. The orchestrator itself is a static TypeScript daemon with named hook points for model-backed judgment, designed to converge to the same outcome after a crash at any point. Task graphs are imported from Linear or Jira through the session's own tracker connector, and progress is mirrored back to the tracker.
 
-## Running
+## Running locally
+
+Prerequisites: Node 22 or newer, git, and, for real agents, the Claude Code CLI (`claude`) logged in. Scripted agents need nothing else.
 
 ```
-npm install && npm run build
-# orchestrator.yaml: repoPath, graphPath, dataDir, integrationBranch, checkCommand, capacity ...
-orchestrator-ctl start                                     # daemon for this repository; run data under ~/.orchestrator/runs/<id>/
-orchestrator-ctl status                                    # also: answer, cancel, reopen, unblock, accept, reject, pause, resume, logs, stop, runs
-orchestrator --repo .                                      # or run the daemon in the foreground (SIGTERM stops it; agents are adopted on restart)
+git clone git@github.com:autodidacticon/orchestrator.git && cd orchestrator
+npm install
+npm run build
+npm link            # puts orchestrator, orchestrator-ctl, orchestrator-mcp, orchestrator-mcp-shim on PATH
+npm test            # unit, slice, and crash-injection suites with scripted agents; no model calls
 ```
 
-For use from a Claude Code session, link the package once so its executables are on PATH, then load the host wrapper:
+### From a terminal
+
+1. In the repository you want to work on, write `orchestrator.yaml` (every key is optional):
+
+   ```yaml
+   integrationBranch: main
+   checkCommand: npm test          # run on every rebased submission before it is published
+   capacity: 2                     # agents in parallel
+   budgets:
+     maxLaunchMs: 7200000          # 2 h per launch
+     maxRunCostUsd: 20             # pause admission when the run has spent this much
+   ```
+
+2. Start the daemon for that repository. It records run data under `~/.orchestrator/runs/<id>/` and prints the graph file path:
+
+   ```
+   cd /path/to/your/repo
+   orchestrator-ctl start          # {"started": true, "url": "http://127.0.0.1:...", "graphPath": "~/.orchestrator/runs/<id>/graph.yaml", ...}
+   ```
+
+3. Write the task graph to that `graphPath`. The daemon re-reads it on change. Every task needs a description and acceptance criteria, or it is blocked as under-specified:
+
+   ```yaml
+   nodes:
+     - id: T1
+       title: Add the schema migration
+       description: Create the users table migration and the model.
+       acceptanceCriteria: [migration applies cleanly, model has unit tests]
+       deps: []
+     - id: T2
+       title: Expose the users API
+       description: Add GET and POST /users on top of T1's model.
+       acceptanceCriteria: [endpoints documented, integration test passes]
+       deps: [T1]
+     - id: MVP
+       kind: milestone
+       gated: true                 # a human reviews and accepts the pinned commit
+       deps: [T2]
+   ```
+
+4. Operate the run from the same terminal:
+
+   ```
+   orchestrator-ctl status                         # sets by state, stall roots, open questions, stuck tasks, cost
+   orchestrator-ctl answer T1 "use sqlite"         # answer an agent's question
+   orchestrator-ctl logs T1                        # the agent's captured output
+   orchestrator-ctl nudge T1 "commit what you have"
+   orchestrator-ctl accept MVP --sha <sha> --version 1   # or: reject MVP --note "..."
+   orchestrator-ctl reopen T1 [--cascade]
+   orchestrator-ctl proposals | accept-proposal <id> | reject-proposal <id> --note "..."
+   orchestrator-ctl pause | resume [--override-budget]
+   orchestrator-ctl stop [--reap]                  # graceful: agents keep running and are adopted on the next start
+   orchestrator-ctl runs                           # every run under ~/.orchestrator
+   ```
+
+   To run the daemon in the foreground instead, `orchestrator --repo .` (SIGTERM stops it gracefully). To keep everything inside one directory, use a config with explicit paths and `orchestrator --config orchestrator.yaml` with `repoPath`, `graphPath`, and `dataDir` set; then pass `--data-dir` to `orchestrator-ctl`.
+
+By default agents are headless Claude Code sessions (`runnerCommand`), each in its own git worktree with the brief on stdin and the agent API as an MCP server. For a dry run without model calls, point `runnerCommand` at the scripted agent: `node --import <repo>/node_modules/tsx/dist/loader.mjs <repo>/test/agents/scripted.ts {briefJson}`, and give each task a `behavior` such as `commitAndSubmit`, `blockAndWait:<question>`, or `fail`.
+
+### From a Claude Code session
+
+Load the plugin and use its skills: `import` turns a Linear or Jira epic into the graph with the session's own tracker connector, `run` starts the daemon and monitors it (questions, reviews, stuck tasks, proposals, tracker mirroring), and `review` judges a milestone's pinned commit.
 
 ```
-npm link                                          # installs orchestrator, orchestrator-ctl, orchestrator-mcp, orchestrator-mcp-shim
 claude --plugin-dir /path/to/orchestrator/hosts/claude-code
 ```
+
+### Tests
+
+`npm test` runs everything that needs no model: unit tests, slices with real subprocess agents, git, and the HTTP API, and the crash-injection suite in `test/crash`, which is the project gate. Two opt-in tests use a real model: `ORCH_E2E_CLAUDE=1 npm test -- test/e2e/claude` runs three Claude Code agents, and `ORCH_E2E_CLAUDE_PLUGIN=1 npm test -- test/e2e/plugin` has a Claude Code session operate a run through the plugin.
+
+## Behaviour
+
+A task is done once its sealed work has been rebased onto the integration branch, checked, and published as one squash commit with `Orchestrator-Task` and `Orchestrator-Launch` trailers; a gated milestone then waits for a human to accept its pinned commit. The daemon converges to the same outcome after a crash at any named point, and surviving agents are adopted on restart.
 
 Tracker sync. After an import that names its tracker, the daemon derives tracker-bound effects from its own transitions into a durable outbox, in the same transaction as the transition: an issue goes in progress on its first launch, done when its work is published (or, with `tracker.doneAt: milestoneAccepted`, when its gated milestone is accepted), cancelled on cancel; the parent issue follows its first starting child and closes when the milestone is accepted. Comments are posted where a human is needed: an agent's question, a block with its reason, a milestone ready for review, accepted, or rejected (`tracker.commentOnDone` and `tracker.commentOnFail` add completion and failure comments, both off by default). The daemon never talks to a tracker: the `run` skill drains the outbox after every `wait` with the session's Linear or Atlassian tools, mapping states by type, and acknowledges each effect (`outbox`, `ack` tools; `GET /v1/outbox`, `POST /v1/outbox/:id/{ack,nack}` routes; `orchestrator-ctl outbox | ack`). Every comment ends with a marker line, `— orchestrator run <id> · event <n>`, so a drainer can recognise its own comments and never posts one twice. A human reply under a question comment is relayed as the answer (`tracker.answersFromComments`, default on); the first answer wins. Config keys: `tracker.enabled` (`auto` | `always` | `never`), `maxAttempts`, `parentInProgress`, `doneAt`, `commentOnDone`, `commentOnFail`, `answersFromComments`. Status reports `tracker`, `outboxPending`, and `trackerErrors`. Manual check against a sandbox workspace: import an epic with the `import` skill in a Claude Code session connected to Linear or Jira, run it with the `run` skill, and watch the child issues move and the question comment appear; this is not part of `npm test`.
 
 Health. The daemon renews a launch's lease every tick while its process is alive, so a quiet agent is never failed for silence; lease expiry applies only to launches the runner cannot observe. Progress is a worktree fingerprint (head plus status and diff), any API call, or a changed heartbeat text. A launch idle past `health.stuckAfterMs` (default 15 min) is flagged (`stuck` in status and the digest, a `stuck` notice in its inbox, event `launch.stuck`) and idle past `health.stuckFailAfterMs` (default 45 min) is reaped and failed with reason `stuck`, spending an attempt; either threshold at 0 disables that step. `orchestrator-ctl nudge <task> <message>` (also the `nudge` tool) queues a message for the agent's inbox. Budgets: `budgets.maxLaunchMs` (default 2 h) fails an overlong launch with reason `timeBudget`, waiting time excluded; `budgets.maxRunCostUsd` (default 0, unlimited) pauses admission with `pausedReason: costBudget` once the run's cost, read from Claude Code's final JSON per launch, reaches the ceiling, and `resume` is refused until `orchestrator-ctl resume --override-budget` (or `resume` with `overrideBudget`) raises the ceiling by one budget. When a task is published, every other running agent gets a `baseMoved` notice naming the new head and the files it touched, and may rebase its branch onto it; the verifier rebases from the merge base so such branches integrate cleanly (`health.baseMovedNotice` turns the notice off).
 
-The graph file is YAML or JSON: `nodes: [{ id, kind?: task|milestone, gated?, deps: [], description, acceptanceCriteria: [...] }]`.
-Agents are launched by `runnerCommand` (default: headless Claude Code with the brief on stdin and the MCP façade). Tests: `npm test`; the crash-injection suite in `test/crash` is the project gate. `ORCH_E2E_CLAUDE=1 npm test -- test/e2e/claude` runs three real Claude Code agents; `ORCH_E2E_CLAUDE_PLUGIN=1 npm test -- test/e2e/plugin` has a real Claude Code session operate a run through the plugin.
+Graph mutation. Milestones hold no work, so they never block a reopen: reopening a done task resets every done or submitted milestone downstream (`milestone.reset`), which is reviewed again at its next version once the revised work is published, and dependency edits to such milestones are compatible reloads that reset them the same way. A reopen whose target has started task dependents is refused with the blockers; `orchestrator-ctl reopen <task> --cascade` (or `reopen` with `cascade: true`) records a plan, returns it as `reset: [{ id, from }]`, and the next tick kills running dependents, drops queued verification, and returns done dependents and the target to unstarted with budgets reset. Nothing on the integration branch is reverted: each relaunch is briefed with a revision context naming the prior launch, branch, published commit, and report, and publishes a further trailer commit. Agents may put structured `proposals` (title, description, acceptance criteria, optional deps, scope, labels) in their submit report; they are held pending (`proposals` in status and the digest) until `accept-proposal <id> [--node-id <tracker key>]` appends a task node depending on the proposer, joining its gated milestone when `proposals.joinMilestone` is true (default), or `reject-proposal <id> --note`. A compatible reload that edits a running task's payload sends its agent a `payloadChanged` inbox notice (`graph.payloadChangedNotice`, default true); the pinned brief stays and the next launch uses the new payload.
 
 ## Contents
 
 ### Requirements
 
-Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, and `add-health-monitoring`:
+Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, and `add-graph-mutation`:
 
 - Capability specs
-  - [task-graph](openspec/specs/task-graph/spec.md): loading, validation, external nodes, readiness, milestones, stall detection, revisions, reload compatibility
-  - [task-lifecycle](openspec/specs/task-lifecycle/spec.md): states, transitions by actor, admission, counters, leases, retry, reopen guard, cancellation, milestone review
+  - [task-graph](openspec/specs/task-graph/spec.md): loading, validation, external nodes, readiness, milestones, stall detection, revisions, reload compatibility, revocability through milestones and the cascade plan
+  - [task-lifecycle](openspec/specs/task-lifecycle/spec.md): states, transitions by actor, admission, counters, leases, retry, reopen guard, cascade reopen, milestone reset and review, cancellation
   - [agent-protocol](openspec/specs/agent-protocol/spec.md): the brief, the API, deduplication, sealing, no-op and acceptance checks, blocking and resume, fallback, fencing, MCP façade, brief validation
   - [integration-pipeline](openspec/specs/integration-pipeline/spec.md): worktrees, the verifier, publication, conflicts, foreign commits, milestone tags
   - [crash-recovery](openspec/specs/crash-recovery/spec.md): durable records, recovery per boundary, adoption, fencing, sweeps, crash points, invariants
@@ -48,19 +117,9 @@ Current specs in `openspec/specs/`, synced from the archived changes `add-orches
 - Archived change `add-session-operator` (operate from a Claude Code session): [Proposal](openspec/changes/archive/2026-10-12-add-session-operator/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-session-operator/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-session-operator/tasks.md)
 - Archived change `add-tracker-sync` (mirror the run to the tracker): [Proposal](openspec/changes/archive/2026-10-12-add-tracker-sync/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-tracker-sync/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-tracker-sync/tasks.md)
 - Archived change `add-health-monitoring` (liveness, stuck detection, budgets): [Proposal](openspec/changes/archive/2026-10-12-add-health-monitoring/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-health-monitoring/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-health-monitoring/tasks.md)
+- Archived change `add-graph-mutation` (transparent milestones, cascade reopen, proposals): [Proposal](openspec/changes/archive/2026-10-12-add-graph-mutation/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-graph-mutation/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-graph-mutation/tasks.md)
 
-Active changes, in the order to apply them (each has its own plan under `plans/`):
+Active changes, in the order to apply them:
 
-1. `add-graph-mutation`: milestones transparent to the reopen guard, cascade reopen, structured proposals held for acceptance, the payloadChanged notice. [Proposal](openspec/changes/add-graph-mutation/proposal.md), [Design](openspec/changes/add-graph-mutation/design.md), [Tasks](openspec/changes/add-graph-mutation/tasks.md)
-2. `add-pull-runner`: claimable launches, spawn, pull, and mixed modes, worker tools on the operator MCP server, the work skill and workflow, the marketplace manifest. [Proposal](openspec/changes/add-pull-runner/proposal.md), [Design](openspec/changes/add-pull-runner/design.md), [Tasks](openspec/changes/add-pull-runner/tasks.md)
-3. `add-scheduling-policy`: a configurable ordering chain with critical path first, declared file scopes with an overlap filter, deferred candidates in status. [Proposal](openspec/changes/add-scheduling-policy/proposal.md), [Design](openspec/changes/add-scheduling-policy/design.md), [Tasks](openspec/changes/add-scheduling-policy/tasks.md)
-
-### Plans
-
-- [plans/0-orchestrator-v1/plan.md](plans/0-orchestrator-v1/plan.md): the v1 implementation plan, including the design decisions, the build phases, and the review findings with their responses
-- [plans/1-session-operator/plan.md](plans/1-session-operator/plan.md): operating a run from a Claude Code session: host packaging, per-user run directories, the operator MCP server, tracker import, external nodes
-- [plans/2-tracker-sync/plan.md](plans/2-tracker-sync/plan.md): the tracker outbox, mirroring policy, done semantics, and answers from comments
-- [plans/3-health/plan.md](plans/3-health/plan.md): liveness, progress signals, stuck escalation, budgets, and the baseMoved notice
-- [plans/4-graph-mutation/plan.md](plans/4-graph-mutation/plan.md): transparent milestones, cascade reopen, proposals, and the payloadChanged notice
-- [plans/5-pull-runner/plan.md](plans/5-pull-runner/plan.md): claimable launches, runner modes, worker tools, the work skill and workflow, and what remote workers would need
-- [plans/6-scheduling/plan.md](plans/6-scheduling/plan.md): the ordering chain, scopes and the overlap rule, and deferred reporting
+1. `add-pull-runner`: claimable launches, spawn, pull, and mixed modes, worker tools on the operator MCP server, the work skill and workflow, the marketplace manifest. [Proposal](openspec/changes/add-pull-runner/proposal.md), [Design](openspec/changes/add-pull-runner/design.md), [Tasks](openspec/changes/add-pull-runner/tasks.md)
+2. `add-scheduling-policy`: a configurable ordering chain with critical path first, declared file scopes with an overlap filter, deferred candidates in status. [Proposal](openspec/changes/add-scheduling-policy/proposal.md), [Design](openspec/changes/add-scheduling-policy/design.md), [Tasks](openspec/changes/add-scheduling-policy/tasks.md)

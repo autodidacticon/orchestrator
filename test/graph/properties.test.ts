@@ -1,8 +1,8 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { type GraphNode, type Id, makeGraph } from '../../src/graph/model.js';
-import { depsSatisfied, milestoneFixedPoint, milestonesDue, ready } from '../../src/graph/query.js';
-import { defaultEntry, type Entry, type Status } from '../../src/state/status.js';
+import { dependents, depsSatisfied, milestoneFixedPoint, milestonesDue, ready, revocable } from '../../src/graph/query.js';
+import { defaultEntry, type Entry, isStarted, type Status } from '../../src/state/status.js';
 import { asStatus } from './helpers.js';
 
 /** Random DAG: node i may depend only on nodes < i, so it is acyclic by construction. */
@@ -72,6 +72,35 @@ describe('graph properties', () => {
             for (const other of before) {
               if (other !== id) expect(after.has(other)).toBe(true);
             }
+          }
+        },
+      ),
+    );
+  });
+
+  it('revocable blockers are the started non-milestone nodes reachable through milestone-only paths, never a milestone', () => {
+    fc.assert(
+      fc.property(
+        dagArb.chain((g) => fc.tuple(fc.constant(g), overlayArb([...g.nodes.keys()]))),
+        ([g, o]) => {
+          for (const [id, e] of o) {
+            if (e.status.kind !== 'done' && e.status.kind !== 'cancelled') continue;
+            const expected = new Set<string>();
+            const seen = new Set<string>();
+            const walk = (n: string): void => {
+              for (const d of dependents(g, n)) {
+                if (seen.has(d)) continue;
+                seen.add(d);
+                if (g.nodes.get(d)?.kind === 'milestone') walk(d);
+                else if (isStarted(o.get(d)!.status)) expected.add(d);
+              }
+            };
+            walk(id);
+            const r = revocable(g, o, id);
+            const blockers = r.ok ? [] : r.blockers;
+            expect(new Set(blockers)).toEqual(expected);
+            for (const b of blockers) expect(g.nodes.get(b)?.kind).not.toBe('milestone');
+            for (const m of r.resets) expect(g.nodes.get(m)?.kind).toBe('milestone');
           }
         },
       ),

@@ -44,6 +44,12 @@ describe('MCP shim', () => {
     expect(hb).toMatchObject({ status: 200, ok: true });
     expect(h.store.listEvents({ kind: 'agent.heartbeat' })[0]?.payload).toEqual({ progress: 'hi' });
 
+    // a payload edit to the running task reaches the agent through the inbox tool
+    h.source.set(single('hang', ', title: "renamed"'));
+    await h.orch.tick();
+    const inbox = parse(await client.callTool({ name: 'inbox', arguments: {} }));
+    expect(inbox).toMatchObject({ status: 200, notices: [{ kind: 'payloadChanged', rev: h.orch.graph().rev }] });
+
     // restart the server on the same port while a call is in flight
     const port = h.server.port;
     await h.server.close();

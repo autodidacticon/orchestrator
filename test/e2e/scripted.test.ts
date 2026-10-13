@@ -34,6 +34,27 @@ describe('e2e with scripted agents', () => {
     }
   }, 120_000);
 
+  it('a scripted agent proposes a follow-up; accepting it through the CLI appends the node, which runs after the proposer', async () => {
+    const run = await setupCrashRun();
+    writeFileSync(path.join(run.dir, 'graph.yaml'), 'nodes:\n  - { id: T1, deps: [], behavior: "proposeThenSubmit:1", description: d, acceptanceCriteria: [a] }\n');
+    try {
+      const child = run.start();
+      await run.waitUntil(() => run.entries().get('T1')?.status.kind === 'done', 60_000);
+      const url = run.url();
+      const listed = await runCli(['proposals', '--url', url]);
+      expect(listed.body).toMatchObject({ proposals: [{ id: 'T1-p1', status: 'pending', payload: { title: 'Follow-up 1 from T1', labels: ['follow-up'] } }] });
+      const accepted = await runCli(['accept-proposal', 'T1-p1', '--url', url]);
+      expect(accepted.body).toMatchObject({ ok: true, nodeId: 'T1-p1', accepted: true });
+      expect(readFileSync(path.join(run.dir, 'graph.yaml'), 'utf8')).toContain('id: T1-p1');
+      await run.waitUntil(() => run.entries().get('T1-p1')?.status.kind === 'done', 60_000);
+      expect(gitIn(run.repo, 'log', '--format=%(trailers:key=Orchestrator-Task,valueonly)', 'main').split('\n').filter(Boolean).sort()).toEqual(['T1', 'T1-p1']);
+      expect((await runCli(['status', '--url', url])).body).toMatchObject({ proposals: [] });
+      await run.stop(child);
+    } finally {
+      run.cleanup();
+    }
+  }, 120_000);
+
   it('plain restart adopts a mid-task agent; --reap-on-exit stops it', async () => {
     const run = await setupCrashRun();
     try {

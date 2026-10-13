@@ -1,7 +1,7 @@
 /**
  * Pure queries over (graph, overlay). See specs/task-graph.
  */
-import { entryOf, isSatisfied, isStarted, type Overlay, type Status } from '../state/status.js';
+import { entryOf, isSatisfied, isStarted, type Overlay, type Status, type StatusKind } from '../state/status.js';
 import type { Graph, Id } from './model.js';
 
 export function deps(g: Graph, id: Id): readonly Id[] {
@@ -144,20 +144,67 @@ export function stallRoots(g: Graph, overlay: Overlay): Id[] {
   return out;
 }
 
-export type Revocable = { ok: true } | { ok: false; blockers: Id[]; reason: string };
+export type Revocable = { ok: true; resets: Id[] } | { ok: false; blockers: Id[]; reason: string; resets: Id[] };
 
-/** done/cancelled nodes may be reopened only if no dependent is started. */
+/**
+ * done/cancelled nodes may be reopened only if no non-milestone dependent reachable
+ * through a chain of milestones is started. Milestones are transparent: they never
+ * block, and the done or submitted ones downstream are listed as `resets`.
+ * See specs/task-graph "Revocability through milestones".
+ */
 export function revocable(g: Graph, overlay: Overlay, id: Id): Revocable {
-  if (g.nodes.get(id)?.kind === 'external') return { ok: false, blockers: [], reason: `node ${id} is external; change its done flag in the graph file` };
+  if (g.nodes.get(id)?.kind === 'external') return { ok: false, blockers: [], reason: `node ${id} is external; change its done flag in the graph file`, resets: [] };
   const s = entryOf(overlay, id).status;
   if (s.kind !== 'done' && s.kind !== 'cancelled') {
-    return { ok: false, blockers: [], reason: `node ${id} is ${s.kind}, not done or cancelled` };
+    return { ok: false, blockers: [], reason: `node ${id} is ${s.kind}, not done or cancelled`, resets: [] };
   }
-  const blockers = dependents(g, id).filter((d) => isStarted(entryOf(overlay, d).status));
+  const blockers: Id[] = [];
+  const resets: Id[] = [];
+  const seen = new Set<Id>();
+  const stack = [...dependents(g, id)];
+  while (stack.length) {
+    const d = stack.pop() as Id;
+    if (seen.has(d)) continue;
+    seen.add(d);
+    const node = g.nodes.get(d);
+    const ds = entryOf(overlay, d).status;
+    if (node?.kind === 'milestone') {
+      if (ds.kind === 'done' || ds.kind === 'submitted') resets.push(d);
+      stack.push(...dependents(g, d));
+    } else if (isStarted(ds)) {
+      blockers.push(d);
+    }
+  }
+  blockers.sort();
   if (blockers.length) {
-    return { ok: false, blockers, reason: `dependents started: ${blockers.join(', ')}` };
+    return { ok: false, blockers, reason: `dependents started: ${blockers.join(', ')}`, resets };
   }
-  return { ok: true };
+  return { ok: true, resets };
+}
+
+export interface CascadeStep {
+  id: Id;
+  from: StatusKind;
+}
+
+/**
+ * The cascade plan for reopening `id`: the node and every started node reachable
+ * downstream through any chain of dependents, dependents before their dependencies.
+ * See specs/task-graph "Revocability through milestones".
+ */
+export function cascadePlan(g: Graph, overlay: Overlay, id: Id): CascadeStep[] {
+  const order: Id[] = [];
+  const seen = new Set<Id>();
+  const visit = (n: Id): void => {
+    if (seen.has(n)) return;
+    seen.add(n);
+    for (const d of dependents(g, n)) visit(d);
+    order.push(n);
+  };
+  visit(id);
+  return order
+    .filter((n) => n === id || isStarted(entryOf(overlay, n).status))
+    .map((n) => ({ id: n, from: entryOf(overlay, n).status.kind }));
 }
 
 export interface QuiescenceContext {

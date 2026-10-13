@@ -11,7 +11,16 @@ export interface ReloadReason {
 }
 
 export type ReloadClassification =
-  | { compatible: true; added: Id[]; removed: Id[]; changed: Id[] }
+  | {
+      compatible: true;
+      added: Id[];
+      removed: Id[];
+      changed: Id[];
+      /** Started tasks whose payload differs; their live launches get a notice. */
+      payloadChanged: Id[];
+      /** Done or submitted milestones whose deps changed; they reset. */
+      milestoneDepsChanged: Id[];
+    }
   | { compatible: false; reasons: ReloadReason[] };
 
 function sameSet(a: readonly Id[], b: readonly Id[]): boolean {
@@ -25,12 +34,16 @@ export function classifyReload(prev: Graph, next: Graph, overlay: Overlay): Relo
   const added: Id[] = [];
   const removed: Id[] = [];
   const changed: Id[] = [];
+  const payloadChanged: Id[] = [];
+  const milestoneDepsChanged: Id[] = [];
 
   for (const id of next.nodes.keys()) {
     if (!prev.nodes.has(id)) added.push(id);
   }
   for (const [id, old] of prev.nodes) {
-    const started = isStarted(entryOf(overlay, id).status);
+    const status = entryOf(overlay, id).status;
+    // Milestones hold no work: they never count as started for compatibility. See specs/task-graph "Reload compatibility".
+    const started = old.kind !== 'milestone' && isStarted(status);
     const nu = next.nodes.get(id);
     if (!nu) {
       removed.push(id);
@@ -43,6 +56,8 @@ export function classifyReload(prev: Graph, next: Graph, overlay: Overlay): Relo
     const kindChanged = old.kind !== nu.kind;
     const otherChanged = old.gated !== nu.gated || old.done !== nu.done || JSON.stringify(old.payload) !== JSON.stringify(nu.payload);
     if (depsChanged || kindChanged || otherChanged) changed.push(id);
+    if (started && JSON.stringify(old.payload) !== JSON.stringify(nu.payload)) payloadChanged.push(id);
+    if (old.kind === 'milestone' && nu.kind === 'milestone' && depsChanged && (status.kind === 'done' || status.kind === 'submitted')) milestoneDepsChanged.push(id);
     if (started && depsChanged) {
       reasons.push({ id, code: 'depsChangedStarted', message: `deps of ${id} changed while started` });
     }
@@ -52,5 +67,5 @@ export function classifyReload(prev: Graph, next: Graph, overlay: Overlay): Relo
   }
 
   if (reasons.length) return { compatible: false, reasons };
-  return { compatible: true, added, removed, changed };
+  return { compatible: true, added, removed, changed, payloadChanged, milestoneDepsChanged };
 }

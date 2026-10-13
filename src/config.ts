@@ -34,6 +34,20 @@ export const configSchema = z.object({
   onInsufficient: z.enum(['block', 'remediate']).default('block'),
   remediateMode: z.enum(['review', 'auto']).default('review'),
   cancelReleasesDependentsDefault: z.boolean().default(false),
+  /** Graph reload behaviour. See specs/agent-protocol "Payload change notice". */
+  graph: z
+    .object({
+      /** Notify a live launch when a compatible reload changed its task's payload. */
+      payloadChangedNotice: z.boolean().default(true),
+    })
+    .default({}),
+  /** Agent proposals. See specs/operator-control "Proposals". */
+  proposals: z
+    .object({
+      /** An accepted proposal joins every gated milestone whose closure contains the proposer. */
+      joinMilestone: z.boolean().default(true),
+    })
+    .default({}),
   /** Stuck detection and the base-moved notice. See specs/health-monitoring. */
   health: z
     .object({

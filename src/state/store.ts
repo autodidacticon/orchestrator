@@ -117,6 +117,32 @@ export interface TrackerRecord {
   recordedAt: number;
 }
 
+export type ProposalStatus = 'pending' | 'accepted' | 'rejected';
+
+/** A follow-up task an agent proposed in its report. See specs/agent-protocol "Proposals in the report". */
+export interface ProposalPayload {
+  title: string;
+  description: string;
+  acceptanceCriteria: string[];
+  deps?: Id[];
+  scope?: string[];
+  labels?: string[];
+}
+
+export interface Proposal {
+  /** `<taskId>-p<n>`. */
+  id: string;
+  taskId: Id;
+  launchId: string;
+  status: ProposalStatus;
+  payload: ProposalPayload;
+  /** The graph node the proposal became, once accepted. */
+  nodeId?: Id;
+  note?: string;
+  createdAt: number;
+  decidedAt?: number;
+}
+
 export interface EventInput {
   kind: string;
   taskId?: Id;
@@ -153,6 +179,13 @@ export interface Store {
   updateJob(jobId: string, patch: Partial<VerifierJob>): void;
   getJob(jobId: string): VerifierJob | undefined;
   listJobs(filter?: { status?: JobStatus | JobStatus[]; taskId?: Id; applied?: boolean }): VerifierJob[];
+  /** Mark a job dropped and applied; a dropped job's in-flight result is discarded. */
+  dropJob(jobId: string): void;
+
+  createProposal(p: Proposal): void;
+  updateProposal(id: string, patch: Partial<Proposal>): void;
+  getProposal(id: string): Proposal | undefined;
+  listProposals(filter?: { status?: ProposalStatus; taskId?: Id }): Proposal[];
 
   putReport(r: StoredReport): void;
   getReport(launchId: string): StoredReport | undefined;

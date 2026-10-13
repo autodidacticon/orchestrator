@@ -34,7 +34,9 @@ describe('operator CLI and routes', () => {
     expect((await cli('nudge', 'T2', 'hello')).status).toBe(409);
     expect((await cli('answer', 'T1', 'option', 'b')).body).toEqual({ ok: true });
     await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done', 20_000);
-    expect((await cli('reopen', 'T1')).status).toBe(409); // T2 is started
+    const refused = await cli('reopen', 'T1');
+    expect(refused.status).toBe(409); // T2 is started
+    expect(refused.body).toMatchObject({ ok: false, blockers: ['T2'] });
     await h.waitFor(() => h!.orch.entry('MVP').status.kind === 'submitted', 20_000);
     const mvp = h.orch.entry('MVP');
     expect((await cli('accept', 'MVP', '--sha', mvp.integrationSha!, '--version', '7')).status).toBe(409);
@@ -75,6 +77,23 @@ describe('operator CLI and routes', () => {
     expect((paged.body as { effects: Array<{ id: number }> }).effects.map((e) => e.id)).toEqual([second!.id]);
     await expect(cli('ack')).rejects.toThrow(/effect id/);
   });
+
+  it('reopen --cascade returns the plan and the tick applies it', async () => {
+    h = await makeSlice({ graph: `nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit }\n  - { id: T2, deps: [T1], behavior: hang }`, config: { leaseTtlMs: 60_000 } });
+    const url = h.orch.apiBaseUrl;
+    const cli = (...args: string[]) => runCli([...args, '--url', url]);
+    await h.waitFor(() => h!.orch.entry('T2').status.kind === 'running', 20_000);
+    const l2 = h.launchOf('T2');
+    const r = await cli('reopen', 'T1', '--cascade');
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ ok: true, reset: expect.arrayContaining([{ id: 'T2', from: 'running' }, { id: 'T1', from: 'done' }]) });
+    expect(h.store.listEvents({ kind: 'operator.reopen' }).at(-1)?.payload).toMatchObject({ cascade: true });
+    await h.orch.tick();
+    expect(h.store.getLaunch(l2.launchId)).toMatchObject({ status: 'ended', endReason: 'cascade' });
+    expect(h.orch.entry('T2')).toMatchObject({ status: { kind: 'unstarted' }, attempts: 0 });
+    expect((await cli('proposals')).body).toEqual({ proposals: [] });
+    expect((await cli('reject-proposal', 'NOPE', '--note', 'x')).status).toBe(404);
+  }, 40_000);
 
   it('graceful stop keeps agents for adoption; --reap stops them', async () => {
     h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000 } });

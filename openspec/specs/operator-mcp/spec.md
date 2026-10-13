@@ -1,7 +1,7 @@
 # Operator MCP Specification
 
 ## Purpose
-The operator MCP server a host session uses to start, drive, wait on, and review a run: a stdio server that forwards every operator operation to the daemon's HTTP routes, the tool set it exposes, the behaviour of the `wait`, `start`, and `review` tools, the `outbox` and `ack` tools through which a session drains tracker-bound effects, the `nudge` tool, and the `stuck` and `pausedReason` health fields the `wait` digest carries.
+The operator MCP server a host session uses to start, drive, wait on, and review a run: a stdio server that forwards every operator operation to the daemon's HTTP routes, the tool set it exposes, the behaviour of the `wait`, `start`, and `review` tools, the `outbox` and `ack` tools through which a session drains tracker-bound effects, the `nudge` tool, the `stuck` and `pausedReason` health fields the `wait` digest carries, the `cascade` parameter of the `reopen` tool, and the `proposals`, `accept_proposal`, and `reject_proposal` tools through which a session decides proposed follow-up work.
 
 ## Requirements
 
@@ -84,3 +84,17 @@ The digest returned by `wait` and `events` SHALL include `stuck` and `pausedReas
 #### Scenario: Digest shows a budget pause
 - **WHEN** the run cost budget is reached during a `wait`
 - **THEN** the returned digest has `paused` true and `pausedReason` `costBudget`
+
+### Requirement: Reopen tool cascade parameter
+The `reopen` tool SHALL accept an optional boolean `cascade`, forward it in the route body, and return the route's response unchanged, so that a refusal carries `blockers` and a cascade carries `reset`.
+
+#### Scenario: Refusal then cascade
+- **WHEN** `reopen` is called for T1 while T2 runs, and then called again with `cascade: true`
+- **THEN** the first result carries `blockers` with T2 and the second carries `reset` with T1 and T2
+
+### Requirement: Proposal tools
+The server SHALL expose `proposals` with an optional `status`, `accept_proposal` with `id`, optional `nodeId`, and optional `payload`, and `reject_proposal` with `id` and `note`, each forwarding to the corresponding daemon route and returning a single JSON text block.
+
+#### Scenario: Accept through the tool
+- **WHEN** `accept_proposal` is called with `T2-p1` and `nodeId` ENG-77
+- **THEN** the daemon records the operator event, the result reports node ENG-77, and `status` no longer lists `T2-p1`

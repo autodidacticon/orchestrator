@@ -174,6 +174,16 @@ export interface ConflictContext {
   previousBranch: string;
 }
 
+/** Why a task is relaunched after reopen, uncancel, or a cascade reset. See specs/agent-protocol "Revision context in the brief". */
+export interface RevisionContext {
+  cause: 'reopened' | 'upstreamReopened';
+  upstream?: Id;
+  priorLaunchId: string;
+  priorBranch: string;
+  priorPublishedSha?: string;
+  priorReportSummary?: string;
+}
+
 /** Attempt context composed into the next brief, then cleared at launch. */
 export interface AttemptContext {
   priorFailure?: FailedReason;
@@ -181,4 +191,5 @@ export interface AttemptContext {
   conflict?: ConflictContext;
   question?: Question;
   answer?: string;
+  revision?: RevisionContext;
 }

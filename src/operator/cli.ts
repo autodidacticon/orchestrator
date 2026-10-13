@@ -4,7 +4,10 @@
  *   orchestrator-ctl status
  *   orchestrator-ctl answer <task> <text>
  *   orchestrator-ctl cancel <task> [--release] [--reason <text>]
- *   orchestrator-ctl reopen <task>
+ *   orchestrator-ctl reopen <task> [--cascade]
+ *   orchestrator-ctl proposals [--status <pending|accepted|rejected|all>]
+ *   orchestrator-ctl accept-proposal <id> [--node-id <id>] [--payload <json>]
+ *   orchestrator-ctl reject-proposal <id> --note <text>
  *   orchestrator-ctl unblock <task> [--answer <text>] [--accept-candidate]
  *   orchestrator-ctl accept <milestone> --sha <sha> --version <n>
  *   orchestrator-ctl reject <milestone> --note <text>
@@ -68,7 +71,10 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl status
   orchestrator-ctl answer <task> <text>
   orchestrator-ctl cancel <task> [--release] [--reason <text>]
-  orchestrator-ctl reopen <task>
+  orchestrator-ctl reopen <task> [--cascade]       cascade resets started dependents and returns the plan
+  orchestrator-ctl proposals [--status <s>]       pending agent proposals (or accepted, rejected, all)
+  orchestrator-ctl accept-proposal <id> [--node-id <id>] [--payload <json>]
+  orchestrator-ctl reject-proposal <id> --note <text>
   orchestrator-ctl unblock <task> [--answer <text>] [--accept-candidate]
   orchestrator-ctl accept <milestone> --sha <sha> --version <n>
   orchestrator-ctl reject <milestone> --note <text>
@@ -107,6 +113,10 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       result: { type: 'string' },
       error: { type: 'string' },
       'override-budget': { type: 'boolean', default: false },
+      cascade: { type: 'boolean', default: false },
+      status: { type: 'string' },
+      'node-id': { type: 'string' },
+      payload: { type: 'string' },
     },
   });
   const [cmd, a, ...rest] = positionals;
@@ -130,7 +140,15 @@ export async function runCli(argv: string[]): Promise<CliResult> {
     case 'cancel':
       return call(base, 'POST', `/v1/tasks/${a}/cancel`, { reason: values.reason ?? 'cancelled by operator', release: values.release });
     case 'reopen':
-      return call(base, 'POST', `/v1/tasks/${a}/reopen`);
+      return call(base, 'POST', `/v1/tasks/${a}/reopen`, { cascade: values.cascade });
+    case 'proposals':
+      return call(base, 'GET', `/v1/proposals${values.status ? `?status=${encodeURIComponent(values.status)}` : ''}`);
+    case 'accept-proposal':
+      if (!a) throw new Error('accept-proposal needs a proposal id');
+      return call(base, 'POST', `/v1/proposals/${a}/accept`, { nodeId: values['node-id'], payload: values.payload ? (JSON.parse(values.payload) as Record<string, unknown>) : undefined });
+    case 'reject-proposal':
+      if (!a) throw new Error('reject-proposal needs a proposal id');
+      return call(base, 'POST', `/v1/proposals/${a}/reject`, { note: values.note ?? rest.join(' ') });
     case 'unblock':
       return call(base, 'POST', `/v1/tasks/${a}/unblock`, { answer: values.answer, acceptCandidate: values['accept-candidate'] });
     case 'accept':

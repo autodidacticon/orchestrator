@@ -37,3 +37,12 @@ criteria if any.
 
 Report your decision and the reasons to the user in a few lines. Never accept on the
 strength of green checks alone.
+
+## Repairing after a rejection
+
+A rejected milestone stays blocked until the work under it changes. Two repair paths: add a
+new task to the graph (or accept an agent's proposal) and `unblock` the milestone, or reopen
+the offending task with the `run` skill's reopen flow. Reopening a task under the milestone
+resets the milestone automatically; it is resubmitted at the next review version, with a
+new tag at the new head, once the revised task is published. Accepting against the old
+version is refused as stale.

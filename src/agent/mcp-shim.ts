@@ -72,6 +72,10 @@ export async function startShim(env: ShimEnv): Promise<void> {
         tests: z.array(z.string()).optional(),
         acceptance: z.array(z.object({ criterion: z.string(), evidence: z.string() })).optional(),
         noChanges: z.object({ justification: z.string() }).optional(),
+        proposals: z
+          .array(z.object({ title: z.string(), description: z.string(), acceptanceCriteria: z.array(z.string()), deps: z.array(z.string()).optional(), scope: z.array(z.string()).optional(), labels: z.array(z.string()).optional() }))
+          .optional()
+          .describe('Follow-up tasks you discovered; a human accepts them into the graph. followUps stays free text.'),
         tried: z.string().optional(),
         why: z.string().optional(),
         whatWouldUnblock: z.string().optional(),

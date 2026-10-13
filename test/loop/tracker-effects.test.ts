@@ -185,7 +185,7 @@ describe('tracker effect derivation', () => {
     await h.orch.tick();
     await h.submit('T5');
     await h.orch.settle();
-    expect(h.orch.reopen('T5')).toEqual({ ok: true });
+    expect(h.orch.reopen('T5')).toMatchObject({ ok: true });
     await h.orch.tick();
     expect(h.statusOf('T5')).toBe('running');
     expect(states(h, 'T5')).toEqual(['inProgress', 'done', 'inProgress']);

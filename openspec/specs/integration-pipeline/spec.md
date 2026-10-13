@@ -1,7 +1,7 @@
 # Integration Pipeline Specification
 
 ## Purpose
-Repository layout, one worktree per launch, the serialized verifier job pipeline (rebase, check, squash with trailers), compare-and-swap publication, conflict handling, foreign-commit detection, and milestone tagging, with the rebase replaying only the commits after the merge base of the integration head and the sealed sha and the published outcome recording the files it changed.
+Repository layout, one worktree per launch, the serialized verifier job pipeline (rebase, check, squash with trailers), compare-and-swap publication, conflict handling, foreign-commit detection, and milestone tagging, with the rebase replaying only the commits after the merge base of the integration head and the sealed sha and the published outcome recording the files it changed, where a reopen never rewrites the integration branch and a revision of a reopened task lands as one further trailer commit on top of its prior one.
 
 ## Requirements
 
@@ -98,3 +98,14 @@ The verifier SHALL rebase onto the integration head only the commits after the m
 #### Scenario: Changed files recorded
 - **WHEN** a task is published with a commit touching `src/a.ts` and `README.md`
 - **THEN** the job records `changedFiles` `["README.md", "src/a.ts"]`
+
+### Requirement: Reopen leaves the integration branch untouched
+Reopen, uncancel, and cascade SHALL NOT update the integration ref, revert or remove any published commit, or delete any milestone tag. A reopened task's next launch SHALL start from the current integration head, which contains its prior published commit, and its next publication SHALL add one further squash commit carrying the same `Orchestrator-Task` trailer and the new launch's `Orchestrator-Launch` trailer. The one-commit-per-task expectation SHALL be read per published launch.
+
+#### Scenario: Head unchanged by reopen
+- **WHEN** T1 is published at head H and then reopened with cascade over T2 and MVP
+- **THEN** the integration head is still H, every tag still exists, and no foreign commit is reported
+
+#### Scenario: Revision adds a second trailer commit
+- **WHEN** reopened T1 is published again
+- **THEN** the integration branch carries two commits with trailer `Orchestrator-Task: T1`, each with a distinct `Orchestrator-Launch`, and the second has the first as an ancestor

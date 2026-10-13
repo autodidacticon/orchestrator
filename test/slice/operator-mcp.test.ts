@@ -59,7 +59,7 @@ describe('operator MCP server', () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(tools.tools).toHaveLength(20);
+    expect(tools.tools).toHaveLength(23);
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);
@@ -158,6 +158,54 @@ describe('operator MCP server', () => {
     expect(((await tool('outbox', { after: first!.id, limit: 10 }))['effects'] as Array<{ id: number }>).map((e) => e.id)).toEqual([second!.id]);
     expect(await tool('stop', { reap: true })).toMatchObject({ status: 200, stopped: true });
   }, 60_000);
+
+  it('reopen refuses with blockers then cascades; proposals are listed, accepted with a node id, and rejected', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), [
+      `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'retryWindowMs: 5000', 'capacity: 3',
+    ].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    await tool('start');
+    expect(await tool('import_graph', {
+      content: ['nodes:',
+        '  - { id: T1, deps: [], behavior: commitAndSubmit, description: d, acceptanceCriteria: [a] }',
+        '  - { id: T2, deps: [T1], behavior: hang, description: d, acceptanceCriteria: [a] }',
+        '  - { id: T3, deps: [], behavior: "proposeThenSubmit:2", description: d, acceptanceCriteria: [a] }', ''].join('\n'),
+    })).toMatchObject({ accepted: true });
+    const by = (s: Record<string, unknown>, k: string): string[] => ((s['byStatus'] as Record<string, string[]>)[k] ?? []);
+    const until = async (pred: (s: Record<string, unknown>) => boolean) => {
+      for (let i = 0; i < 200; i++) {
+        const s = await tool('status');
+        if (pred(s)) return s;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      throw new Error('condition not reached');
+    };
+    await until((s) => by(s, 'running').includes('T2') && by(s, 'done').includes('T3'));
+
+    const refused = await client.callTool({ name: 'reopen', arguments: { task: 'T1' } });
+    expect(refused.isError).toBe(true);
+    expect(parse(refused)).toMatchObject({ status: 409, blockers: ['T2'] });
+    const cascaded = await tool('reopen', { task: 'T1', cascade: true });
+    expect(cascaded).toMatchObject({ status: 200, ok: true });
+    expect((cascaded['reset'] as Array<{ id: string }>).map((r) => r.id).sort()).toEqual(['T1', 'T2']);
+
+    const listed = await tool('proposals');
+    expect((listed['proposals'] as Array<{ id: string; status: string }>).map((p) => [p.id, p.status])).toEqual([['T3-p1', 'pending'], ['T3-p2', 'pending']]);
+    const accepted = await tool('accept_proposal', { id: 'T3-p1', nodeId: 'ENG-9' });
+    expect(accepted).toMatchObject({ status: 200, ok: true, nodeId: 'ENG-9', accepted: true });
+    expect(await tool('reject_proposal', { id: 'T3-p2', note: 'later' })).toMatchObject({ status: 200, ok: true });
+    const status = await until((s) => by(s, 'done').includes('ENG-9'));
+    expect(status['proposals']).toEqual([]);
+    expect(by(status, 'done')).toEqual(expect.arrayContaining(['T3', 'ENG-9']));
+    expect(await tool('stop', { reap: true })).toMatchObject({ status: 200, stopped: true });
+  }, 90_000);
 
   it('wait returns on a stuck flag and nudge reaches the launch', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));

@@ -76,6 +76,22 @@ describe('transition table', () => {
     expect(retry.attempts).toBe(1);
   });
 
+  it('cascade rows reset budgets for every started task status; milestone reset is the orchestrator\'s alone', () => {
+    const base = { ...defaultEntry(), attempts: 2, integrationRetries: 1, launches: 3 };
+    for (const from of ['running', 'waiting', 'submitted', 'done'] as const) {
+      const out = applyTransition({ ...base, status: asStatus(from) as Status }, { kind: 'unstarted' }, { nodeId: 'n', nodeKind: 'task', actor: 'human', trigger: 'cascade', now: 1 });
+      expect(out).toMatchObject({ attempts: 0, integrationRetries: 0, launches: 3, lease: undefined });
+    }
+    expect(findTransition('task', 'running', 'unstarted', 'agent', 'cascade')).toBeUndefined();
+    expect(findTransition('milestone', 'done', 'unstarted', 'orchestrator', 'milestoneReset')).toBeDefined();
+    expect(findTransition('milestone', 'submitted', 'unstarted', 'orchestrator', 'milestoneReset')).toBeDefined();
+    expect(findTransition('milestone', 'done', 'unstarted', 'agent', 'milestoneReset')).toBeUndefined();
+    expect(findTransition('task', 'done', 'unstarted', 'orchestrator', 'milestoneReset')).toBeUndefined();
+    const reset = applyTransition({ ...base, status: { kind: 'done' }, reviewVersion: 2, accepted: { sha: 's', version: 2 } }, { kind: 'unstarted' }, { nodeId: 'm', nodeKind: 'milestone', actor: 'orchestrator', trigger: 'milestoneReset', now: 1, patch: { accepted: undefined, integrationSha: undefined } });
+    expect(reset.reviewVersion).toBe(2);
+    expect(reset.accepted).toBeUndefined();
+  });
+
   it('leaving running clears the lease unless patched', () => {
     const lease = { launchId: 'l', token: 't', claimedAt: 0, expiresAt: 9, baseSha: 's', graphRev: 'r' };
     const e = { ...defaultEntry(), status: { kind: 'running' } as Status, lease };

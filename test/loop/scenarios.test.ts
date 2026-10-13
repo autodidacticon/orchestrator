@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fixtureText } from '../graph/helpers.js';
 import { makeHarness, runToQuiet, type Harness } from './harness.js';
 
 let h: Harness;
@@ -88,7 +89,7 @@ describe('inproc scenarios on the standard fixture', () => {
     await h.orch.tick();
     await h.failTask('T2', 'no again', 1);
     expect(h.statusOf('T2')).toBe('blocked');
-    expect(h.orch.reopen('T1')).toEqual({ ok: true });
+    expect(h.orch.reopen('T1')).toMatchObject({ ok: true, reset: [{ id: 'T1', from: 'done' }] });
     expect(h.statusOf('T1')).toBe('unstarted');
     expect(h.orch.entry('T1').attempts).toBe(0);
     expect(h.orch.entry('T1').launches).toBe(1);
@@ -129,6 +130,90 @@ describe('inproc scenarios on the standard fixture', () => {
     expect(h.orch.acceptMilestone('MVP', v3.integrationSha!, 2).ok).toBe(false);
     expect(h.orch.acceptMilestone('MVP', v3.integrationSha!, 3)).toEqual({ ok: true });
     expect(h.orch.status().finished).toBe(true);
+  });
+
+  it('reopening a task under an accepted milestone resets the milestone, which resubmits at version 2 with a new tag', async () => {
+    await runToQuiet(h);
+    const v1 = h.orch.entry('MVP');
+    expect(h.orch.acceptMilestone('MVP', v1.integrationSha!, 1)).toEqual({ ok: true });
+    await h.orch.settle();
+    expect(h.orch.status().finished).toBe(true);
+    expect(h.orch.reopen('T3')).toEqual({ ok: true, reset: [{ id: 'T3', from: 'done' }, { id: 'MVP', from: 'done' }] });
+    expect(h.statusOf('T3')).toBe('unstarted');
+    expect(h.orch.entry('MVP')).toMatchObject({ status: { kind: 'unstarted' }, reviewVersion: 1 });
+    expect(h.orch.entry('MVP').accepted).toBeUndefined();
+    expect(h.orch.entry('MVP').integrationSha).toBeUndefined();
+    expect(h.store.listEvents({ kind: 'milestone.reset' })).toMatchObject([{ taskId: 'MVP', payload: { reason: 'upstreamReopened', upstream: 'T3', from: 'done', reviewVersion: 1 } }]);
+    expect(h.orch.acceptMilestone('MVP', v1.integrationSha!, 1).ok).toBe(false);
+    expect(h.orch.status().finished).toBe(false);
+    await h.orch.tick();
+    expect(h.statusOf('T3')).toBe('running');
+    const brief = h.workspace.briefs.get(h.launchOf('T3').launchId)!;
+    expect(brief.carry?.['revision']).toMatchObject({ cause: 'reopened', priorBranch: 'task/T3/l1', priorPublishedSha: expect.stringMatching(/^pub-T3-/), priorReportSummary: 'did T3' });
+    await h.submit('T3');
+    await h.orch.settle();
+    const v2 = h.orch.entry('MVP');
+    expect(v2).toMatchObject({ status: { kind: 'submitted' }, reviewVersion: 2 });
+    expect(v2.integrationSha).not.toBe(v1.integrationSha);
+    expect(h.workspace.tags).toEqual([{ id: 'MVP', version: 1, sha: v1.integrationSha }, { id: 'MVP', version: 2, sha: v2.integrationSha }]);
+    expect(h.orch.acceptMilestone('MVP', v2.integrationSha!, 1).ok).toBe(false);
+    expect(h.orch.acceptMilestone('MVP', v2.integrationSha!, 2)).toEqual({ ok: true });
+    await h.orch.settle();
+    expect(h.orch.status().finished).toBe(true);
+  });
+
+  it('a submitted milestone resets when its deps change on reload; an automatic milestone resets and completes again', async () => {
+    await runToQuiet(h);
+    expect(h.statusOf('MVP')).toBe('submitted');
+    h.source.set(`${fixtureText('standard.yaml').replace('deps: [T3, T4]', 'deps: [T3, T4, T5]')}`);
+    await h.orch.tick();
+    expect(h.orch.status().graphRejected).toBeUndefined();
+    expect(h.orch.entry('MVP')).toMatchObject({ status: { kind: 'submitted' }, reviewVersion: 2 }); // T5 is already done: reset, then resubmitted in the same tick
+    expect(h.store.listEvents({ kind: 'milestone.reset' })).toMatchObject([{ taskId: 'MVP', payload: { reason: 'depsChanged', from: 'submitted', reviewVersion: 1 } }]);
+
+    const auto = makeHarness({ graph: fixtureText('chained-milestones.yaml') });
+    try {
+      await auto.orch.tick();
+      await auto.submit('T1');
+      await auto.orch.settle();
+      expect(auto.statusOf('M1')).toBe('done');
+      expect(auto.orch.reopen('T1')).toMatchObject({ ok: true });
+      expect(auto.statusOf('M1')).toBe('unstarted');
+      await auto.orch.tick();
+      await auto.submit('T1');
+      await auto.orch.settle();
+      expect(auto.statusOf('M1')).toBe('done');
+      expect(auto.store.listEvents({ kind: 'milestone.reset' }).map((e) => e.taskId)).toEqual(expect.arrayContaining(['M1']));
+    } finally {
+      auto.cleanup();
+    }
+  });
+
+  it('a payload edit to a running task is a notice, not a relaunch; the next launch uses the new payload; disabled by config', async () => {
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    h.source.set(fixtureText('standard.yaml').replace('Schema migration', 'Schema migration v2'));
+    await h.orch.tick();
+    expect(h.orch.status().graphRejected).toBeUndefined();
+    const rev = h.orch.graph().rev;
+    expect(await h.inbox('T1')).toEqual([{ kind: 'payloadChanged', rev }]);
+    expect(h.launchOf('T1').launchId).toBe(l1.launchId);
+    expect(h.workspace.briefs.get(l1.launchId)!.node.payload['title']).toBe('Schema migration');
+    expect(h.store.listEvents({ kind: 'graph.payloadChanged' })).toMatchObject([{ taskId: 'T1', payload: { rev } }]);
+    await h.failTask('T1');
+    await h.orch.tick();
+    expect(h.workspace.briefs.get(h.launchOf('T1').launchId)!.node.payload['title']).toBe('Schema migration v2');
+
+    const off = makeHarness({ config: { graph: { payloadChangedNotice: false } } });
+    try {
+      await off.orch.tick();
+      off.source.set(fixtureText('standard.yaml').replace('Schema migration', 'Schema migration v2'));
+      await off.orch.tick();
+      expect(await off.inbox('T1')).toEqual([]);
+      expect(off.store.listEvents({ kind: 'graph.payloadChanged' })).toEqual([]);
+    } finally {
+      off.cleanup();
+    }
   });
 
   it('pause stops admission while running work completes and verifies', async () => {

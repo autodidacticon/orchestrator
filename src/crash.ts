@@ -5,6 +5,8 @@
  * immediately with code 137 (as if killed). Otherwise this is a no-op. Every
  * boundary between a durable record and an external effect calls this.
  */
+import { readFileSync } from 'node:fs';
+
 export const CRASH_POINTS = [
   'launch.afterRow',
   'launch.afterWorktree',
@@ -17,6 +19,7 @@ export const CRASH_POINTS = [
   'verify.afterSquash',
   'verify.afterPublish',
   'milestone.afterTag',
+  'cascade.afterPlan',
   'tick.afterPhase1',
   'tick.afterPhase2',
   'tick.afterPhase3',
@@ -35,8 +38,21 @@ export function setCrashHook(fn: ((name: string) => void) | undefined): void {
   hook = fn;
 }
 
+/** The armed crash point: ORCH_CRASH_AT, or the contents of the file ORCH_CRASH_AT_FILE names (so a test can arm a point mid-run). */
+function armed(): string | undefined {
+  const direct = process.env['ORCH_CRASH_AT'];
+  if (direct) return direct;
+  const file = process.env['ORCH_CRASH_AT_FILE'];
+  if (!file) return undefined;
+  try {
+    return readFileSync(file, 'utf8').trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function crashPoint(name: CrashPoint): void {
-  const target = process.env['ORCH_CRASH_AT'];
+  const target = armed();
   if (!target || target !== name) return;
   if (hook) {
     hook(name);

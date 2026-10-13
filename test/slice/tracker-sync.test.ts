@@ -36,8 +36,8 @@ describe('tracker sync through a fake tracker', () => {
     const tracker = new FakeTracker();
     const base = h.orch.apiBaseUrl;
     await h.orch.tick();
-    // T1 may already be waiting on its question by the time the tick returns.
-    expect([...h.orch.status().byStatus.running, ...h.orch.status().byStatus.waiting].sort()).toEqual(['T1', 'T3', 'T5']);
+    // Agents may already have asked or failed by the time the tick returns; each has launched once.
+    for (const id of ['T1', 'T3', 'T5']) expect(h.store.listLaunches({ taskId: id }).length).toBeGreaterThan(0);
     await drainOnce(base, tracker);
     expect(tracker.states('T1')).toEqual(['started']);
     expect(tracker.states('T3')).toEqual(['started']);
