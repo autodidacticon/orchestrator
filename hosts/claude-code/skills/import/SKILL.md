@@ -46,13 +46,23 @@ One record per issue you fetched, including the root:
   cancelled, duplicate, or won't-do is `cancelled`.
 - `parent` is the root id for each child.
 - `description` is the raw text. Acceptance criteria are parsed from a heading named
-  "Acceptance criteria" (configurable with `options.criteriaHeading`).
+  "Acceptance criteria" (configurable with `options.criteriaHeading`). A heading named
+  "Scope" (configurable with `options.scopeHeading`) lists the path globs the task's work
+  stays within, one per bullet, such as `src/api/**` or `package.json`; the orchestrator
+  never runs two tasks with overlapping scopes at the same time. Leave it out when the
+  issue does not say.
+- `priority` is a number where a lower number is more urgent; the orchestrator uses it to
+  break ties between ready tasks with equally long chains behind them. Linear: send the
+  issue's `priority` field as is (its 0, meaning none, is dropped). Jira: send the position
+  of the issue's priority in the site's priority list, counted from the most urgent as 1.
+  Omit it when the tracker has no priority.
 
 ## 4. Import
 
 Call `import_issues` with `{ root, issues, tracker, options? }`. Options: `criteriaHeading`,
-`inProgress` (`external` by default: issues a human is working on are not taken over; set
-`task` to orchestrate them), `gated` (the root milestone waits for human review, default true).
+`scopeHeading`, `inProgress` (`external` by default: issues a human is working on are not
+taken over; set `task` to orchestrate them), `gated` (the root milestone waits for human
+review, default true).
 
 Always pass `tracker`: `{ kind: "linear" }` when you fetched through the Linear tools,
 `{ kind: "atlassian" }` through the Atlassian tools, plus `workspace` naming the Linear

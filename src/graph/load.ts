@@ -31,6 +31,8 @@ const nodeSchema = z
     gated: z.boolean().default(false),
     done: z.boolean().default(false),
     deps: z.array(z.string().min(1)).default([]),
+    /** Path globs the task's work stays within; stays in the payload. See specs/scheduling-policy "Scope declaration". */
+    scope: z.array(z.string().min(1)).optional(),
   })
   .passthrough();
 
@@ -51,7 +53,7 @@ export function parseGraph(content: string): Graph {
   const parsed = fileSchema.safeParse(raw);
   if (!parsed.success) {
     throw new GraphValidationError(
-      `graph file does not match schema: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
+      `graph file does not match schema: ${parsed.error.issues.map((i) => `${describeIssuePath(raw, i.path)}: ${i.message}`).join('; ')}`,
       'schema',
       { issues: parsed.error.issues },
     );
@@ -87,6 +89,17 @@ export function parseGraph(content: string): Graph {
   }
 
   return makeGraph(revOf(content), nodes);
+}
+
+/** `nodes.3.scope` becomes `node "T4" (nodes.3): scope` when the raw node has an id. */
+function describeIssuePath(raw: unknown, issuePath: Array<string | number>): string {
+  const joined = issuePath.join('.');
+  const [head, index, ...rest] = issuePath;
+  if (head !== 'nodes' || typeof index !== 'number') return joined;
+  const nodes = (raw as { nodes?: unknown })?.nodes;
+  const node = Array.isArray(nodes) ? (nodes[index] as { id?: unknown } | undefined) : undefined;
+  if (typeof node?.id !== 'string') return joined;
+  return `node "${node.id}" (nodes.${index})${rest.length ? `: ${rest.join('.')}` : ''}`;
 }
 
 /** DFS with colors; returns the cycle path (first id repeated at the end) or undefined. */

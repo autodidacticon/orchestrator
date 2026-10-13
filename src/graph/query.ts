@@ -25,6 +25,34 @@ export function closure(g: Graph, id: Id): Set<Id> {
   return out;
 }
 
+const criticalPathCache = new WeakMap<Graph, ReadonlyMap<Id, number>>();
+
+/**
+ * Critical path length per node: the number of task nodes on the longest chain
+ * of dependents below it. Milestones and external nodes pass through at zero, so
+ * a chain continues through a milestone. Computed from the graph alone and cached
+ * per graph object, which is immutable per revision. See specs/task-graph "Critical path length".
+ */
+export function criticalPathLength(g: Graph): ReadonlyMap<Id, number> {
+  const cached = criticalPathCache.get(g);
+  if (cached) return cached;
+  const out = new Map<Id, number>();
+  const visit = (id: Id): number => {
+    const known = out.get(id);
+    if (known !== undefined) return known;
+    let best = 0;
+    for (const d of dependents(g, id)) {
+      const weight = g.nodes.get(d)?.kind === 'task' ? 1 : 0;
+      best = Math.max(best, weight + visit(d));
+    }
+    out.set(id, best);
+    return best;
+  };
+  for (const id of g.nodes.keys()) visit(id);
+  criticalPathCache.set(g, out);
+  return out;
+}
+
 export function tasks(g: Graph): Id[] {
   return [...g.nodes.values()].filter((n) => n.kind === 'task').map((n) => n.id);
 }

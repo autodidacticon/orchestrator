@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { type GraphNode, type Id, makeGraph } from '../../src/graph/model.js';
-import { dependents, depsSatisfied, milestoneFixedPoint, milestonesDue, ready, revocable } from '../../src/graph/query.js';
+import { criticalPathLength, dependents, depsSatisfied, milestoneFixedPoint, milestonesDue, ready, revocable } from '../../src/graph/query.js';
 import { defaultEntry, type Entry, isStarted, type Status } from '../../src/state/status.js';
 import { asStatus } from './helpers.js';
 
@@ -104,6 +104,23 @@ describe('graph properties', () => {
           }
         },
       ),
+    );
+  });
+
+  it('critical path length is monotone along dependencies and a milestone takes the maximum over its dependents', () => {
+    fc.assert(
+      fc.property(dagArb, (g) => {
+        const cp = criticalPathLength(g);
+        for (const node of g.nodes.values()) {
+          const weight = node.kind === 'task' ? 1 : 0;
+          for (const d of node.deps) expect(cp.get(d)!).toBeGreaterThanOrEqual(cp.get(node.id)! + weight);
+          if (dependents(g, node.id).length === 0) expect(cp.get(node.id)).toBe(0);
+          if (node.kind === 'milestone') {
+            const below = dependents(g, node.id).map((d) => cp.get(d)! + (g.nodes.get(d)?.kind === 'task' ? 1 : 0));
+            expect(cp.get(node.id)).toBe(below.length ? Math.max(...below) : 0);
+          }
+        }
+      }),
     );
   });
 

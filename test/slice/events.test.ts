@@ -34,6 +34,17 @@ describe('event stream, review bundle, status facts', () => {
     expect(filtered.body['events']).toHaveLength(1);
   });
 
+  it('the digest counts deferred candidates and drops to zero once the blocker publishes', async () => {
+    h = await makeSlice({ graph: `nodes:\n  - { id: A, deps: [], behavior: commitAndSubmit, scope: ["src/**"] }\n  - { id: B, deps: [], behavior: hang, scope: ["src/api/**"] }`, config: { leaseTtlMs: 60_000 } });
+    await h.orch.tick();
+    const first = await get(h, '/v1/events?after=0&wait=0');
+    expect(first.body['digest']).toMatchObject({ deferred: 1, running: ['A'] });
+    expect((await get(h, '/v1/status')).body['deferred']).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+    await h.waitFor(() => h!.orch.entry('A').status.kind === 'done' && h!.orch.entry('B').status.kind === 'running', 20_000);
+    const after = await get(h, '/v1/events?after=0&wait=0');
+    expect(after.body['digest']).toMatchObject({ deferred: 0, running: ['B'] });
+  });
+
   it('review bundle for a submitted milestone, error otherwise; status carries run facts', async () => {
     h = await makeSlice({ graph: `nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit, acceptanceCriteria: [works] }\n  - { id: MVP, kind: milestone, gated: true, deps: [T1], acceptanceCriteria: [demo runs] }`, realVerifier: true });
     expect((await get(h, '/v1/milestones/MVP/review')).status).toBe(409);

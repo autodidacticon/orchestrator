@@ -3,6 +3,10 @@
  */
 import { z } from 'zod';
 
+/** Admission ordering stages. See specs/scheduling-policy "Ordering chain". */
+export const stageNames = ['criticalPath', 'priority', 'fifo'] as const;
+export type StageName = (typeof stageNames)[number];
+
 export const configSchema = z.object({
   /** Repository the orchestrator integrates into (the primary clone). */
   repoPath: z.string().default('.'),
@@ -90,6 +94,15 @@ export const configSchema = z.object({
       doneAt: z.enum(['integration', 'milestoneAccepted']).default('integration'),
       /** The run skill relays human comments under a question as the answer. */
       answersFromComments: z.boolean().default(true),
+    })
+    .default({}),
+  /** Admission order and the scope filter. See specs/scheduling-policy. */
+  scheduling: z
+    .object({
+      /** Stages applied as one stable lexicographic sort over ready candidates; ties keep graph file order. */
+      order: z.array(z.enum(stageNames)).default(['criticalPath', 'priority', 'fifo']),
+      /** Defer a candidate whose declared scope overlaps the scope of a task holding a slot. */
+      scopes: z.boolean().default(true),
     })
     .default({}),
   /** Brief template slots: name -> { source, required, minLength }. */

@@ -1,6 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { quiescent, stallRoots, stalled } from '../../src/graph/query.js';
+import { scopeOf, scopesOverlap } from '../../src/loop/schedule.js';
 import { makeHarness } from './harness.js';
 
 /**
@@ -40,6 +41,9 @@ const actionArb: fc.Arbitrary<Action> = fc.oneof(
   fc.constant<Action>({ t: 'advance' }),
 );
 
+/** A small glob set so random scopes overlap often; `undefined` leaves the node unconstrained. */
+const scopeArb = fc.option(fc.subarray(['src/**', 'src/api/**', 'src/ui/**', 'docs/*', '**', 'package.json'], { minLength: 1, maxLength: 2 }), { nil: undefined });
+
 const graphArb = fc
   .integer({ min: 2, max: 7 })
   .chain((n) =>
@@ -47,12 +51,14 @@ const graphArb = fc
       fc.array(fc.boolean(), { minLength: n, maxLength: n }),
       fc.array(fc.boolean(), { minLength: n, maxLength: n }),
       fc.array(fc.array(fc.nat(n - 1), { maxLength: 3 }), { minLength: n, maxLength: n }),
+      fc.array(scopeArb, { minLength: n, maxLength: n }),
     ),
   )
-  .map(([ms, gated, deps]) => {
+  .map(([ms, gated, deps, scopes]) => {
     const lines = ms.map((m, i) => {
       const d = [...new Set((deps[i] ?? []).filter((x) => x < i).map((x) => `N${x}`))];
-      return `  - { id: N${i}, kind: ${m ? 'milestone' : 'task'}, gated: ${m && gated[i] ? 'true' : 'false'}, deps: [${d.join(', ')}] }`;
+      const scope = !m && scopes[i] ? `, scope: [${scopes[i]!.map((g) => JSON.stringify(g)).join(', ')}]` : '';
+      return `  - { id: N${i}, kind: ${m ? 'milestone' : 'task'}, gated: ${m && gated[i] ? 'true' : 'false'}, deps: [${d.join(', ')}]${scope} }`;
     });
     return `nodes:\n${lines.join('\n')}`;
   });
@@ -132,6 +138,21 @@ describe('reachable-state stall property', () => {
           const quiet = quiescent(g, o, { live, now: h.now.value, pendingVerifierResults: h.store.listJobs({ applied: false }).length });
           if (quiet && stalled(g, o, live)) {
             expect(stallRoots(g, o).length).toBeGreaterThan(0);
+          }
+          // Scope filter: no two running or waiting tasks overlap, and every deferral names a task holding its scope.
+          const holders = [...o].filter(([id, e]) => g.nodes.get(id)?.kind === 'task' && ['running', 'waiting', 'submitted'].includes(e.status.kind)).map(([id]) => id);
+          for (const a of live) {
+            for (const b of live) {
+              if (a >= b) continue;
+              const sa = scopeOf(g.nodes.get(a));
+              const sb = scopeOf(g.nodes.get(b));
+              if (sa && sb) expect(scopesOverlap(sa, sb), `${a} and ${b} run with overlapping scopes`).toBe(false);
+            }
+          }
+          for (const d of h.orch.status().deferred) {
+            expect(d.reason).toBe('scopeOverlap');
+            expect(d.with.length).toBeGreaterThan(0);
+            for (const w of d.with) expect(holders, `${d.id} deferred behind ${w}, which holds no scope`).toContain(w);
           }
           // After cascades: no started task depends on an unstarted node.
           for (const [id, e] of o) {

@@ -49,8 +49,14 @@ answers (section 2b), then act on the digest:
   and `cost.ceilingUsd` from `status`, then offer `resume` with `overrideBudget: true`
   (raises the ceiling by one budget) or stopping. Never override the budget unless the user
   says so.
+- **deferred** non-zero: ready tasks are held back because their declared scope overlaps a
+  task that is running, waiting, submitted, or claimable. Read `deferred` from `status` and
+  name each held task with the ids in its `with` list in the progress report ("T3 waits for
+  T2's files"); do not call the run slow or stalled. Nothing to do: they launch on the first
+  tick after the blocker's work is published.
 
-Between actions, give the user a one-line progress note: running, waiting, done counts.
+Between actions, give the user a one-line progress note: running, waiting, done counts, and
+the deferred tasks with their blockers when there are any.
 
 ### 2a. Drain the tracker outbox
 

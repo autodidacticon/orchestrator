@@ -15,7 +15,7 @@ import { policyReport } from '../tracker/policy.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, ...tracker };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, deferred: 0, ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
@@ -25,6 +25,8 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
     pausedReason: s.pausedReason,
     proposals: s.proposals,
     claimable: s.claimable.length,
+    /** Candidates skipped by the scope filter; `status` names their blockers. */
+    deferred: s.deferred.length,
     openQuestions: s.openQuestions,
     /** Milestones awaiting a human; tasks awaiting the verifier are `verifying`. */
     awaitingReview: s.awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'milestone'),

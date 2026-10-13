@@ -24,6 +24,8 @@ export type IssueRecord = z.infer<typeof issueRecordSchema>;
 
 export const importOptionsSchema = z.object({
   criteriaHeading: z.string().min(1).default('Acceptance criteria'),
+  /** Heading whose items become the task's `scope` globs. See specs/graph-import "Scope from the description". */
+  scopeHeading: z.string().min(1).default('Scope'),
   inProgress: z.enum(['external', 'task']).default('external'),
   gated: z.boolean().default(true),
 });
@@ -78,23 +80,47 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** Split a description at the first acceptance-criteria heading. */
-export function splitDescription(text: string | undefined, heading = 'Acceptance criteria'): { description: string; acceptanceCriteria: string[] } {
-  if (!text) return { description: '', acceptanceCriteria: [] };
+const anyHeading = /^\s*#{1,6}\s+\S/;
+const item = /^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)(.*\S)\s*$/;
+
+function headingPattern(heading: string): RegExp {
+  return new RegExp(`^\\s*(?:#{1,6}\\s*|\\*\\*)?${escapeRegExp(heading)}(?:\\*\\*)?\\s*:?\\s*$`, 'i');
+}
+
+/**
+ * Split a description at every configured heading in one pass. `description`
+ * is the text before the first of them; each section is the list items under
+ * its heading up to the next heading, configured or markdown. A section whose
+ * heading is absent is undefined.
+ */
+export function splitSections<K extends string>(text: string | undefined, headings: Record<K, string>): { description: string; sections: Partial<Record<K, string[]>> } {
+  const sections: Partial<Record<K, string[]>> = {};
+  if (!text) return { description: '', sections };
   const lines = text.replace(/\r\n/g, '\n').split('\n');
-  const head = new RegExp(`^\\s*(?:#{1,6}\\s*|\\*\\*)?${escapeRegExp(heading)}(?:\\*\\*)?\\s*:?\\s*$`, 'i');
-  const anyHeading = /^\s*#{1,6}\s+\S/;
-  const item = /^\s*(?:[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)(.*\S)\s*$/;
-  const idx = lines.findIndex((l) => head.test(l));
-  if (idx < 0) return { description: text.trim(), acceptanceCriteria: [] };
-  const criteria: string[] = [];
-  for (let i = idx + 1; i < lines.length; i++) {
-    const l = lines[i] as string;
-    if (anyHeading.test(l)) break;
-    const m = item.exec(l);
-    if (m) criteria.push((m[1] as string).trim());
+  const patterns = Object.entries(headings).map(([key, heading]) => ({ key: key as K, re: headingPattern(heading as string) }));
+  const starts = patterns
+    .map(({ key, re }) => ({ key, idx: lines.findIndex((l) => re.test(l)) }))
+    .filter(({ idx }) => idx >= 0);
+  if (starts.length === 0) return { description: text.trim(), sections };
+  const first = Math.min(...starts.map((s) => s.idx));
+  const isHeading = (l: string) => anyHeading.test(l) || patterns.some(({ re }) => re.test(l));
+  for (const { key, idx } of starts) {
+    const items: string[] = [];
+    for (let i = idx + 1; i < lines.length; i++) {
+      const l = lines[i] as string;
+      if (isHeading(l)) break;
+      const m = item.exec(l);
+      if (m) items.push((m[1] as string).trim());
+    }
+    sections[key] = items;
   }
-  return { description: lines.slice(0, idx).join('\n').trim(), acceptanceCriteria: criteria };
+  return { description: lines.slice(0, first).join('\n').trim(), sections };
+}
+
+/** Split a description at the acceptance-criteria heading and the scope heading, in whichever order they appear. */
+export function splitDescription(text: string | undefined, heading = 'Acceptance criteria', scopeHeading = 'Scope'): { description: string; acceptanceCriteria: string[]; scope?: string[] } {
+  const { description, sections } = splitSections(text, { criteria: heading, scope: scopeHeading });
+  return { description, acceptanceCriteria: sections.criteria ?? [], ...(sections.scope?.length ? { scope: sections.scope } : {}) };
 }
 
 /** Map normalized issues to graph file nodes. Throws ImportError on malformed input or an invalid graph. */
@@ -115,13 +141,15 @@ export function mapIssues(raw: unknown): { nodes: GraphFileNode[]; content: stri
   const externalIds = new Set<string>();
 
   const payloadOf = (i: IssueRecord) => {
-    const { description, acceptanceCriteria } = splitDescription(i.description, options.criteriaHeading);
+    const { description, acceptanceCriteria, scope } = splitDescription(i.description, options.criteriaHeading, options.scopeHeading);
     return {
       title: i.title,
       description,
       acceptanceCriteria,
+      ...(scope ? { scope } : {}),
       ...(i.labels ? { labels: i.labels } : {}),
-      ...(i.priority !== undefined ? { priority: i.priority } : {}),
+      // Linear's 0 means no priority; every other value passes through unchanged. See specs/graph-import "Priority normalisation".
+      ...(i.priority !== undefined && i.priority !== 0 ? { priority: i.priority } : {}),
       ...(i.url ? { url: i.url } : {}),
       trackerState: i.state,
     };

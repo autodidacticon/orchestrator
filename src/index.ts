@@ -7,6 +7,7 @@ export { crashPoint, CRASH_POINTS, type CrashPoint } from './crash.js';
 export * from './graph/model.js';
 export { parseGraph, loadGraphFile, GraphValidationError, revOf } from './graph/load.js';
 export * as graphQuery from './graph/query.js';
+export { criticalPathLength } from './graph/query.js';
 export { classifyReload, type ReloadClassification, type ReloadReason } from './graph/diff.js';
 export { StaticGraphSource, FileGraphSource, type GraphSource } from './graph/source.js';
 export * from './state/status.js';
@@ -14,7 +15,7 @@ export { TRANSITIONS, applyTransition, findTransition, isAllowed, TransitionErro
 export type * from './state/store.js';
 export { SqliteStore } from './state/sqlite.js';
 export { Orchestrator, type OrchestratorDeps, type StatusReport, type ApiResponse, type AgentOp } from './loop/orchestrator.js';
-export { fifoPolicy, admit, type Policy, type ScheduleContext } from './loop/schedule.js';
+export { fifoPolicy, chainPolicy, admit, scopesOverlap, staticPrefix, type Policy, type ScheduleContext, type Admission, type Deferral } from './loop/schedule.js';
 export type { AgentRunner, SpawnResult } from './runner/runner.js';
 export { SubprocessRunner, substitute, pidAlive, killTree } from './runner/subprocess.js';
 export { ClaudeCodeRunner, DEFAULT_CLAUDE_COMMAND } from './runner/claude-code.js';

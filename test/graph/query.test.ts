@@ -3,6 +3,7 @@ import { parseGraph } from '../../src/graph/load.js';
 import {
   awaitingReview,
   cascadePlan,
+  criticalPathLength,
   finished,
   incomplete,
   milestoneFixedPoint,
@@ -42,6 +43,25 @@ describe('dependency semantics and readiness', () => {
     const o = overlayWith({ T1: 'done', T2: 'done', T3: 'done', T4: 'done', T5: 'done' });
     expect(ready(g, o)).toEqual([]);
     expect(milestonesDue(g, o)).toEqual(['MVP']);
+  });
+});
+
+describe('critical path length', () => {
+  it('counts task nodes on the longest chain of dependents', () => {
+    const cp = criticalPathLength(g);
+    expect(Object.fromEntries(cp)).toEqual({ T1: 2, T2: 1, T3: 0, T4: 0, T5: 0, MVP: 0 });
+    expect(criticalPathLength(g)).toBe(cp); // cached per graph object
+  });
+
+  it('passes through a milestone to the tasks below it', () => {
+    const chain = parseGraph(`nodes:
+  - { id: T1, deps: [] }
+  - { id: M1, kind: milestone, deps: [T1] }
+  - { id: T9, deps: [M1] }
+  - { id: X, kind: external, deps: [] }
+  - { id: T10, deps: [X] }`);
+    const cp = criticalPathLength(chain);
+    expect(Object.fromEntries(cp)).toEqual({ T1: 1, M1: 1, T9: 0, X: 1, T10: 0 });
   });
 });
 

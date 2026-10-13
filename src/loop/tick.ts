@@ -284,14 +284,19 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
       if (cost >= ceiling) o.pauseForBudget(cost, ceiling);
     }
   }
-  if (o.isPaused()) return;
+  if (o.isPaused()) {
+    o.setDeferred([]);
+    return;
+  }
   await spawnDueLaunches(o);
   const g = o.graph();
   const overlay = o.overlay();
   let running = 0;
   let waiting = 0;
   const resumables: Id[] = [];
-  for (const id of g.nodes.keys()) {
+  // Tasks holding their scope: running, waiting, or submitted, plus any with a claimable launch. See specs/scheduling-policy "Scope filter at admission".
+  const held = new Set<Id>();
+  for (const [id, node] of g.nodes) {
     const e = overlay.get(id);
     if (!e) continue;
     if (e.status.kind === 'running') running++;
@@ -299,7 +304,9 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
       waiting++;
       if (e.status.answer !== undefined) resumables.push(id);
     }
+    if (node.kind === 'task' && (e.status.kind === 'running' || e.status.kind === 'waiting' || e.status.kind === 'submitted')) held.add(id);
   }
+  for (const l of o.store.listLaunches({ status: 'claimable' })) held.add(l.taskId);
   const admission = admit(resumables, q.ready(g, overlay), {
     graph: g,
     overlay,
@@ -307,7 +314,9 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
     maxWaiting: o.config.maxWaiting,
     runningCount: running,
     waitingCount: waiting,
+    held: [...held],
   }, o.policy);
+  o.setDeferred(admission.deferred);
 
   for (const id of admission.resumes) {
     const e = o.entry(id);

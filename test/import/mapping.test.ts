@@ -23,6 +23,19 @@ describe('description splitting', () => {
     expect(splitDescription('x\n### Done when\n- y', 'Done when')).toEqual({ description: 'x', acceptanceCriteria: ['y'] });
     expect(splitDescription(undefined)).toEqual({ description: '', acceptanceCriteria: [] });
   });
+
+  it('parses a scope section, one glob per item, with the headings in either order', () => {
+    const both = splitDescription('Do the thing.\n\n## Acceptance criteria\n- it works\n\n## Scope\n- src/api/**\n- package.json');
+    expect(both).toEqual({ description: 'Do the thing.', acceptanceCriteria: ['it works'], scope: ['src/api/**', 'package.json'] });
+    const reversed = splitDescription('Intro text.\n\n**Scope**\n- docs/*\n\nAcceptance criteria:\n1. ok\n2. fine\n\n## Notes\nignored');
+    expect(reversed).toEqual({ description: 'Intro text.', acceptanceCriteria: ['ok', 'fine'], scope: ['docs/*'] });
+    // A bold scope heading ends the criteria section even though it is not a markdown heading.
+    expect(splitDescription('x\n## Acceptance criteria\n- a\n**Scope**\n- src/**')).toEqual({ description: 'x', acceptanceCriteria: ['a'], scope: ['src/**'] });
+    expect(splitDescription('x\n## Files\n- lib/**', 'Acceptance criteria', 'Files')).toEqual({ description: 'x', acceptanceCriteria: [], scope: ['lib/**'] });
+    const none = splitDescription('No headings here');
+    expect(none).toEqual({ description: 'No headings here', acceptanceCriteria: [] });
+    expect('scope' in none).toBe(false);
+  });
 });
 
 describe('tracker record', () => {
@@ -53,6 +66,32 @@ describe('mapping rules', () => {
     const g = parseGraph(r.content);
     expect(g.rev).toBe(r.rev);
     expect(g.nodes.size).toBe(8);
+  });
+
+  it('scope lands in the payload; priority 0 is dropped and other priorities pass through', () => {
+    const issues = [
+      { id: 'E', title: 'epic', state: 'open', blockedBy: [] },
+      { id: 'A', parent: 'E', state: 'open', description: 'A.\n\n## Acceptance criteria\n- a\n\n## Scope\n- src/api/**\n- package.json', blockedBy: [], priority: 0 },
+      { id: 'B', parent: 'E', state: 'open', description: 'B.\n\n## Scope\n- src/ui/**', blockedBy: [], priority: 1 },
+      { id: 'C', parent: 'E', state: 'open', description: 'C with no scope', blockedBy: [], priority: 'High' },
+      { id: 'D', parent: 'E', state: 'open', description: 'D.\n\n## Area\n- lib/**', blockedBy: [], priority: 4 },
+    ];
+    const r = mapIssues({ root: 'E', issues });
+    const byId = Object.fromEntries(r.nodes.map((n) => [n.id, n]));
+    expect(byId['A']).toMatchObject({ scope: ['src/api/**', 'package.json'], acceptanceCriteria: ['a'], description: 'A.' });
+    expect('priority' in byId['A']!).toBe(false);
+    expect(byId['B']).toMatchObject({ scope: ['src/ui/**'], priority: 1, description: 'B.' });
+    expect(byId['C']).toMatchObject({ priority: 'High' });
+    expect('scope' in byId['C']!).toBe(false);
+    expect(byId['D']).toMatchObject({ priority: 4 });
+    expect('scope' in byId['D']!).toBe(false); // "Area" is not the scope heading in this import, so it stays in the description
+    expect(String(byId['D']!['description'])).toContain('## Area');
+    expect(parseGraph(r.content).nodes.get('A')?.payload['scope']).toEqual(['src/api/**', 'package.json']);
+
+    const renamed = mapIssues({ root: 'E', issues, options: { scopeHeading: 'Area' } });
+    const byId2 = Object.fromEntries(renamed.nodes.map((n) => [n.id, n]));
+    expect(byId2['D']).toMatchObject({ scope: ['lib/**'] });
+    expect('scope' in byId2['A']!).toBe(false);
   });
 
   it('in-progress policy and ungated option', () => {

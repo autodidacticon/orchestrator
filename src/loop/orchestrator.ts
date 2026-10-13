@@ -35,7 +35,7 @@ import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
 import type { BriefInput, FallbackReport, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
-import { fifoPolicy, type Policy } from './schedule.js';
+import { chainPolicy, type Deferral, type Policy } from './schedule.js';
 import { runTick } from './tick.js';
 import { deriveEffects } from '../tracker/effects.js';
 import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, runCostUsd } from '../health/budgets.js';
@@ -154,6 +154,8 @@ export interface StatusReport {
   tracker: TrackerRecord | undefined;
   outboxPending: number;
   trackerErrors: TrackerError[];
+  /** Candidates skipped by the scope filter in the last admission pass; empty while paused. See specs/operator-control "Status report: deferred candidates". */
+  deferred: Deferral[];
 }
 
 export interface TrackerError {
@@ -192,6 +194,7 @@ export class Orchestrator implements OrchestratorCore {
 
   private readonly clock: () => number;
   private _graph: Graph | undefined;
+  private _deferred: Deferral[] = [];
   private _graphRejected: { reasons: string[] } | undefined;
   private readonly waiters = new Map<string, Waiter[]>();
   private verifierInFlight: Promise<void> | undefined;
@@ -207,7 +210,7 @@ export class Orchestrator implements OrchestratorCore {
     this.workspace = deps.workspace;
     this.verifier = deps.verifier;
     this.graphSource = deps.graphSource;
-    this.policy = deps.policy ?? fifoPolicy;
+    this.policy = deps.policy ?? chainPolicy(this.config);
     this.briefValidator = deps.briefValidator ?? alwaysValid;
     this.remediator = deps.remediator ?? noRemediation;
     this.stuckDiagnoser = deps.stuckDiagnoser ?? humanDiagnoser;
@@ -266,6 +269,11 @@ export class Orchestrator implements OrchestratorCore {
 
   overlay(): Overlay {
     return this.store.allEntries();
+  }
+
+  /** The last admission pass's deferrals, kept for status. */
+  setDeferred(deferred: Deferral[]): void {
+    this._deferred = deferred;
   }
 
   recordTransition(id: Id, from: StatusKind, to: StatusKind, actor: Actor, trigger: string, extra: Record<string, unknown> = {}): number {
@@ -1187,6 +1195,7 @@ export class Orchestrator implements OrchestratorCore {
       tracker: trackerOf(this.store),
       outboxPending: this.store.countOutbox('pending'),
       trackerErrors: this.trackerErrors(),
+      deferred: this.isPaused() ? [] : this._deferred,
     };
   }
 

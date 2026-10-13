@@ -61,6 +61,25 @@ describe('graph loading', () => {
     expect(() => parseGraph(': : :')).toThrow(GraphValidationError);
   });
 
+  it('scope loads into the payload; a malformed scope is rejected naming the node', () => {
+    const g = parseGraph(`nodes:\n  - { id: A, deps: [], scope: ["src/api/**", "package.json"] }\n  - { id: B, deps: [] }`);
+    expect(g.nodes.get('A')?.payload).toEqual({ scope: ['src/api/**', 'package.json'] });
+    expect(g.nodes.get('B')?.payload).toEqual({});
+    expect('scope' in (g.nodes.get('B')?.payload ?? {})).toBe(false);
+    for (const bad of ['scope: "src/**"', 'scope: [""]', 'scope: [1]']) {
+      try {
+        parseGraph(`nodes:\n  - { id: A, deps: [] }\n  - { id: T4, deps: [A], ${bad} }`);
+        expect.unreachable();
+      } catch (err) {
+        const e = err as GraphValidationError;
+        expect(e).toBeInstanceOf(GraphValidationError);
+        expect(e.code).toBe('schema');
+        expect(e.message).toMatch(/node "T4"/);
+        expect(e.message).toMatch(/scope/);
+      }
+    }
+  });
+
   it('closure(MVP) is T1..T4', () => {
     const g = loadFixture('standard.yaml');
     expect([...closure(g, 'MVP')].sort()).toEqual(['T1', 'T2', 'T3', 'T4']);

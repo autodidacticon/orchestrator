@@ -95,6 +95,21 @@ describe('operator CLI and routes', () => {
     expect((await cli('reject-proposal', 'NOPE', '--note', 'x')).status).toBe(404);
   }, 40_000);
 
+  it('status lists a deferred candidate with the ids its scope overlaps', async () => {
+    h = await makeSlice({
+      graph: `nodes:\n  - { id: A, deps: [], behavior: hang, scope: ["src/**"] }\n  - { id: B, deps: [], behavior: hang, scope: ["src/api/**"] }\n  - { id: C, deps: [], behavior: hang, scope: ["docs/**"] }`,
+      config: { leaseTtlMs: 60_000 },
+    });
+    const url = h.orch.apiBaseUrl;
+    const cli = (...args: string[]) => runCli([...args, '--url', url]);
+    await h.orch.tick();
+    const status = await cli('status');
+    expect(status.body).toMatchObject({ byStatus: { running: ['A', 'C'], unstarted: ['B'] }, deferred: [{ id: 'B', reason: 'scopeOverlap', with: ['A'] }] });
+    expect((await cli('cancel', 'A', '--reason', 'make room')).body).toEqual({ ok: true });
+    await h.waitFor(() => h!.orch.entry('B').status.kind === 'running');
+    expect((await cli('status')).body).toMatchObject({ deferred: [] });
+  });
+
   it('graceful stop keeps agents for adoption; --reap stops them', async () => {
     h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000 } });
     await h.orch.tick();

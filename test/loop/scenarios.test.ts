@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Config } from '../../src/config.js';
 import { fixtureText } from '../graph/helpers.js';
 import { makeHarness, runToQuiet, type Harness } from './harness.js';
 
@@ -432,3 +433,126 @@ function require_fixture(): string {
   - { id: T5, title: Changelog,         deps: [] }
   - { id: MVP, kind: milestone, gated: true, deps: [T3, T4] }`;
 }
+
+describe('scope filter', () => {
+  const scoped = `nodes:
+  - { id: A, deps: [], scope: ["src/api/**"] }
+  - { id: B, deps: [], scope: ["src/api/users/**"] }
+  - { id: C, deps: [], scope: ["src/ui/**"] }`;
+  const open: Harness[] = [];
+  afterEach(() => {
+    for (const x of open.splice(0)) x.cleanup();
+  });
+  const scopedHarness = (config: Partial<Config> = {}) => {
+    const x = makeHarness({ graph: scoped, config: { capacity: 2, ...config } });
+    open.push(x);
+    return x;
+  };
+  const deferredOf = (x: Harness) => x.orch.status().deferred;
+
+  it('overlapping siblings launch one at a time; the deferred one launches on the first tick after the blocker is published', async () => {
+    const x = scopedHarness();
+    await x.orch.tick();
+    expect(x.orch.status().byStatus.running.sort()).toEqual(['A', 'C']);
+    expect(deferredOf(x)).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+    // A submitted: it holds its scope until its work is published.
+    await x.submit('A');
+    expect(x.statusOf('A')).toBe('submitted');
+    await x.orch.tick(); // starts verification; the result lands on the next tick
+    expect(x.statusOf('A')).toBe('submitted');
+    expect(x.statusOf('B')).toBe('unstarted');
+    expect(deferredOf(x)).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+    while (x.orch.verifierBusy()) await new Promise((r) => setImmediate(r));
+    await x.orch.tick();
+    expect(x.statusOf('A')).toBe('done');
+    // The tick that applied the publication launched B in its admission phase.
+    expect(x.statusOf('B')).toBe('running');
+    expect(deferredOf(x)).toEqual([]);
+    expect(x.store.listEvents({ kind: 'launch.created', taskId: 'B' })).toHaveLength(1);
+  });
+
+  it('a submitted blocker keeps its scope while verification is pending', async () => {
+    const x = scopedHarness();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const origRun = x.verifier.run.bind(x.verifier);
+    x.verifier.run = async (job, ctx) => {
+      await gate;
+      return origRun(job, ctx);
+    };
+    await x.orch.tick();
+    await x.submit('A');
+    await x.orch.tick();
+    expect(x.statusOf('A')).toBe('submitted');
+    expect(x.statusOf('B')).toBe('unstarted');
+    expect(deferredOf(x)).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+    release();
+    await x.orch.settle();
+    expect(x.statusOf('A')).toBe('done');
+    expect(x.statusOf('B')).toBe('running');
+    expect(deferredOf(x)).toEqual([]);
+  });
+
+  it('a waiting blocker holds its scope; a failed one releases it', async () => {
+    const x = scopedHarness();
+    await x.orch.tick();
+    void x.block('A');
+    await new Promise((r) => setImmediate(r));
+    expect(x.statusOf('A')).toBe('waiting');
+    await x.orch.tick();
+    expect(x.statusOf('B')).toBe('unstarted');
+    expect(deferredOf(x)).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+    x.orch.answer('A', 'go');
+    await x.orch.tick();
+    expect(x.statusOf('A')).toBe('running');
+    expect(x.statusOf('B')).toBe('unstarted');
+    await x.failTask('A', 'no', 3);
+    expect(x.statusOf('A')).toBe('unstarted');
+    await x.orch.tick();
+    // A, unstarted again at attempt 1, comes first in file order and relaunches; B stays behind it.
+    expect(x.statusOf('A')).toBe('running');
+    expect(deferredOf(x)).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+    await x.failTask('A', 'no again', 1);
+    expect(x.statusOf('A')).toBe('blocked');
+    await x.orch.tick();
+    expect(x.statusOf('B')).toBe('running');
+    expect(deferredOf(x)).toEqual([]);
+  });
+
+  it('a claimable launch holds its scope in pull mode', async () => {
+    const x = scopedHarness({ runner: { mode: 'pull', claimWindowMs: 0 } });
+    await x.orch.tick();
+    expect(x.store.listLaunches({ status: 'claimable' }).map((l) => l.taskId).sort()).toEqual(['A', 'C']);
+    expect(deferredOf(x)).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+    const c = await x.orch.claim({ workerId: 'w1', taskId: 'A' });
+    expect(c.status).toBe(200);
+    await x.orch.tick();
+    expect(deferredOf(x)).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+    const r = await x.orch.release(String(c.body['launchId']), 'busy');
+    expect(r.status).toBe(200);
+    expect(x.statusOf('A')).toBe('unstarted');
+    await x.orch.tick();
+    // A, released at no cost, comes first again by file order; B stays deferred behind it.
+    expect(x.store.listLaunches({ status: 'claimable' }).map((l) => l.taskId).sort()).toEqual(['A', 'C']);
+    expect(deferredOf(x)).toEqual([{ id: 'B', reason: 'scopeOverlap', with: ['A'] }]);
+  });
+
+  it('scopes: false launches overlapping tasks together; a paused run reports nothing deferred', async () => {
+    const x = scopedHarness({ capacity: 3, scheduling: { order: ['criticalPath', 'priority', 'fifo'], scopes: false } });
+    await x.orch.tick();
+    expect(x.orch.status().byStatus.running.sort()).toEqual(['A', 'B', 'C']);
+    expect(deferredOf(x)).toEqual([]);
+    const y = scopedHarness();
+    await y.orch.tick();
+    expect(deferredOf(y)).toHaveLength(1);
+    y.orch.pause();
+    expect(deferredOf(y)).toEqual([]);
+    await y.orch.tick();
+    expect(deferredOf(y)).toEqual([]);
+    y.orch.resume();
+    await y.orch.tick();
+    expect(deferredOf(y)).toHaveLength(1);
+  });
+});
