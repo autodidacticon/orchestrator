@@ -181,6 +181,18 @@ describe('package entrypoints', () => {
     }
   });
 
+  // See specs/host-integration "Skills report the toolchain".
+  it('the skills report the toolchain and resolve needsConfig', () => {
+    const run = readFileSync(path.join(plugin, 'skills/run/SKILL.md'), 'utf8');
+    for (const word of ['configure', 'needsConfig', 'CLAUDE.md', 'needsAccess', 'detected: npm test on main', 'start-only']) expect(run, word).toContain(word);
+    expect(run).toContain('omit the allow-list part');
+    for (const skill of ['import', 'work']) {
+      const text = readFileSync(path.join(plugin, `skills/${skill}/SKILL.md`), 'utf8');
+      expect(text, skill).toContain('needsConfig');
+      expect(text, skill).toContain('configure');
+    }
+  });
+
   it('declares the session hooks', () => {
     const hooks = JSON.parse(readFileSync(path.join(plugin, 'hooks/hooks.json'), 'utf8')) as { hooks: { SessionStart: Array<{ matcher: string; hooks: Array<{ command: string; timeout?: number }> }>; SessionEnd: Array<{ hooks: Array<{ command: string }> }> } };
     expect(hooks.hooks.SessionStart[0]).toMatchObject({ matcher: 'startup|resume|clear' });

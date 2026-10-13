@@ -18,7 +18,8 @@ export interface BriefJson {
   baseSha: string;
   graphRev: string;
   integrationBranch: string;
-  checkCommand: string;
+  checkCommand?: string;
+  allowedTools?: string[];
   retryWindowMs: number;
   fallbackPath: string;
   attempt: number;
@@ -50,6 +51,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     graphRev: launch.graphRev,
     integrationBranch: input.integrationBranch,
     checkCommand: input.checkCommand,
+    allowedTools: input.allowedTools,
     retryWindowMs: input.retryWindowMs,
     fallbackPath: opts.fallbackPath,
     attempt: launch.attempt,
@@ -78,7 +80,9 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   lines.push(
     `- Commit all work on branch \`${launch.branch}\` in this worktree. Uncommitted or untracked files make your submission be rejected with 409 and the file list; commit and resubmit.`,
     `- Never merge into, push to, or check out \`${input.integrationBranch}\`. You may rebase your launch branch onto it when a baseMoved notice says it advanced; the orchestrator integrates your branch after verification.`,
-    `- Run the check command before submitting: \`${input.checkCommand}\`.`,
+    input.checkCommand
+      ? `- Run the check command before submitting: \`${input.checkCommand}\`.`
+      : '- No check command is configured for this repository yet; the operator is being asked. Run the project\'s documented test suite before submitting.',
     '- If the task needs no changes, say so explicitly with `noChanges: { justification }` in your report.',
     '- Your report must give evidence for every acceptance criterion above: one `acceptance` entry per criterion, whose `criterion` quotes the criterion text (markdown and case do not matter) or gives its number.',
     '- Terminate as soon as your report is accepted.',
@@ -86,6 +90,13 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   );
   lines.push('## Workspace', '');
   lines.push(`- Worktree: \`${launch.worktree}\``, `- Branch: \`${launch.branch}\``, `- Base commit: \`${launch.baseSha}\``, `- Integration branch: \`${input.integrationBranch}\``);
+  if (input.allowedTools?.length) {
+    const bash = input.allowedTools.filter((r) => r.startsWith('Bash('));
+    lines.push(
+      `- If the orchestrator spawned you, these Bash rules are in force: ${bash.map((r) => `\`${r}\``).join(', ')}. A worker holding a claimed launch runs under its own permissions instead.`,
+      '- Run commands from the worktree root without `cd`: every part of a compound command must match a rule on its own. When you need a command these rules do not cover, ask with a `needsAccess` question naming the command rather than retrying it.',
+    );
+  }
   lines.push(
     '- Notices may arrive in your inbox (the `inbox` operation): `stuck` when no progress has been observed for a while, `nudge` with a message from the operator, `baseMoved` with the new integration `head` and the `files` that changed, and `payloadChanged` when your task\'s description was edited (re-read the brief file). Check the inbox after long steps.',
     '',

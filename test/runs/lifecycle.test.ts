@@ -60,7 +60,7 @@ describe('run directory and daemon lifecycle', () => {
     expect(fromSub).toBe(fromLink);
     expect(runDirFor(fromSub, env)).toBe(runDirFor(fromLink, env));
     expect(runDirFor(fromSub, env).startsWith(path.join(home, 'runs'))).toBe(true);
-    const cfg = await resolveRunConfig(fromSub, env);
+    const cfg = (await resolveRunConfig(fromSub, env)).config;
     expect(cfg.dataDir).toBe(runPaths(fromSub, env).runDir);
     expect(cfg.graphPath).toBe(path.join(cfg.dataDir, 'graph.yaml'));
     expect(cfg.repoPath).toBe(fromSub);
@@ -189,6 +189,30 @@ describe('run directory and daemon lifecycle', () => {
     await expect(reviveDaemon({ repo, env })).rejects.toThrow(/stopped at .*start/);
     expect(await reviveDaemon({ repo: realpathSync(makeRepo(fresh())), env })).toBeUndefined(); // no store: nothing to revive
   }, 90_000);
+
+  // See specs/operator-control "Start arguments".
+  it('passes configuration arguments as --set flags, applies them through the route on a running daemon, and rejects start-only keys there', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home };
+    const repo = realpathSync(makeRepo(fresh()));
+    configFor(repo);
+    const first = await startDaemon({ repo, env, overrides: { capacity: 3, allowedTools: ['Bash(docker:*)'] } });
+    expect(first.started).toBe(true);
+    expect(first.config?.capacity).toEqual({ value: 3, source: 'argument' });
+    expect(first.config?.checkCommand).toEqual({ value: 'true', source: 'file' });
+    expect(first.config?.allowedTools).toMatchObject({ parts: { argument: ['Bash(docker:*)'] }, applied: false });
+    expect(first.applied?.sort()).toEqual(['allowedTools', 'capacity']);
+    expect(first.rejected).toEqual([]);
+    expect(first.needsConfig).toEqual([]);
+    const second = await startDaemon({ repo, env, overrides: { capacity: 4, integrationBranch: 'develop' } });
+    expect(second).toMatchObject({ started: false, applied: ['capacity'], rejected: [{ key: 'integrationBranch' }] });
+    expect(second.rejected?.[0]?.reason).toMatch(/start-only/);
+    expect(second.config?.capacity).toEqual({ value: 4, source: 'argument' });
+    expect(second.config?.integrationBranch).toEqual({ value: 'main', source: 'detected' });
+    await expect(startDaemon({ repo, env, overrides: { capacity: 0 } })).rejects.toThrow(/capacity/);
+    expect((await health(first.url))?.['config']).toMatchObject({ capacity: { value: 4, source: 'argument' } });
+    await stopDaemon({ repo, env });
+  }, 60_000);
 
   it('adopts --default-mode only when nothing chose a mode, and keeps it across restarts', async () => {
     home = fresh();

@@ -21,6 +21,7 @@ export const TOOL_NAMES = [
   'answer', 'cancel', 'reopen', 'unblock', 'accept', 'reject', 'pause', 'resume', 'logs',
   'outbox', 'ack', 'nudge', 'proposals', 'accept_proposal', 'reject_proposal',
   'claim', 'release', 'launch_heartbeat', 'launch_report', 'launch_block', 'launch_inbox', 'launch_log',
+  'configure',
 ] as const;
 
 export function clampWait(ms: number | undefined): number {
@@ -186,10 +187,37 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   server.registerTool(
     'start',
     {
-      description: 'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path, and the runner mode in force. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull unless orchestrator.yaml sets runner.mode or the run chose a mode before; a running daemon keeps its mode. After an idle exit or a crash every other tool revives the daemon by itself.',
-      inputSchema: { mode: z.enum(['spawn', 'pull', 'mixed']).optional() },
+      description:
+        'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path, the runner mode in force, and the resolved configuration: config (every key as { value, source }: argument, file, pinned, detected, default, or unresolved), toolchain (what detection found in the repository root), needsConfig (keys no layer supplied; checkCommand there means submitted work is held until it is set), and applied / rejected for the configuration arguments. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull unless orchestrator.yaml sets runner.mode or the run chose a mode before; a running daemon keeps its mode. Configuration arguments become durable overrides for the run: passed to a daemon this call spawns, applied through the configuration route to one already running; integrationBranch is start-only and lands under rejected on a running daemon. After an idle exit or a crash every other tool revives the daemon by itself.',
+      inputSchema: {
+        mode: z.enum(['spawn', 'pull', 'mixed']).optional(),
+        checkCommand: z.string().optional().describe('The command the verifier runs on every rebased submission, e.g. "npm test".'),
+        integrationBranch: z.string().optional().describe('Start-only: the branch work is published to; pinned for the run once chosen.'),
+        capacity: z.number().int().optional().describe('Agents in parallel.'),
+        allowedTools: z.array(z.string()).optional().describe('Rules appended to the derived allow list for spawned agents, e.g. "Bash(docker:*)".'),
+        runnerCommand: z.string().optional().describe('The runner command template; {allowedTools} is filled at spawn.'),
+      },
     },
-    async (a) => guarded(async () => ({ status: 200, body: await startDaemon({ repo: values.repo, env, mode: a.mode, ...(a.mode ? {} : { defaultMode: 'pull' as const }) }) })),
+    async (a) =>
+      guarded(async () => {
+        const { mode, ...rest } = a;
+        const overrides = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+        return { status: 200, body: await startDaemon({ repo: values.repo, env, mode, ...(mode ? {} : { defaultMode: 'pull' as const }), ...(Object.keys(overrides).length ? { overrides } : {}) }) };
+      }),
+  );
+  server.registerTool(
+    'configure',
+    {
+      description:
+        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every launch spawned afterwards). A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start).',
+      inputSchema: {
+        checkCommand: z.string().nullable().optional(),
+        capacity: z.number().int().nullable().optional(),
+        allowedTools: z.array(z.string()).nullable().optional(),
+        runnerCommand: z.string().nullable().optional(),
+      },
+    },
+    async (a) => guarded(() => client.call('PUT', '/v1/config', Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)))),
   );
   server.registerTool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a) =>
     guarded(async () => {
@@ -197,7 +225,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       return { status: r.stopped ? 200 : 409, body: r };
     }),
   );
-  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, and attachments: the sessions attached and the launches each holds.', inputSchema: {} }, async () =>
+  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (allowedTools with its parts and whether the runner command applies it), toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async () =>
     guarded(() => client.call('GET', '/v1/status')),
   );
   server.registerTool('runs', { description: 'List every run under ORCH_HOME with its repository, daemon liveness, and, for a daemon that is gone, its exit record (idle, stop, or signal with the last digest) or none after a crash.', inputSchema: {} }, async () =>
@@ -234,7 +262,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   server.registerTool(
     'wait',
     {
-      description: `Block until something happens. Returns events after afterSeq (default: now), the latest seq, and a digest (openQuestions, awaitingReview, finished, stalled, stuck, pausedReason, deferred: the count of ready tasks held back by scope overlap, outboxPending, trackerErrors). until: question | review | finished | stalled | any; any also returns on launch.stuck, launch.unstuck, and budget.exceeded. timeoutMs default ${WAIT_DEFAULT_MS}, cap ${WAIT_CAP_MS}. Loop on this instead of polling status.`,
+      description: `Block until something happens. Returns events after afterSeq (default: now), the latest seq, and a digest (openQuestions, awaitingReview, finished, stalled, stuck, pausedReason, deferred: the count of ready tasks held back by scope overlap, needsConfig: configuration keys still unresolved, with checkCommand meaning submitted work is held until configure sets it, outboxPending, trackerErrors). until: question | review | finished | stalled | any; any also returns on launch.stuck, launch.unstuck, and budget.exceeded. timeoutMs default ${WAIT_DEFAULT_MS}, cap ${WAIT_CAP_MS}. Loop on this instead of polling status.`,
       inputSchema: { afterSeq: z.number().int().nonnegative().optional(), timeoutMs: z.number().int().nonnegative().optional(), until: z.enum(['question', 'review', 'finished', 'stalled', 'any']).optional() },
     },
     async (a) => guarded(() => client.wait(a)),

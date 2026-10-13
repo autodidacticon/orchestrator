@@ -11,8 +11,7 @@ import type { Launch } from '../state/store.js';
 import { logPath, SubprocessRunner, type SubprocessRunnerOptions } from './subprocess.js';
 import type { SpawnResult, Usage } from './runner.js';
 
-export const DEFAULT_CLAUDE_COMMAND =
-  'claude -p --output-format json --mcp-config {mcpConfig} --strict-mcp-config --permission-mode acceptEdits --allowedTools "Bash(git:*)" "mcp__orchestrator__heartbeat" "mcp__orchestrator__report" "mcp__orchestrator__block" "mcp__orchestrator__inbox" "mcp__orchestrator__log" --no-session-persistence < {brief}';
+export { DEFAULT_CLAUDE_COMMAND } from './command.js';
 
 /** The shim entrypoint: the built .js next to this file if present, else the .ts via tsx. */
 export function shimCommand(): { command: string; args: string[] } {

@@ -4,12 +4,15 @@
  */
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { type Config, configSchema, defaultConfig } from '../config.js';
+import { type Config, configSchema, defaultConfig, loadConfig } from '../config.js';
 import { parse as parseYaml } from 'yaml';
+import { detectIntegrationBranch } from '../toolchain/branch.js';
+import { detectToolchain, type ToolchainRecord } from '../toolchain/detect.js';
+import { type ConfigReport, type Overrides, type Resolved, resolveLayers } from './resolve.js';
 
 const execFileP = promisify(execFile);
 
@@ -19,6 +22,8 @@ export const DAEMON_PID = 'daemon.pid';
 export const DAEMON_LOG = 'daemon.log';
 export const GRAPH_FILE = 'graph.yaml';
 export const CONFIG_FILE = 'orchestrator.yaml';
+/** The resolved configuration with provenance, written beside daemon.json. See specs/toolchain-discovery "Resolved configuration record". */
+export const CONFIG_JSON = 'config.json';
 
 export function orchHome(env: NodeJS.ProcessEnv = process.env): string {
   return env['ORCH_HOME'] ?? path.join(homedir(), '.orchestrator');
@@ -132,24 +137,80 @@ export function readRepoConfigRaw(realRepoPath: string): Record<string, unknown>
   }
 }
 
-/**
- * Config for a run: <repo>/orchestrator.yaml when present, else defaults.
- * dataDir and graphPath default to the run directory unless the file sets them.
- */
-export async function resolveRunConfig(realRepoPath: string, env: NodeJS.ProcessEnv = process.env): Promise<Config> {
+/** The file layer and defaults for a run: <repo>/orchestrator.yaml when present. dataDir and graphPath default to the run directory unless the file sets them. */
+function baseRunConfig(realRepoPath: string, env: NodeJS.ProcessEnv): { config: Config; fileRaw: Record<string, unknown> | undefined } {
   const p = runPaths(realRepoPath, env);
   const file = path.join(realRepoPath, CONFIG_FILE);
   if (!existsSync(file)) {
-    return defaultConfig({ repoPath: realRepoPath, dataDir: p.runDir, graphPath: p.graphPath, runDir: p.runDir });
+    return { config: defaultConfig({ repoPath: realRepoPath, dataDir: p.runDir, graphPath: p.graphPath, runDir: p.runDir }), fileRaw: undefined };
   }
   const raw = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
   const cfg = configSchema.parse(raw);
   const abs = (v: string) => (path.isAbsolute(v) ? v : path.resolve(realRepoPath, v));
   return {
-    ...cfg,
-    repoPath: raw['repoPath'] ? abs(String(raw['repoPath'])) : realRepoPath,
-    dataDir: raw['dataDir'] ? abs(String(raw['dataDir'])) : p.runDir,
-    graphPath: raw['graphPath'] ? abs(String(raw['graphPath'])) : p.graphPath,
-    runDir: p.runDir,
+    config: {
+      ...cfg,
+      repoPath: raw['repoPath'] ? abs(String(raw['repoPath'])) : realRepoPath,
+      dataDir: raw['dataDir'] ? abs(String(raw['dataDir'])) : p.runDir,
+      graphPath: raw['graphPath'] ? abs(String(raw['graphPath'])) : p.graphPath,
+      runDir: p.runDir,
+    },
+    fileRaw: raw,
   };
+}
+
+export interface ResolveOptions {
+  /** The durable override document (the argument layer). */
+  overrides?: Overrides;
+  /** The integration branch pinned in the store for the run. */
+  pinned?: string;
+  /** false: skip detection (no git or filesystem probes); the detected layer is then empty. */
+  detect?: boolean;
+}
+
+/** Detection from the repository: the toolchain table and the integration branch. See specs/toolchain-discovery. */
+export async function detectRepo(repo: string): Promise<{ toolchain: ToolchainRecord; integrationBranch: string | undefined }> {
+  const [toolchain, integrationBranch] = await Promise.all([detectToolchain(repo), detectIntegrationBranch(repo)]);
+  return { toolchain, integrationBranch };
+}
+
+/**
+ * The resolved configuration for a run: arguments over <repo>/orchestrator.yaml
+ * over the pinned branch over detection over defaults, with provenance.
+ * Callers that only need the values read `.config`.
+ */
+export async function resolveRunConfig(realRepoPath: string, env: NodeJS.ProcessEnv = process.env, opts: ResolveOptions = {}): Promise<Resolved> {
+  const { config, fileRaw } = baseRunConfig(realRepoPath, env);
+  const detected = opts.detect === false ? undefined : await detectRepo(config.repoPath);
+  return resolveLayers({ base: config, fileRaw, detected, pinned: opts.pinned }, opts.overrides ?? {});
+}
+
+/** The same resolution over an explicit config file (`orchestrator --config`). */
+export async function resolveFileConfig(file: string, opts: ResolveOptions = {}): Promise<Resolved> {
+  const config = await loadConfig(file);
+  let fileRaw: Record<string, unknown> = {};
+  try {
+    const raw = parseYaml(readFileSync(file, 'utf8')) as unknown;
+    if (raw && typeof raw === 'object') fileRaw = raw as Record<string, unknown>;
+  } catch {
+    /* loadConfig already parsed it */
+  }
+  const detected = opts.detect === false ? undefined : await detectRepo(config.repoPath);
+  return resolveLayers({ base: config, fileRaw, detected, pinned: opts.pinned }, opts.overrides ?? {});
+}
+
+/** Atomic write of the resolved configuration record (temp file and rename). */
+export function writeConfigJson(runDir: string, record: ConfigReport): void {
+  const target = path.join(runDir, CONFIG_JSON);
+  const tmp = `${target}.${process.pid}.tmp`;
+  writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  renameSync(tmp, target);
+}
+
+export function readConfigJson(runDir: string): ConfigReport | undefined {
+  try {
+    return JSON.parse(readFileSync(path.join(runDir, CONFIG_JSON), 'utf8')) as ConfigReport;
+  } catch {
+    return undefined;
+  }
 }

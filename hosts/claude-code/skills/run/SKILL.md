@@ -11,13 +11,38 @@ never raw event lists.
 
 ## 1. Start
 
-Call `start`. It returns the run directory, graph path, URL, and the runner `mode` in force,
-and is safe to repeat. A run started from this plugin defaults to `pull`: the daemon prepares
-each launch and this session's own subagents do the work (section 1a), so the user sees every
-agent here. `spawn` (the daemon runs headless agents, for unattended runs) and `mixed` are
-explicit choices: `start` with `mode`, or `runner.mode` in `orchestrator.yaml`, which wins.
-Tell the user who is executing the work. Then call `status`. If no graph is loaded, say so
-and suggest the `import` skill.
+Call `start`. It returns the run directory, graph path, URL, the runner `mode` in force, and
+the resolved configuration: `config` (every key as `{ value, source }`, the source being
+`argument`, `file`, `pinned`, `detected`, `default`, or `unresolved`), `toolchain` (what
+detection found in the repository root), and `needsConfig` (keys no layer supplied). It is safe
+to repeat. A run started from this plugin defaults to `pull`: the daemon prepares each launch
+and this session's own subagents do the work (section 1a), so the user sees every agent here.
+`spawn` (the daemon runs headless agents, for unattended runs) and `mixed` are explicit
+choices: `start` with `mode`, or `runner.mode` in `orchestrator.yaml`, which wins.
+
+Tell the user who is executing the work, and report the toolchain in one line: the check
+command and the integration branch with the source of each and, when the daemon spawns agents
+(`spawn`, or `mixed` after the claim window), the toolchains whose commands agents may run, for
+example "detected: npm test on main; agents may run npm and node". When this session's
+subagents work the launches (`pull`), omit the allow-list part: workers run under this
+session's own permissions. If `needsConfig` is not empty, resolve it now (section 1b). Then
+call `status`. If no graph is loaded, say so and suggest the `import` skill.
+
+## 1b. Resolve what detection could not
+
+When `needsConfig` names `checkCommand`, in the `start` result or in a later `wait` digest,
+submitted work is held under `verifying` until a check command is set: no attempt is spent and
+the sealed work is kept, but nothing is published. Never leave it unresolved while a task is
+`submitted` without having asked the user. Look for the test command in `CLAUDE.md`, the
+README, and the manifests in the repository root (`package.json` scripts, `Makefile` targets,
+and their counterparts). When one is stated unambiguously, call `configure` with `checkCommand`
+and tell the user the command and where you found it ("set checkCommand to `make check` from
+CLAUDE.md"). Otherwise propose your best reading, or say you found none, and call `configure`
+only with what the user confirms. `configure` also takes `capacity`, `allowedTools` (rules
+appended to the derived list for spawned agents, such as `Bash(docker:*)`), and
+`runnerCommand`; a null clears an override so the value falls back to the file, detection, or
+the default. The integration branch is start-only: pass `integrationBranch` to `start` before
+the run holds any launch; a running daemon refuses it.
 
 ## 1a. Work the run with session subagents
 
@@ -47,7 +72,15 @@ answers (section 2b), then act on the digest:
 
 - **openQuestions** non-empty: for each task, call `status` or `logs` only if you need
   context, then present the question to the user verbatim and wait for their reply. Send the
-  reply with `answer`. Do not invent answers to questions that need a human decision.
+  reply with `answer`. Do not invent answers to questions that need a human decision. When the
+  question's kind is `needsAccess` and it names a command (from `status`, under the task's
+  blocked or waiting reason), offer three things: adding a rule through `configure`
+  (`allowedTools: ["Bash(<command>:*)"]`) so launches spawned afterwards can run it, saying
+  that the live agent cannot gain the rule; running the command yourself on the agent's behalf
+  in its worktree and sending the result with `answer`, which is what unblocks the live agent
+  now; or answering with an alternative. Do what the user picks.
+- **needsConfig** names `checkCommand`: submitted tasks are held under `verifying` until a
+  check command is set. Follow section 1b now; do not call the run slow or stalled.
 - **awaitingReview** non-empty: invoke the `review` skill for each milestone.
 - **finished** true: report the final state (done tasks, milestones) and stop.
 - **stalled** true: report `stallRoots` with their reasons. Offer the options that apply:

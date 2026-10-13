@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 import { ApiServer } from '../../src/agent/server.js';
-import { defaultConfig, type Config } from '../../src/config.js';
+import { type Config, type ConfigInput, defaultConfig } from '../../src/config.js';
 import { FileGraphSource, StaticGraphSource } from '../../src/graph/source.js';
 import { Orchestrator } from '../../src/loop/orchestrator.js';
 import { registerOperatorRoutes } from '../../src/operator/routes.js';
@@ -64,7 +64,7 @@ export interface SliceHarness {
   cleanup(): Promise<void>;
 }
 
-export async function makeSlice(opts: { graph: string; config?: Partial<Config>; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean }): Promise<SliceHarness> {
+export async function makeSlice(opts: { graph: string; config?: ConfigInput; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean }): Promise<SliceHarness> {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-slice-'));
   const repo = opts.repo ?? makeRepo(dir);
   const dataDir = path.join(dir, 'run');
@@ -88,7 +88,10 @@ export async function makeSlice(opts: { graph: string; config?: Partial<Config>;
   const graphPath = path.join(dataDir, 'graph.yaml');
   if (opts.fileGraph) writeFileSync(graphPath, opts.graph);
   const source = opts.fileGraph ? new FileGraphSource(graphPath) : new StaticGraphSource(opts.graph);
-  const runner = new SubprocessRunner({ command: config.runnerCommand, logDir: path.join(dataDir, 'logs'), graceMs: 500, extraEnv: { ORCH_PIDLOG: pidlog } });
+  let orch!: Orchestrator;
+  let server!: ApiServer;
+  // The command and its allow list are read from the effective configuration at every spawn. See specs/toolchain-discovery "Runner command composition".
+  const runner = new SubprocessRunner({ command: () => orch.effective().config.runnerCommand, allowedTools: () => orch.effective().allowedTools.value, logDir: path.join(dataDir, 'logs'), graceMs: 500, extraEnv: { ORCH_PIDLOG: pidlog } });
   // A runner that cannot observe its processes: the lease TTL is the only bound on silence.
   if (opts.unobserved) runner.liveness = async () => 'unknown';
   const workspace = new GitWorkspace(repo, config.integrationBranch, path.join(dataDir, 'worktrees'));
@@ -99,15 +102,14 @@ export async function makeSlice(opts: { graph: string; config?: Partial<Config>;
           repo,
           integrationBranch: config.integrationBranch,
           tempRoot: path.join(dataDir, 'verify'),
-          checkCommand: config.checkCommand,
+          // Read from the effective configuration when a job starts checking, so a runtime override applies to the next job.
+          checkCommand: () => orch.effective().config.checkCommand,
           checkTimeoutMs: config.checkTimeoutMs,
           baselineSha: gitIn(repo, 'rev-parse', config.integrationBranch),
         })
       : new PassthroughVerifier());
 
   const port = config.apiPort || (await freePort());
-  let orch!: Orchestrator;
-  let server!: ApiServer;
   const boot = async () => {
     orch = new Orchestrator({ store, config, graphSource: source, runner, workspace, verifier });
     server = new ApiServer(orch);

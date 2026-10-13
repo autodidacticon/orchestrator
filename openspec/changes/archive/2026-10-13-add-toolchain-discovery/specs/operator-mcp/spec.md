@@ -1,11 +1,19 @@
 ## MODIFIED Requirements
 
 ### Requirement: Start tool
-`start` SHALL perform the daemon lifecycle `start` for the resolved run, creating the run directory if needed, and SHALL return the URL, pid, run directory, and graph path. It SHALL be safe to call repeatedly. It SHALL accept the optional configuration arguments `checkCommand`, `integrationBranch`, `capacity`, `allowedTools`, and `runnerCommand` beside `mode`, pass them to the lifecycle `start`, and return the `config` block with value and source per key, the `toolchain` record, `needsConfig`, and any `rejected` keys, so that the session can report what was detected and set what was not.
+`start` SHALL perform the daemon lifecycle `start` for the resolved run, creating the run directory if needed, and SHALL return the URL, pid, run directory, graph path, and the runner mode in force. It SHALL be safe to call repeatedly. When it spawns the daemon and no `mode` argument is given, it SHALL pass `--default-mode pull`, so that a run started from the plugin executes its launches through session workers unless the repository's `orchestrator.yaml` sets `runner.mode` or the run already holds a mode override. When the daemon is already running and no `mode` is given, the mode SHALL be left as it is. It SHALL accept the optional configuration arguments `checkCommand`, `integrationBranch`, `capacity`, `allowedTools`, and `runnerCommand` beside `mode`, pass them to the lifecycle `start`, and return the `config` block with value and source per key, the `toolchain` record, `needsConfig`, and any `rejected` keys, so that the session can report what was detected and set what was not.
 
 #### Scenario: Fresh repository
 - **WHEN** `start` is called in a repository with no run directory
-- **THEN** the run directory is created, a daemon is spawned, and the URL answers `status` within the bounded time
+- **THEN** the run directory is created, a daemon is spawned, the URL answers `status` within the bounded time, and the mode in force is `pull`
+
+#### Scenario: Config wins over the plugin default
+- **WHEN** `start` is called without `mode` in a repository whose `orchestrator.yaml` sets `runner.mode: spawn`
+- **THEN** the mode in force is `spawn`
+
+#### Scenario: Running daemon keeps its mode
+- **WHEN** the daemon runs in `spawn` after `orchestrator-ctl mode spawn` and `start` is called without `mode`
+- **THEN** no second daemon is spawned and the mode stays `spawn`
 
 #### Scenario: Detection reported
 - **WHEN** `start` is called in a Node repository with no file

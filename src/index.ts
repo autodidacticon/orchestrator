@@ -18,7 +18,12 @@ export { Orchestrator, type OrchestratorDeps, type StatusReport, type ApiRespons
 export { fifoPolicy, chainPolicy, admit, scopesOverlap, staticPrefix, type Policy, type ScheduleContext, type Admission, type Deferral } from './loop/schedule.js';
 export type { AgentRunner, SpawnResult } from './runner/runner.js';
 export { SubprocessRunner, substitute, pidAlive, killTree } from './runner/subprocess.js';
-export { ClaudeCodeRunner, DEFAULT_CLAUDE_COMMAND } from './runner/claude-code.js';
+export { ClaudeCodeRunner } from './runner/claude-code.js';
+export { DEFAULT_CLAUDE_COMMAND, ALLOWED_TOOLS_SLOT, hasAllowedToolsSlot, quoteRules } from './runner/command.js';
+export { detectToolchain, type ToolchainRecord, type ToolchainKind } from './toolchain/detect.js';
+export { BASE_RULES, rulesFor, isSafeRule, composeAllowedTools } from './toolchain/tools.js';
+export { detectIntegrationBranch } from './toolchain/branch.js';
+export { resolveLayers, reportOf, mergeOverrides, overridesSchema, OVERRIDABLE_KEYS, START_ONLY_KEYS, type Resolved, type ResolveInputs, type Overrides, type ConfigReport, type Provenance, type Source } from './runs/resolve.js';
 export { InprocRunner } from './runner/inproc.js';
 export type { Workspace, SealResult, FallbackReport, BriefInput } from './workspace/workspace.js';
 export { GitWorkspace } from './workspace/git-workspace.js';

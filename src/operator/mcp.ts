@@ -9,7 +9,7 @@ export const USAGE = `orchestrator-mcp: operator MCP server for a host session.
 
   orchestrator-mcp [--repo <path>]
 
-A stdio MCP server exposing start, stop, status, runs, import_issues,
+A stdio MCP server exposing start, stop, status, runs, configure, import_issues,
 import_graph, wait, review, answer, cancel, reopen, unblock, accept, reject,
 pause, resume, logs, outbox, ack, nudge, proposals, accept_proposal,
 reject_proposal, and the worker tools claim, release, launch_heartbeat,

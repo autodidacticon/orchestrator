@@ -16,12 +16,16 @@ npm test            # unit, slice, and crash-injection suites with scripted agen
 
 ### From a terminal
 
-1. In the repository you want to work on, write `orchestrator.yaml` (every key is optional):
+1. No configuration file is needed. At every start the daemon reads the repository root (never subdirectories) and detects the check command from the first matching manifest in a fixed order (a `Makefile` with a `test` target, then `package.json` with a real `test` script using the package manager named by `packageManager` or the lockfile, then `Cargo.toml`, `go.mod`, `pyproject.toml`/`setup.cfg`/`pytest.ini` with uv or poetry when their lockfile exists, `Gemfile`, `build.gradle(.kts)`, `pom.xml`, `mix.exs`, `*.sln`/`*.csproj`), the integration branch (`origin/HEAD` when that branch exists locally, else the checked-out branch, else `main`), and the tools spawned agents may run (`Bash(git:*)` and the orchestrator tools, plus the test, run, install, and exec commands of every toolchain found: `npm test`, `npm run`, `npm install`, `npm ci`, `npx`, `node`, `cargo`, `go`, `pytest`, `python`, `pip`, `uv`, `poetry`, `make`, and their counterparts). Every value is resolved in one order, an explicit argument over `orchestrator.yaml` over the branch pinned for the run (integration branch only) over detection over the built-in default, and records where it came from. Arguments are durable overrides for the run: `orchestrator-ctl start --set checkCommand="make check" --set capacity=3` (also `integrationBranch`, `allowedTools` as a JSON array or one rule per flag, `runnerCommand`), and `orchestrator-ctl config --check-command ... --capacity ... --allow "Bash(docker:*)" --runner-command ... --clear <key>` on a running daemon; `orchestrator-ctl config` alone prints every key with its value and source, the detection record, and `needsConfig`. The same facts are in `status` (`config`, `toolchain`, `needsConfig`) and in `config.json` in the run directory. When nothing supplies a check command, `needsConfig` names it and submitted work is held, without spending an attempt, until one is set. The integration branch is pinned when the run first starts: a re-pointed `origin/HEAD` or a different checked-out branch never moves it, and an explicit different branch is refused once the run holds launches (start from a fresh run directory to change it). The derived allow list lets spawned agents fetch and run packages, including their install scripts, with the user's credentials; `runner.claude.deriveTools: false` with an explicit `runner.claude.allowedTools`, or a `deny` rule in the project's `.claude/settings.json`, narrows it. Which agents get the list is the runner mode: it is filled into the `{allowedTools}` slot of the default `runnerCommand` for launches the daemon spawns (`spawn`, and `mixed` after the claim window), while a launch claimed by a session worker runs under that session's own permissions (see the next section). An existing `orchestrator.yaml` keeps working unchanged: keys it sets resolve with source `file`, and a `runnerCommand` without the `{allowedTools}` slot runs verbatim. The file is optional for everything else too:
 
    ```yaml
    integrationBranch: main
    checkCommand: npm test          # run on every rebased submission before it is published
    capacity: 2                     # agents in parallel
+   runner:
+     claude:
+       allowedTools: ["Bash(docker:*)"]   # appended to the derived list for spawned agents
+       deriveTools: true                  # false: only Bash(git:*), the orchestrator tools, and the rules above
    scheduling:
      order: [criticalPath, priority, fifo]   # admission order; ties keep graph file order
      scopes: true                  # never run two tasks whose declared scopes overlap
@@ -62,7 +66,8 @@ npm test            # unit, slice, and crash-injection suites with scripted agen
 4. Operate the run from the same terminal:
 
    ```
-   orchestrator-ctl status                         # sets by state, stall roots, open questions, stuck tasks, deferred tasks, cost
+   orchestrator-ctl status                         # sets by state, stall roots, open questions, stuck tasks, deferred tasks, cost, config, toolchain, needsConfig
+   orchestrator-ctl config [--check-command <cmd>] [--allow <rule>] [--capacity <n>] [--clear <key>]   # show or override the configuration
    orchestrator-ctl answer T1 "use sqlite"         # answer an agent's question
    orchestrator-ctl logs T1                        # the agent's captured output
    orchestrator-ctl nudge T1 "commit what you have"
@@ -114,22 +119,23 @@ Graph mutation. Milestones hold no work, so they never block a reopen: reopening
 
 ### Requirements
 
-Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, `add-graph-mutation`, `add-pull-runner`, `add-scheduling-policy`, `replace-sqlite-driver`, and `add-daemon-lifecycle`:
+Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, `add-graph-mutation`, `add-pull-runner`, `add-scheduling-policy`, `replace-sqlite-driver`, `add-daemon-lifecycle`, and `add-toolchain-discovery`:
 
 - Capability specs
   - [task-graph](openspec/specs/task-graph/spec.md): loading, validation, external nodes, readiness, milestones, stall detection, revisions, reload compatibility, revocability through milestones and the cascade plan, critical path length
   - [task-lifecycle](openspec/specs/task-lifecycle/spec.md): states, transitions by actor, admission, counters, leases, retry, reopen guard, cascade reopen, milestone reset and review, cancellation
-  - [agent-protocol](openspec/specs/agent-protocol/spec.md): the brief, the API, deduplication, sealing, no-op and acceptance checks, blocking and resume, fallback, fencing, MCP façade, brief validation
-  - [integration-pipeline](openspec/specs/integration-pipeline/spec.md): worktrees, the verifier, publication, conflicts, foreign commits, milestone tags
+  - [agent-protocol](openspec/specs/agent-protocol/spec.md): the brief, the API, deduplication, sealing, no-op and acceptance checks, blocking and resume, fallback, fencing, MCP façade, brief validation, the check command and tool rules in the brief
+  - [integration-pipeline](openspec/specs/integration-pipeline/spec.md): worktrees, the verifier and the hold while no check command is configured, publication, conflicts, foreign commits, milestone tags
   - [crash-recovery](openspec/specs/crash-recovery/spec.md): durable records, recovery per boundary, adoption, fencing, sweeps, crash points, invariants, store transactions
-  - [operator-control](openspec/specs/operator-control/spec.md): operator routes shared by the CLI and the MCP server, status, run directories, daemon lifecycle, idle exit, exit record and revival, session attachments, event stream, review bundle, graph import, pause and resume, shutdown, logs
-  - [operator-mcp](openspec/specs/operator-mcp/spec.md): the operator MCP server a host session drives: tool set, wait, start, review
+  - [operator-control](openspec/specs/operator-control/spec.md): operator routes shared by the CLI and the MCP server, status, run directories, daemon lifecycle, idle exit, exit record and revival, session attachments, the configuration route and start arguments, event stream, review bundle, graph import, pause and resume, shutdown, logs
+  - [operator-mcp](openspec/specs/operator-mcp/spec.md): the operator MCP server a host session drives: tool set, wait, start with configuration arguments, configure, review
   - [graph-import](openspec/specs/graph-import/spec.md): normalized issue records, mapping rules, acceptance criteria and scope extraction, priority normalisation, import outcome
-  - [host-integration](openspec/specs/host-integration/spec.md): package entrypoints, per-host wrappers, the plugin launcher and session hooks, skills, no native dependencies, quiet SQLite binding
+  - [host-integration](openspec/specs/host-integration/spec.md): package entrypoints, per-host wrappers, the plugin launcher and session hooks, skills and how they report the toolchain and resolve `needsConfig`, no native dependencies, quiet SQLite binding
   - [tracker-sync](openspec/specs/tracker-sync/spec.md): the durable outbox of tracker effects, effect kinds and marker, mirroring policy, done semantics, the drainer contract
   - [health-monitoring](openspec/specs/health-monitoring/spec.md): process liveness, progress signals, stuck detection and escalation, the diagnosis hook, launch and run budgets, usage accounting, the base-moved notice
   - [pull-runner](openspec/specs/pull-runner/spec.md): runner modes and the claim window, claim and release with keep, session attachments, worker identity and idempotent re-claim, access modes with remote reserved
   - [scheduling-policy](openspec/specs/scheduling-policy/spec.md): the admission ordering chain and its stages, declared scopes, the overlap rule, the scope filter at admission
+  - [toolchain-discovery](openspec/specs/toolchain-discovery/spec.md): resolution order and provenance, toolchain detection and the package manager, integration branch detection and pinning, derived allowed tools, runner command composition, the resolved configuration record, runtime overrides and start-only keys
 - Archived change `add-orchestrator-v1` (the v1 runtime): [Proposal](openspec/changes/archive/2026-10-12-add-orchestrator-v1/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-orchestrator-v1/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-orchestrator-v1/tasks.md)
 - Archived change `add-session-operator` (operate from a Claude Code session): [Proposal](openspec/changes/archive/2026-10-12-add-session-operator/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-session-operator/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-session-operator/tasks.md)
 - Archived change `add-tracker-sync` (mirror the run to the tracker): [Proposal](openspec/changes/archive/2026-10-12-add-tracker-sync/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-tracker-sync/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-tracker-sync/tasks.md)
@@ -139,7 +145,6 @@ Current specs in `openspec/specs/`, synced from the archived changes `add-orches
 - Archived change `add-scheduling-policy` (ordering chain, scopes, deferrals): [Proposal](openspec/changes/archive/2026-10-13-add-scheduling-policy/proposal.md), [Design](openspec/changes/archive/2026-10-13-add-scheduling-policy/design.md), [Tasks](openspec/changes/archive/2026-10-13-add-scheduling-policy/tasks.md)
 - Archived change `replace-sqlite-driver` (Node's built-in SQLite, no native dependency): [Proposal](openspec/changes/archive/2026-10-13-replace-sqlite-driver/proposal.md), [Design](openspec/changes/archive/2026-10-13-replace-sqlite-driver/design.md), [Tasks](openspec/changes/archive/2026-10-13-replace-sqlite-driver/tasks.md)
 - Archived change `add-daemon-lifecycle` (visible session subagents by default, idle exit and revival, session attachments, kept release, self-contained plugin, hooks): [Proposal](openspec/changes/archive/2026-10-13-add-daemon-lifecycle/proposal.md), [Design](openspec/changes/archive/2026-10-13-add-daemon-lifecycle/design.md), [Tasks](openspec/changes/archive/2026-10-13-add-daemon-lifecycle/tasks.md)
+- Archived change `add-toolchain-discovery` (the check command, integration branch, and spawned agents' allowed tools detected from the repository with provenance, durable overrides through `configure` and `--set`, no `orchestrator.yaml` required): [Proposal](openspec/changes/archive/2026-10-13-add-toolchain-discovery/proposal.md), [Design](openspec/changes/archive/2026-10-13-add-toolchain-discovery/design.md), [Tasks](openspec/changes/archive/2026-10-13-add-toolchain-discovery/tasks.md)
 
-Active change, planned 2026-10-13 from the first end-to-end walkthrough:
-
-1. `add-toolchain-discovery`: the check command, integration branch, and spawned agents' allowed tools detected from the repository with provenance, runtime overrides through a `configure` tool, no `orchestrator.yaml` required. [Proposal](openspec/changes/add-toolchain-discovery/proposal.md), [Design](openspec/changes/add-toolchain-discovery/design.md), [Tasks](openspec/changes/add-toolchain-discovery/tasks.md)
+No change is active. The next planned piece of work, not yet proposed, is the usage and log loss when a launch is reaped on report.

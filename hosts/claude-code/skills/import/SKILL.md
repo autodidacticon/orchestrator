@@ -17,7 +17,12 @@ session and hand over normalized records.
   session; connect one (for example the Linear or Atlassian plugin) and run the import again."
   Do not call `import_issues`.
 - The orchestrator daemon must be running for this repository. Call the `start` tool; it is
-  idempotent and returns the run directory and graph path.
+  idempotent and returns the run directory, the graph path, and the resolved configuration.
+  Report the toolchain in one line: the check command and the integration branch with the
+  source of each (for example "detected: npm test on main"). When `needsConfig` names
+  `checkCommand`, follow the run skill's section 1b (read `CLAUDE.md`, the README, and the
+  root manifests; set it with `configure` when it is stated unambiguously, otherwise ask) before
+  continuing, so that the first submission is not held.
 
 ## 2. Fetch the root and everything it references
 

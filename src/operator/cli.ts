@@ -2,6 +2,7 @@
 /**
  * Operator CLI over the daemon's HTTP API.
  *   orchestrator-ctl status
+ *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--clear <key>]...
  *   orchestrator-ctl answer <task> <text>
  *   orchestrator-ctl cancel <task> [--release] [--reason <text>]
  *   orchestrator-ctl reopen <task> [--cascade]
@@ -24,6 +25,7 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
+import { parseSetFlags } from '../runs/resolve.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 import { SqliteStore } from '../state/sqlite.js';
 import { isEntrypoint } from '../entry.js';
@@ -75,10 +77,13 @@ export async function call(base: string, method: 'GET' | 'POST' | 'PUT', route: 
 
 export const USAGE = `orchestrator-ctl: operate a running orchestrator.
 
-  orchestrator-ctl start [--repo <path>]       start the daemon for a repository (idempotent)
+  orchestrator-ctl start [--repo <path>] [--set key=value]...   start the daemon for a repository (idempotent);
+                                               --set checkCommand=..., integrationBranch=..., capacity=..., allowedTools=..., runnerCommand=...
   orchestrator-ctl stop [--reap] [--repo <path>]
   orchestrator-ctl runs                         list runs under ORCH_HOME
   orchestrator-ctl status
+  orchestrator-ctl config                       the resolved configuration: every key with its value and source, the toolchain, needsConfig
+  orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--clear <key>]...
   orchestrator-ctl answer <task> <text>
   orchestrator-ctl cancel <task> [--release] [--reason <text>]
   orchestrator-ctl reopen <task> [--cascade]       cascade resets started dependents and returns the plan
@@ -133,11 +138,17 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       payload: { type: 'string' },
       task: { type: 'string' },
       access: { type: 'string' },
+      set: { type: 'string', multiple: true },
+      'check-command': { type: 'string' },
+      capacity: { type: 'string' },
+      allow: { type: 'string', multiple: true },
+      'runner-command': { type: 'string' },
+      clear: { type: 'string', multiple: true },
     },
   });
   const [cmd, a, ...rest] = positionals;
   if (cmd === 'start') {
-    const r = await startDaemon({ repo: values.repo });
+    const r = await startDaemon({ repo: values.repo, ...(values.set?.length ? { overrides: parseSetFlags(values.set) } : {}) });
     return { status: 200, body: r };
   }
   if (cmd === 'stop') {
@@ -151,6 +162,21 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   switch (cmd) {
     case 'status':
       return call(base, 'GET', '/v1/status');
+    case 'config': {
+      // One PUT for every flag given; `--allow` appends to the rules already set by argument. See specs/operator-control "Configuration route".
+      const patch: Record<string, unknown> = {};
+      for (const k of values.clear ?? []) patch[k] = null;
+      if (values['check-command'] !== undefined) patch['checkCommand'] = values['check-command'];
+      if (values.capacity !== undefined) patch['capacity'] = Number(values.capacity);
+      if (values['runner-command'] !== undefined) patch['runnerCommand'] = values['runner-command'];
+      if (values.allow?.length) {
+        const cur = await call(base, 'GET', '/v1/config');
+        const existing = patch['allowedTools'] === null ? [] : ((cur.body as { overrides?: { allowedTools?: string[] } }).overrides?.allowedTools ?? []);
+        patch['allowedTools'] = [...existing, ...values.allow.filter((r) => !existing.includes(r))];
+      }
+      if (!Object.keys(patch).length) return call(base, 'GET', '/v1/config');
+      return call(base, 'PUT', '/v1/config', patch);
+    }
     case 'answer':
       return call(base, 'POST', `/v1/tasks/${a}/answer`, { text: rest.join(' ') });
     case 'cancel':

@@ -7,6 +7,8 @@ import { existsSync, openSync, readdirSync, readFileSync, writeFileSync } from '
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pidAlive } from '../runner/subprocess.js';
+import type { ToolchainRecord } from '../toolchain/detect.js';
+import { type ConfigReport, type OverridableKey, type Overrides, overridesSchema, START_ONLY_KEYS } from './resolve.js';
 import { DAEMON_PID, ensureRunDir, orchHome, readDaemonJson, readRepoFile, resolveRepoPath, runPaths, type DaemonInfo, type ExitRecord, type RunPaths } from './runDir.js';
 
 export interface DaemonState {
@@ -67,6 +69,8 @@ export interface StartOptions {
   mode?: 'spawn' | 'pull' | 'mixed';
   /** The mode a spawned daemon adopts when neither the store nor orchestrator.yaml chose one; ignored for a running daemon. */
   defaultMode?: 'spawn' | 'pull' | 'mixed';
+  /** Configuration arguments: passed as `--set` flags to a daemon this call spawns, applied through `PUT /v1/config` to one already running. See specs/operator-control "Start arguments". */
+  overrides?: Overrides;
 }
 
 export interface StartResult extends DaemonInfo {
@@ -75,6 +79,45 @@ export interface StartResult extends DaemonInfo {
   started: boolean;
   /** The runner mode in force after the start. */
   mode?: 'spawn' | 'pull' | 'mixed';
+  /** The resolved configuration with value and source per key, read from the daemon once healthy. */
+  config?: ConfigReport['config'];
+  toolchain?: ToolchainRecord;
+  needsConfig?: OverridableKey[];
+  /** Override keys applied by this call, and those the daemon refused with its reason. */
+  applied?: OverridableKey[];
+  rejected?: Array<{ key: OverridableKey; reason: string }>;
+}
+
+async function readConfig(url: string): Promise<ConfigReport | undefined> {
+  try {
+    const res = await fetch(`${url}/v1/config`, { signal: AbortSignal.timeout(3000) });
+    return res.ok ? ((await res.json()) as ConfigReport) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Runtime keys go through the route; start-only keys are refused here, so the rest still lands. */
+async function applyOverrides(url: string, overrides: Overrides): Promise<{ applied: OverridableKey[]; rejected: Array<{ key: OverridableKey; reason: string }> }> {
+  const rejected: Array<{ key: OverridableKey; reason: string }> = [];
+  const runtime: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === undefined) continue;
+    if ((START_ONLY_KEYS as readonly string[]).includes(k)) rejected.push({ key: k as OverridableKey, reason: `${k} is start-only: it applies when the daemon is spawned, and this daemon is already running` });
+    else runtime[k] = v;
+  }
+  let applied: OverridableKey[] = [];
+  if (Object.keys(runtime).length) {
+    const res = await fetch(`${url}/v1/config`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(runtime), signal: AbortSignal.timeout(5000) });
+    const body = (await res.json().catch(() => ({}))) as { applied?: OverridableKey[]; error?: string };
+    if (res.ok) applied = body.applied ?? (Object.keys(runtime) as OverridableKey[]);
+    else for (const k of Object.keys(runtime)) rejected.push({ key: k as OverridableKey, reason: body.error ?? `status ${res.status}` });
+  }
+  return { applied, rejected };
+}
+
+function configFields(report: ConfigReport | undefined): Pick<StartResult, 'config' | 'toolchain' | 'needsConfig'> {
+  return report ? { config: report.config, toolchain: report.toolchain, needsConfig: report.needsConfig } : {};
 }
 
 function modeOf(status: Record<string, unknown> | undefined): 'spawn' | 'pull' | 'mixed' | undefined {
@@ -87,19 +130,34 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
   const env = opts.env ?? process.env;
   const repo = await resolveRepoPath({ repo: opts.repo, cwd: opts.cwd, env });
   const paths: RunPaths = ensureRunDir(repo, env);
+  const checked = overridesSchema.safeParse(opts.overrides ?? {});
+  if (!checked.success) {
+    const issue = checked.error.issues[0];
+    throw new Error(`invalid configuration argument ${String(issue?.path[0] ?? '')}: ${issue?.message ?? 'invalid value'}`);
+  }
+  const overrides = checked.data;
   const state = await daemonState(paths.runDir);
   if (state.healthy && state.pid && state.url) {
     const info = readDaemonJson(paths.runDir) as DaemonInfo;
     if (opts.mode) {
       await fetch(`${state.url}/v1/runner`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: opts.mode }), signal: AbortSignal.timeout(3000) });
     }
+    const outcome = await applyOverrides(state.url, overrides);
     const mode = opts.mode ?? modeOf(await health(state.url));
-    return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false, ...(mode ? { mode } : {}) };
+    return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false, ...(mode ? { mode } : {}), ...configFields(await readConfig(state.url)), applied: outcome.applied, rejected: outcome.rejected };
   }
   const { command, args } = daemonCommand();
   const fd = openSync(paths.daemonLog, 'a');
   const modeArgs = opts.mode ? ['--mode', opts.mode] : opts.defaultMode ? ['--default-mode', opts.defaultMode] : [];
-  const child = spawn(command, [...args, '--repo', repo, ...modeArgs], {
+  // Values become `--set` flags the daemon stores before resolving; a null (clear) goes through the route once it is up.
+  const setArgs: string[] = [];
+  const clears: Record<string, null> = {};
+  for (const [k, v] of Object.entries(overrides)) {
+    if (v === undefined) continue;
+    if (v === null) clears[k] = null;
+    else setArgs.push('--set', `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`);
+  }
+  const child = spawn(command, [...args, '--repo', repo, ...modeArgs, ...setArgs], {
     cwd: repo,
     env: { ...env, ...opts.extraEnv },
     detached: true,
@@ -114,7 +172,9 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
     const status = info && info.pid === child.pid ? await health(info.url) : undefined;
     if (info && status) {
       const mode = modeOf(status) ?? opts.mode;
-      return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: true, ...(mode ? { mode } : {}) };
+      const applied = Object.entries(overrides).filter(([, v]) => v !== undefined && v !== null).map(([k]) => k as OverridableKey);
+      const cleared = Object.keys(clears).length ? await applyOverrides(info.url, clears as Overrides) : { applied: [] as OverridableKey[], rejected: [] as Array<{ key: OverridableKey; reason: string }> };
+      return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: true, ...(mode ? { mode } : {}), ...configFields(await readConfig(info.url)), applied: [...applied, ...cleared.applied], rejected: cleared.rejected };
     }
     if (!pidAlive(child.pid)) break;
     await new Promise((r) => setTimeout(r, 150));

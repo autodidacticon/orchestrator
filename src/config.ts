@@ -2,6 +2,8 @@
  * Orchestrator configuration with defaults. Loaded from a YAML/JSON file by main.ts.
  */
 import { z } from 'zod';
+import { DEFAULT_CLAUDE_COMMAND } from './runner/command.js';
+import { isSafeRule } from './toolchain/tools.js';
 
 /** Admission ordering stages. See specs/scheduling-policy "Ordering chain". */
 export const stageNames = ['criticalPath', 'priority', 'fifo'] as const;
@@ -24,16 +26,15 @@ export const configSchema = z.object({
   maxAttempts: z.number().int().positive().default(2),
   integrationRetries: z.number().int().nonnegative().default(3),
   tickIntervalMs: z.number().int().positive().default(5_000),
-  checkCommand: z.string().default('npm test'),
+  /** Run on every rebased submission. Detected from the repository when the file does not set it; unresolved holds verification. See specs/toolchain-discovery. */
+  checkCommand: z.string().min(1).optional(),
   checkTimeoutMs: z.number().int().positive().default(15 * 60_000),
   /** Loopback API port; 0 picks a free port. */
   apiPort: z.number().int().nonnegative().default(0),
   /** Agent retry window before falling back to the report file. */
   retryWindowMs: z.number().int().positive().default(120_000),
-  /** Runner command template; {brief}, {worktree}, {launchId}, {mcpConfig} are substituted. */
-  runnerCommand: z.string().default(
-    'claude -p --output-format json --mcp-config {mcpConfig} --strict-mcp-config --permission-mode acceptEdits --allowedTools "Bash(git:*)" "mcp__orchestrator__heartbeat" "mcp__orchestrator__report" "mcp__orchestrator__block" "mcp__orchestrator__inbox" "mcp__orchestrator__log" --no-session-persistence < {brief}',
-  ),
+  /** Runner command template; {brief}, {worktree}, {launchId}, {mcpConfig}, and {allowedTools} are substituted at every spawn. */
+  runnerCommand: z.string().default(DEFAULT_CLAUDE_COMMAND),
   validateAt: z.enum(['ready', 'ingest']).default('ready'),
   onInsufficient: z.enum(['block', 'remediate']).default('block'),
   remediateMode: z.enum(['review', 'auto']).default('review'),
@@ -44,6 +45,15 @@ export const configSchema = z.object({
       /** spawn: the daemon spawns a process; pull: launches wait for a worker; mixed: parked for claimWindowMs, then spawned. */
       mode: z.enum(['spawn', 'pull', 'mixed']).default('spawn'),
       claimWindowMs: z.number().int().nonnegative().default(60_000),
+      /** The allow list of spawned Claude Code agents. See specs/toolchain-discovery "Derived allowed tools". */
+      claude: z
+        .object({
+          /** Rules appended to the derived list, in the documented prefix form such as `Bash(docker:*)`. */
+          allowedTools: z.array(z.string().refine(isSafeRule, { message: 'a rule must not contain a double quote, backslash, dollar sign, or backtick' })).default([]),
+          /** Derive rules from the toolchains found in the repository root. */
+          deriveTools: z.boolean().default(true),
+        })
+        .default({}),
     })
     .default({}),
   /** Graph reload behaviour. See specs/agent-protocol "Payload change notice". */
@@ -133,7 +143,10 @@ export const configSchema = z.object({
 
 export type Config = z.infer<typeof configSchema>;
 
-export function defaultConfig(overrides: Partial<Config> = {}): Config {
+/** What a caller may pass before defaults apply: every defaulted key optional, nested blocks partial. */
+export type ConfigInput = z.input<typeof configSchema>;
+
+export function defaultConfig(overrides: ConfigInput = {}): Config {
   return configSchema.parse(overrides);
 }
 

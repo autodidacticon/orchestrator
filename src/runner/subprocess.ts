@@ -9,12 +9,15 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Launch } from '../state/store.js';
 import type { AgentRunner, Liveness, SpawnResult } from './runner.js';
+import { quoteRules } from './command.js';
 
 const execFileP = promisify(execFile);
 
 export interface SubprocessRunnerOptions {
-  /** Shell command; {brief}, {briefJson}, {worktree}, {launchId}, {taskId}, {mcpConfig} are substituted. */
-  command: string;
+  /** Shell command, or a getter read at every spawn; {brief}, {briefJson}, {worktree}, {launchId}, {taskId}, {mcpConfig}, {allowedTools} are substituted. */
+  command: string | (() => string);
+  /** The allow list filled into {allowedTools}, read at every spawn. See specs/toolchain-discovery "Runner command composition". */
+  allowedTools?: () => string[];
   logDir: string;
   /** Grace period between SIGTERM and SIGKILL. */
   graceMs?: number;
@@ -35,13 +38,15 @@ export class SubprocessRunner implements AgentRunner {
   async spawn(launch: Launch, env: Record<string, string>): Promise<SpawnResult> {
     await mkdir(this.opts.logDir, { recursive: true });
     const orchDir = path.join(launch.worktree, '.orchestrator');
-    const cmd = substitute(this.opts.command, {
+    const template = typeof this.opts.command === 'function' ? this.opts.command() : this.opts.command;
+    const cmd = substitute(template, {
       brief: path.join(orchDir, 'brief.md'),
       briefJson: path.join(orchDir, 'brief.json'),
       worktree: launch.worktree,
       launchId: launch.launchId,
       taskId: launch.taskId,
       mcpConfig: path.join(orchDir, 'mcp.json'),
+      allowedTools: quoteRules(this.opts.allowedTools?.() ?? []),
     });
     const log = await open(logPath(this.opts.logDir, launch.launchId), 'a');
     try {

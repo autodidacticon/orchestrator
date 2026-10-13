@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Config } from '../../src/config.js';
+import type { ConfigInput } from '../../src/config.js';
 import { makeHarness, type Harness } from './harness.js';
 
 const open: Harness[] = [];
@@ -12,7 +12,7 @@ const QUIET = `nodes:
   - { id: X, kind: external, done: false }
   - { id: T1, deps: [X] }`;
 
-function harness(config: Partial<Config> = {}, graph?: string): Harness {
+function harness(config: ConfigInput = {}, graph?: string): Harness {
   const h = makeHarness({ graph, config: { health: { stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true }, ...config } });
   open.push(h);
   return h;

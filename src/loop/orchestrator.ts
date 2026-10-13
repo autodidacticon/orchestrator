@@ -43,6 +43,8 @@ import { deriveEffects } from '../tracker/effects.js';
 import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, runCostUsd } from '../health/budgets.js';
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
+import { type ConfigReport, configSummary, mergeOverrides, type OverridableKey, overridesSchema, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
+import type { ToolchainRecord } from '../toolchain/detect.js';
 
 export const questionSchema = z.object({
   kind: z.enum(['needsDecision', 'needsAccess', 'impossible', 'dependencyCancelled', 'outOfScope', 'insufficientSpec', 'milestoneRejected']),
@@ -111,6 +113,8 @@ export interface OrchestratorDeps {
   clock?: () => number;
   log?: Logger;
   apiBaseUrl?: string;
+  /** The boot-time resolution with its inputs; defaults to the config alone with no detection. See specs/toolchain-discovery. */
+  resolved?: Resolved;
 }
 
 export interface StatusReport {
@@ -164,6 +168,10 @@ export interface StatusReport {
   idle: { quiescent: boolean; idleMs: number; exitAfterMs: number };
   /** Live session attachments and the claimed launches each holds. See specs/operator-control "Session attachments". */
   attachments: Array<{ id: string; pids: number[]; since: number; launches: string[] }>;
+  /** The effective configuration with provenance, the detection record, and the keys still unresolved. See specs/operator-control "Status report: configuration". */
+  config: ConfigReport['config'];
+  toolchain: ToolchainRecord | undefined;
+  needsConfig: OverridableKey[];
 }
 
 export interface TrackerError {
@@ -199,6 +207,12 @@ export class Orchestrator implements OrchestratorCore {
   foreignCommits: string[] = [];
   /** Set by the daemon entrypoint; the shutdown route calls it after responding. */
   requestShutdown: ((reason: 'idle' | 'stop', reap?: boolean) => void) | undefined;
+  /** Set by the daemon entrypoint: rewrites config.json after an accepted override. */
+  onConfigChanged: ((report: ConfigReport) => void) | undefined;
+  /** The boot-time resolution; `effective()` re-applies the durable overrides over its inputs. */
+  private readonly boot: Resolved;
+  private configMemo: { key: string; resolved: Resolved } | undefined;
+  private readonly heldJobsLogged = new Set<string>();
 
   private readonly clock: () => number;
   private _graph: Graph | undefined;
@@ -229,6 +243,7 @@ export class Orchestrator implements OrchestratorCore {
     this.clock = deps.clock ?? (() => Date.now());
     this.log = deps.log ?? silentLog;
     this.apiBaseUrl = deps.apiBaseUrl ?? 'http://127.0.0.1:0';
+    this.boot = deps.resolved ?? resolveLayers({ base: this.config });
     this.startedAt = this.now();
     this.lastActivityAt = this.startedAt;
     if (!runIdOf(this.store)) setRunId(this.store, randomUUID().slice(0, 16));
@@ -390,6 +405,50 @@ export class Orchestrator implements OrchestratorCore {
     this.wake();
   }
 
+  // ---- configuration (specs/toolchain-discovery "Runtime overrides and start-only keys") ----
+
+  /** The effective configuration: the boot resolution with the store's override document applied; memoised until the document changes. */
+  effective(): Resolved {
+    const key = this.store.getKv('config.overrides') ?? '';
+    if (this.configMemo?.key === key) return this.configMemo.resolved;
+    const resolved = resolveLayers(this.boot.inputs, readOverrides(this.store));
+    this.configMemo = { key, resolved };
+    return resolved;
+  }
+
+  /** The record shape shared by `status`, `GET /v1/config`, and config.json. */
+  configReport(): ConfigReport {
+    return reportOf(this.effective(), this.now());
+  }
+
+  /**
+   * Apply an override patch: the whole patch is validated first, a start-only key
+   * refuses it whole, and the accepted document is written with its `operator.config`
+   * event in one transaction, followed by `config.resolved`, the hook, and a wake.
+   */
+  setConfig(patch: unknown): SetConfigResult {
+    const parsed = overridesSchema.safeParse(patch ?? {});
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const key = issue?.code === 'unrecognized_keys' ? String(issue.keys[0] ?? '') : String(issue?.path[0] ?? '');
+      return { ok: false, status: 400, key, error: `${key || 'config'}: ${issue?.message ?? 'invalid value'}` };
+    }
+    const doc = parsed.data as Record<string, unknown>;
+    const keys = Object.keys(doc).filter((k) => doc[k] !== undefined) as OverridableKey[];
+    const startOnly = keys.filter((k) => START_ONLY_KEYS.includes(k));
+    if (startOnly.length) return { ok: false, status: 409, startOnly, error: `${startOnly.join(', ')} is start-only: pass it to start, which applies it when the daemon is spawned` };
+    const next = mergeOverrides(readOverrides(this.store), parsed.data);
+    this.store.transaction(() => {
+      this.operatorEvent('config', undefined, { patch: parsed.data, overrides: next });
+      this.store.setKv('config.overrides', JSON.stringify(next));
+    });
+    const report = this.configReport();
+    this.store.appendEvent({ kind: 'config.resolved', payload: configSummary(report) }, this.now());
+    this.onConfigChanged?.(report);
+    this.wake();
+    return { ok: true, applied: keys, report };
+  }
+
   overlay(): Overlay {
     return this.store.allEntries();
   }
@@ -439,6 +498,8 @@ export class Orchestrator implements OrchestratorCore {
         cancelled: ds.kind === 'cancelled' ? { reason: ds.reason } : undefined,
       };
     });
+    // The check command and the rules are read when the brief is composed; a launch already briefed keeps its text. See specs/agent-protocol "Check command and tool rules in the brief".
+    const eff = this.effective();
     return {
       launch,
       node: { id: node.id, kind: node.kind, payload: this.payloadOf(node), deps: node.deps },
@@ -446,8 +507,10 @@ export class Orchestrator implements OrchestratorCore {
       carry: entry.carry as Record<string, unknown> | undefined,
       apiBaseUrl: this.apiBaseUrl,
       retryWindowMs: this.config.retryWindowMs,
-      checkCommand: this.config.checkCommand,
+      checkCommand: eff.config.checkCommand,
       integrationBranch: this.config.integrationBranch,
+      // Only a launch the daemon spawns gets the list; in pull mode every launch is claimed and the worker runs under its own permissions.
+      allowedTools: eff.allowedTools.applied && this.effectiveMode() !== 'pull' ? eff.allowedTools.value : undefined,
     };
   }
 
@@ -1298,6 +1361,7 @@ export class Orchestrator implements OrchestratorCore {
   status(): StatusReport {
     const g = this.graph();
     const o = this.overlay();
+    const report = this.configReport();
     const byStatus: Record<StatusKind, Id[]> = { unstarted: [], running: [], waiting: [], submitted: [], done: [], failed: [], blocked: [], cancelled: [] };
     for (const node of g.nodes.values()) {
       if (node.kind === 'external') continue;
@@ -1354,6 +1418,9 @@ export class Orchestrator implements OrchestratorCore {
       deferred: this.isPaused() ? [] : this._deferred,
       idle: { quiescent: this.quiescent(), idleMs: this.idleMs(), exitAfterMs: this.config.daemon.idleExitMs },
       attachments: this.attachments(),
+      config: report.config,
+      toolchain: report.toolchain,
+      needsConfig: report.needsConfig,
     };
   }
 
@@ -1393,11 +1460,26 @@ export class Orchestrator implements OrchestratorCore {
     return this.verifierInFlight !== undefined;
   }
 
-  /** Start the verifier worker on the oldest queued job if idle. */
+  /**
+   * Start the verifier worker on the oldest queued job if idle. While no check
+   * command is configured, a job with commits ahead of its base is held `queued`
+   * (the task stays `submitted`, no attempt is spent); a declared no-op, whose sealed
+   * sha equals its base sha, never reaches the check and is taken up regardless.
+   * See specs/integration-pipeline "Check and verified tree".
+   */
   startVerifierIfIdle(): void {
     if (this.verifierInFlight) return;
-    const [job] = this.store.listJobs({ status: 'queued' });
+    const checkCommand = this.effective().config.checkCommand;
+    const job = this.store.listJobs({ status: 'queued' }).find((j) => {
+      if (checkCommand !== undefined || j.sealedSha === j.baseSha) return true;
+      if (!this.heldJobsLogged.has(j.jobId)) {
+        this.heldJobsLogged.add(j.jobId);
+        this.log.warn('verification held: no check command is configured for this repository; set it with configure or orchestrator-ctl config', { jobId: j.jobId, taskId: j.taskId });
+      }
+      return false;
+    });
     if (!job) return;
+    this.heldJobsLogged.delete(job.jobId);
     crashPoint('verify.afterQueued');
     this.verifierInFlight = this.runVerifierJob(job)
       .catch((err) => {

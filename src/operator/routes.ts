@@ -15,11 +15,14 @@ import { policyReport } from '../tracker/policy.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, deferred: 0, ...tracker };
+  /** Keys still unresolved; `checkCommand` here means submitted work is held until it is set. See specs/operator-control "Status report: configuration". */
+  const needsConfig = orch.effective().needsConfig;
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, deferred: 0, needsConfig, ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
     graphLoaded: true,
+    needsConfig,
     ...tracker,
     stuck: s.stuck,
     pausedReason: s.pausedReason,
@@ -139,6 +142,12 @@ export async function acceptProposal(orch: Orchestrator, id: string, opts: { nod
   return { status: 200, body: { ok: true, id: p.id, nodeId, joined, written: true, ...written.body } };
 }
 
+/** The configuration facts every status response carries, graph or not. */
+function configFacts(orch: Orchestrator): Record<string, unknown> {
+  const r = orch.configReport();
+  return { config: r.config, toolchain: r.toolchain, needsConfig: r.needsConfig };
+}
+
 function result(r: { ok: true } | { ok: false; reason: string; blockers?: string[] }): ApiResponse {
   return r.ok ? { status: 200, body: { ok: true } } : { status: 409, body: { ok: false, reason: r.reason, blockers: (r as { blockers?: string[] }).blockers } };
 }
@@ -149,6 +158,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     body: orch.hasGraph()
       ? (orch.status() as unknown as Record<string, unknown>)
       : {
+          ...configFacts(orch),
           graphRev: undefined,
           graphRejected: orch.graphRejected(),
           finished: false,
@@ -173,6 +183,14 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           error: 'graph not loaded',
         },
   }));
+  // Configuration: the resolved block with provenance, and runtime overrides. See specs/operator-control "Configuration route".
+  server.addRoute('GET', /^\/v1\/config$/, async () => ({ status: 200, body: orch.configReport() as unknown as Record<string, unknown> }));
+  server.addRoute('PUT', /^\/v1\/config$/, async (_req, body) => {
+    const r = orch.setConfig(body);
+    if (!r.ok) return r.status === 409 ? { status: 409, body: { ok: false, error: r.error, startOnly: r.startOnly } } : { status: 400, body: { error: r.error, key: r.key } };
+    const { config, toolchain, needsConfig, overrides } = r.report;
+    return { status: 200, body: { ok: true, applied: r.applied, config, toolchain, needsConfig, overrides } };
+  });
   server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/answer$/, async (_req, body, [id]) => result(orch.answer(id as string, String(body['text'] ?? ''))));
   server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/cancel$/, async (_req, body, [id]) =>
     result(orch.cancel(id as string, String(body['reason'] ?? 'cancelled by operator'), body['release'] === true || body['release'] === 'true')),

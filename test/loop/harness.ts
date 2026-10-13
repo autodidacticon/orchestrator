@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { BriefValidator } from '../../src/brief/validate.js';
 import type { StuckDiagnoser } from '../../src/health/stuck.js';
-import { defaultConfig, type Config } from '../../src/config.js';
+import { type ConfigInput, defaultConfig } from '../../src/config.js';
 import { StaticGraphSource } from '../../src/graph/source.js';
 import { Orchestrator, type ApiResponse } from '../../src/loop/orchestrator.js';
 import { InprocRunner } from '../../src/runner/inproc.js';
@@ -34,9 +34,10 @@ export interface Harness {
   cleanup(): void;
 }
 
-export function makeHarness(opts: { graph?: string; config?: Partial<Config>; dir?: string; briefValidator?: BriefValidator; stuckDiagnoser?: StuckDiagnoser } = {}): Harness {
+export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: string; briefValidator?: BriefValidator; stuckDiagnoser?: StuckDiagnoser } = {}): Harness {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-'));
-  const config = defaultConfig({ dataDir: dir, capacity: 4, maxWaiting: 4, ...opts.config });
+  // checkCommand has no default any more; in-process scenarios verify with the fake backend and must not be held. See specs/integration-pipeline "Check and verified tree".
+  const config = defaultConfig({ dataDir: dir, capacity: 4, maxWaiting: 4, checkCommand: 'true', ...opts.config });
   const store = new SqliteStore(path.join(dir, 'store.sqlite'));
   const runner = new InprocRunner();
   const workspace = new FakeWorkspace();

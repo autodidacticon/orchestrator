@@ -21,8 +21,11 @@ export interface BriefInput {
   carry?: Record<string, unknown>;
   apiBaseUrl: string;
   retryWindowMs: number;
-  checkCommand: string;
+  /** Absent while no check command is configured. */
+  checkCommand?: string;
   integrationBranch: string;
+  /** The Bash rules in force for a launch the daemon spawns; absent when the runner command carries its own list. */
+  allowedTools?: string[];
 }
 
 export interface Workspace {

@@ -5,6 +5,7 @@ import { composeBrief } from '../../src/brief/compose.js';
 import { parseGraph } from '../../src/graph/load.js';
 import { makeHarness, type Harness } from './harness.js';
 import { Orchestrator } from '../../src/loop/orchestrator.js';
+import { BASE_RULES } from '../../src/toolchain/tools.js';
 
 const graph = `nodes:
   - { id: A, deps: [], description: "do A" }
@@ -84,6 +85,58 @@ describe('interrupted context', () => {
     expect(markdown).toContain('commit `W1` is a work-in-progress commit');
     expect(markdown).toContain('squash the work-in-progress commit before submitting');
     expect(json.context).toMatchObject({ interrupted: { priorLaunchId: 'L1', headSha: 'H1', wipCommit: 'W1' } });
+  });
+});
+
+// See specs/agent-protocol "Check command and tool rules in the brief".
+describe('check command and tool rules', () => {
+  const launch = { launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'live', token: 't', branch: 'task/T1/l1', worktree: '/w', baseSha: 'base1', graphRev: 'r', createdAt: 1 } as const;
+  const base = {
+    launch: launch as unknown as Parameters<typeof composeBrief>[0]['launch'],
+    node: { id: 'T1', kind: 'task' as const, payload: { title: 'x', description: 'd', acceptanceCriteria: ['a'] }, deps: [] },
+    depReports: [],
+    carry: undefined,
+    apiBaseUrl: 'http://127.0.0.1:1',
+    retryWindowMs: 1000,
+    integrationBranch: 'main',
+  };
+
+  it('names the detected command and lists the Bash rules in force for a spawned launch', () => {
+    const { markdown, json } = composeBrief({ ...base, checkCommand: 'npm test', allowedTools: [...BASE_RULES, 'Bash(npm test:*)', 'Bash(node:*)'] }, { fallbackPath: '/x' });
+    expect(markdown).toContain('Run the check command before submitting: `npm test`');
+    expect(markdown).toContain('these Bash rules are in force: `Bash(git:*)`, `Bash(npm test:*)`, `Bash(node:*)`');
+    expect(markdown).toContain('runs under its own permissions');
+    expect(markdown).toContain('without `cd`');
+    expect(markdown).toContain('`needsAccess` question naming the command');
+    expect(json.checkCommand).toBe('npm test');
+    expect(json.allowedTools).toContain('Bash(npm test:*)');
+  });
+
+  it('says no command is configured when unresolved, and lists no rules when none apply', () => {
+    const { markdown, json } = composeBrief({ ...base }, { fallbackPath: '/x' });
+    expect(markdown).toContain('No check command is configured for this repository yet');
+    expect(markdown).toContain('documented test suite before submitting');
+    expect(markdown).not.toContain('Run the check command before submitting');
+    expect(markdown).not.toContain('Bash rules are in force');
+    expect(json.checkCommand).toBeUndefined();
+    expect(json.allowedTools).toBeUndefined();
+  });
+
+  it('a brief prepared after setConfig names the new command while the earlier brief is unchanged', async () => {
+    h = makeHarness({ graph: 'nodes:\n  - { id: A, deps: [], description: d, acceptanceCriteria: [a] }\n  - { id: B, deps: [], description: d, acceptanceCriteria: [a] }', config: { capacity: 1 } });
+    await h.orch.tick();
+    const first = h.launchOf('A').launchId;
+    expect(h.workspace.briefs.get(first)!.checkCommand).toBe('true');
+    expect(h.workspace.briefs.get(first)!.allowedTools).toEqual([...BASE_RULES]);
+    expect(h.orch.setConfig({ checkCommand: 'make check' })).toMatchObject({ ok: true });
+    await h.submit('A', { acceptance: [{ criterion: 'a', evidence: 'done' }] });
+    await h.orch.settle();
+    expect(h.statusOf('A')).toBe('done');
+    expect(h.statusOf('B')).toBe('running');
+    const second = h.workspace.briefs.get(h.launchOf('B').launchId)!;
+    expect(second.checkCommand).toBe('make check');
+    expect(composeBrief(second, { fallbackPath: '/x' }).markdown).toContain('`make check`');
+    expect(h.workspace.briefs.get(first)!.checkCommand).toBe('true');
   });
 });
 

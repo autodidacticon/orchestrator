@@ -61,7 +61,9 @@ describe('operator MCP server', () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(tools.tools).toHaveLength(30);
+    expect(tools.tools).toHaveLength(31);
+    const configure = tools.tools.find((t) => t.name === 'configure');
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'runnerCommand']);
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);
@@ -71,6 +73,16 @@ describe('operator MCP server', () => {
     expect(started).toMatchObject({ status: 200, started: true });
     expect(String(started['runDir']).startsWith(home)).toBe(true);
     expect((await tool('start'))['started']).toBe(false);
+    // The start result says what was resolved; configure forwards refusals unchanged. See specs/operator-mcp "Start tool" and "Configure tool".
+    expect(started['config']).toMatchObject({ checkCommand: { value: 'true', source: 'file' }, capacity: { value: 2, source: 'file' }, integrationBranch: { value: 'main', source: 'detected' } });
+    expect(started['needsConfig']).toEqual([]);
+    expect(started['toolchain']).toMatchObject({ kinds: [] });
+    const refused = await client.callTool({ name: 'configure', arguments: { capacity: 0 } });
+    expect(refused.isError).toBe(true);
+    expect(parse(refused)).toMatchObject({ status: 400, key: 'capacity' });
+    expect(await tool('configure', { capacity: 3 })).toMatchObject({ status: 200, ok: true, applied: ['capacity'], config: { capacity: { value: 3, source: 'argument' } } });
+    expect(await tool('configure', { capacity: null })).toMatchObject({ status: 200, ok: true, config: { capacity: { value: 2, source: 'file' } } });
+    expect((await tool('status'))['config']).toMatchObject({ capacity: { value: 2, source: 'file' } });
 
     const imported = await tool('import_graph', {
       content: ['nodes:',
@@ -147,17 +159,19 @@ describe('operator MCP server', () => {
     await fetch(`${url}/v1/attachments/${first}/end`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reason: 'test' }) });
     const flagged = await fetch(`${url}/v1/status`, { headers: { 'x-orch-attachment': first } });
     expect(flagged.headers.get('x-orch-attachment')).toBe('unknown');
-    expect(await tool('status')).toMatchObject({ status: 200 }); // sees the unknown flag and registers again
+    // The ended attachment's launch is handed back at no cost and parked again. Raw polls: a tool call would register the
+    // server again first, and a live attachment keeps its launches.
+    for (let i = 0; i < 50; i++) {
+      const s = (await (await fetch(`${url}/v1/status`)).json()) as { claimable: string[] };
+      if (s.claimable.includes('T1')) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(await tool('status')).toMatchObject({ status: 200, claimable: ['T1'] }); // sees the unknown flag and registers again
     const again = (await tool('status'))['attachments'] as Array<{ id: string; launches: string[] }>;
     expect(again).toHaveLength(1);
     expect(again[0]!.id).toBe(first); // the same server re-registers its own id
-    // The ended attachment's launch was handed back at no cost and parked again; the next claim carries the fresh attachment.
-    for (let i = 0; i < 50; i++) {
-      const s = await tool('status');
-      if ((s['claimable'] as string[]).includes('T1') && (s['attachments'] as Array<{ launches: string[] }>)[0]?.launches.length === 0) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    expect(await tool('status')).toMatchObject({ claimable: ['T1'] });
+    expect(again[0]!.launches).toEqual([]);
+    // The next claim carries the fresh attachment.
     const second = await tool('claim', { workerId: 'w1' });
     expect(second).toMatchObject({ status: 200, taskId: 'T1', repeated: false });
     expect(second['launchId']).not.toBe(claimed['launchId']);

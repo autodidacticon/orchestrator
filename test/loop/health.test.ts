@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Config } from '../../src/config.js';
+import type { Config, ConfigInput } from '../../src/config.js';
 import type { StuckDiagnoser } from '../../src/health/stuck.js';
 import { Orchestrator } from '../../src/loop/orchestrator.js';
 import { makeHarness, type Harness } from './harness.js';
@@ -12,7 +12,7 @@ afterEach(() => {
 const health = (over: Partial<Config['health']> = {}): Config['health'] => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true, ...over });
 const budgets = (over: Partial<Config['budgets']> = {}): Config['budgets'] => ({ maxLaunchMs: 0, maxRunCostUsd: 0, ...over });
 
-function harness(config: Partial<Config> = {}, extra: { diagnoser?: StuckDiagnoser } = {}): Harness {
+function harness(config: ConfigInput = {}, extra: { diagnoser?: StuckDiagnoser } = {}): Harness {
   const h = makeHarness({ config: { tickIntervalMs: 100, health: health(), budgets: budgets(), ...config }, stuckDiagnoser: extra.diagnoser });
   open.push(h);
   return h;

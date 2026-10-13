@@ -14,7 +14,11 @@ the workflow hands back: questions, reviews, and the end.
 ## 1. Prerequisites
 
 - A graph must be loaded: call `start` and then `status`; if no graph is loaded, use the
-  `import` skill first.
+  `import` skill first. `start` also returns the resolved configuration: report the check
+  command and the integration branch with their sources in one line, and when `needsConfig`
+  names `checkCommand`, follow the run skill's section 1b (find the test command in
+  `CLAUDE.md`, the README, or the root manifests and set it with `configure`, or ask the user)
+  before running workers, since submitted work is held until it is set.
 - `start` reports the mode in force. A plugin-started run is already `pull`. To work a run in
   `spawn` mode, call `start` with `mode: "pull"` (workers only) or `mode: "mixed"` (the
   daemon spawns whatever nobody claims within its claim window); this switches a daemon

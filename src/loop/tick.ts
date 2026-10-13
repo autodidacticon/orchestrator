@@ -312,7 +312,8 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
   const admission = admit(resumables, q.ready(g, overlay), {
     graph: g,
     overlay,
-    capacity: o.config.capacity,
+    // Capacity is read at each admission pass so an override applies on the next tick. See specs/toolchain-discovery "Runtime overrides and start-only keys".
+    capacity: o.effective().config.capacity,
     maxWaiting: o.config.maxWaiting,
     runningCount: running,
     waitingCount: waiting,

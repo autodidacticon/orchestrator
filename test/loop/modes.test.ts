@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import type { Config } from '../../src/config.js';
+import type { Config, ConfigInput } from '../../src/config.js';
 import { makeHarness, type Harness } from './harness.js';
 
 const open: Harness[] = [];
@@ -7,7 +7,7 @@ afterEach(() => {
   for (const h of open.splice(0)) h.cleanup();
 });
 
-function harness(runner: Partial<Config['runner']> = {}, config: Partial<Config> = {}): Harness {
+function harness(runner: Partial<Config['runner']> = {}, config: ConfigInput = {}): Harness {
   const h = makeHarness({ config: { runner: { mode: 'spawn', claimWindowMs: 60_000, ...runner }, tickIntervalMs: 100, health: { stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true }, budgets: { maxLaunchMs: 0, maxRunCostUsd: 0 }, ...config } });
   open.push(h);
   return h;

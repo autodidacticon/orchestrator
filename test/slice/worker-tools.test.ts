@@ -53,7 +53,7 @@ describe('worker tools on the operator MCP server', () => {
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(tools.tools).toHaveLength(30);
+    expect(tools.tools).toHaveLength(31);
 
     const started = await tool('start', { mode: 'pull' });
     expect(started).toMatchObject({ status: 200, started: true, mode: 'pull' });

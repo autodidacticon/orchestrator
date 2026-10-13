@@ -29,7 +29,8 @@ export interface GitVerifierOptions {
   integrationBranch: string;
   /** Root for temporary verification worktrees. */
   tempRoot: string;
-  checkCommand: string;
+  /** The check command, or a getter read once when a job starts checking and held for the job. See specs/integration-pipeline "Check and verified tree". */
+  checkCommand: string | undefined | (() => string | undefined);
   checkTimeoutMs: number;
   /** Head when the orchestrator first ran; commits before it are never foreign. */
   baselineSha?: string;
@@ -53,6 +54,7 @@ export class GitVerifierBackend implements VerifierBackend {
 
   async run(job: VerifierJob, ctx: VerifierContext): Promise<VerifierOutcome> {
     const { repo } = this.opts;
+    const checkCommand = typeof this.opts.checkCommand === 'function' ? this.opts.checkCommand() : this.opts.checkCommand;
     const expectedHead = await revParse(repo, this.opts.integrationBranch);
     ctx.progress({ status: 'checking', expectedHead });
     const temp = path.join(this.opts.tempRoot, job.jobId);
@@ -86,7 +88,10 @@ export class GitVerifierBackend implements VerifierBackend {
       }
 
       // 2. Check command on the rebased tree.
-      const check = await runCheck(this.opts.checkCommand, temp, this.opts.checkTimeoutMs, this.maxOut);
+      if (checkCommand === undefined) {
+        return { kind: 'failed', reason: { kind: 'checkFailed', message: 'no check command is configured for this repository', output: '' } };
+      }
+      const check = await runCheck(checkCommand, temp, this.opts.checkTimeoutMs, this.maxOut);
       crashPoint('verify.afterCheck');
       if (check.timedOut) {
         return { kind: 'failed', reason: { kind: 'checkTimeout', message: `check exceeded ${this.opts.checkTimeoutMs}ms`, output: check.output } };

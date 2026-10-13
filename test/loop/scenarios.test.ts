@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Config } from '../../src/config.js';
+import type { ConfigInput } from '../../src/config.js';
 import { fixtureText } from '../graph/helpers.js';
 import { makeHarness, runToQuiet, type Harness } from './harness.js';
 
@@ -447,7 +447,7 @@ describe('scope filter', () => {
   afterEach(() => {
     for (const x of open.splice(0)) x.cleanup();
   });
-  const scopedHarness = (config: Partial<Config> = {}) => {
+  const scopedHarness = (config: ConfigInput = {}) => {
     const x = makeHarness({ graph: scoped, config: { capacity: 2, ...config } });
     open.push(x);
     return x;
@@ -566,7 +566,7 @@ describe('kept release', () => {
   afterEach(() => {
     for (const x of open.splice(0)) x.cleanup();
   });
-  const pullHarness = (config: Partial<Config> = {}) => {
+  const pullHarness = (config: ConfigInput = {}) => {
     const x = makeHarness({ config: { capacity: 2, runner: { mode: 'pull', claimWindowMs: 60_000 }, ...config } });
     open.push(x);
     return x;
