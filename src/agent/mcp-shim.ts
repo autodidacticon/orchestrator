@@ -6,8 +6,8 @@
  *
  * Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN, ORCH_RETRY_WINDOW_MS (default 120000).
  */
-import path from 'node:path';
 import { z } from 'zod';
+import { isEntrypoint } from '../entry.js';
 
 export interface ShimEnv {
   api: string;
@@ -111,7 +111,7 @@ to the daemon with the launch token. Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN,
 ORCH_RETRY_WINDOW_MS. The orchestrator writes this into each launch's mcp.json.
 `;
 
-const isEntry = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+const isEntry = isEntrypoint(import.meta.url);
 if (isEntry && (process.argv.includes('--help') || process.argv.includes('-h'))) {
   process.stdout.write(USAGE);
 } else if (isEntry) {

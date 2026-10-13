@@ -26,6 +26,7 @@ import { parseArgs } from 'node:util';
 import { daemonState, listRuns, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 import { SqliteStore } from '../state/sqlite.js';
+import { isEntrypoint } from '../entry.js';
 
 export interface CliResult {
   status: number;
@@ -200,7 +201,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   }
 }
 
-const isEntry = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+const isEntry = isEntrypoint(import.meta.url);
 if (isEntry) {
   runCli(process.argv.slice(2))
     .then((r) => {

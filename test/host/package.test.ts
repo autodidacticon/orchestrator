@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -58,5 +59,23 @@ describe('package entrypoints', () => {
     const { stdout } = await execFileP('node', ['--import', tsxLoader, path.join(root, entry), '--help'], { cwd: root });
     expect(stdout).toContain(name);
     expect(stdout).toContain(phrase);
+  });
+
+  // npm link and global installs put a symlink on PATH; the entrypoint guard must see through it.
+  it.each([
+    ['orchestrator', 'src/main.ts'],
+    ['orchestrator-ctl', 'src/operator/cli.ts'],
+    ['orchestrator-mcp', 'src/operator/mcp.ts'],
+    ['orchestrator-mcp-shim', 'src/agent/mcp-shim.ts'],
+  ])('%s runs when invoked through a symlink', async (name, entry) => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-bin-'));
+    try {
+      const link = path.join(dir, name);
+      symlinkSync(path.join(root, entry), link);
+      const { stdout } = await execFileP('node', ['--import', tsxLoader, link, '--help'], { cwd: dir });
+      expect(stdout).toContain(name);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

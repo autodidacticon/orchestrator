@@ -332,6 +332,10 @@ describe('inproc scenarios on the standard fixture', () => {
     const missing = await h.submit('A', { acceptance: [{ criterion: 'works', evidence: 't' }] });
     expect(missing.body).toMatchObject({ accepted: false, reason: 'missingAcceptanceEvidence', uncovered: ['documented'] });
     expect(h.orch.entry('A')).toMatchObject({ attempts: 1, status: { kind: 'unstarted' } });
+    // A loosely quoted criterion (markdown, case, trailing punctuation) or its position covers it.
+    await h.orch.tick();
+    const loose = await h.submit('A', { acceptance: [{ criterion: '1. `Works`.', evidence: 't' }, { criterion: '2', evidence: 'd' }] });
+    expect(loose.body).toMatchObject({ accepted: true });
 
     const lb = h.launchOf('B');
     h.workspace.scriptEmpty('B', lb.baseSha);

@@ -192,12 +192,15 @@ export function mapIssues(raw: unknown): { nodes: GraphFileNode[]; content: stri
       rootDeps.push(b);
     }
   }
+  // The root's description and acceptance criteria ride on the milestone so the review bundle can show them.
+  const rootText = rootRec?.description ? splitDescription(rootRec.description, options.criteriaHeading, options.scopeHeading) : undefined;
   nodes.push({
     id: root,
     kind: 'milestone',
     gated: options.gated,
     deps: rootDeps,
     title: rootRec?.title ?? root,
+    ...(rootText ? { description: rootText.description, acceptanceCriteria: rootText.acceptanceCriteria } : {}),
     ...(rootRec?.url ? { url: rootRec.url } : {}),
     trackerState: rootRec?.state ?? 'unknown',
   });

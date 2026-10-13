@@ -13,7 +13,7 @@ Import SHALL accept records of the form `{ id, title, description?, state, block
 - **THEN** the import fails naming that record and `state`, and nothing is written
 
 ### Requirement: Mapping rules
-The import SHALL map: every child of the root with state `open` to a task whose id is the tracker key; every `blockedBy` edge between two tasks to a dependency; every `blockedBy` target outside the child set, and every child with state `done`, `cancelled`, or `inProgress`, to an `external` node whose `done` flag is true only for state `done`; and the root to a gated milestone depending on every child. Node payloads SHALL carry `title`, `description`, `acceptanceCriteria`, `labels`, `priority`, `url`, and `trackerState`. The in-progress rule SHALL be configurable to import such issues as tasks instead.
+The import SHALL map: every child of the root with state `open` to a task whose id is the tracker key; every `blockedBy` edge between two tasks to a dependency; every `blockedBy` target outside the child set, and every child with state `done`, `cancelled`, or `inProgress`, to an `external` node whose `done` flag is true only for state `done`; and the root to a gated milestone depending on every child. Node payloads SHALL carry `title`, `description`, `acceptanceCriteria`, `labels`, `priority`, `url`, and `trackerState`. The milestone SHALL carry the root's `description` and `acceptanceCriteria` when the root record has a description, so that a review shows what the milestone must satisfy. The in-progress rule SHALL be configurable to import such issues as tasks instead.
 
 #### Scenario: Epic with mixed children
 - **WHEN** an epic has children A (open), B (open, blocked by A), C (done), and D (open, blocked by X where X is outside the epic)

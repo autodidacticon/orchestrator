@@ -72,7 +72,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   lines.push(`# Task ${node.id}: ${title}`, '');
   if (description) lines.push(description, '');
   lines.push('## Acceptance criteria', '');
-  if (criteria.length) for (const c of criteria) lines.push(`- ${c}`);
+  if (criteria.length) criteria.forEach((c, i) => lines.push(`${i + 1}. ${c}`));
   else lines.push('- (none declared)');
   lines.push('', '## Definition of done', '');
   lines.push(
@@ -80,7 +80,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     `- Never merge into, push to, or check out \`${input.integrationBranch}\`. You may rebase your launch branch onto it when a baseMoved notice says it advanced; the orchestrator integrates your branch after verification.`,
     `- Run the check command before submitting: \`${input.checkCommand}\`.`,
     '- If the task needs no changes, say so explicitly with `noChanges: { justification }` in your report.',
-    '- Your report must give evidence for every acceptance criterion above.',
+    '- Your report must give evidence for every acceptance criterion above: one `acceptance` entry per criterion, whose `criterion` quotes the criterion text (markdown and case do not matter) or gives its number.',
     '- Terminate as soon as your report is accepted.',
     '',
   );

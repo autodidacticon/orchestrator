@@ -68,11 +68,19 @@ If `sealedSha` equals `baseSha`, the submit report MUST carry `noChanges` with a
 - **THEN** the task is `submitted` and verification passes without publishing a commit
 
 ### Requirement: Acceptance evidence
-When the brief contains acceptance criteria, the submit report MUST include an `acceptance` entry with evidence for each criterion; otherwise the submission SHALL fail with reason `missingAcceptanceEvidence`. The check is structural; the orchestrator does not judge the evidence.
+When the brief contains acceptance criteria, the submit report MUST include an `acceptance` entry with evidence for each criterion; otherwise the submission SHALL fail with reason `missingAcceptanceEvidence`. An entry covers a criterion when its `criterion` matches the criterion's text after markdown code spans and emphasis, a leading list marker, and trailing punctuation are dropped, whitespace is collapsed, and case is ignored, or when it is the criterion's 1-based position in the brief's list. The check is structural; the orchestrator does not judge the evidence.
 
 #### Scenario: Missing evidence
 - **WHEN** the brief lists two criteria and the report covers one
 - **THEN** the task becomes `failed` with reason `missingAcceptanceEvidence` naming the uncovered criterion
+
+#### Scenario: Loosely quoted criterion
+- **WHEN** the brief lists the criterion "`npm test` passes." and the report's entry reads "npm test passes"
+- **THEN** the criterion is covered
+
+#### Scenario: Criterion by position
+- **WHEN** the brief lists two criteria and the report's entries read "1" and "2"
+- **THEN** both criteria are covered
 
 ### Requirement: Block and wait
 `block` SHALL persist the question, move the task to `waiting`, release its run slot, and hold the connection open until an answer is delivered or `maxWait` elapses. An operator answer SHALL be persisted before any resume. The task SHALL return to `running` and the long-poll SHALL complete only after the scheduler admits it. A dropped connection SHALL be recoverable by re-issuing `block` with the same `seq`, which returns the stored answer once admitted. When `maxWait` elapses the task SHALL become `blocked` with the question preserved, and a later answer SHALL act as unblock-with-answer.

@@ -94,6 +94,19 @@ describe('mapping rules', () => {
     expect('scope' in byId2['A']!).toBe(false);
   });
 
+  it("the root's description and acceptance criteria ride on the milestone", () => {
+    const r = mapIssues({
+      root: 'E',
+      issues: [
+        { id: 'E', title: 'epic', state: 'open', blockedBy: [], description: 'The goal.\n\n## Acceptance criteria\n- demo runs\n- docs updated' },
+        { id: 'A', parent: 'E', state: 'open', description: 'A.\n\n## Acceptance criteria\n- a', blockedBy: [] },
+      ],
+    });
+    expect(r.nodes.find((n) => n.id === 'E')).toMatchObject({ kind: 'milestone', description: 'The goal.', acceptanceCriteria: ['demo runs', 'docs updated'] });
+    const bare = mapIssues(epic);
+    expect('description' in bare.nodes.find((n) => n.id === 'ENG-1')!).toBe(false);
+  });
+
   it('in-progress policy and ungated option', () => {
     const r = mapIssues({ ...epic, options: { inProgress: 'task', gated: false } });
     const byId = Object.fromEntries(r.nodes.map((n) => [n.id, n]));

@@ -22,6 +22,7 @@ import { runIdOf, setRunId } from './state/store.js';
 import { randomUUID } from 'node:crypto';
 import { revParse } from './workspace/git.js';
 import { GitWorkspace } from './workspace/git-workspace.js';
+import { isEntrypoint } from './entry.js';
 
 export const stderrLogger: Logger = {
   info: (msg, data) => process.stderr.write(`${new Date().toISOString()} INFO ${msg}${data ? ` ${JSON.stringify(data)}` : ''}\n`),
@@ -136,7 +137,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   await orch.start();
 }
 
-const isEntry = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+const isEntry = isEntrypoint(import.meta.url);
 if (isEntry) {
   main().catch((err) => {
     stderrLogger.error('fatal', { err: String(err instanceof Error ? err.stack : err) });

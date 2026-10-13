@@ -3,7 +3,7 @@
  * Operator MCP server: the tools a host session uses to drive a run.
  * Full implementation in task group 5; this file holds the entrypoint and usage.
  */
-import path from 'node:path';
+import { isEntrypoint } from '../entry.js';
 
 export const USAGE = `orchestrator-mcp: operator MCP server for a host session.
 
@@ -18,7 +18,7 @@ the store. The run is resolved from --repo, ORCH_REPO, or the git top level of
 the working directory. ORCH_HOME overrides ~/.orchestrator.
 `;
 
-const isEntry = process.argv[1] && import.meta.url === new URL(`file://${path.resolve(process.argv[1])}`).href;
+const isEntry = isEntrypoint(import.meta.url);
 if (isEntry && (process.argv.includes('--help') || process.argv.includes('-h'))) {
   process.stdout.write(USAGE);
 } else if (isEntry) {
