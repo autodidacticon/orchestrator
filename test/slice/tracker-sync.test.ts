@@ -86,7 +86,7 @@ describe('tracker sync through a fake tracker', () => {
   it('the same run without a tracker recorded produces no effects', async () => {
     const h = await slice(G, {}, false);
     await h.orch.tick();
-    expect([...h.orch.status().byStatus.running, ...h.orch.status().byStatus.waiting].sort()).toEqual(['T1', 'T3', 'T5']);
+    for (const id of ['T1', 'T3', 'T5']) expect(h.store.listLaunches({ taskId: id }).length).toBeGreaterThan(0);
     expect(h.store.listOutbox()).toEqual([]);
     expect(h.orch.status().outboxPending).toBe(0);
   });

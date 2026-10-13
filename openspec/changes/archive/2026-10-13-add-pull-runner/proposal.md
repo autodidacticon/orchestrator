@@ -19,11 +19,11 @@ The daemon only pushes work: every launch is a headless process it spawns. A use
 
 ### Modified Capabilities
 - `task-lifecycle`: the transition table gains `running -> unstarted` for a claimed launch released without progress; a new requirement covers claimable launches: the slot they hold, the lease that starts at the claim, counters, and the expiry path.
-- `agent-protocol`: workers act through the token-scoped operator tools under the same scoping, deduplication, sealing, and fencing rules; the fallback file is not available to them.
-- `operator-control`: routes for claims, releases, and the mode override, each recorded as an event; status and digest additions for workers; a reaping shutdown leaves claimed launches to their leases.
+- `agent-protocol`: workers act through the token-scoped operator tools under the same scoping, deduplication, sealing, and fencing rules; the fallback file is not available to them. The inbox notices requirement also names `payloadChanged`, the fourth kind, which the brief now lists.
+- `operator-control`: routes for claims, releases, and the mode override, each recorded as an event; status and digest additions for workers; a reaping shutdown leaves claimed launches to their leases. The operator interface requirement restates the full operation list, which earlier changes had extended only in their own requirements.
 - `operator-mcp`: the worker tools and the `mode` argument on `start`.
 - `host-integration`: the work skill and workflow script, and the marketplace manifest with the version check.
-- `crash-recovery`: the `claimable` state, the claim boundary, the two crash points, and recovery of claimable and claimed launches.
+- `crash-recovery`: the `claimable` state, the claim boundary, the two crash points, and recovery of claimable and claimed launches. The named crash points requirement restates the complete list, including `cascade.afterPlan`, and the file-based arming the crash suite uses mid-run.
 
 ## Impact
 

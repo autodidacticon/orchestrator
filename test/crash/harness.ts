@@ -17,6 +17,7 @@ import { freePort, gitIn, makeRepo, scriptedAgent, tsxLoader } from '../slice/ha
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const mainTs = path.resolve(here, '../../src/main.ts');
+const workerTs = path.resolve(here, '../agents/worker.ts');
 
 export const crashGraph = `nodes:
   - { id: T1, title: Schema migration, description: "add the schema migration", acceptanceCriteria: [migrates], deps: [],   behavior: commitAndSubmit, url: "https://tracker.example/T1" }
@@ -39,6 +40,9 @@ export type CrashScenario = 'standard' | 'cascade';
 export interface CrashRun {
   dir: string;
   scenario: CrashScenario;
+  /** Pull mode: the scripted workers started beside the daemon. */
+  workers: ChildProcess[];
+  pull: boolean;
   /** Arm a crash point for the running daemon through ORCH_CRASH_AT_FILE. */
   armCrash(point: string): void;
   disarmCrash(): void;
@@ -60,14 +64,29 @@ export interface CrashRun {
   cleanup(): void;
 }
 
-export async function setupCrashRun(opts: { scenario?: CrashScenario } = {}): Promise<CrashRun> {
+export interface CrashRunOptions {
+  scenario?: CrashScenario;
+  /** Shorthand for runner mode pull with two scripted workers. */
+  pull?: boolean;
+  runner?: { mode: 'pull' | 'mixed'; claimWindowMs?: number };
+  /** Scripted workers started beside the daemon (default two when a runner mode is set). */
+  workers?: number;
+  workerEnv?: Record<string, string>;
+  /** Graph text instead of the scenario's. */
+  graph?: string;
+}
+
+export async function setupCrashRun(opts: CrashRunOptions = {}): Promise<CrashRun> {
   const scenario = opts.scenario ?? 'standard';
+  const runnerMode = opts.runner?.mode ?? (opts.pull ? 'pull' : undefined);
+  const pull = runnerMode !== undefined;
+  const workerCount = opts.workers ?? (pull ? 2 : 0);
   const dir = mkdtempSync(path.join(tmpdir(), 'orch-crash-'));
   const repo = makeRepo(dir);
   const dataDir = path.join(dir, 'run');
   mkdirSync(dataDir);
   const graphPath = path.join(dir, 'graph.yaml');
-  const graphText = scenario === 'cascade' ? cascadeGraph : crashGraph;
+  const graphText = opts.graph ?? (scenario === 'cascade' ? cascadeGraph : crashGraph);
   writeFileSync(graphPath, graphText);
   const crashFile = path.join(dir, 'crash-at');
   const pidlog = path.join(dir, 'pids.log');
@@ -90,15 +109,20 @@ export async function setupCrashRun(opts: { scenario?: CrashScenario } = {}): Pr
       `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
       'tracker:',
       '  enabled: always',
+      ...(runnerMode ? ['runner:', `  mode: ${runnerMode}`, ...(opts.runner?.claimWindowMs !== undefined ? [`  claimWindowMs: ${opts.runner.claimWindowMs}`] : [])] : []),
     ].join('\n'),
   );
   const baseline = gitIn(repo, 'rev-parse', 'main');
   const daemonLog = path.join(dir, 'daemon.log');
   const graph = parseGraph(graphText);
 
+  const workers: ChildProcess[] = [];
+  const daemons: ChildProcess[] = [];
   const run: CrashRun = {
     dir,
     scenario,
+    workers,
+    pull,
     armCrash: (point) => writeFileSync(crashFile, point),
     disarmCrash: () => {
       try {
@@ -138,6 +162,18 @@ export async function setupCrashRun(opts: { scenario?: CrashScenario } = {}): Pr
         env: { ...process.env, ORCH_PIDLOG: pidlog, ORCH_CRASH_AT_FILE: crashFile, ...env },
         stdio: ['ignore', fd, fd],
       });
+      daemons.push(child);
+      // Pull mode: two scripted workers beside the daemon, started once; they retry through daemon restarts.
+      if (workerCount > 0 && !workers.some((w) => w.exitCode === null)) {
+        const wfd = openSync(path.join(dir, 'workers.log'), 'a');
+        for (let i = 1; i <= workerCount; i++) {
+          const w = spawn('node', ['--import', tsxLoader, workerTs], {
+            env: { ...process.env, ORCH_API: `http://127.0.0.1:${port}`, ORCH_WORKER_ID: `w${i}`, ORCH_RETRY_WINDOW_MS: '120000', ORCH_WORKER_LOG: path.join(dir, 'worker-events.log'), ...(opts.workerEnv ?? {}) },
+            stdio: ['ignore', wfd, wfd],
+          });
+          workers.push(w);
+        }
+      }
       return child;
     },
     waitExit: (child, timeoutMs = 60_000) =>
@@ -180,7 +216,26 @@ export async function setupCrashRun(opts: { scenario?: CrashScenario } = {}): Pr
       }
       throw new Error(`terminal state not reached; daemon log:\n${readFileSync(daemonLog, 'utf8').slice(-4000)}`);
     },
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    cleanup: () => {
+      // A failed assertion skips run.stop(); never leave a daemon behind.
+      for (const d of daemons) {
+        if (d.exitCode === null) {
+          try {
+            d.kill('SIGKILL');
+          } catch {
+            /* gone */
+          }
+        }
+      }
+      for (const w of workers) {
+        try {
+          w.kill('SIGKILL');
+        } catch {
+          /* gone */
+        }
+      }
+      rmSync(dir, { recursive: true, force: true });
+    },
   };
   return run;
 }

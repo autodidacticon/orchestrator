@@ -206,7 +206,7 @@ export class SqliteStore implements Store {
       where.push('task_id = ?');
       args.push(filter.taskId);
     }
-    const sql = `SELECT doc FROM launches${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at, launch_id`;
+    const sql = `SELECT doc FROM launches${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY created_at, rowid`;
     return (this.db.prepare(sql).all(...args) as Array<{ doc: string }>).map((r) => JSON.parse(r.doc) as Launch);
   }
 

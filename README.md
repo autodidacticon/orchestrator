@@ -65,6 +65,7 @@ npm test            # unit, slice, and crash-injection suites with scripted agen
    orchestrator-ctl reopen T1 [--cascade]
    orchestrator-ctl proposals | accept-proposal <id> | reject-proposal <id> --note "..."
    orchestrator-ctl pause | resume [--override-budget]
+   orchestrator-ctl mode pull | claim w1 | release <launchId> --reason "..."
    orchestrator-ctl stop [--reap]                  # graceful: agents keep running and are adopted on the next start
    orchestrator-ctl runs                           # every run under ~/.orchestrator
    ```
@@ -75,15 +76,19 @@ By default agents are headless Claude Code sessions (`runnerCommand`), each in i
 
 ### From a Claude Code session
 
-Load the plugin and use its skills: `import` turns a Linear or Jira epic into the graph with the session's own tracker connector, `run` starts the daemon and monitors it (questions, reviews, stuck tasks, proposals, tracker mirroring), and `review` judges a milestone's pinned commit.
+Load the plugin and use its skills: `import` turns a Linear or Jira epic into the graph with the session's own tracker connector, `run` starts the daemon and monitors it (questions, reviews, stuck tasks, proposals, tracker mirroring), `work` has the session's own subagents execute the launches through a bundled workflow, and `review` judges a milestone's pinned commit. The plugin's MCP server runs `orchestrator-mcp`, so the package must be on PATH first (`npm link` above, or a global install).
 
 ```
-claude --plugin-dir /path/to/orchestrator/hosts/claude-code
+claude --plugin-dir /path/to/orchestrator/hosts/claude-code          # from a checkout
+claude plugin marketplace add autodidacticon/orchestrator            # or install from this repository's marketplace
+claude plugin install orchestrator@orchestrator
 ```
+
+Who executes launches is `runner.mode`: `spawn` (default) has the daemon run headless Claude Code agents; `pull` parks each prepared launch until a worker claims it (`orchestrator-ctl claim <workerId>`, the `claim` tool, or the `work` skill's workflow); `mixed` parks for `runner.claimWindowMs` (default 60 s) and then spawns. `orchestrator-ctl mode <mode>` or `start` with `mode` switches a running daemon. A claimed launch has no process: its lease is renewed by the worker's API calls and by progress in the worktree, and `release` hands it back (untouched: no attempt spent).
 
 ### Tests
 
-`npm test` runs everything that needs no model: unit tests, slices with real subprocess agents, git, and the HTTP API, and the crash-injection suite in `test/crash`, which is the project gate. Two opt-in tests use a real model: `ORCH_E2E_CLAUDE=1 npm test -- test/e2e/claude` runs three Claude Code agents, and `ORCH_E2E_CLAUDE_PLUGIN=1 npm test -- test/e2e/plugin` has a Claude Code session operate a run through the plugin.
+`npm test` runs everything that needs no model: unit tests, slices with real subprocess agents, git, and the HTTP API, and the crash-injection suite in `test/crash`, which is the project gate. Three opt-in tests use a real model: `ORCH_E2E_CLAUDE=1 npm test -- test/e2e/claude` runs three Claude Code agents, `ORCH_E2E_CLAUDE_PLUGIN=1 npm test -- test/e2e/plugin` has a Claude Code session operate a run through the plugin, and `ORCH_E2E_CLAUDE_WORK=1 npm test -- test/e2e/work` has a session execute a run in pull mode with two workers through the work skill.
 
 ## Behaviour
 
@@ -99,7 +104,7 @@ Graph mutation. Milestones hold no work, so they never block a reopen: reopening
 
 ### Requirements
 
-Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, and `add-graph-mutation`:
+Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, `add-graph-mutation`, and `add-pull-runner`:
 
 - Capability specs
   - [task-graph](openspec/specs/task-graph/spec.md): loading, validation, external nodes, readiness, milestones, stall detection, revisions, reload compatibility, revocability through milestones and the cascade plan
@@ -113,13 +118,14 @@ Current specs in `openspec/specs/`, synced from the archived changes `add-orches
   - [host-integration](openspec/specs/host-integration/spec.md): package entrypoints, per-host wrappers, skills
   - [tracker-sync](openspec/specs/tracker-sync/spec.md): the durable outbox of tracker effects, effect kinds and marker, mirroring policy, done semantics, the drainer contract
   - [health-monitoring](openspec/specs/health-monitoring/spec.md): process liveness, progress signals, stuck detection and escalation, the diagnosis hook, launch and run budgets, usage accounting, the base-moved notice
+  - [pull-runner](openspec/specs/pull-runner/spec.md): runner modes and the claim window, claim and release, worker identity and idempotent re-claim, access modes with remote reserved
 - Archived change `add-orchestrator-v1` (the v1 runtime): [Proposal](openspec/changes/archive/2026-10-12-add-orchestrator-v1/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-orchestrator-v1/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-orchestrator-v1/tasks.md)
 - Archived change `add-session-operator` (operate from a Claude Code session): [Proposal](openspec/changes/archive/2026-10-12-add-session-operator/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-session-operator/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-session-operator/tasks.md)
 - Archived change `add-tracker-sync` (mirror the run to the tracker): [Proposal](openspec/changes/archive/2026-10-12-add-tracker-sync/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-tracker-sync/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-tracker-sync/tasks.md)
 - Archived change `add-health-monitoring` (liveness, stuck detection, budgets): [Proposal](openspec/changes/archive/2026-10-12-add-health-monitoring/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-health-monitoring/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-health-monitoring/tasks.md)
 - Archived change `add-graph-mutation` (transparent milestones, cascade reopen, proposals): [Proposal](openspec/changes/archive/2026-10-12-add-graph-mutation/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-graph-mutation/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-graph-mutation/tasks.md)
+- Archived change `add-pull-runner` (workers claim launches; the work skill and workflow): [Proposal](openspec/changes/archive/2026-10-13-add-pull-runner/proposal.md), [Design](openspec/changes/archive/2026-10-13-add-pull-runner/design.md), [Tasks](openspec/changes/archive/2026-10-13-add-pull-runner/tasks.md)
 
-Active changes, in the order to apply them:
+Active change:
 
-1. `add-pull-runner`: claimable launches, spawn, pull, and mixed modes, worker tools on the operator MCP server, the work skill and workflow, the marketplace manifest. [Proposal](openspec/changes/add-pull-runner/proposal.md), [Design](openspec/changes/add-pull-runner/design.md), [Tasks](openspec/changes/add-pull-runner/tasks.md)
-2. `add-scheduling-policy`: a configurable ordering chain with critical path first, declared file scopes with an overlap filter, deferred candidates in status. [Proposal](openspec/changes/add-scheduling-policy/proposal.md), [Design](openspec/changes/add-scheduling-policy/design.md), [Tasks](openspec/changes/add-scheduling-policy/tasks.md)
+1. `add-scheduling-policy`: a configurable ordering chain with critical path first, declared file scopes with an overlap filter, deferred candidates in status. [Proposal](openspec/changes/add-scheduling-policy/proposal.md), [Design](openspec/changes/add-scheduling-policy/design.md), [Tasks](openspec/changes/add-scheduling-policy/tasks.md)

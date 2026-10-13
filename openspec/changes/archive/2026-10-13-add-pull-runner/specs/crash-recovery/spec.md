@@ -1,3 +1,16 @@
+## MODIFIED Requirements
+
+### Requirement: Named crash points
+The code SHALL call `crashPoint(name)` at each boundary. When the environment variable `ORCH_CRASH_AT` equals the name, or the file named by `ORCH_CRASH_AT_FILE` contains it, the process SHALL exit immediately; otherwise the call SHALL do nothing. The named points SHALL be `launch.afterRow`, `launch.afterWorktree`, `launch.afterSpawn`, `launch.afterPid`, `launch.afterClaimable`, `claim.afterRecord`, `api.afterEventCommit`, `verify.afterQueued`, `verify.afterRebase`, `verify.afterCheck`, `verify.afterSquash`, `verify.afterPublish`, `milestone.afterTag`, `cascade.afterPlan`, and `tick.afterPhase<n>` for each phase.
+
+#### Scenario: Crash point fires only when named
+- **WHEN** `ORCH_CRASH_AT` is `verify.afterSquash`
+- **THEN** the daemon exits exactly there and nowhere else
+
+#### Scenario: Crash point armed through a file while running
+- **WHEN** the file named by `ORCH_CRASH_AT_FILE` is written with `tick.afterPhase1` while the daemon runs
+- **THEN** the daemon exits at the end of the next phase 1 and not before
+
 ## ADDED Requirements
 
 ### Requirement: Claim boundaries

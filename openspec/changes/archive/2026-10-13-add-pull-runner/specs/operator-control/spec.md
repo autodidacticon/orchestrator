@@ -1,3 +1,16 @@
+## MODIFIED Requirements
+
+### Requirement: Operator interface
+The orchestrator SHALL expose operator routes on its loopback HTTP server, and both a CLI and an MCP server SHALL speak to them. The operations SHALL be `status`, `answer`, `cancel` with optional release, `reopen` with optional cascade, `unblock`, `accept`, `reject`, `pause`, `resume` with optional budget override, `logs`, `events`, `review`, `import`, `shutdown`, `start` with optional mode, `stop`, `runs`, `outbox`, `ack`, `nudge`, `proposals`, `accept_proposal`, `reject_proposal`, `claim`, `release`, and `mode`. Humans and host sessions SHALL act only through this interface.
+
+#### Scenario: CLI reaches the daemon
+- **WHEN** `status` is run while the daemon is up
+- **THEN** it prints the current report from the daemon
+
+#### Scenario: MCP and CLI share one implementation
+- **WHEN** the same operation is invoked through the CLI and through the MCP server
+- **THEN** both produce the same event and the same effect
+
 ## ADDED Requirements
 
 ### Requirement: Claims and releases

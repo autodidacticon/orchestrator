@@ -8,8 +8,9 @@ import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema, tracker
 import { daemonState, listRuns, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 
-export const WAIT_DEFAULT_MS = 60_000;
-export const WAIT_CAP_MS = 90_000;
+/** The cap keeps every tool call under Claude Code's two-minute foreground limit; ORCH_WAIT_CAP_MS shortens it for tests. */
+export const WAIT_CAP_MS = Number(process.env['ORCH_WAIT_CAP_MS'] ?? 90_000);
+export const WAIT_DEFAULT_MS = Math.min(60_000, WAIT_CAP_MS);
 /** Each daemon-side long-poll is shorter than the cap so a cancelled client never leaves a long server wait. */
 const POLL_SLICE_MS = 20_000;
 
@@ -17,6 +18,7 @@ export const TOOL_NAMES = [
   'start', 'stop', 'status', 'runs', 'import_issues', 'import_graph', 'wait', 'review',
   'answer', 'cancel', 'reopen', 'unblock', 'accept', 'reject', 'pause', 'resume', 'logs',
   'outbox', 'ack', 'nudge', 'proposals', 'accept_proposal', 'reject_proposal',
+  'claim', 'release', 'launch_heartbeat', 'launch_report', 'launch_block', 'launch_inbox', 'launch_log',
 ] as const;
 
 export function clampWait(ms: number | undefined): number {
@@ -64,11 +66,11 @@ export class OperatorClient {
     return state.url;
   }
 
-  async call(method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>, timeoutMs = 30_000): Promise<{ status: number; body: Record<string, unknown> }> {
+  async call(method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>, timeoutMs = 30_000, headers: Record<string, string> = {}): Promise<{ status: number; body: Record<string, unknown> }> {
     const base = await this.url();
     const res = await fetch(`${base}${route}`, {
       method,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...headers },
       body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -128,8 +130,13 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   const task = { task: z.string().describe('Task id as it appears in the graph, e.g. ENG-123') };
   const milestone = { milestone: z.string().describe('Milestone id') };
 
-  server.registerTool('start', { description: 'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path.', inputSchema: {} }, async () =>
-    guarded(async () => ({ status: 200, body: await startDaemon({ repo: values.repo, env }) })),
+  server.registerTool(
+    'start',
+    {
+      description: 'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path. mode: spawn (the daemon runs headless agents), pull (workers claim launches), or mixed; applied to a daemon already running too.',
+      inputSchema: { mode: z.enum(['spawn', 'pull', 'mixed']).optional() },
+    },
+    async (a) => guarded(async () => ({ status: 200, body: await startDaemon({ repo: values.repo, env, mode: a.mode }) })),
   );
   server.registerTool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a) =>
     guarded(async () => {
@@ -254,6 +261,77 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
           ? client.call('POST', `/v1/outbox/${a.id}/nack`, { error: a.error })
           : client.call('POST', `/v1/outbox/${a.id}/ack`, { result: a.result });
       }),
+  );
+
+  // Pull runner: a session subagent claims a prepared launch and acts as its agent through token-scoped tools. See specs/operator-mcp "Worker tools".
+  server.registerTool(
+    'claim',
+    {
+      description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, and pending when a question is open. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable or the run is paused.',
+      inputSchema: { workerId: z.string(), taskId: z.string().optional(), access: z.enum(['local', 'remote']).optional() },
+    },
+    async (a) => guarded(() => client.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access })),
+  );
+  server.registerTool('release', { description: 'Hand a claimed launch back with a reason. Untouched: the task returns to unstarted at no cost; after progress: a failed attempt.', inputSchema: { launchId: z.string(), reason: z.string() } }, async (a) =>
+    guarded(() => client.call('POST', `/v1/launches/${encodeURIComponent(a.launchId)}/release`, { reason: a.reason })),
+  );
+  const scoped = { launchId: z.string(), token: z.string() };
+  const forwardLaunch = (op: 'heartbeat' | 'report' | 'block' | 'log' | 'inbox', launchId: string, token: string, body: Record<string, unknown>, timeoutMs = 30_000) =>
+    client.call(op === 'inbox' ? 'GET' : 'POST', `/v1/launches/${encodeURIComponent(launchId)}/${op}`, body, timeoutMs, { authorization: `Bearer ${token}` });
+  server.registerTool('launch_heartbeat', { description: 'Worker: renew the lease and report progress text for a claimed launch.', inputSchema: { ...scoped, progress: z.string().optional() } }, async ({ launchId, token, ...body }) =>
+    guarded(() => forwardLaunch('heartbeat', launchId, token, body)),
+  );
+  server.registerTool(
+    'launch_report',
+    {
+      description: 'Worker: final report for a claimed launch. kind=submit needs a committed, clean worktree (409 with the dirty files otherwise: commit and call again with the same seq); kind=fail gives up. seq increases per call.',
+      inputSchema: {
+        ...scoped,
+        seq: z.number().int().nonnegative(),
+        kind: z.enum(['submit', 'fail']),
+        summary: z.string().optional(),
+        interfaces: z.array(z.string()).optional(),
+        decisions: z.array(z.string()).optional(),
+        deviations: z.array(z.string()).optional(),
+        followUps: z.array(z.string()).optional(),
+        tests: z.array(z.string()).optional(),
+        acceptance: z.array(z.object({ criterion: z.string(), evidence: z.string() })).optional(),
+        noChanges: z.object({ justification: z.string() }).optional(),
+        proposals: z.array(z.object({ title: z.string(), description: z.string(), acceptanceCriteria: z.array(z.string()), deps: z.array(z.string()).optional(), scope: z.array(z.string()).optional(), labels: z.array(z.string()).optional() })).optional(),
+        tried: z.string().optional(),
+        why: z.string().optional(),
+        whatWouldUnblock: z.string().optional(),
+      },
+    },
+    async ({ launchId, token, ...body }) => guarded(() => forwardLaunch('report', launchId, token, body)),
+  );
+  server.registerTool(
+    'launch_block',
+    {
+      description: `Worker: ask a human a question for a claimed launch. Returns { answer } when it arrives within ${WAIT_CAP_MS / 1000}s, otherwise { pending: true, seq }: call again with the same seq until the answer comes.`,
+      inputSchema: {
+        ...scoped,
+        seq: z.number().int().nonnegative(),
+        kind: z.enum(['needsDecision', 'needsAccess', 'impossible', 'dependencyCancelled', 'outOfScope', 'insufficientSpec', 'milestoneRejected']),
+        message: z.string(),
+        options: z.array(z.string()).optional(),
+      },
+    },
+    async ({ launchId, token, ...body }) =>
+      guarded(async () => {
+        try {
+          return await forwardLaunch('block', launchId, token, body, WAIT_CAP_MS);
+        } catch (err) {
+          if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) return { status: 200, body: { pending: true, seq: body['seq'] } };
+          throw err;
+        }
+      }),
+  );
+  server.registerTool('launch_inbox', { description: 'Worker: pending notices for a claimed launch (stuck, nudge, baseMoved, payloadChanged).', inputSchema: scoped }, async ({ launchId, token }) =>
+    guarded(() => forwardLaunch('inbox', launchId, token, {})),
+  );
+  server.registerTool('launch_log', { description: 'Worker: append a log line to a claimed launch.', inputSchema: { ...scoped, text: z.string(), seq: z.number().int().optional() } }, async ({ launchId, token, ...body }) =>
+    guarded(() => forwardLaunch('log', launchId, token, body)),
   );
 
   await server.connect(new StdioServerTransport());

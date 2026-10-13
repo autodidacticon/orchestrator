@@ -59,7 +59,7 @@ describe('operator MCP server', () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
-    expect(tools.tools).toHaveLength(23);
+    expect(tools.tools).toHaveLength(30);
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);

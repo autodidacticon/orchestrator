@@ -55,6 +55,10 @@ export class FakeWorkspace implements Workspace {
     return this.fingerprints.get(launch.launchId) ?? `${this.head}:clean`;
   }
 
+  async exists(launch: Launch): Promise<boolean> {
+    return this.worktrees.has(launch.launchId);
+  }
+
   /** Test helper: a submission that is empty (sealedSha == baseSha). */
   scriptEmpty(taskId: Id, baseSha: string): void {
     this.sealScript.set(taskId, { ok: true, sealedSha: baseSha });

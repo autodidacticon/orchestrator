@@ -7,7 +7,8 @@ import path from 'node:path';
 import { composeBrief } from '../brief/compose.js';
 import type { Id } from '../graph/model.js';
 import type { Launch } from '../state/store.js';
-import { dirtyFiles, git, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeRemove } from './git.js';
+import { existsSync } from 'node:fs';
+import { dirtyFiles, git, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeRemove } from './git.js';
 import type { BriefInput, FallbackReport, SealResult, Workspace } from './workspace.js';
 
 export const ORCH_DIR = '.orchestrator';
@@ -26,7 +27,14 @@ export class GitWorkspace implements Workspace {
 
   async prepare(launch: Launch, brief: BriefInput): Promise<void> {
     await mkdir(path.dirname(launch.worktree), { recursive: true });
-    await worktreeAdd(this.repo, launch.worktree, launch.branch, launch.baseSha);
+    if (await refExists(this.repo, `refs/heads/${launch.branch}`)) {
+      // Re-preparing a launch whose worktree vanished: reset its branch to the base and attach a new worktree.
+      await git(this.repo, ['worktree', 'prune'], { allowFail: true });
+      await git(this.repo, ['branch', '-f', launch.branch, launch.baseSha]);
+      await git(this.repo, ['worktree', 'add', launch.worktree, launch.branch]);
+    } else {
+      await worktreeAdd(this.repo, launch.worktree, launch.branch, launch.baseSha);
+    }
     await this.ensureExcluded();
     const dir = path.join(launch.worktree, ORCH_DIR);
     await mkdir(dir, { recursive: true });
@@ -100,6 +108,10 @@ export class GitWorkspace implements Workspace {
   async diffStat(from: string, to: string): Promise<string> {
     const r = await git(this.repo, ['diff', '--stat', `${from}..${to}`], { allowFail: true });
     return r.code === 0 ? r.stdout.trim() : '';
+  }
+
+  async exists(launch: Launch): Promise<boolean> {
+    return existsSync(path.join(launch.worktree, ORCH_DIR, 'brief.json'));
   }
 
   /** Head sha plus a hash over `git status --porcelain` (minus .orchestrator/) and `git diff HEAD`, so edits to an already dirty file still register. */

@@ -60,12 +60,15 @@ export interface StartOptions {
   /** Extra environment for the daemon (and therefore its agents). */
   extraEnv?: Record<string, string>;
   timeoutMs?: number;
+  /** Runner mode for the run: passed to a daemon this call spawns, set through the runner route on one already running. */
+  mode?: 'spawn' | 'pull' | 'mixed';
 }
 
 export interface StartResult extends DaemonInfo {
   runDir: string;
   graphPath: string;
   started: boolean;
+  mode?: 'spawn' | 'pull' | 'mixed';
 }
 
 /** Idempotent start: reuse a healthy daemon, otherwise spawn one detached and wait for health. */
@@ -76,11 +79,14 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
   const state = await daemonState(paths.runDir);
   if (state.healthy && state.pid && state.url) {
     const info = readDaemonJson(paths.runDir) as DaemonInfo;
-    return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false };
+    if (opts.mode) {
+      await fetch(`${state.url}/v1/runner`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: opts.mode }), signal: AbortSignal.timeout(3000) });
+    }
+    return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false, ...(opts.mode ? { mode: opts.mode } : {}) };
   }
   const { command, args } = daemonCommand();
   const fd = openSync(paths.daemonLog, 'a');
-  const child = spawn(command, [...args, '--repo', repo], {
+  const child = spawn(command, [...args, '--repo', repo, ...(opts.mode ? ['--mode', opts.mode] : [])], {
     cwd: repo,
     env: { ...env, ...opts.extraEnv },
     detached: true,
@@ -93,7 +99,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
   while (Date.now() < deadline) {
     const info = readDaemonJson(paths.runDir);
     if (info && info.pid === child.pid && (await health(info.url))) {
-      return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: true };
+      return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: true, ...(opts.mode ? { mode: opts.mode } : {}) };
     }
     if (!pidAlive(child.pid)) break;
     await new Promise((r) => setTimeout(r, 150));

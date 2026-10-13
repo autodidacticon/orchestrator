@@ -41,4 +41,6 @@ export interface Workspace {
   diffStat(from: string, to: string): Promise<string>;
   /** Progress fingerprint: the worktree head sha, a colon, and a hash of its status and diff. */
   fingerprint(launch: Launch): Promise<string>;
+  /** Whether the launch's worktree and brief are present. */
+  exists(launch: Launch): Promise<boolean>;
 }

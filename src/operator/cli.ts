@@ -12,6 +12,9 @@
  *   orchestrator-ctl accept <milestone> --sha <sha> --version <n>
  *   orchestrator-ctl reject <milestone> --note <text>
  *   orchestrator-ctl pause | resume [--override-budget]
+ *   orchestrator-ctl mode <spawn|pull|mixed>
+ *   orchestrator-ctl claim <workerId> [--task <id>]
+ *   orchestrator-ctl release <launchId> --reason <text>
  *   orchestrator-ctl nudge <task> <message>
  *   orchestrator-ctl logs <task> [--launch <n>]
  *   orchestrator-ctl outbox [--after <id>] [--limit <n>]
@@ -53,12 +56,12 @@ export async function resolveUrl(opts: { url?: string; dataDir?: string; repo?: 
   }
 }
 
-export async function call(base: string, method: 'GET' | 'POST', route: string, body?: Record<string, unknown>): Promise<CliResult> {
+export async function call(base: string, method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>): Promise<CliResult> {
   // Bodies are JSON documents; a result may be any JSON value.
   const res = await fetch(`${base}${route}`, {
     method,
     headers: { 'content-type': 'application/json' },
-    body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
+    body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
   });
   return { status: res.status, body: await res.json() };
 }
@@ -79,6 +82,9 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl accept <milestone> --sha <sha> --version <n>
   orchestrator-ctl reject <milestone> --note <text>
   orchestrator-ctl pause | resume [--override-budget]   resume is refused over the cost ceiling without the flag
+  orchestrator-ctl mode <spawn|pull|mixed>         who executes launches: the daemon, workers, or both
+  orchestrator-ctl claim <workerId> [--task <id>]  hand a parked launch to a worker (prints its brief, token, worktree)
+  orchestrator-ctl release <launchId> --reason <text>
   orchestrator-ctl nudge <task> <message>       queue a message for the task's running agent
   orchestrator-ctl logs <task> [--launch <n>]
   orchestrator-ctl outbox [--after <id>] [--limit <n>]   pending tracker effects and the policy
@@ -117,6 +123,8 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       status: { type: 'string' },
       'node-id': { type: 'string' },
       payload: { type: 'string' },
+      task: { type: 'string' },
+      access: { type: 'string' },
     },
   });
   const [cmd, a, ...rest] = positionals;
@@ -159,6 +167,15 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       return call(base, 'POST', '/v1/pause');
     case 'resume':
       return call(base, 'POST', '/v1/resume', { overrideBudget: values['override-budget'] });
+    case 'mode':
+      if (!a) throw new Error('mode needs spawn, pull, or mixed');
+      return call(base, 'PUT', '/v1/runner', { mode: a });
+    case 'claim':
+      if (!a) throw new Error('claim needs a worker id');
+      return call(base, 'POST', '/v1/claims', { workerId: a, taskId: values.task, access: values.access });
+    case 'release':
+      if (!a) throw new Error('release needs a launch id');
+      return call(base, 'POST', `/v1/launches/${a}/release`, { reason: values.reason ?? rest.join(' ') });
     case 'nudge':
       if (!a) throw new Error('nudge needs a task id and a message');
       return call(base, 'POST', `/v1/tasks/${a}/nudge`, { message: rest.join(' ') });

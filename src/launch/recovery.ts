@@ -23,10 +23,35 @@ export async function recover(o: Orchestrator): Promise<void> {
     if (owns) await startLaunch(o, launch.taskId, { sameAttempt: true });
   }
 
+  // Parked launches stay parked; a worktree lost while the daemon was down is prepared again for the same launch.
+  for (const launch of store.listLaunches({ status: 'claimable' })) {
+    const entry = o.entry(launch.taskId);
+    const owns = entry.lease?.launchId === launch.launchId && entry.status.kind === 'running';
+    if (!owns) {
+      o.endLaunch(launch, 'superseded');
+      await workspace.remove(launch);
+      continue;
+    }
+    if (!(await workspace.exists(launch))) {
+      await workspace.remove(launch);
+      await workspace.prepare(launch, o.briefInput(launch));
+      store.appendEvent({ kind: 'launch.reprepared', taskId: launch.taskId, launchId: launch.launchId, payload: {} }, o.now());
+    }
+  }
+
   for (const launch of store.listLaunches({ status: 'live' })) {
     const entry = o.entry(launch.taskId);
     const owns = entry.lease?.launchId === launch.launchId;
     if (!owns || (entry.status.kind !== 'running' && entry.status.kind !== 'waiting')) continue;
+    if (launch.worker && launch.pid === undefined) {
+      // A claimed launch is judged by its lease, never as a dead process, and has no fallback file.
+      if (entry.status.kind === 'running' && entry.lease && entry.lease.expiresAt <= o.now()) {
+        o.fail(launch.taskId, { kind: 'leaseExpired', message: 'worker lease expired while the daemon was down' }, 'orchestrator', 'deadOrExpired');
+        o.endLaunch(launch, 'leaseExpired');
+        await workspace.remove(launch);
+      }
+      continue;
+    }
     const liveness = await runner.liveness(launch);
     if (liveness === 'alive') {
       // Adopt, and renew first: an outage longer than the TTL must not fail a surviving agent.
@@ -78,7 +103,7 @@ export async function recover(o: Orchestrator): Promise<void> {
   }
 
   // Sweep stray worktrees.
-  const liveIds = new Set(store.listLaunches({ status: ['preparing', 'launching', 'live'] }).map((l) => l.launchId));
+  const liveIds = new Set(store.listLaunches({ status: ['preparing', 'claimable', 'launching', 'live'] }).map((l) => l.launchId));
   for (const id of await workspace.listWorktrees()) {
     if (liveIds.has(id)) continue;
     const l = store.getLaunch(id);

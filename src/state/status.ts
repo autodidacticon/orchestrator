@@ -73,7 +73,8 @@ export type FailedKind =
   | 'reaped'
   | 'malformedReport'
   | 'stuck'
-  | 'timeBudget';
+  | 'timeBudget'
+  | 'released';
 
 export interface FailedReason {
   kind: FailedKind;

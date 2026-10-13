@@ -1,7 +1,7 @@
 # Task Lifecycle Specification
 
 ## Purpose
-Node states, allowed transitions by actor, admission, counters, leases, retry, the reopen guard, cancellation, milestone review, milestone resets, and cascade reopen for every node in the task graph, where a lease is renewed by observed process liveness as well as by API calls, so that silence from a live agent is a health matter rather than a lease failure, and where reopening a task resets every done or submitted milestone downstream of it while a reopen with cascade resets the whole started closure downstream of it, dependents before their dependencies.
+Node states, allowed transitions by actor, admission, counters, leases, retry, the reopen guard, cancellation, milestone review, milestone resets, and cascade reopen for every node in the task graph, where a lease is renewed by observed process liveness as well as by API calls, so that silence from a live agent is a health matter rather than a lease failure, and where reopening a task resets every done or submitted milestone downstream of it while a reopen with cascade resets the whole started closure downstream of it, dependents before their dependencies, and where in `pull` and `mixed` modes a launch is parked as `claimable` once prepared, holding its run slot with a lease that starts only at the claim, and the release of a claimed launch returns the task to `unstarted` without spending an attempt when no progress was observed and fails it, spending one, otherwise.
 
 ## Requirements
 
@@ -30,7 +30,8 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 | running | failed | agent | fail report |
 | running | blocked | agent | block delivered through the fallback file after exit |
 | running | waiting | agent | block through the long-poll |
-| running | failed | orchestrator | process dead without a report, or lease expired |
+| running | failed | orchestrator | process dead without a report, lease expired, or a claimed launch released after progress |
+| running | unstarted | orchestrator | claimed launch released without progress |
 | waiting | running | orchestrator | answer persisted and a slot admitted |
 | waiting | blocked | orchestrator | maxWait elapsed or process dead |
 | submitted | done | verifier | published |
@@ -67,6 +68,10 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 #### Scenario: Milestone reset row
 - **WHEN** MVP is `done` and the orchestrator requests `unstarted` with trigger `milestoneReset`
 - **THEN** the transition is applied, and the same request by an agent is rejected
+
+#### Scenario: Release without progress returns to unstarted
+- **WHEN** a claimed launch is released before any progress was observed
+- **THEN** the orchestrator applies `running -> unstarted` with `attempts` unchanged and the lease cleared
 
 ### Requirement: Admission
 The orchestrator SHALL admit `unstarted` ready tasks and resumable `waiting` tasks into run slots up to the configured capacity, admitting resumables before new launches and otherwise in first-in first-out order. A `waiting` task SHALL NOT hold a run slot, and the number of `waiting` tasks SHALL be bounded by `maxWaiting`.
@@ -239,3 +244,22 @@ When a task is reopened, uncancelled, or reset by cascade, every milestone reach
 #### Scenario: Property after cascade
 - **WHEN** random cascades are applied through the real tick to random reachable states
 - **THEN** no task whose status is `running`, `waiting`, `submitted`, or `done` has a dependency whose status is `unstarted`
+
+### Requirement: Claimable launches
+In `pull` and `mixed` modes a launch SHALL be parked as `claimable` once its worktree and brief exist. The task SHALL be `running` from the moment the launch row exists and SHALL hold a run slot while parked, so that the number of parked launches is bounded by `capacity`. The lease of a parked launch SHALL NOT expire; its TTL SHALL start at the claim, when `claimedAt` and `expiresAt` are set and `spawnedAt` stays unset. A claimed launch's lease SHALL be renewed by any API call under its token, by observed worktree progress, and at admission when the task resumes from `waiting`. An expired lease on a claimed launch SHALL follow the existing failure path: `failed` with reason `leaseExpired`, `attempts` increased, the worktree swept, and a new launch prepared while attempts remain. `launches` SHALL increase by one for every launch row, claimed or spawned.
+
+#### Scenario: Parked launch holds a slot
+- **WHEN** capacity is 2 and two launches are parked
+- **THEN** no third task is admitted until one of them ends
+
+#### Scenario: Parked launch does not expire
+- **WHEN** a launch stays parked for longer than the lease TTL
+- **THEN** it is still `claimable` and its task is still `running`
+
+#### Scenario: Abandoned claim fails the attempt
+- **WHEN** a worker claims a launch and then makes no API call and no worktree change for longer than the lease TTL
+- **THEN** the task is `failed` with reason `leaseExpired`, `attempts` is one, the worktree is removed, and a new claimable launch is prepared
+
+#### Scenario: Resume renews the lease
+- **WHEN** a claimed launch's task has been `waiting` for longer than the lease TTL and is answered and admitted
+- **THEN** its lease expires `leaseTtlMs` after the admission, not before

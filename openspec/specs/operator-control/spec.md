@@ -1,12 +1,12 @@
 # Operator Control Specification
 
 ## Purpose
-The HTTP-backed operator interface, reached through both a CLI and an MCP server, and its operations: status, answers, cancellation, reopen and unblock, milestone review, pause and resume, shutdown, and logs, together with per-user run directories, daemon lifecycle and discovery, the event stream, the review bundle, graph import through the daemon, the tracker outbox routes a drainer uses to list, acknowledge, and reject tracker-bound effects, the health operations (`nudge` to reach a running agent through its inbox, the health facts `status` reports such as stuck tasks, cost, and budgets, and the cost-budget pause that `resume` lifts only with an override), the `cascade` flag on `reopen` that resets the started closure downstream of the target and returns its plan, and the proposal operations (`proposals`, `accept_proposal`, and `reject_proposal`) through which a human decides the follow-up work agents propose, where every human action is recorded as an event.
+The HTTP-backed operator interface, reached through both a CLI and an MCP server, and its operations: status, answers, cancellation, reopen and unblock, milestone review, pause and resume, shutdown, and logs, together with per-user run directories, daemon lifecycle and discovery, the event stream, the review bundle, graph import through the daemon, the tracker outbox routes a drainer uses to list, acknowledge, and reject tracker-bound effects, the health operations (`nudge` to reach a running agent through its inbox, the health facts `status` reports such as stuck tasks, cost, and budgets, and the cost-budget pause that `resume` lifts only with an override), the `cascade` flag on `reopen` that resets the started closure downstream of the target and returns its plan, the proposal operations (`proposals`, `accept_proposal`, and `reject_proposal`) through which a human decides the follow-up work agents propose, and the pull-runner operations (`claim` and `release`, through which a worker takes a prepared launch and hands it back, and the `mode` override that `start` and the `runner` route apply to a run) together with the `runner`, `claimable`, and `workers` facts `status` reports, where every human action is recorded as an event.
 
 ## Requirements
 
 ### Requirement: Operator interface
-The orchestrator SHALL expose operator routes on its loopback HTTP server, and both a CLI and an MCP server SHALL speak to them. The operations SHALL be `status`, `answer`, `cancel` with optional release, `reopen`, `unblock`, `accept`, `reject`, `pause`, `resume`, `logs`, `events`, `review`, `import`, `shutdown`, `start`, `stop`, and `runs`. Humans and host sessions SHALL act only through this interface.
+The orchestrator SHALL expose operator routes on its loopback HTTP server, and both a CLI and an MCP server SHALL speak to them. The operations SHALL be `status`, `answer`, `cancel` with optional release, `reopen` with optional cascade, `unblock`, `accept`, `reject`, `pause`, `resume` with optional budget override, `logs`, `events`, `review`, `import`, `shutdown`, `start` with optional mode, `stop`, `runs`, `outbox`, `ack`, `nudge`, `proposals`, `accept_proposal`, `reject_proposal`, `claim`, `release`, and `mode`. Humans and host sessions SHALL act only through this interface.
 
 #### Scenario: CLI reaches the daemon
 - **WHEN** `status` is run while the daemon is up
@@ -243,3 +243,25 @@ The operator interface SHALL gain `proposals`, which lists proposals filtered by
 #### Scenario: Pending proposals visible
 - **WHEN** T2 submitted with one proposal and nothing has decided it
 - **THEN** `status` and the digest list `T2-p1` with task T2 and its title, and an accepted or rejected proposal is not listed
+
+### Requirement: Claims and releases
+The operator routes SHALL include `POST /v1/claims`, `POST /v1/launches/:id/release`, and `PUT /v1/runner` with `{ mode }`, with the semantics given in the pull-runner specification. Each SHALL be recorded as an event with its arguments before its effect. The CLI and the MCP server SHALL expose `claim`, `release`, and the mode override through these routes. A reaping shutdown SHALL NOT fail claimed launches: the daemon cannot terminate a worker, and the lease governs them.
+
+#### Scenario: Claim is auditable
+- **WHEN** a worker claims T1
+- **THEN** the event log contains a `launch.claimed` event for T1 with the worker id, followed by the launch becoming live
+
+#### Scenario: Mode override is durable
+- **WHEN** `PUT /v1/runner` sets mode `pull` and the daemon restarts
+- **THEN** the mode is still `pull`
+
+#### Scenario: Reap leaves workers alone
+- **WHEN** the daemon is stopped with reap while a worker holds a launch
+- **THEN** the launch stays live, its task stays `running`, and the worker's next call succeeds after the daemon restarts
+
+### Requirement: Status report: workers
+`status` SHALL additionally report `runner` with the effective `mode` and `claimWindowMs`, `claimable` as the ids of tasks whose launch is claimable in claim order, and `workers` as `[{ id, launchId, taskId, claimedAt }]` for every live launch held by a worker. The `events` digest SHALL additionally include `claimable`, the number of claimable launches.
+
+#### Scenario: Parked and claimed launches are visible
+- **WHEN** T1 is parked and T2 is held by worker `w1`
+- **THEN** `status` shows `claimable: [T1]` and `workers` containing `w1` with T2's launch, and the digest shows `claimable: 1`

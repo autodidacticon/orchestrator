@@ -5,7 +5,9 @@
 import type { Id } from '../graph/model.js';
 import type { Entry } from './status.js';
 
-export type LaunchStatus = 'preparing' | 'launching' | 'live' | 'ended' | 'revoked';
+export type LaunchStatus = 'preparing' | 'claimable' | 'launching' | 'live' | 'ended' | 'revoked';
+
+export type RunnerMode = 'spawn' | 'pull' | 'mixed';
 
 export interface Launch {
   launchId: string;
@@ -22,6 +24,10 @@ export interface Launch {
   graphRev: string;
   pid?: number;
   spawnedAt?: number;
+  /** Pull and mixed modes: when the launch was parked for a worker. See specs/pull-runner. */
+  claimableAt?: number;
+  /** Set when a worker claimed the launch; such a launch has no pid and is governed by its lease. */
+  worker?: { id: string; claimedAt: number };
   endedAt?: number;
   endReason?: string;
   createdAt: number;

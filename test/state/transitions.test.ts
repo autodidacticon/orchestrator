@@ -92,6 +92,16 @@ describe('transition table', () => {
     expect(reset.accepted).toBeUndefined();
   });
 
+  it('a claimed launch released without progress returns to unstarted at no cost', () => {
+    const lease = { launchId: 'l', token: 't', claimedAt: 0, expiresAt: 9, baseSha: 's', graphRev: 'r' };
+    const e = { ...defaultEntry(), attempts: 1, launches: 2, status: { kind: 'running' } as Status, lease };
+    const out = applyTransition(e, { kind: 'unstarted' }, { nodeId: 'n', nodeKind: 'task', actor: 'orchestrator', trigger: 'released', now: 1 });
+    expect(out).toMatchObject({ attempts: 1, launches: 2, status: { kind: 'unstarted' } });
+    expect(out.lease).toBeUndefined();
+    expect(findTransition('task', 'running', 'unstarted', 'agent', 'released')).toBeUndefined();
+    expect(findTransition('milestone', 'running', 'unstarted', 'orchestrator', 'released')).toBeUndefined();
+  });
+
   it('leaving running clears the lease unless patched', () => {
     const lease = { launchId: 'l', token: 't', claimedAt: 0, expiresAt: 9, baseSha: 's', graphRev: 'r' };
     const e = { ...defaultEntry(), status: { kind: 'running' } as Status, lease };

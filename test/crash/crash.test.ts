@@ -40,7 +40,8 @@ describe('crash suite', () => {
     }
   }, 120_000);
 
-  it.each(CRASH_POINTS.filter((p) => p !== 'cascade.afterPlan').map((p) => [p] as const))('crash at %s then restart converges', async (point) => {
+  const PULL_ONLY = new Set(['launch.afterClaimable', 'claim.afterRecord', 'cascade.afterPlan']);
+  it.each(CRASH_POINTS.filter((p) => !PULL_ONLY.has(p)).map((p) => [p] as const))('crash at %s then restart converges', async (point) => {
     const run = await setupCrashRun();
     try {
       const crashing = run.start({ ORCH_CRASH_AT: point });
@@ -118,4 +119,40 @@ describe('cascade crash scenario', () => {
     (point) => runCascadeScenario(point),
     240_000,
   );
+});
+
+/** Pull mode: two scripted workers claim every launch; points that only a spawned launch reaches are skipped. */
+const SPAWN_ONLY = new Set(['launch.afterWorktree', 'launch.afterSpawn', 'launch.afterPid', 'cascade.afterPlan']);
+
+describe('pull-mode crash matrix', () => {
+  it('uninterrupted pull run converges with every launch claimed by a worker', async () => {
+    const run = await setupCrashRun({ pull: true });
+    try {
+      const child = run.start();
+      await run.waitTerminal(120_000);
+      await run.stop(child);
+      await assertConverged(run, 'pull no-crash');
+      const launches = run.entries();
+      expect(launches.size).toBeGreaterThan(0);
+      expect(readFileSync(run.dir + '/worker-events.log', 'utf8')).toMatch(/report T1 200/);
+    } finally {
+      run.cleanup();
+    }
+  }, 180_000);
+
+  it.each(CRASH_POINTS.filter((p) => !SPAWN_ONLY.has(p)).map((p) => [p] as const))('pull-mode crash at %s then restart converges', async (point) => {
+    const run = await setupCrashRun({ pull: true });
+    try {
+      const crashing = run.start({ ORCH_CRASH_AT: point });
+      const code = await run.waitExit(crashing, 90_000);
+      expect(code, `daemon did not crash at ${point}; log:\n${readFileSync(run.daemonLog, 'utf8').slice(-2000)}`).toBe(CRASH_EXIT_CODE);
+      const resumed = run.start();
+      await run.waitTerminal(150_000);
+      await run.stop(resumed);
+      await new Promise((r) => setTimeout(r, 300));
+      await assertConverged(run, `pull ${point}`);
+    } finally {
+      run.cleanup();
+    }
+  }, 300_000);
 });

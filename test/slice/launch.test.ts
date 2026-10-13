@@ -170,6 +170,43 @@ describe('slice: launch, API, recovery', () => {
     await h.runner.reap(l);
   });
 
+  it('pull mode parks the launch as claimable with its brief; a claim makes it live with a worker and no pid', async () => {
+    h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
+    await h.orch.tick();
+    const [l] = h.store.listLaunches({ taskId: 'T1' });
+    expect(l?.status).toBe('claimable');
+    expect(l?.pid).toBeUndefined();
+    expect(l?.worker).toBeUndefined();
+    expect(existsSync(path.join(l!.worktree, '.orchestrator', 'brief.json'))).toBe(true);
+    expect(h.orch.entry('T1').status.kind).toBe('running');
+    expect((await h.orch.agentCall(l!.launchId, l!.token, 'heartbeat')).status).toBe(401);
+    const claim = await h.orch.claim({ workerId: 'w1' });
+    expect(claim.status).toBe(200);
+    expect(claim.body).toMatchObject({ launchId: l!.launchId, taskId: 'T1', token: l!.token, worktree: l!.worktree, baseSha: l!.baseSha, apiUrl: h.orch.apiBaseUrl });
+    expect((claim.body['brief'] as { taskId: string }).taskId).toBe('T1');
+    expect(h.store.getLaunch(l!.launchId)).toMatchObject({ status: 'live', worker: { id: 'w1' } });
+    expect(h.store.getLaunch(l!.launchId)?.pid).toBeUndefined();
+    expect((await h.orch.agentCall(l!.launchId, l!.token, 'heartbeat')).status).toBe(200);
+    expect(h.store.listEvents({ launchId: l!.launchId }).map((e) => e.kind)).toEqual(['launch.created', 'launch.claimable', 'launch.claimed', 'agent.heartbeat']);
+  });
+
+  it('mixed mode spawns a parked launch after its claim window', async () => {
+    h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000, runner: { mode: 'mixed', claimWindowMs: 300 } } });
+    await h.orch.tick();
+    const [l] = h.store.listLaunches({ taskId: 'T1' });
+    expect(l?.status).toBe('claimable');
+    await h.orch.tick();
+    expect(h.store.getLaunch(l!.launchId)?.status).toBe('claimable');
+    await new Promise((r) => setTimeout(r, 400));
+    await h.orch.tick();
+    const spawned = h.store.getLaunch(l!.launchId)!;
+    expect(spawned.status).toBe('live');
+    expect(spawned.worker).toBeUndefined();
+    expect(spawned.pid).toBeGreaterThan(0);
+    expect(pidAlive(spawned.pid!)).toBe(true);
+    expect(h.store.listEvents({ launchId: l!.launchId }).map((e) => e.kind)).toEqual(['launch.created', 'launch.claimable', 'launch.live']);
+  });
+
   it('recovery: launch stuck in launching is revoked, killed by launch id, and relaunched on the same attempt', async () => {
     h = await makeSlice({ graph: single('hang') });
     await h.orch.tick();

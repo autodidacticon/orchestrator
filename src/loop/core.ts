@@ -5,7 +5,7 @@ import type { Config } from '../config.js';
 import type { Graph, GraphNode, Id } from '../graph/model.js';
 import type { AgentRunner } from '../runner/runner.js';
 import type { Entry, StatusKind } from '../state/status.js';
-import type { Launch, Store } from '../state/store.js';
+import type { Launch, RunnerMode, Store } from '../state/store.js';
 import type { Actor } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
 import type { BriefInput, Workspace } from '../workspace/workspace.js';
@@ -29,6 +29,8 @@ export interface OrchestratorCore {
   readonly remediator: Remediator;
   readonly log: Logger;
   now(): number;
+  /** The runner mode in force: the durable override, else the configured mode. */
+  effectiveMode(): RunnerMode;
   graph(): Graph;
   graphRev(): string;
   requireNode(id: Id): GraphNode;

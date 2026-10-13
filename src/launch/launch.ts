@@ -26,12 +26,12 @@ export interface StartLaunchOptions {
 }
 
 /**
- * Create the launch for a task. For a fresh attempt this performs
- * unstarted -> running. For `sameAttempt` the task stays running and only the
- * launch counter advances.
+ * Create the launch for a task and prepare its worktree and brief. For a fresh
+ * attempt this performs unstarted -> running. For `sameAttempt` the task stays
+ * running and only the launch counter advances. The row is left `preparing`.
  */
-export async function startLaunch(core: OrchestratorCore, taskId: Id, opts: StartLaunchOptions = {}): Promise<Launch> {
-  const { store, config, runner, workspace } = core;
+export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: StartLaunchOptions = {}): Promise<Launch> {
+  const { store, config, workspace } = core;
   const now = core.now();
   const node = core.requireNode(taskId);
   const baseSha = await workspace.integrationHead();
@@ -84,6 +84,13 @@ export async function startLaunch(core: OrchestratorCore, taskId: Id, opts: Star
   crashPoint('launch.afterRow');
 
   await workspace.prepare(launch, core.briefInput(launch));
+  return launch;
+}
+
+/** Spawn a prepared launch: launching -> process -> live with a pid. */
+export async function spawnLaunch(core: OrchestratorCore, launch: Launch): Promise<Launch> {
+  const { store, runner } = core;
+  const { launchId, taskId } = launch;
   store.updateLaunch(launchId, { status: 'launching' });
   crashPoint('launch.afterWorktree');
 
@@ -101,4 +108,21 @@ export async function startLaunch(core: OrchestratorCore, taskId: Id, opts: Star
   });
   crashPoint('launch.afterPid');
   return { ...launch, status: 'live', pid, spawnedAt, progressAt: spawnedAt, lastSignal: 'spawned' };
+}
+
+/**
+ * Prepare a launch, then spawn it in `spawn` mode or park it as `claimable`
+ * for a worker in `pull` and `mixed` modes. See specs/pull-runner "Runner modes".
+ */
+export async function startLaunch(core: OrchestratorCore, taskId: Id, opts: StartLaunchOptions = {}): Promise<Launch> {
+  const launch = await prepareLaunch(core, taskId, opts);
+  const mode = core.effectiveMode();
+  if (mode === 'spawn') return spawnLaunch(core, launch);
+  const claimableAt = core.now();
+  core.store.transaction(() => {
+    core.store.updateLaunch(launch.launchId, { status: 'claimable', claimableAt });
+    core.store.appendEvent({ kind: 'launch.claimable', taskId, launchId: launch.launchId, payload: { mode } }, claimableAt);
+  });
+  crashPoint('launch.afterClaimable');
+  return { ...launch, status: 'claimable', claimableAt };
 }

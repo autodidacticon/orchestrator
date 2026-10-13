@@ -22,11 +22,13 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 | failed | blocked | orchestrator | attempts exhausted |
 | blocked | unstarted | human | unblock or answer |
 | done or cancelled | unstarted | human | reopen or uncancel when revocable |
+| running, waiting, submitted, or done | unstarted | human | cascade reopen of an upstream node |
 | any non-terminal | cancelled | human | cancel |
 | milestone unstarted | done | orchestrator | closure satisfied, not gated |
 | milestone unstarted | submitted | orchestrator | closure satisfied, gated |
 | milestone submitted | done | human | accept |
 | milestone submitted | blocked | human | reject |
+| milestone done or submitted | unstarted | orchestrator | milestone reset: upstream reopened, or deps changed on reload |
 
 #### Scenario: Listed transition is applied
 - **WHEN** a task is `failed` with attempts below the maximum and the orchestrator requests `unstarted`
@@ -39,6 +41,14 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 #### Scenario: Milestone never runs
 - **WHEN** a transition to `running` is requested for a milestone
 - **THEN** the transition is rejected
+
+#### Scenario: Cascade row applies to a running dependent
+- **WHEN** T2 is `running` and a human cascades a reopen of T1 with trigger `cascade`
+- **THEN** T2 becomes `unstarted` and its lease is cleared
+
+#### Scenario: Milestone reset row
+- **WHEN** MVP is `done` and the orchestrator requests `unstarted` with trigger `milestoneReset`
+- **THEN** the transition is applied, and the same request by an agent is rejected
 
 #### Scenario: Release without progress returns to unstarted
 - **WHEN** a claimed launch is released before any progress was observed

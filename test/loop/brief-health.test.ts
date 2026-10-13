@@ -9,7 +9,7 @@ describe('brief: health wording', () => {
       { launch, node: { id: 'T1', kind: 'task', payload: { title: 'x', description: 'd', acceptanceCriteria: ['a'] }, deps: [] }, depReports: [], apiBaseUrl: 'http://127.0.0.1:1', retryWindowMs: 1000, checkCommand: 'true', integrationBranch: 'main' },
       { fallbackPath: '/w/.orchestrator/report.json' },
     );
-    for (const needle of ['`stuck`', '`nudge`', '`baseMoved`', 'Check the inbox after long steps', 'You may rebase your launch branch onto it', 'Never merge into, push to, or check out `main`']) {
+    for (const needle of ['`stuck`', '`nudge`', '`baseMoved`', '`payloadChanged`', 'Check the inbox after long steps', 'You may rebase your launch branch onto it', 'Never merge into, push to, or check out `main`']) {
       expect(markdown, needle).toContain(needle);
     }
     expect(markdown).not.toContain('Never merge, rebase onto, or touch');

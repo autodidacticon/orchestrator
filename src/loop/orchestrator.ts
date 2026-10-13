@@ -26,7 +26,9 @@ import {
   type Status,
   type StatusKind,
 } from '../state/status.js';
-import { type Launch, runIdOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
+import { type Launch, type RunnerMode, runIdOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import type { CascadeStep } from '../graph/query.js';
 import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
@@ -144,6 +146,10 @@ export interface StatusReport {
   latestSeq: number;
   /** Pending agent proposals awaiting a human. See specs/operator-control "Status report: proposals". */
   proposals: Array<{ id: string; taskId: Id; title: string }>;
+  /** Pull runner: the mode in force, parked launches in claim order, and the workers holding launches. See specs/operator-control "Status report: workers". */
+  runner: { mode: RunnerMode; claimWindowMs: number };
+  claimable: Id[];
+  workers: Array<{ id: string; launchId: string; taskId: Id; claimedAt: number }>;
   /** Tracker sync: the recorded tracker, pending effects, and effects that failed at the retry cap. */
   tracker: TrackerRecord | undefined;
   outboxPending: number;
@@ -242,6 +248,20 @@ export class Orchestrator implements OrchestratorCore {
 
   entry(id: Id): Entry {
     return this.store.getEntry(id) ?? defaultEntry(this.now());
+  }
+
+  /** The runner mode in force: the durable override, else the configured mode. See specs/pull-runner "Runner modes". */
+  effectiveMode(): RunnerMode {
+    const override = this.store.getKv('runner.mode');
+    return override === 'spawn' || override === 'pull' || override === 'mixed' ? override : this.config.runner.mode;
+  }
+
+  setMode(mode: RunnerMode): void {
+    this.store.transaction(() => {
+      this.operatorEvent('mode', undefined, { mode });
+      this.store.setKv('runner.mode', mode);
+    });
+    this.wake();
   }
 
   overlay(): Overlay {
@@ -903,6 +923,131 @@ export class Orchestrator implements OrchestratorCore {
     return { ok: true };
   }
 
+  /**
+   * Hand a parked launch to a worker. Idempotent per worker id. See specs/pull-runner
+   * "Claim", "Worker identity", and "Access modes".
+   */
+  async claim(opts: { workerId: string; taskId?: Id; access?: string }): Promise<ApiResponse> {
+    const access = opts.access ?? 'local';
+    if (access === 'remote') return { status: 501, body: { error: 'access remote is reserved for a later change; only local workers are supported', access } };
+    if (access !== 'local') return { status: 400, body: { error: `unknown access ${access}` } };
+    const workerId = String(opts.workerId ?? '').trim();
+    if (!workerId) return { status: 400, body: { error: 'workerId is required' } };
+    // A worker holds a launch only while its task still runs or waits on it; a submitted launch stays live until reconcile ends it.
+    const held = this.store.listLaunches({ status: 'live' }).find((l) => {
+      if (l.worker?.id !== workerId) return false;
+      const e = this.entry(l.taskId);
+      return e.lease?.launchId === l.launchId && (e.status.kind === 'running' || e.status.kind === 'waiting');
+    });
+    if (held) {
+      if (opts.taskId && opts.taskId !== held.taskId) {
+        return { status: 409, body: { ok: false, reason: `worker ${workerId} already holds launch ${held.launchId} for ${held.taskId}`, launchId: held.launchId, taskId: held.taskId } };
+      }
+      return { status: 200, body: await this.claimResponse(held, true) };
+    }
+    if (this.isPaused()) return { status: 404, body: { error: 'the run is paused; nothing can be claimed', paused: true } };
+    let launch: Launch | undefined;
+    if (opts.taskId) {
+      const launches = [...this.store.listLaunches({ taskId: opts.taskId })].sort((a, b) => a.launchNo - b.launchNo);
+      const latest = launches.at(-1);
+      if (!latest) return { status: 404, body: { error: `task ${opts.taskId} has no launch`, paused: false } };
+      if (latest.status !== 'claimable') return { status: 409, body: { ok: false, reason: `launch of ${opts.taskId} is ${latest.status}`, state: latest.status, launchId: latest.launchId } };
+      launch = latest;
+    } else {
+      launch = [...this.store.listLaunches({ status: 'claimable' })].sort((a, b) => (a.claimableAt ?? a.createdAt) - (b.claimableAt ?? b.createdAt) || a.createdAt - b.createdAt).at(0);
+      if (!launch) return { status: 404, body: { error: 'nothing is claimable', paused: false } };
+    }
+    const entry = this.entry(launch.taskId);
+    if (entry.status.kind !== 'running' || entry.lease?.launchId !== launch.launchId) {
+      return { status: 409, body: { ok: false, reason: `launch ${launch.launchId} is superseded`, state: launch.status } };
+    }
+    const now = this.now();
+    const lease = entry.lease;
+    this.store.transaction(() => {
+      this.store.updateLaunch(launch!.launchId, { status: 'live', worker: { id: workerId, claimedAt: now }, progressAt: now, lastSignal: 'claimed' });
+      this.store.setEntry(launch!.taskId, { ...entry, lease: { ...lease, claimedAt: now, expiresAt: now + this.config.leaseTtlMs }, carry: undefined, updatedAt: now });
+      this.store.appendEvent({ kind: 'launch.claimed', taskId: launch!.taskId, launchId: launch!.launchId, payload: { workerId, access } }, now);
+    });
+    crashPoint('claim.afterRecord');
+    // A baseline fingerprint so a release can tell whether the worker touched the tree.
+    try {
+      this.store.updateLaunch(launch.launchId, { fingerprint: await this.workspace.fingerprint(launch) });
+    } catch {
+      /* no worktree in logic tests */
+    }
+    const claimed = this.store.getLaunch(launch.launchId) ?? launch;
+    this.wake();
+    return { status: 200, body: await this.claimResponse(claimed, false) };
+  }
+
+  private async claimResponse(launch: Launch, repeated: boolean): Promise<Record<string, unknown>> {
+    const dir = path.join(launch.worktree, '.orchestrator');
+    let brief: unknown;
+    try {
+      brief = JSON.parse(await readFile(path.join(dir, 'brief.json'), 'utf8'));
+    } catch {
+      brief = undefined;
+    }
+    const entry = this.entry(launch.taskId);
+    let pending: Record<string, unknown> | undefined;
+    if (entry.status.kind === 'waiting') pending = { seq: entry.status.seq, question: entry.status.question, ...(entry.status.answer !== undefined ? { answer: entry.status.answer } : {}) };
+    else if (launch.pendingAnswer) pending = { seq: launch.pendingAnswer.seq, answer: launch.pendingAnswer.answer };
+    return {
+      ok: true,
+      repeated,
+      launchId: launch.launchId,
+      taskId: launch.taskId,
+      token: launch.token,
+      worktree: launch.worktree,
+      briefPath: path.join(dir, 'brief.md'),
+      brief,
+      baseSha: launch.baseSha,
+      branch: launch.branch,
+      apiUrl: this.apiBaseUrl,
+      workerId: launch.worker?.id,
+      ...(pending ? { pending } : {}),
+    };
+  }
+
+  /** Hand a claimed launch back. Without progress the task returns to unstarted at no cost. See specs/pull-runner "Release". */
+  async release(launchId: string, reason: string): Promise<ApiResponse> {
+    const launch = this.store.getLaunch(launchId);
+    if (!launch || launch.status !== 'live' || !launch.worker) {
+      return { status: 409, body: { ok: false, reason: `launch ${launchId} is not a live claimed launch` } };
+    }
+    const entry = this.entry(launch.taskId);
+    if (entry.lease?.launchId !== launchId || (entry.status.kind !== 'running' && entry.status.kind !== 'waiting')) {
+      return { status: 409, body: { ok: false, reason: `launch ${launchId} is superseded; task is ${entry.status.kind}` } };
+    }
+    let fingerprint: string | undefined;
+    try {
+      fingerprint = await this.workspace.fingerprint(launch);
+    } catch {
+      fingerprint = undefined;
+    }
+    const touched = fingerprint !== undefined && launch.fingerprint !== undefined && fingerprint !== launch.fingerprint;
+    const called = launch.lastSignal !== undefined && launch.lastSignal !== 'claimed' && launch.lastSignal !== 'spawned';
+    const progressed = touched || called;
+    let outcome: 'unstarted' | 'failed' | 'blocked';
+    this.store.transaction(() => {
+      this.store.appendEvent({ kind: 'launch.released', taskId: launch.taskId, launchId, payload: { reason, progressed, workerId: launch.worker?.id } }, this.now());
+      if (entry.status.kind === 'waiting') {
+        this.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');
+        outcome = 'blocked';
+      } else if (!progressed) {
+        this.transition(launch.taskId, { kind: 'unstarted' }, 'orchestrator', 'released');
+        outcome = 'unstarted';
+      } else {
+        const out = this.fail(launch.taskId, { kind: 'released', message: reason }, 'orchestrator', 'deadOrExpired');
+        outcome = out.status.kind === 'blocked' ? 'blocked' : 'failed';
+      }
+      this.endLaunch(launch, 'released');
+    });
+    await this.workspace.remove(launch);
+    this.wake();
+    return { status: 200, body: { ok: true, launchId, taskId: launch.taskId, outcome: outcome!, progressed } };
+  }
+
   pause(): void {
     this.store.transaction(() => {
       this.operatorEvent('pause', undefined, {});
@@ -1036,6 +1181,9 @@ export class Orchestrator implements OrchestratorCore {
       daemonUrl: this.apiBaseUrl,
       latestSeq: this.store.latestEventSeq(),
       proposals: this.store.listProposals({ status: 'pending' }).map((p) => ({ id: p.id, taskId: p.taskId, title: p.payload.title })),
+      runner: { mode: this.effectiveMode(), claimWindowMs: this.config.runner.claimWindowMs },
+      claimable: [...this.store.listLaunches({ status: 'claimable' })].sort((a, b) => (a.claimableAt ?? a.createdAt) - (b.claimableAt ?? b.createdAt)).map((l) => l.taskId),
+      workers: this.store.listLaunches({ status: 'live' }).filter((l) => l.worker).map((l) => ({ id: l.worker!.id, launchId: l.launchId, taskId: l.taskId, claimedAt: l.worker!.claimedAt })),
       tracker: trackerOf(this.store),
       outboxPending: this.store.countOutbox('pending'),
       trackerErrors: this.trackerErrors(),
@@ -1180,6 +1328,7 @@ export class Orchestrator implements OrchestratorCore {
     if (this.verifierInFlight) await this.verifierInFlight;
     if (opts.reap) {
       for (const l of this.store.listLaunches({ status: 'live' })) {
+        if (l.worker) continue; // the daemon cannot terminate a worker; its lease governs it
         await this.runner.reap(l);
         await this.recordUsage(l);
         const e = this.entry(l.taskId);

@@ -15,7 +15,7 @@ import { policyReport } from '../tracker/policy.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], ...tracker };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
@@ -24,6 +24,7 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
     stuck: s.stuck,
     pausedReason: s.pausedReason,
     proposals: s.proposals,
+    claimable: s.claimable.length,
     openQuestions: s.openQuestions,
     /** Milestones awaiting a human; tasks awaiting the verifier are `verifying`. */
     awaitingReview: s.awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'milestone'),
@@ -159,6 +160,9 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           stuck: [],
           pausedReason: orch.pausedReason(),
           proposals: [],
+          runner: { mode: orch.effectiveMode(), claimWindowMs: orch.config.runner.claimWindowMs },
+          claimable: [],
+          workers: [],
           foreignCommits: [],
           latestSeq: orch.store.latestEventSeq(),
           tracker: trackerOf(orch.store),
@@ -189,6 +193,24 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     return r.ok ? { status: 200, body: { ok: true, paused: false } } : { status: 409, body: { ok: false, reason: r.reason, runUsd: r.runUsd, ceilingUsd: r.ceilingUsd, paused: orch.isPaused() } };
   });
   server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/nudge$/, async (_req, body, [id]) => result(orch.nudge(id as string, String(body['message'] ?? ''))));
+  // Pull runner: claims, releases, and the mode override. See specs/operator-control "Claims and releases".
+  server.addRoute('POST', /^\/v1\/claims$/, async (_req, body) => {
+    if (!orch.hasGraph()) return { status: 409, body: { ok: false, reason: 'graph not loaded' } };
+    const args = { workerId: String(body['workerId'] ?? ''), taskId: typeof body['taskId'] === 'string' ? body['taskId'] : undefined, access: typeof body['access'] === 'string' ? body['access'] : undefined };
+    orch.store.appendEvent({ kind: 'operator.claim', taskId: args.taskId, payload: { ...args } }, orch.now());
+    return orch.claim(args);
+  });
+  server.addRoute('POST', /^\/v1\/launches\/([^/]+)\/release$/, async (_req, body, [id]) => {
+    const reason = String(body['reason'] ?? 'released by worker');
+    orch.store.appendEvent({ kind: 'operator.release', launchId: id as string, payload: { reason } }, orch.now());
+    return orch.release(id as string, reason);
+  });
+  server.addRoute('PUT', /^\/v1\/runner$/, async (_req, body) => {
+    const mode = body['mode'];
+    if (mode !== 'spawn' && mode !== 'pull' && mode !== 'mixed') return { status: 400, body: { error: 'mode must be spawn, pull, or mixed' } };
+    orch.setMode(mode);
+    return { status: 200, body: { ok: true, runner: { mode, claimWindowMs: orch.config.runner.claimWindowMs } } };
+  });
   server.addRoute('GET', /^\/v1\/tasks\/([^/]+)\/logs$/, async (_req, query, [id]) => {
     const launches = orch.store.listLaunches({ taskId: id as string });
     const wanted = query['launch'] ? Number(query['launch']) : undefined;

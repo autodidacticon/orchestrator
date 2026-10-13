@@ -12,6 +12,8 @@ export const CRASH_POINTS = [
   'launch.afterWorktree',
   'launch.afterSpawn',
   'launch.afterPid',
+  'launch.afterClaimable',
+  'claim.afterRecord',
   'api.afterEventCommit',
   'verify.afterQueued',
   'verify.afterRebase',

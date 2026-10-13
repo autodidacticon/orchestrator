@@ -8,7 +8,7 @@
  */
 import { crashPoint } from '../crash.js';
 import * as q from '../graph/query.js';
-import { startLaunch } from '../launch/launch.js';
+import { spawnLaunch, startLaunch } from '../launch/launch.js';
 import type { Id } from '../graph/model.js';
 import type { AttemptContext, Entry, FailedKind } from '../state/status.js';
 import type { Launch, VerifierJob } from '../state/store.js';
@@ -64,7 +64,7 @@ export async function applyPendingCascade(o: Orchestrator): Promise<void> {
       deferred = true;
       continue;
     }
-    const live = o.store.listLaunches({ taskId: step.id, status: 'live' }).filter((l) => entry.lease?.launchId === l.launchId);
+    const live = o.store.listLaunches({ taskId: step.id, status: ['live', 'claimable'] }).filter((l) => entry.lease?.launchId === l.launchId);
     for (const l of live) {
       await o.runner.reap(l);
       await o.recordUsage(l);
@@ -99,6 +99,25 @@ export async function reconcile(o: Orchestrator): Promise<void> {
       continue;
     }
 
+    if (launch.worker && launch.pid === undefined) {
+      // A claimed launch has no process: its lease is the only bound on silence, renewed by API calls and worktree progress. See specs/task-lifecycle "Claimable launches".
+      if (!active) continue;
+      const observed = entry.status.kind === 'running' ? await observeFingerprint(o, launch) : launch;
+      if (observed.progressAt !== launch.progressAt) o.renewLease(launch);
+      if (entry.status.kind === 'running') {
+        if (await checkTimeBudget(o, observed)) continue;
+        if (await checkStuck(o, observed)) continue;
+      }
+      const cur = o.entry(launch.taskId);
+      if (cur.status.kind === 'running' && cur.lease?.launchId === launch.launchId && cur.lease.expiresAt <= now) {
+        await o.recordUsage(launch);
+        o.fail(launch.taskId, { kind: 'leaseExpired', message: `no contact from worker for ${o.config.leaseTtlMs}ms` }, 'orchestrator', 'deadOrExpired');
+        o.endLaunch(launch, 'leaseExpired');
+        await o.workspace.remove(launch);
+      }
+      continue;
+    }
+
     const liveness = await o.runner.liveness(launch);
     if (liveness === 'dead') {
       await handleDeadLaunch(o, launch, entry);
@@ -127,6 +146,15 @@ export async function reconcile(o: Orchestrator): Promise<void> {
       await o.workspace.remove(launch);
       continue;
     }
+  }
+
+  // Parked launches whose task was cancelled or superseded are ended and their worktrees removed.
+  for (const launch of o.store.listLaunches({ status: 'claimable' })) {
+    const entry = o.entry(launch.taskId);
+    const owns = entry.lease?.launchId === launch.launchId && entry.status.kind === 'running';
+    if (owns) continue;
+    o.endLaunch(launch, entry.status.kind === 'cancelled' ? 'cancelled' : 'superseded');
+    await o.workspace.remove(launch);
   }
 
   // maxWait: waiting tasks past the limit degrade to blocked, question preserved.
@@ -257,6 +285,7 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
     }
   }
   if (o.isPaused()) return;
+  await spawnDueLaunches(o);
   const g = o.graph();
   const overlay = o.overlay();
   let running = 0;
@@ -292,6 +321,8 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
       const waited = l?.waitingSince !== undefined ? now - l.waitingSince : 0;
       o.store.updateLaunch(launchId, { pendingAnswer: { seq, answer }, waitedMs: (l?.waitedMs ?? 0) + waited, waitingSince: undefined });
       if (l) recordSignal(o, { ...l, waitedMs: (l.waitedMs ?? 0) + waited }, 'resumed');
+      // A claimed launch's lease starts fresh at admission; a spawned one is renewed by liveness anyway.
+      if (l) o.renewLease(l);
       o.store.putDedup(launchId, seq, { status: 200, body: { answer } });
     });
     o.resolveWaiters(launchId, { status: 200, body: { answer } });
@@ -321,6 +352,19 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
       continue;
     }
     await startLaunch(o, id);
+  }
+}
+
+/** Spawn parked launches whose claim window elapsed: zero in spawn, claimWindowMs in mixed, never in pull. */
+export async function spawnDueLaunches(o: Orchestrator): Promise<void> {
+  const mode = o.effectiveMode();
+  if (mode === 'pull') return;
+  const window = mode === 'mixed' ? o.config.runner.claimWindowMs : 0;
+  for (const launch of o.store.listLaunches({ status: 'claimable' })) {
+    if (o.now() - (launch.claimableAt ?? launch.createdAt) < window) continue;
+    const entry = o.entry(launch.taskId);
+    if (entry.status.kind !== 'running' || entry.lease?.launchId !== launch.launchId) continue;
+    await spawnLaunch(o, launch);
   }
 }
 

@@ -87,7 +87,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   lines.push('## Workspace', '');
   lines.push(`- Worktree: \`${launch.worktree}\``, `- Branch: \`${launch.branch}\``, `- Base commit: \`${launch.baseSha}\``, `- Integration branch: \`${input.integrationBranch}\``);
   lines.push(
-    '- Notices may arrive in your inbox (the `inbox` operation): `stuck` when no progress has been observed for a while, `nudge` with a message from the operator, and `baseMoved` with the new integration `head` and the `files` that changed. Check the inbox after long steps.',
+    '- Notices may arrive in your inbox (the `inbox` operation): `stuck` when no progress has been observed for a while, `nudge` with a message from the operator, `baseMoved` with the new integration `head` and the `files` that changed, and `payloadChanged` when your task\'s description was edited (re-read the brief file). Check the inbox after long steps.',
     '',
   );
   lines.push('## Dependencies', '');

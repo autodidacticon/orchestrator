@@ -34,6 +34,14 @@ export const configSchema = z.object({
   onInsufficient: z.enum(['block', 'remediate']).default('block'),
   remediateMode: z.enum(['review', 'auto']).default('review'),
   cancelReleasesDependentsDefault: z.boolean().default(false),
+  /** Who executes launches. See specs/pull-runner "Runner modes". */
+  runner: z
+    .object({
+      /** spawn: the daemon spawns a process; pull: launches wait for a worker; mixed: parked for claimWindowMs, then spawned. */
+      mode: z.enum(['spawn', 'pull', 'mixed']).default('spawn'),
+      claimWindowMs: z.number().int().nonnegative().default(60_000),
+    })
+    .default({}),
   /** Graph reload behaviour. See specs/agent-protocol "Payload change notice". */
   graph: z
     .object({

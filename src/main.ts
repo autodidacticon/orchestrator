@@ -31,7 +31,7 @@ export const stderrLogger: Logger = {
 
 export const USAGE = `orchestrator: the daemon.
 
-  orchestrator [--repo <path>] [--config orchestrator.yaml] [--reap-on-exit]
+  orchestrator [--repo <path>] [--config orchestrator.yaml] [--reap-on-exit] [--mode spawn|pull|mixed]
 
 With --repo (or inside a repository), run data lives under ORCH_HOME
 (~/.orchestrator) keyed by the repository path, and <repo>/orchestrator.yaml is
@@ -50,6 +50,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       config: { type: 'string', short: 'c' },
       repo: { type: 'string' },
       'reap-on-exit': { type: 'boolean', default: false },
+      mode: { type: 'string' },
       help: { type: 'boolean', short: 'h', default: false },
     },
   });
@@ -72,6 +73,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   // The run id names this run in tracker comments; by repository under a run directory, otherwise once per store.
   if (runId) setRunId(store, runId);
   else if (!runIdOf(store)) setRunId(store, randomUUID().slice(0, 16));
+  if (values.mode) {
+    if (!['spawn', 'pull', 'mixed'].includes(values.mode)) throw new Error(`--mode must be spawn, pull, or mixed, not ${values.mode}`);
+    store.setKv('runner.mode', values.mode);
+  }
   if (!store.getKv('baselineHead')) store.setKv('baselineHead', await revParse(config.repoPath, config.integrationBranch));
 
   const runner = new ClaudeCodeRunner({ command: config.runnerCommand, logDir: path.join(config.dataDir, 'logs'), retryWindowMs: config.retryWindowMs });

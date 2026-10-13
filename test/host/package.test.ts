@@ -29,6 +29,24 @@ describe('package entrypoints', () => {
     expect(core.CRASH_POINTS.length).toBeGreaterThan(10);
   });
 
+  it('ships a marketplace manifest whose plugin version matches the package, and the plugin validates with the work skill and workflow', async () => {
+    const marketplace = JSON.parse(readFileSync(path.join(root, '.claude-plugin', 'marketplace.json'), 'utf8')) as { name: string; plugins: Array<{ name: string; source: string }> };
+    expect(marketplace.name).toBe('orchestrator');
+    expect(marketplace.plugins).toMatchObject([{ name: 'orchestrator', source: './hosts/claude-code' }]);
+    const plugin = JSON.parse(readFileSync(path.join(root, 'hosts/claude-code/.claude-plugin/plugin.json'), 'utf8')) as { version: string };
+    const version = (JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { version: string }).version;
+    expect(plugin.version).toBe(version);
+    expect(existsSync(path.join(root, 'hosts/claude-code/skills/work/SKILL.md'))).toBe(true);
+    expect(existsSync(path.join(root, 'hosts/claude-code/workflows/work.js'))).toBe(true);
+    try {
+      const { stdout } = await execFileP('claude', ['plugin', 'validate', '--strict', path.join(root, 'hosts/claude-code')], { cwd: root });
+      expect(stdout).toContain('Validation passed');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      console.warn('claude CLI not installed; plugin validation skipped');
+    }
+  });
+
   it.each([
     ['orchestrator', 'src/main.ts', 'the daemon'],
     ['orchestrator-ctl', 'src/operator/cli.ts', 'operate a running orchestrator'],

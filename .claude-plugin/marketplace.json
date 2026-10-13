@@ -1,0 +1,14 @@
+{
+  "name": "orchestrator",
+  "description": "The orchestrator plugin for Claude Code: run a dependency graph of tasks with parallel coding agents, from import to review.",
+  "owner": {
+    "name": "Richard"
+  },
+  "plugins": [
+    {
+      "name": "orchestrator",
+      "source": "./hosts/claude-code",
+      "description": "Run a dependency graph of tasks with parallel coding agents from a Claude Code session: import an epic, start a run, monitor it, work it with session subagents, review milestones."
+    }
+  ]
+}
