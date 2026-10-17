@@ -37,17 +37,19 @@ export class ApiServer {
     this.routes.push({ method, pattern, handler });
   }
 
-  async listen(port = 0): Promise<string> {
+  /** Binds to `bind` and returns the advertised URL: `baseUrl` when set, else `http://<bind>:<port>`. */
+  async listen(port = 0, opts: { bind?: string; baseUrl?: string } = {}): Promise<string> {
+    const bind = opts.bind ?? '127.0.0.1';
     await new Promise<void>((resolve, reject) => {
       const onError = (err: Error) => reject(err);
       this.server.once('error', onError);
-      this.server.listen(port, '127.0.0.1', () => {
+      this.server.listen(port, bind, () => {
         this.server.off('error', onError);
         resolve();
       });
     });
     this.port = (this.server.address() as AddressInfo).port;
-    const url = `http://127.0.0.1:${this.port}`;
+    const url = opts.baseUrl ? opts.baseUrl.replace(/\/+$/, '') : `http://${bind.includes(':') ? `[${bind}]` : bind}:${this.port}`;
     this.orch.apiBaseUrl = url;
     return url;
   }

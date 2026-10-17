@@ -32,6 +32,10 @@ export const configSchema = z.object({
   checkTimeoutMs: z.number().int().positive().default(15 * 60_000),
   /** Loopback API port; 0 picks a free port. */
   apiPort: z.number().int().nonnegative().default(0),
+  /** Address the API binds to; `0.0.0.0` in a cluster. See specs/cluster-runtime. */
+  apiBind: z.string().min(1).default('127.0.0.1'),
+  /** The URL the daemon advertises (kv, daemon.json, briefs, claims) instead of `http://<apiBind>:<port>`. */
+  apiBaseUrl: z.string().url().optional(),
   /** Agent retry window before falling back to the report file. */
   retryWindowMs: z.number().int().positive().default(120_000),
   /** Runner command template; {brief}, {worktree}, {launchId}, {mcpConfig}, and {allowedTools} are substituted at every spawn. */

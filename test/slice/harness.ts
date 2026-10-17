@@ -168,7 +168,8 @@ export async function makeSlice(opts: { graph: string; config?: ConfigInput; ver
       await orch.stop({ reap: true }).catch(() => undefined);
       await server.close().catch(() => undefined);
       store.close();
-      rmSync(dir, { recursive: true, force: true });
+      // A reaped agent may still be writing into its worktree for a moment; retry rather than fail on ENOTEMPTY.
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
   };
   return h;

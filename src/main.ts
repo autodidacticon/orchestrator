@@ -184,13 +184,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   registerOperatorRoutes(server, orch);
   // Reuse the recorded port when the config does not pin one, so agents launched before a restart reconnect.
   const recorded = Number(store.getKv('apiPort') ?? 0);
+  // The advertised URL is apiBaseUrl when set (a cluster Service), else the bind address. See specs/cluster-runtime.
+  const listenOpts = { bind: config.apiBind, baseUrl: config.apiBaseUrl };
   let url: string;
   try {
-    url = await server.listen(config.apiPort || recorded);
+    url = await server.listen(config.apiPort || recorded, listenOpts);
   } catch (err) {
     if (config.apiPort) throw err;
     stderrLogger.warn('recorded port unavailable, picking a new one', { recorded, err: String(err) });
-    url = await server.listen(0);
+    url = await server.listen(0, listenOpts);
   }
   store.setKv('apiBaseUrl', url);
   store.setKv('apiPort', String(server.port));
