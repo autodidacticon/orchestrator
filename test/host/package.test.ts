@@ -201,6 +201,22 @@ describe('package entrypoints', () => {
     expect(workflow).toMatch(/model: c\.model/);
     expect(workflow).toMatch(/effort: c\.effort/);
     expect(workflow).toContain("enum: ['low', 'medium', 'high', 'xhigh', 'max']");
+    // The claimer is cheap, polls inside one agent, and both agents of a loop carry the worker id. See specs/host-integration "Work skill and workflow".
+    expect(workflow).toContain("(args && args.claimModel) || 'claude-haiku-5-5'");
+    expect(workflow).toMatch(/claimEffort\) \? args\.claimEffort : 'low'/);
+    expect(workflow).toMatch(/model: claimModel, effort: claimEffort/);
+    expect(workflow).toContain('const CLAIM_POLLS = 3');
+    expect(workflow).toContain('const CLAIM_WAIT_MS = 90000');
+    expect(workflow).toContain('label: `claim ${workerId}`');
+    expect(workflow).toContain('label: `work ${workerId} ${c.taskId}`');
+    expect(workflow).toMatch(/capacity < requested \? capacity : requested/);
+    for (const skill of ['run', 'work']) {
+      const text = readFileSync(path.join(plugin, `skills/${skill}/SKILL.md`), 'utf8');
+      expect(text, skill).toContain('claimModel');
+      expect(text, skill).toContain('claude-haiku-5-5');
+      expect(text, skill).toContain('capacity:');
+      expect(text, skill).toContain('--add-dir ~/.orchestrator');
+    }
   });
 
   it('declares the session hooks', () => {

@@ -31,16 +31,26 @@ the workflow hands back: questions, reviews, and the end.
 ## 2. Run the workflow
 
 Pick a worker count no larger than the run's `capacity` (from `status`), usually 2 to 4, and a
-run tag such as `work-1`. Run the plugin's workflow `work.js` with the Workflow tool:
+run tag such as `work-1`. Run the plugin's workflow `work.js` with the Workflow tool, passing
+the capacity so the workflow clamps the count itself:
 
 ```
-Workflow({ scriptPath: "<plugin dir>/workflows/work.js", args: { workers: 2, runTag: "work-1" } })
+Workflow({ scriptPath: "<plugin dir>/workflows/work.js", args: { workers: 2, runTag: "work-1", capacity: <status.config.capacity.value> } })
 ```
 
-Each worker loop claims a launch with the worker id `<runTag>-<n>`, runs a worker agent on
-the brief with the model and effort the claim carries (the task's choice, else the run
-default), and claims again until nothing is claimable. The workflow runs in the background
-and returns short outcomes per launch; never paste briefs or logs into the conversation.
+Each worker loop runs a claimer agent that claims a launch with the worker id `<runTag>-<n>`;
+when nothing is claimable it waits up to 90 seconds, reads `status`, and tries again, up to
+three polls before returning. The claimer makes no decisions, so it runs on a fixed cheap
+model: `claude-haiku-5-5` at `low` effort. Pass `claimModel` and `claimEffort` in `args` only
+when the user asks for a different claimer. On a claim the loop runs a worker agent on the
+brief with the model and effort the claim carries (the task's choice, else the run default),
+then claims again until nothing is claimable. In the agent view the claimer is labelled
+`claim <workerId>` and the worker `work <workerId> <taskId>`, so the two agents of a loop
+share the worker id. The workflow runs in the background and returns short outcomes per
+launch; never paste briefs or logs into the conversation. Workers edit files in worktrees under
+the run directory (`~/.orchestrator/runs/<id>/worktrees`, outside the repository), so a session
+in `acceptEdits` mode prompts for each file there unless it was started with
+`--add-dir ~/.orchestrator`; tell the user when the first such prompt appears.
 
 ## 3. Monitor while it runs
 

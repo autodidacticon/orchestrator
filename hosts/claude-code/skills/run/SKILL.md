@@ -58,13 +58,18 @@ with a worker count no larger than the run's `capacity` (from `status`), usually
 a run tag such as `work-1`:
 
 ```
-Workflow({ scriptPath: "<plugin dir>/workflows/work.js", args: { workers: 2, runTag: "work-1" } })
+Workflow({ scriptPath: "<plugin dir>/workflows/work.js", args: { workers: 2, runTag: "work-1", capacity: <status.config.capacity.value> } })
 ```
 
-Each worker loop claims a launch, runs a worker subagent on its brief in the prepared
-worktree, reports through the worker tools, and claims again until nothing is claimable. The
-workflow runs in the background; do not wait for its completion notice, monitor with `wait`
-(section 2). When the workflow has ended while launches are still claimable (a question was
+Each worker loop runs a cheap claimer agent (`claude-haiku-5-5` at `low` by default; pass
+`claimModel` and `claimEffort` only when the user asks otherwise) that claims a launch, polling
+up to three times with 90-second waits when nothing is claimable, then runs a worker subagent
+on its brief in the prepared worktree with the launch's model and effort, reports through the
+worker tools, and claims again until nothing is claimable. Agents are labelled `claim
+<workerId>` and `work <workerId> <taskId>`. Workers edit files in worktrees under the run
+directory, outside the repository, so an `acceptEdits` session prompts for each file there
+unless it was started with `--add-dir ~/.orchestrator`. The workflow runs in the background; do
+not wait for its completion notice, monitor with `wait` (section 2). When the workflow has ended while launches are still claimable (a question was
 answered after it stopped, or a task was retried), re-run it with the same run tag: a worker
 with the same id claims its launch back. In `spawn` mode run no workflow; the daemon's agents
 do the work and you only monitor.

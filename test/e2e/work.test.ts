@@ -48,7 +48,8 @@ describe.skipIf(!enabled)('e2e: a Claude Code session works a run in pull mode',
       ].join(' ');
       const { stdout } = await execFileP(
         'claude',
-        ['-p', prompt, '--plugin-dir', path.join(root, 'hosts/claude-code'), '--output-format', 'json', '--permission-mode', 'acceptEdits', '--allowedTools', 'mcp__plugin_orchestrator_operator__*', 'Bash(git:*)', 'Workflow', 'Agent', '--no-session-persistence'],
+        // acceptEdits auto-approves edits only inside the working directory and --add-dir directories; the workers' worktrees live under ORCH_HOME. See specs/host-integration "Work skill and workflow".
+        ['-p', prompt, '--plugin-dir', path.join(root, 'hosts/claude-code'), '--add-dir', home, '--output-format', 'json', '--permission-mode', 'acceptEdits', '--allowedTools', 'mcp__plugin_orchestrator_operator__*', 'Bash(git:*)', 'Workflow', 'Agent', '--no-session-persistence'],
         { cwd: repo, env, maxBuffer: 16 * 1024 * 1024, timeout: 25 * 60_000 },
       );
       const result = JSON.parse(stdout) as { result?: string; is_error?: boolean };
