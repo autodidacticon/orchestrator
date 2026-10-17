@@ -1,0 +1,10 @@
+# Mounted into the clone as <repo>/orchestrator.yaml, which `orchestrator --repo` reads.
+# Relative paths resolve against the clone.
+runner:
+  mode: pull
+daemon:
+  idleExitMs: 0
+apiBind: 0.0.0.0
+apiPort: 8080
+apiBaseUrl: http://orchestrator.orch.svc:8080
+graphPath: graph.yaml

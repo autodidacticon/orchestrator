@@ -1,0 +1,90 @@
+# One daemon per run: Recreate, so two never share the volume.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orchestrator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orchestrator
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        # Clones REPO_URL into the data volume on first start; later starts keep the existing clone.
+        - name: clone
+          image: orchestrator:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: REPO_URL
+              value: https://example.invalid/set-REPO_URL.git
+          command:
+            - sh
+            - -ec
+            - |
+              if [ ! -d /data/repo/.git ]; then
+                rm -rf /data/repo
+                git clone "$REPO_URL" /data/repo
+              fi
+              # The mounted orchestrator.yaml and graph.yaml are not part of the project.
+              for f in /orchestrator.yaml /graph.yaml; do
+                grep -qxF "$f" /data/repo/.git/info/exclude 2>/dev/null || echo "$f" >> /data/repo/.git/info/exclude
+              done
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: orchestrator
+          image: orchestrator:dev
+          imagePullPolicy: IfNotPresent
+          command: ["orchestrator", "--repo", "/data/repo"]
+          env:
+            # The run directory (store, worktrees, logs) lives on the volume.
+            - name: ORCH_HOME
+              value: /data/home
+            - name: GIT_AUTHOR_NAME
+              value: orchestrator
+            - name: GIT_AUTHOR_EMAIL
+              value: orchestrator@orch.svc
+            - name: GIT_COMMITTER_NAME
+              value: orchestrator
+            - name: GIT_COMMITTER_EMAIL
+              value: orchestrator@orch.svc
+          ports:
+            - name: api
+              containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: api
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: api
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /data/repo/orchestrator.yaml
+              subPath: orchestrator.yaml
+              readOnly: true
+            - name: config
+              mountPath: /data/repo/graph.yaml
+              subPath: graph.yaml
+              readOnly: true
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: orchestrator-data
+        - name: config
+          configMap:
+            name: orchestrator-config

@@ -1,0 +1,27 @@
+# The base plus an in-cluster git origin seeded from ./fixture. See deploy/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: orch
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: orchestrator
+resources:
+  - ../../base
+  - git-origin.yaml
+# One key per fixture file; kustomize has no globs here, so a new fixture file is listed too.
+configMapGenerator:
+  - name: git-origin-fixture
+    files:
+      - fixture/README.md
+      - fixture/package.json
+      - fixture/test.js
+patches:
+  - target:
+      kind: Deployment
+      name: orchestrator
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/initContainers/0/env/0
+        value:
+          name: REPO_URL
+          value: git://git-origin.orch.svc:9418/fixture.git

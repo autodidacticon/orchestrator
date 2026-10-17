@@ -1,0 +1,18 @@
+# The daemon in namespace orch. See deploy/README.md.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: orch
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: orchestrator
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+# The hash suffix rolls the daemon when either file changes: subPath mounts do not see ConfigMap updates.
+configMapGenerator:
+  - name: orchestrator-config
+    files:
+      - orchestrator.yaml
+      - graph.yaml

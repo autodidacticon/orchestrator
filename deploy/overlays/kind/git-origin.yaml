@@ -1,0 +1,96 @@
+# A stand-in for the project's remote: git daemon serving git://git-origin.orch.svc:9418/fixture.git
+# with receive-pack enabled, seeded from ./fixture on first start.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: git-origin-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-origin
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: git-origin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: git-origin
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      initContainers:
+        # Commits the fixture on main and clones it bare; later starts keep what was pushed.
+        - name: seed
+          image: orchestrator:dev
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              [ -d /srv/git/fixture.git ] && exit 0
+              rm -rf /tmp/seed
+              git init -q -b main /tmp/seed
+              cp -L /fixture/* /tmp/seed/
+              git -C /tmp/seed add -A
+              git -C /tmp/seed -c user.name=fixture -c user.email=fixture@orch.svc commit -q -m "Fixture"
+              git clone -q --bare /tmp/seed /srv/git/fixture.git
+          volumeMounts:
+            - name: repos
+              mountPath: /srv/git
+            - name: fixture
+              mountPath: /fixture
+              readOnly: true
+      containers:
+        - name: git-daemon
+          image: orchestrator:dev
+          imagePullPolicy: IfNotPresent
+          command:
+            - git
+            - daemon
+            - --verbose
+            - --reuseaddr
+            - --export-all
+            - --enable=receive-pack
+            - --base-path=/srv/git
+            - --listen=0.0.0.0
+            - --port=9418
+            - /srv/git
+          ports:
+            - name: git
+              containerPort: 9418
+          volumeMounts:
+            - name: repos
+              mountPath: /srv/git
+      volumes:
+        - name: repos
+          persistentVolumeClaim:
+            claimName: git-origin-data
+        - name: fixture
+          configMap:
+            name: git-origin-fixture
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-origin
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: git-origin
+  ports:
+    - name: git
+      port: 9418
+      targetPort: git

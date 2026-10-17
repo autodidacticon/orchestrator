@@ -1,0 +1,11 @@
+# The clone, the run directory (store, worktrees, logs) and nothing else.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: orchestrator-data
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
