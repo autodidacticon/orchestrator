@@ -50,7 +50,7 @@ export const TOOL_NAMES = ['heartbeat', 'report', 'block', 'inbox', 'log'] as co
 export async function startShim(env: ShimEnv): Promise<void> {
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
-  const server = new McpServer({ name: 'orchestrator-agent-api', version: '0.1.0' });
+  const server = new McpServer({ name: 'orchestrator-agent-api', version: '0.2.0' });
   const text = (r: { status: number; body: unknown }) => ({
     content: [{ type: 'text' as const, text: JSON.stringify({ status: r.status, ...(typeof r.body === 'object' && r.body ? (r.body as object) : { body: r.body }) }) }],
     isError: r.status >= 400,
