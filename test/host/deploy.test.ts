@@ -36,11 +36,13 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
 
   it('the ConfigMap holds orchestrator.yaml for a pull-mode, cluster-bound, never-idle daemon and a graph.yaml', () => {
     const cm = base.find((r) => r.kind === 'ConfigMap') as Resource;
-    const cfg = parse(cm.data?.['orchestrator.yaml'] ?? '') as { runner: { mode: string }; daemon: { idleExitMs: number }; apiBind: string; apiPort: number; graphPath: string };
+    const cfg = parse(cm.data?.['orchestrator.yaml'] ?? '') as { runner: { mode: string }; daemon: { idleExitMs: number }; apiBind: string; apiPort: number; apiBaseUrl: string; graphPath: string };
     expect(cfg.runner.mode).toBe('pull');
     expect(cfg.daemon.idleExitMs).toBe(0);
     expect(cfg.apiBind).toBe('0.0.0.0');
     expect(cfg.apiPort).toBe(8080);
+    // The advertised URL names the Service, so agents and clients in the cluster reach the daemon. See specs/cluster-runtime "Reference manifests".
+    expect(cfg.apiBaseUrl).toBe('http://orchestrator.orch.svc:8080');
     expect(cfg.graphPath).toBe('graph.yaml');
     expect(parse(cm.data?.['graph.yaml'] ?? '')).toHaveProperty('nodes');
   });

@@ -1,6 +1,6 @@
 # deploy
 
-Everything for running the orchestrator in a cluster lives here.
+Everything for running the orchestrator in a cluster lives here. The specification is `openspec/specs/cluster-runtime/spec.md`, with the process-level behaviour (signalled shutdown, JSON logs, the remote `ORCH_URL`) under the "Container mode" requirement of `openspec/specs/operator-control/spec.md`.
 
 ## Daemon image
 

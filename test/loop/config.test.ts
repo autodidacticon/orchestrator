@@ -74,6 +74,9 @@ describe('effective configuration', () => {
     expect(unsafe).toMatchObject({ ok: false, status: 400, key: 'allowedTools' });
     expect((unsafe as { error: string }).error).toContain('Bash(echo');
     expect(h.orch.setConfig({ nope: 1 })).toMatchObject({ ok: false, status: 400, key: 'nope' });
+    // apiBind and apiBaseUrl are read once at start; they are file keys, not runtime overrides. See specs/cluster-runtime "Bind host and advertised URL".
+    expect(h.orch.setConfig({ apiBind: '0.0.0.0' })).toMatchObject({ ok: false, status: 400, key: 'apiBind' });
+    expect(h.orch.setConfig({ apiBaseUrl: 'http://orchestrator:8080' })).toMatchObject({ ok: false, status: 400, key: 'apiBaseUrl' });
     // See specs/model-selection "Run default model and effort".
     expect(h.orch.setConfig({ effort: 'huge' })).toMatchObject({ ok: false, status: 400, key: 'effort' });
     expect(h.orch.setConfig({ model: 'opus; rm -rf /' })).toMatchObject({ ok: false, status: 400, key: 'model' });

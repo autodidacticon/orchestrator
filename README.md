@@ -37,6 +37,8 @@ npm link            # puts orchestrator, orchestrator-ctl, orchestrator-mcp, orc
    ```yaml
    integrationBranch: main
    checkCommand: npm test          # run on every rebased submission before it is published
+   apiBind: 127.0.0.1              # the address the API binds; 0.0.0.0 in a cluster (file key, read at start)
+   apiBaseUrl: http://orchestrator.orch.svc:8080   # the URL advertised to agents and clients when it differs from the bind
    capacity: 2                     # agents in parallel
    runner:
      claude:
@@ -106,6 +108,10 @@ By default agents are headless Claude Code sessions (`runnerCommand`, with `{all
 
 `npm test` runs everything that needs no model: unit tests, slices with real subprocess agents, git, and the HTTP API, and the crash-injection suite in `test/crash`, which is the project gate. Three opt-in tests use a real model: `ORCH_E2E_CLAUDE=1 npm test -- test/e2e/claude` runs three Claude Code agents, `ORCH_E2E_CLAUDE_PLUGIN=1 npm test -- test/e2e/plugin` has a Claude Code session operate a run through the plugin, and `ORCH_E2E_CLAUDE_WORK=1 npm test -- test/e2e/work` has a session execute a run in pull mode with two workers through the work skill.
 
+### Running on Kubernetes
+
+The daemon also runs as a long-lived container. `deploy/README.md` is the operational reference: the `Dockerfile` builds an image with Node, git, and ssh only (`orchestrator` and `orchestrator-ctl` on PATH); `deploy/base` is a kustomize layout with a Recreate Deployment that clones `REPO_URL` into a volume, probes `/healthz` and `/readyz`, and runs in pull mode behind a ClusterIP Service; `deploy/overlays/kind` adds an in-cluster git origin and a one-task graph; and `deploy/smoke.sh` builds, loads into kind, applies the overlay, and asserts the milestone claims over the API (`--dry-run` prints the steps). The cluster-facing settings are `apiBind` and `apiBaseUrl` (the address the API binds and the URL it advertises; file keys read at start, not runtime overrides), `ORCH_LOG_FORMAT=json` for one JSON object per log line, and `ORCH_URL` on a client naming a non-loopback host, which makes `orchestrator-ctl` and the operator MCP server use that daemon without ever starting a local one. Workers do not yet run in the cluster: a daemon there parks launches for session workers, and the mounted graph is read-only, so import and proposal acceptance fail in that layout until the graph lives in the store. The specification is [cluster-runtime](openspec/specs/cluster-runtime/spec.md) and the "Container mode" requirement of [operator-control](openspec/specs/operator-control/spec.md).
+
 ## Behaviour
 
 A task is done once its sealed work has been rebased onto the integration branch, checked, and published as one squash commit with `Orchestrator-Task` and `Orchestrator-Launch` trailers; a gated milestone then waits for a human to accept its pinned commit. The daemon converges to the same outcome after a crash at any named point, and surviving agents are adopted on restart.
@@ -124,15 +130,15 @@ Graph mutation. Milestones hold no work, so they never block a reopen: reopening
 
 ### Requirements
 
-Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, `add-graph-mutation`, `add-pull-runner`, `add-scheduling-policy`, `replace-sqlite-driver`, `add-daemon-lifecycle`, `add-toolchain-discovery`, and `add-model-selection`:
+Current specs in `openspec/specs/`, synced from the archived changes `add-orchestrator-v1`, `add-session-operator`, `add-tracker-sync`, `add-health-monitoring`, `add-graph-mutation`, `add-pull-runner`, `add-scheduling-policy`, `replace-sqlite-driver`, `add-daemon-lifecycle`, `add-toolchain-discovery`, `add-model-selection`, and `add-cluster-runtime`:
 
 - Capability specs
   - [task-graph](openspec/specs/task-graph/spec.md): loading, validation, external nodes, readiness, milestones, stall detection, revisions, reload compatibility, revocability through milestones and the cascade plan, critical path length
   - [task-lifecycle](openspec/specs/task-lifecycle/spec.md): states, transitions by actor, admission, counters, leases, retry, reopen guard, cascade reopen, milestone reset and review, cancellation
   - [agent-protocol](openspec/specs/agent-protocol/spec.md): the brief, the API, deduplication, sealing, no-op and acceptance checks, blocking and resume, fallback, fencing, MCP façade, brief validation, the check command and tool rules in the brief
   - [integration-pipeline](openspec/specs/integration-pipeline/spec.md): worktrees, the verifier and the hold while no check command is configured, publication, conflicts, foreign commits, milestone tags
-  - [crash-recovery](openspec/specs/crash-recovery/spec.md): durable records, recovery per boundary, adoption, fencing, sweeps, crash points, invariants, store transactions
-  - [operator-control](openspec/specs/operator-control/spec.md): operator routes shared by the CLI and the MCP server, status, run directories, daemon lifecycle, idle exit, exit record and revival, session attachments, the configuration route and start arguments, event stream, review bundle, graph import, pause and resume, shutdown, logs
+  - [crash-recovery](openspec/specs/crash-recovery/spec.md): durable records, recovery per boundary, adoption, fencing, sweeps, crash points, invariants, store transactions, idle exit and revival including container mode
+  - [operator-control](openspec/specs/operator-control/spec.md): operator routes shared by the CLI and the MCP server, status, run directories, daemon lifecycle, idle exit, exit record and revival, session attachments, the configuration route and start arguments, event stream, review bundle, graph import, pause and resume, shutdown, logs, container mode (signalled shutdown, JSON logs, remote URL)
   - [operator-mcp](openspec/specs/operator-mcp/spec.md): the operator MCP server a host session drives: tool set, wait, start with configuration arguments, configure, review
   - [graph-import](openspec/specs/graph-import/spec.md): normalized issue records, mapping rules including the `model:` and `effort:` selector labels, acceptance criteria and scope extraction, priority normalisation, import outcome
   - [host-integration](openspec/specs/host-integration/spec.md): package entrypoints, per-host wrappers, the plugin launcher and session hooks, skills and how they report the toolchain and resolve `needsConfig`, no native dependencies, quiet SQLite binding
@@ -141,6 +147,7 @@ Current specs in `openspec/specs/`, synced from the archived changes `add-orches
   - [pull-runner](openspec/specs/pull-runner/spec.md): runner modes and the claim window, claim and release with keep (the claim carrying the launch's model and effort), session attachments, worker identity and idempotent re-claim, access modes with remote reserved
   - [scheduling-policy](openspec/specs/scheduling-policy/spec.md): the admission ordering chain and its stages, declared scopes, the overlap rule, the scope filter at admission
   - [toolchain-discovery](openspec/specs/toolchain-discovery/spec.md): resolution order and provenance, toolchain detection and the package manager, integration branch detection and pinning, derived allowed tools, runner command composition with the allow-list, model, and effort slots, the resolved configuration record, runtime overrides and start-only keys
+  - [cluster-runtime](openspec/specs/cluster-runtime/spec.md): bind host and advertised URL, health probes, the daemon image, the reference kustomize manifests and kind overlay, the read-only mounted graph, the smoke test
   - [model-selection](openspec/specs/model-selection/spec.md): the run default worker model and effort with provenance, per-task selectors and their validation, resolution fixed at preparation, delivery to spawned agents and claimed workers, visibility to operators
 - Archived change `add-orchestrator-v1` (the v1 runtime): [Proposal](openspec/changes/archive/2026-10-12-add-orchestrator-v1/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-orchestrator-v1/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-orchestrator-v1/tasks.md)
 - Archived change `add-session-operator` (operate from a Claude Code session): [Proposal](openspec/changes/archive/2026-10-12-add-session-operator/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-session-operator/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-session-operator/tasks.md)
@@ -155,4 +162,6 @@ Current specs in `openspec/specs/`, synced from the archived changes `add-orches
 
 - Archived change `add-model-selection` (workers run `claude-opus-5-5` at `medium` by default; a task names its own model or effort by payload or by `model:`/`effort:` labels; the choice is fixed per launch and carried to spawned agents and session workers): [Proposal](openspec/changes/archive/2026-10-17-add-model-selection/proposal.md), [Design](openspec/changes/archive/2026-10-17-add-model-selection/design.md), [Tasks](openspec/changes/archive/2026-10-17-add-model-selection/tasks.md)
 
-No change is active. The next planned piece of work, not yet proposed, is the usage and log loss when a launch is reaped on report.
+- Archived change `add-cluster-runtime` (the specification for milestone M1 of the cloud-native project, written after an unattended orchestrator run landed the daemon image, kustomize manifests, kind overlay, smoke script, health probes, bind host and advertised URL, and container-mode lifecycle): [Proposal](openspec/changes/archive/2026-10-17-add-cluster-runtime/proposal.md), [Design](openspec/changes/archive/2026-10-17-add-cluster-runtime/design.md), [Tasks](openspec/changes/archive/2026-10-17-add-cluster-runtime/tasks.md)
+
+No change is active. The next planned piece of work, not yet proposed, is the usage and log loss when a launch is reaped on report, together with two hardening items from the first unattended run: an isolated `ORCH_HOME` for spawned agents and check commands, and recording the caller of `POST /v1/shutdown`.
