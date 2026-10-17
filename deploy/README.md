@@ -87,10 +87,40 @@ The mounted graph is read-only: change it by editing `graph.yaml` here and re-ap
 REPO_URL=git://git-origin.orch.svc:9418/fixture.git
 ```
 
-Every fixture file is listed in the overlay's `configMapGenerator`; add a file there when adding one to `fixture/`. Both Deployments use `orchestrator:dev`, so a kind cluster needs only that image:
+Every fixture file is listed in the overlay's `configMapGenerator`; add a file there when adding one to `fixture/`.
+
+The overlay also merges its own `graph.yaml` into `orchestrator-config`, replacing the base's empty graph with one ready task, `SMOKE`. The daemon, in pull mode, prepares a launch for it and parks it as claimable, which is what the smoke test looks for.
+
+Both Deployments use `orchestrator:dev`, so a kind cluster needs only that image:
 
 ```sh
 docker build -t orchestrator:dev .
 kind load docker-image orchestrator:dev
 kubectl apply -k deploy/overlays/kind
 ```
+
+## Smoke test
+
+`deploy/smoke.sh` is the cluster-level acceptance test. Each milestone adds its own assertions to it. It needs `docker`, `kind`, `kubectl`, `curl` and `jq`, and an existing kind cluster:
+
+```sh
+kind create cluster --name orch     # once
+deploy/smoke.sh                     # against the cluster named by KIND_CLUSTER (default orch)
+KIND_CLUSTER=dev deploy/smoke.sh    # another cluster
+deploy/smoke.sh --dry-run           # print each step's command, execute nothing
+```
+
+The steps run in this order:
+
+1. `docker build -t orchestrator:dev .`
+2. `kind load docker-image orchestrator:dev --name "$KIND_CLUSTER"`
+3. `kubectl apply -k deploy/overlays/kind`
+4. `kubectl rollout status` for `git-origin`, then for `orchestrator`
+5. `kubectl port-forward service/orchestrator` to `127.0.0.1:$LOCAL_PORT` (default 18080), then wait for `/healthz`
+6. The assertions, polled against `/v1/status` until they hold or `STATUS_TIMEOUT_S` (default 120) seconds pass
+
+It asserts:
+
+- M1: `runner.mode` is `pull` and `claimable` is non-empty. The daemon runs in the cluster in pull mode and has parked a launch for the overlay's `SMOKE` task.
+
+Every `kubectl` call passes `--context "$KUBE_CONTEXT"`, default `kind-$KIND_CLUSTER`, so the script never touches whatever context is current. `IMAGE` and `ROLLOUT_TIMEOUT` (default `300s`) can also be overridden. The script exits non-zero at the first step that fails. `test/host/smoke.test.ts` runs the dry run, with every tool stubbed out, and checks the order of the steps.

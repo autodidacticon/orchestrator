@@ -79,4 +79,13 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     const init = find(kind, 'Deployment', 'orchestrator').spec.template.spec.initContainers[0];
     expect(env(init, 'REPO_URL')).toBe('git://git-origin.orch.svc:9418/fixture.git');
   });
+
+  it('the kind overlay replaces the empty graph with one ready task, and the daemon mounts the merged ConfigMap', () => {
+    const cm = kind.find((r) => r.kind === 'ConfigMap' && r.metadata.name.startsWith('orchestrator-config')) as Resource;
+    const graph = parse(cm.data?.['graph.yaml'] ?? '') as { nodes: Array<{ id: string; deps: string[] }> };
+    expect(graph.nodes.filter((n) => n.deps.length === 0)).toHaveLength(1);
+    expect(cm.data).toHaveProperty('orchestrator.yaml');
+    const volumes = find(kind, 'Deployment', 'orchestrator').spec.template.spec.volumes;
+    expect(volumes.find((v: { name: string }) => v.name === 'config').configMap.name).toBe(cm.metadata.name);
+  });
 });

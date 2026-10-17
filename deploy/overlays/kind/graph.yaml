@@ -1,0 +1,8 @@
+# The kind overlay's graph: one ready task, so a pull-mode daemon parks a claimable launch for deploy/smoke.sh to see.
+nodes:
+  - id: SMOKE
+    title: Smoke task
+    deps: []
+    description: Append a line to README.md in the fixture repository.
+    acceptanceCriteria:
+      - README.md has one more line than before.

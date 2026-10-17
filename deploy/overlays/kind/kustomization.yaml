@@ -15,6 +15,11 @@ configMapGenerator:
       - fixture/README.md
       - fixture/package.json
       - fixture/test.js
+  # A one-task graph in place of the base's empty one, so deploy/smoke.sh sees a claimable launch.
+  - name: orchestrator-config
+    behavior: merge
+    files:
+      - graph.yaml
 patches:
   - target:
       kind: Deployment
