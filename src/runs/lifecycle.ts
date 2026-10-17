@@ -33,6 +33,34 @@ export async function health(url: string, timeoutMs = 1500): Promise<Record<stri
   }
 }
 
+/** True for localhost, 127.0.0.0/8, and ::1; false for any other host or an unparseable URL. */
+export function isLoopbackUrl(url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  return host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
+}
+
+/** `ORCH_URL` when it names a non-loopback host: a daemon this machine did not spawn and must not spawn. */
+export function remoteDaemonUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const url = env['ORCH_URL']?.trim();
+  return url && !isLoopbackUrl(url) ? url.replace(/\/+$/, '') : undefined;
+}
+
+function remoteUnreachable(url: string): Error {
+  return new Error(`the daemon at ${url} (ORCH_URL) is unreachable; it runs remotely, so no local daemon is started`);
+}
+
+/** Refuse a local spawn for a remote daemon: it is reachable (and not ours to start) or reported unreachable. */
+async function refuseRemote(url: string): Promise<never> {
+  if (await health(url)) throw new Error(`the daemon runs remotely at ${url} (ORCH_URL); it is not started from this machine`);
+  throw remoteUnreachable(url);
+}
+
 export async function daemonState(runDir: string): Promise<DaemonState> {
   let pid: number | undefined;
   try {
@@ -146,6 +174,8 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
     const mode = opts.mode ?? modeOf(await health(state.url));
     return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false, ...(mode ? { mode } : {}), ...configFields(await readConfig(state.url)), applied: outcome.applied, rejected: outcome.rejected };
   }
+  const remote = remoteDaemonUrl(env);
+  if (remote) await refuseRemote(remote);
   const { command, args } = daemonCommand();
   const fd = openSync(paths.daemonLog, 'a');
   const modeArgs = opts.mode ? ['--mode', opts.mode] : opts.defaultMode ? ['--default-mode', opts.defaultMode] : [];
@@ -248,10 +278,17 @@ export interface RunListing {
  * Start the daemon again for a run directory that holds a store, when the last
  * exit was idle or a crash; refuse after an explicit stop or signal. Returns
  * undefined when there is nothing to revive (no store, or a daemon already
- * healthy). See specs/operator-control "Revive on demand".
+ * healthy). When `ORCH_URL` names a non-loopback host nothing is spawned:
+ * a reachable remote daemon needs no revival, an unreachable one is reported
+ * as such. See specs/operator-control "Revive on demand" and "Container mode".
  */
 export async function reviveDaemon(opts: StartOptions = {}): Promise<StartResult | undefined> {
   const env = opts.env ?? process.env;
+  const remote = remoteDaemonUrl(env);
+  if (remote) {
+    if (await health(remote)) return undefined;
+    throw remoteUnreachable(remote);
+  }
   const repo = await resolveRepoPath({ repo: opts.repo, cwd: opts.cwd, env });
   const paths = runPaths(repo, env);
   if (!existsSync(path.join(paths.runDir, 'store.sqlite'))) return undefined;

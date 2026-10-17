@@ -55,6 +55,7 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     expect(daemon.image).toBe('orchestrator:dev');
     expect(init.image).toBe('orchestrator:dev');
     expect(daemon.command).toEqual(['orchestrator', '--repo', '/data/repo']);
+    expect(env(daemon, 'ORCH_LOG_FORMAT')).toBe('json');
     expect(daemon.livenessProbe.httpGet.path).toBe('/healthz');
     expect(daemon.readinessProbe.httpGet.path).toBe('/readyz');
     expect(daemon.volumeMounts.map((m: { mountPath: string }) => m.mountPath)).toEqual(expect.arrayContaining(['/data', '/data/repo/orchestrator.yaml', '/data/repo/graph.yaml']));

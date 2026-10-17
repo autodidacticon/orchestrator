@@ -168,6 +168,10 @@ An idle exit SHALL be a graceful stop: the orchestrator loop stops, in-flight ve
 - **WHEN** the daemon exits idle with two launches parked in `pull` mode and is revived by a worker's `claim`
 - **THEN** the worker receives the oldest parked launch with its worktree present
 
+#### Scenario: Container mode never exits idle and is never revived locally
+- **WHEN** `daemon.idleExitMs` is 0 and a client's `ORCH_URL` names the daemon's non-loopback Service
+- **THEN** the daemon stays up while quiescent, and a client that cannot reach it reports the URL as unreachable instead of spawning a local daemon (see specs/operator-control "Container mode")
+
 ### Requirement: Attachment end is durable
 The end of an attachment SHALL be a durable record written before any launch is released, and the release of its launches SHALL happen in the next tick's reconcile as one transaction per launch, so that a daemon crash between the record and the release, or between two releases, converges after restart: recovery SHALL leave the record in place, reconcile SHALL release the remaining launches, and a launch already released SHALL NOT be released twice. The kept release SHALL preserve uncommitted work on the launch branch before the launch is ended, so a crash after the commit and before the transition leaves the branch with the work and the launch still live, and the next reconcile completes the release.
 

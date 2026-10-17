@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema, trackerSchema } from '../import/mapping.js';
 import { randomUUID } from 'node:crypto';
 import { ancestorPids } from '../runs/ancestry.js';
-import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
+import { daemonState, listRuns, remoteDaemonUrl, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { EFFORT_LEVELS } from '../runner/selection.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 
@@ -67,6 +67,12 @@ export class OperatorClient {
 
   /** The daemon's URL, reviving it after an idle exit or a crash; refused after an explicit stop or for a repository with no run directory. */
   async url(): Promise<string> {
+    // A remote daemon (ORCH_URL on a non-loopback host) is used as is, without an attachment (its pids are not ours); reviveDaemon reports it unreachable rather than spawning one here.
+    const remote = remoteDaemonUrl(this.ctx.env);
+    if (remote) {
+      await reviveDaemon({ env: this.ctx.env });
+      return remote;
+    }
     const repo = await this.repo();
     const paths = runPaths(repo, this.ctx.env);
     const state = await daemonState(paths.runDir);

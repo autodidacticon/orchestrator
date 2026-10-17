@@ -362,6 +362,21 @@ When an operator operation other than `start`, `stop`, or `runs` finds no health
 - **WHEN** the daemon was stopped with `stop` and `status` is called
 - **THEN** the call fails naming the stop time and suggesting `start`, and no daemon is spawned
 
+### Requirement: Container mode
+The daemon SHALL run as a long-lived foreground process. On SIGTERM or SIGINT it SHALL stop the tick loop, finish the in-flight tick and verifier job, close the API server and its open connections, write the exit record with reason `signal`, and exit 0. When that takes longer than 8 seconds it SHALL write the exit record and exit 0 anyway; a check abandoned that way restarts from `queued` on the next start, as after a crash. The daemon SHALL write `daemon.pid` and `daemon.json` in its data directory itself, whether or not a client spawned it; in a container nothing reads them. When `ORCH_LOG_FORMAT` is `json`, every line the daemon logs on stderr SHALL be one JSON object with `ts`, `level`, and `msg` first, followed by the data fields; a data field named `ts`, `level`, or `msg` is dropped. Any other value SHALL keep the text format. `daemon.idleExitMs: 0` keeps the daemon running however long it is idle (see "Idle exit"). When `ORCH_URL` names a host other than `localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`, the client-side start and revival SHALL NOT spawn a local daemon: revival returns nothing to revive when the URL answers a probe, and otherwise fails naming the URL as unreachable, and `start` refuses. The operator MCP server SHALL use such a URL directly.
+
+#### Scenario: SIGTERM mid-check
+- **WHEN** the daemon receives SIGTERM while a verifier job is `checking`
+- **THEN** the job is published, the server closes, `daemon.json` carries `exit` with reason `signal`, and the process exits 0 within ten seconds
+
+#### Scenario: Remote URL unreachable
+- **WHEN** `ORCH_URL` is `http://orchestrator.orch.svc:8080`, nothing answers there, and an operation would revive the daemon
+- **THEN** the operation fails naming that URL as unreachable, and no local daemon is spawned
+
+#### Scenario: JSON logs
+- **WHEN** the daemon runs with `ORCH_LOG_FORMAT=json`
+- **THEN** every stderr line parses as a JSON object with `ts`, `level`, and `msg`
+
 ### Requirement: Session attachments
 The daemon SHALL expose `POST /v1/attachments` with `{ id, pids }`, where `pids` is the registering process's own pid followed by its ancestor pids up to six levels, recording the attachment durably and appending `attachment.started` on first sight (registering a live attachment again SHALL refresh its chain); `POST /v1/attachments/:id/end` with `{ reason }`, recording the end; and `POST /v1/attachments/ended` with `{ pids, reason }`, recording the end of every live attachment whose chain contains any pid in `pids`. An operator request MAY carry the header `x-orch-attachment` naming the caller's attachment; when that id is not a live attachment the daemon SHALL still perform the operation and SHALL add the response header `x-orch-attachment: unknown`. A claim MAY carry `attachment`, stored on the launch's worker record. At every reconcile the daemon SHALL end any attachment whose first pid is dead, SHALL release with `keep` and reason `sessionEnded` every live claimed launch whose worker carries an ended attachment, SHALL append `attachment.ended`, and SHALL remove the record. `status` SHALL report `attachments` as `[{ id, pids, since, launches }]` for live attachments. The end routes SHALL respond once the end is recorded, before any release.
 

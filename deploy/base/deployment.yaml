@@ -51,6 +51,9 @@ spec:
             # The run directory (store, worktrees, logs) lives on the volume.
             - name: ORCH_HOME
               value: /data/home
+            # One JSON object per stderr line, for the cluster's log collector.
+            - name: ORCH_LOG_FORMAT
+              value: json
             - name: GIT_AUTHOR_NAME
               value: orchestrator
             - name: GIT_AUTHOR_EMAIL

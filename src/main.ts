@@ -4,7 +4,7 @@
  *   orchestrator [--repo <path>] [--config orchestrator.yaml] [--reap-on-exit] [--mode m] [--default-mode m] [--set key=value]...
  * SIGTERM/SIGINT: graceful stop (agents keep running for adoption) unless --reap-on-exit.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import path from 'node:path';
@@ -19,7 +19,7 @@ import { registerOperatorRoutes } from './operator/routes.js';
 import { ClaudeCodeRunner } from './runner/claude-code.js';
 import { SqliteStore } from './state/sqlite.js';
 import { GitVerifierBackend } from './verify/verifier.js';
-import { ensureRunDir, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
+import { DAEMON_PID, ensureRunDir, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
 import { configSummary, mergeOverrides, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved } from './runs/resolve.js';
 import { digestOf } from './operator/routes.js';
 import { runIdOf, setRunId } from './state/store.js';
@@ -27,12 +27,13 @@ import { randomUUID } from 'node:crypto';
 import { revParse } from './workspace/git.js';
 import { GitWorkspace } from './workspace/git-workspace.js';
 import { isEntrypoint } from './entry.js';
+import { makeStderrLogger } from './log.js';
 
-export const stderrLogger: Logger = {
-  info: (msg, data) => process.stderr.write(`${new Date().toISOString()} INFO ${msg}${data ? ` ${JSON.stringify(data)}` : ''}\n`),
-  warn: (msg, data) => process.stderr.write(`${new Date().toISOString()} WARN ${msg}${data ? ` ${JSON.stringify(data)}` : ''}\n`),
-  error: (msg, data) => process.stderr.write(`${new Date().toISOString()} ERROR ${msg}${data ? ` ${JSON.stringify(data)}` : ''}\n`),
-};
+/** Text by default; one JSON object per line with ORCH_LOG_FORMAT=json. */
+export const stderrLogger: Logger = makeStderrLogger();
+
+/** How long a signalled shutdown may wait for the in-flight tick and verifier job before exiting anyway. */
+const SHUTDOWN_GRACE_MS = 8_000;
 
 export const USAGE = `orchestrator: the daemon.
 
@@ -196,6 +197,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   store.setKv('apiBaseUrl', url);
   store.setKv('apiPort', String(server.port));
+  // The daemon writes its own pid file as well, so a run directory nobody spawned from (a container) carries both files; in a container they are inert. See specs/operator-control "Container mode".
+  writeFileSync(path.join(config.dataDir, DAEMON_PID), `${process.pid}\n`, 'utf8');
   writeDaemonJson(config.dataDir, { pid: process.pid, url, port: server.port, startedAt: Date.now(), repo: config.repoPath });
   stderrLogger.info('listening', { url, pid: process.pid, dataDir: config.dataDir });
 
@@ -204,17 +207,27 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     if (stopping) return;
     stopping = true;
     const reap = Boolean(values['reap-on-exit']);
-    stderrLogger.info('shutting down', { cause, reap });
-    await orch.stop({ reap });
-    await server.close();
     // The exit record says why the daemon is gone; a dead pid without one is a crash. See specs/operator-control "Exit record".
     const reason = cause === 'idle' ? 'idle' : cause === 'route' ? 'stop' : 'signal';
-    try {
-      writeExitRecord(config.dataDir, { at: Date.now(), reason, reap, digest: digestOf(orch) });
-    } catch (err) {
-      stderrLogger.warn('could not write the exit record', { err: String(err) });
-    }
+    const recordExit = () => {
+      try {
+        writeExitRecord(config.dataDir, { at: Date.now(), reason, reap, digest: digestOf(orch) });
+      } catch (err) {
+        stderrLogger.warn('could not write the exit record', { err: String(err) });
+      }
+    };
+    stderrLogger.info('shutting down', { cause, reap });
+    // A container runtime kills the process after its grace period; a check still running past ours is abandoned and restarts from queued on the next start. See specs/crash-recovery.
+    setTimeout(() => {
+      stderrLogger.warn('shutdown grace elapsed; exiting with work in flight', { graceMs: SHUTDOWN_GRACE_MS });
+      recordExit();
+      process.exit(0);
+    }, SHUTDOWN_GRACE_MS).unref();
+    await orch.stop({ reap });
+    await server.close();
+    recordExit();
     store.close();
+    stderrLogger.info('stopped', { cause, reason });
     process.exit(0);
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));

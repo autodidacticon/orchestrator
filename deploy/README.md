@@ -73,6 +73,8 @@ The init container `clone` clones `REPO_URL` into `/data/repo` when no clone is 
 - `apiBaseUrl: http://orchestrator.orch.svc:8080`: the URL advertised to agents.
 - `graphPath: graph.yaml`: the graph is the ConfigMap's, not one in the run directory.
 
+The daemon container sets `ORCH_LOG_FORMAT=json`, so every stderr line is one JSON object with `ts`, `level`, `msg`, and the line's data fields. On SIGTERM (a rollout or `kubectl delete pod`) the daemon stops its tick loop, finishes the in-flight tick and verifier job, closes the API server, writes the exit record to `daemon.json`, and exits 0; after 8 seconds it exits anyway, and an abandoned check restarts from `queued` on the next start. `daemon.pid` and `daemon.json` are still written in the run directory, but nothing in the cluster reads them. A client outside the pod reaches the daemon with `ORCH_URL`; when that names a non-loopback host, `orchestrator-ctl` and the operator MCP server never start a local daemon and report the URL as unreachable instead.
+
 The mounted graph is read-only: change it by editing `graph.yaml` here and re-applying. Operations that write the graph file (import, accepting a proposal) fail in this layout.
 
 ### The `REPO_URL` contract

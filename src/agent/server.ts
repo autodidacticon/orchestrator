@@ -56,8 +56,10 @@ export class ApiServer {
   }
 
   async close(): Promise<void> {
-    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    // Close open connections (a long-polling block or inbox) before waiting, or the close callback waits for them.
+    const closed = new Promise<void>((resolve) => this.server.close(() => resolve()));
     this.server.closeAllConnections();
+    await closed;
   }
 
   private async dispatch(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
