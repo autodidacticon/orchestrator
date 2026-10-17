@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.orchestrator
+.orchestrator-run
+test/fixtures
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+hosts/claude-code/node_modules
