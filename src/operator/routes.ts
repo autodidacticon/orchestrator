@@ -3,7 +3,8 @@
  */
 import type { ApiServer } from '../agent/server.js';
 import type { ApiResponse, Orchestrator } from '../loop/orchestrator.js';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { constants as fsc } from 'node:fs';
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
@@ -12,6 +13,7 @@ import { trackerSchema } from '../import/mapping.js';
 import { logPath } from '../runner/subprocess.js';
 import { setTracker, trackerOf } from '../state/store.js';
 import { policyReport } from '../tracker/policy.js';
+import { git } from '../workspace/git.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
@@ -152,7 +154,34 @@ function result(r: { ok: true } | { ok: false; reason: string; blockers?: string
   return r.ok ? { status: 200, body: { ok: true } } : { status: 409, body: { ok: false, reason: r.reason, blockers: (r as { blockers?: string[] }).blockers } };
 }
 
+/** Why the daemon cannot do work right now: the store, the repository, the integration branch. Empty when ready. See specs/cluster-runtime "Probes". */
+export async function readinessFailures(orch: Orchestrator): Promise<string[]> {
+  const reasons: string[] = [];
+  try {
+    orch.store.latestEventSeq();
+  } catch (err) {
+    reasons.push(`store: ${String(err)}`);
+  }
+  const repo = orch.config.repoPath;
+  const branch = orch.config.integrationBranch;
+  try {
+    await access(repo, fsc.R_OK | fsc.X_OK);
+  } catch (err) {
+    reasons.push(`repo: ${repo} is not readable (${(err as NodeJS.ErrnoException).code ?? String(err)})`);
+    return [...reasons, `branch: ${branch} not checked because the repository is unreadable`];
+  }
+  const r = await git(repo, ['rev-parse', '--verify', '--quiet', `${branch}^{commit}`], { allowFail: true });
+  if (r.code !== 0 || !r.stdout.trim()) reasons.push(`branch: ${branch} does not resolve to a commit`);
+  return reasons;
+}
+
 export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): void {
+  // Probes: unauthenticated, and never activity for the idle exit (the dispatch exempts them). See specs/cluster-runtime "Probes".
+  server.addRoute('GET', /^\/healthz$/, async () => ({ status: 200, body: { ok: true } }));
+  server.addRoute('GET', /^\/readyz$/, async () => {
+    const reasons = await readinessFailures(orch);
+    return reasons.length ? { status: 503, body: { ok: false, reasons } } : { status: 200, body: { ok: true } };
+  });
   server.addRoute('GET', /^\/v1\/status$/, async () => ({
     status: 200,
     body: orch.hasGraph()

@@ -2,6 +2,7 @@
  * Loopback HTTP server for agents and operators.
  *   POST /v1/launches/:id/{heartbeat,report,block,log}
  *   GET  /v1/launches/:id/inbox
+ * Health probes (/healthz, /readyz) and operator routes are registered by operator/routes.ts.
  * Operator routes are registered by operator/routes.ts.
  */
 import http from 'node:http';
@@ -65,8 +66,8 @@ export class ApiServer {
       if (r.method !== req.method) continue;
       const m = r.pattern.exec(url.pathname);
       if (!m) continue;
-      // A probe is a liveness check that must not count as activity. See specs/operator-control "Idle exit".
-      const probe = req.method === 'GET' && url.pathname === '/v1/status' && url.searchParams.get('probe') === '1';
+      // A probe is a liveness check that must not count as activity. See specs/operator-control "Idle exit" and specs/cluster-runtime "Probes".
+      const probe = req.method === 'GET' && ((url.pathname === '/v1/status' && url.searchParams.get('probe') === '1') || url.pathname === '/healthz' || url.pathname === '/readyz');
       const attachment = req.headers['x-orch-attachment'];
       const attachmentId = typeof attachment === 'string' && attachment ? attachment : undefined;
       this.orch.requestBegan();

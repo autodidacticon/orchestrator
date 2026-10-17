@@ -84,6 +84,10 @@ describe('bind host and public API base URL (specs/cluster-runtime)', () => {
     const direct = `http://${host}:${port}`;
     const status = (await (await fetch(`${direct}/v1/status`)).json()) as Record<string, unknown>;
     expect(status['daemonUrl']).toBe('http://orchestrator:8080');
+    // The probes answer on the bound address too. See specs/cluster-runtime "Probes".
+    expect(await (await fetch(`${direct}/healthz`)).json()).toEqual({ ok: true });
+    const ready = await fetch(`${direct}/readyz`);
+    expect([ready.status, await ready.json()]).toEqual([200, { ok: true }]);
 
     let body: Record<string, unknown> | undefined;
     const deadline = Date.now() + 30_000;

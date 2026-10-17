@@ -23,3 +23,10 @@ docker run --rm orchestrator:dev orchestrator-ctl
 ```
 
 The image runs as the unprivileged `node` user.
+
+## Probes
+
+The daemon answers two unauthenticated probes on its API port. Neither one counts as activity for the idle exit.
+
+- `GET /healthz`: 200 `{ ok: true }` whenever the process is serving. Use it for liveness.
+- `GET /readyz`: 200 `{ ok: true }` when the store answers a query, the repository path is readable, and the integration branch resolves to a commit. Otherwise it answers 503 `{ ok: false, reasons: [...] }`, with one entry per failed check. Use it for readiness.
