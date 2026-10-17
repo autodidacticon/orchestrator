@@ -32,6 +32,8 @@ describe('effective configuration', () => {
     expect(r.config.integrationBranch).toEqual({ value: 'main', source: 'default' });
     expect(r.config.runnerCommand.source).toBe('default');
     expect(r.config.allowedTools).toMatchObject({ value: [...BASE_RULES], source: 'composed', applied: true, parts: { default: [...BASE_RULES], detected: [], file: [], argument: [] } });
+    expect(r.config.model).toEqual({ value: 'claude-opus-5-5', source: 'default', applied: true });
+    expect(r.config.effort).toEqual({ value: 'medium', source: 'default', applied: true });
     expect(r.toolchain).toBeUndefined();
     expect(r.needsConfig).toEqual([]);
     expect(r.overrides).toEqual({});
@@ -72,6 +74,9 @@ describe('effective configuration', () => {
     expect(unsafe).toMatchObject({ ok: false, status: 400, key: 'allowedTools' });
     expect((unsafe as { error: string }).error).toContain('Bash(echo');
     expect(h.orch.setConfig({ nope: 1 })).toMatchObject({ ok: false, status: 400, key: 'nope' });
+    // See specs/model-selection "Run default model and effort".
+    expect(h.orch.setConfig({ effort: 'huge' })).toMatchObject({ ok: false, status: 400, key: 'effort' });
+    expect(h.orch.setConfig({ model: 'opus; rm -rf /' })).toMatchObject({ ok: false, status: 400, key: 'model' });
     expect(h.orch.setConfig('x')).toMatchObject({ ok: false, status: 400 });
     expect(h.store.getKv('config.overrides')).toBeUndefined();
     expect(h.store.listEvents({ kind: 'operator.config' })).toEqual([]);

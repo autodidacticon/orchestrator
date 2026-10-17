@@ -172,14 +172,17 @@ describe('slice: launch, API, recovery', () => {
 
   // See specs/toolchain-discovery "Runner command composition".
   it('fills the {allowedTools} slot at spawn from the effective list; a rule added through setConfig reaches the next launch only', async () => {
-    const graph = 'nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit, description: d, acceptanceCriteria: [a] }\n  - { id: T2, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }';
-    h = await makeSlice({ graph, config: { capacity: 1, leaseTtlMs: 60_000, runnerCommand: `echo {allowedTools} > {worktree}/.orchestrator/tools.txt && node --import ${tsxLoader} ${scriptedAgent} {briefJson}` } });
+    const graph = 'nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit, description: d, acceptanceCriteria: [a], effort: low }\n  - { id: T2, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }';
+    h = await makeSlice({ graph, config: { capacity: 1, leaseTtlMs: 60_000, runnerCommand: `echo {allowedTools} > {worktree}/.orchestrator/tools.txt && echo {model} {effort} > {worktree}/.orchestrator/selection.txt && node --import ${tsxLoader} ${scriptedAgent} {briefJson}` } });
     expect(h.orch.configReport().config.allowedTools.applied).toBe(true);
     await h.orch.tick();
     const l1 = h.launchOf('T1');
     const tools = (worktree: string) => readFileSync(path.join(worktree, '.orchestrator', 'tools.txt'), 'utf8').trim();
     await h.waitFor(() => existsSync(path.join(l1.worktree, '.orchestrator', 'tools.txt')));
     expect(tools(l1.worktree)).toBe('Bash(git:*) mcp__orchestrator__heartbeat mcp__orchestrator__report mcp__orchestrator__block mcp__orchestrator__inbox mcp__orchestrator__log');
+    // The task's selector and the run default fill {model} and {effort}. See specs/model-selection "Runners and workers receive the values".
+    expect(h.orch.configReport().config.model.applied).toBe(true);
+    expect(readFileSync(path.join(l1.worktree, '.orchestrator', 'selection.txt'), 'utf8').trim()).toBe('claude-opus-5-5 low');
     // The brief of a launch the daemon spawns lists the Bash rules in force.
     expect(readFileSync(path.join(l1.worktree, '.orchestrator', 'brief.md'), 'utf8')).toContain('these Bash rules are in force: `Bash(git:*)`');
     expect(h.orch.setConfig({ allowedTools: ['Bash(docker:*)'] })).toMatchObject({ ok: true, applied: ['allowedTools'] });
@@ -187,6 +190,7 @@ describe('slice: launch, API, recovery', () => {
     const l2 = h.launchOf('T2');
     await h.waitFor(() => existsSync(path.join(l2.worktree, '.orchestrator', 'tools.txt')));
     expect(tools(l2.worktree)).toBe('Bash(git:*) mcp__orchestrator__heartbeat mcp__orchestrator__report mcp__orchestrator__block mcp__orchestrator__inbox mcp__orchestrator__log Bash(docker:*)');
+    expect(readFileSync(path.join(l2.worktree, '.orchestrator', 'selection.txt'), 'utf8').trim()).toBe('claude-opus-5-5 medium');
     expect(readFileSync(path.join(l2.worktree, '.orchestrator', 'brief.md'), 'utf8')).toContain('`Bash(docker:*)`');
     await h.runner.reap(l2);
   });

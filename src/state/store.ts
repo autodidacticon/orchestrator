@@ -3,6 +3,7 @@
  * makes a claim, a dedup write, or a transition one transaction.
  */
 import type { Id } from '../graph/model.js';
+import type { Effort } from '../runner/selection.js';
 import type { Entry } from './status.js';
 
 export type LaunchStatus = 'preparing' | 'claimable' | 'launching' | 'live' | 'ended' | 'revoked';
@@ -55,6 +56,9 @@ export interface Launch {
   /** Time spent waiting on questions, excluded from the launch time budget. */
   waitedMs?: number;
   waitingSince?: number;
+  /** The worker model and effort fixed when the launch was prepared. See specs/model-selection. */
+  model?: string;
+  effort?: Effort;
   /** Usage read from the runner when the launch ended. */
   costUsd?: number;
   turns?: number;

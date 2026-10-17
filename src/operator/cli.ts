@@ -2,7 +2,7 @@
 /**
  * Operator CLI over the daemon's HTTP API.
  *   orchestrator-ctl status
- *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--clear <key>]...
+ *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--model <name>] [--effort <level>] [--clear <key>]...
  *   orchestrator-ctl answer <task> <text>
  *   orchestrator-ctl cancel <task> [--release] [--reason <text>]
  *   orchestrator-ctl reopen <task> [--cascade]
@@ -78,12 +78,13 @@ export async function call(base: string, method: 'GET' | 'POST' | 'PUT', route: 
 export const USAGE = `orchestrator-ctl: operate a running orchestrator.
 
   orchestrator-ctl start [--repo <path>] [--set key=value]...   start the daemon for a repository (idempotent);
-                                               --set checkCommand=..., integrationBranch=..., capacity=..., allowedTools=..., runnerCommand=...
+                                               --set checkCommand=..., integrationBranch=..., capacity=..., allowedTools=..., runnerCommand=..., model=..., effort=...
   orchestrator-ctl stop [--reap] [--repo <path>]
   orchestrator-ctl runs                         list runs under ORCH_HOME
   orchestrator-ctl status
   orchestrator-ctl config                       the resolved configuration: every key with its value and source, the toolchain, needsConfig
-  orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--clear <key>]...
+  orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--model <name>] [--effort <level>] [--clear <key>]...
+                                               model and effort are the worker defaults (claude-opus-5-5 at medium); effort is low, medium, high, xhigh, or max
   orchestrator-ctl answer <task> <text>
   orchestrator-ctl cancel <task> [--release] [--reason <text>]
   orchestrator-ctl reopen <task> [--cascade]       cascade resets started dependents and returns the plan
@@ -143,6 +144,8 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       capacity: { type: 'string' },
       allow: { type: 'string', multiple: true },
       'runner-command': { type: 'string' },
+      model: { type: 'string' },
+      effort: { type: 'string' },
       clear: { type: 'string', multiple: true },
     },
   });
@@ -169,6 +172,8 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       if (values['check-command'] !== undefined) patch['checkCommand'] = values['check-command'];
       if (values.capacity !== undefined) patch['capacity'] = Number(values.capacity);
       if (values['runner-command'] !== undefined) patch['runnerCommand'] = values['runner-command'];
+      if (values.model !== undefined) patch['model'] = values.model;
+      if (values.effort !== undefined) patch['effort'] = values.effort;
       if (values.allow?.length) {
         const cur = await call(base, 'GET', '/v1/config');
         const existing = patch['allowedTools'] === null ? [] : ((cur.body as { overrides?: { allowedTools?: string[] } }).overrides?.allowedTools ?? []);

@@ -114,6 +114,15 @@ describe('orchestrator-ctl config', () => {
     expect(bad.status).toBe(400);
     expect(bad.body).toMatchObject({ key: 'capacity' });
     expect(h.orch.effective().config.checkCommand).toBe('make check');
+    // See specs/operator-control "Set the effort from the CLI" and specs/toolchain-discovery "Invalid effort refused".
+    const effort = await runCli(['--url', url, 'config', '--effort', 'high', '--model', 'claude-sonnet-5-5']);
+    expect(effort.status).toBe(200);
+    expect(effort.body).toMatchObject({ config: { effort: { value: 'high', source: 'argument', applied: false }, model: { value: 'claude-sonnet-5-5', source: 'argument', applied: false } } });
+    expect(h.orch.selectionFor('T1')).toEqual({ model: 'claude-sonnet-5-5', effort: 'high' });
+    const huge = await http(url, 'PUT', '/v1/config', { effort: 'huge' });
+    expect(huge.status).toBe(400);
+    expect(huge.body).toMatchObject({ key: 'effort' });
+    expect(h.orch.effective().effort.value).toBe('high');
   });
 });
 
@@ -128,15 +137,19 @@ describe('the daemon resolves, records, and pins', () => {
     const paths = runPaths(repo, env);
     mkdirSync(paths.runDir, { recursive: true });
     writeFileSync(paths.graphPath, 'nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit, description: d, acceptanceCriteria: [a] }\n');
-    const first = await startDaemon({ repo, env, overrides: { runnerCommand: scripted } });
+    // A bad selector is refused before any daemon is spawned; a good one becomes a `--set` flag. See specs/operator-control "Start arguments".
+    await expect(startDaemon({ repo, env, overrides: { runnerCommand: scripted, effort: 'huge' as never } })).rejects.toThrow(/effort/);
+    const first = await startDaemon({ repo, env, overrides: { runnerCommand: scripted, model: 'claude-sonnet-5-5' } });
     expect(first.started).toBe(true);
+    expect(first.config?.model).toEqual({ value: 'claude-sonnet-5-5', source: 'argument', applied: false });
+    expect(first.config?.effort).toEqual({ value: 'medium', source: 'default', applied: false });
     expect(first.config?.checkCommand).toEqual({ value: 'make test', source: 'detected' });
     expect(first.config?.integrationBranch).toEqual({ value: 'main', source: 'detected' });
     expect(first.config?.runnerCommand).toEqual({ value: scripted, source: 'argument' });
     expect(first.config?.allowedTools).toMatchObject({ applied: false, parts: { detected: ['Bash(make:*)'] } });
     expect(first.toolchain).toMatchObject({ kinds: ['make'], manifests: ['Makefile'], checkCommand: 'make test' });
     expect(first.needsConfig).toEqual([]);
-    expect(first.applied).toEqual(['runnerCommand']);
+    expect([...(first.applied ?? [])].sort()).toEqual(['model', 'runnerCommand']);
     const record = readConfigJson(paths.runDir);
     expect(record?.repo).toBe(repo);
     expect(record?.config.checkCommand).toEqual({ value: 'make test', source: 'detected' });
@@ -157,6 +170,8 @@ describe('the daemon resolves, records, and pins', () => {
 
     // A restart without arguments keeps the overrides, with source argument.
     const second = await startDaemon({ repo, env });
+    expect(second.config?.model).toEqual({ value: 'claude-sonnet-5-5', source: 'argument', applied: false }); // the override survives the restart; specs/model-selection
+    expect(second.config?.model).toEqual({ value: 'claude-sonnet-5-5', source: 'argument', applied: false });
     expect(second.started).toBe(true);
     expect(second.config?.capacity).toEqual({ value: 3, source: 'argument' });
     expect(second.config?.runnerCommand).toEqual({ value: scripted, source: 'argument' });
@@ -178,7 +193,7 @@ describe('the daemon resolves, records, and pins', () => {
     expect(log).toContain('fresh run directory');
     const fourth = await startDaemon({ repo, env });
     expect(fourth.config?.integrationBranch).toEqual({ value: 'main', source: 'pinned' });
-    expect(readConfigJson(paths.runDir)?.overrides).toEqual({ runnerCommand: scripted, capacity: 3 });
+    expect(readConfigJson(paths.runDir)?.overrides).toEqual({ runnerCommand: scripted, capacity: 3, model: 'claude-sonnet-5-5' });
     await stopDaemon({ repo, env });
   }, 180_000);
 

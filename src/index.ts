@@ -19,7 +19,8 @@ export { fifoPolicy, chainPolicy, admit, scopesOverlap, staticPrefix, type Polic
 export type { AgentRunner, SpawnResult } from './runner/runner.js';
 export { SubprocessRunner, substitute, pidAlive, killTree } from './runner/subprocess.js';
 export { ClaudeCodeRunner } from './runner/claude-code.js';
-export { DEFAULT_CLAUDE_COMMAND, ALLOWED_TOOLS_SLOT, hasAllowedToolsSlot, quoteRules } from './runner/command.js';
+export { DEFAULT_CLAUDE_COMMAND, ALLOWED_TOOLS_SLOT, MODEL_SLOT, EFFORT_SLOT, hasAllowedToolsSlot, hasModelSlot, hasEffortSlot, quoteRules } from './runner/command.js';
+export { EFFORT_LEVELS, DEFAULT_MODEL, DEFAULT_EFFORT, MODEL_PATTERN, isModelName, isEffort, modelSchema, effortSchema, type Effort } from './runner/selection.js';
 export { detectToolchain, type ToolchainRecord, type ToolchainKind } from './toolchain/detect.js';
 export { BASE_RULES, rulesFor, isSafeRule, composeAllowedTools } from './toolchain/tools.js';
 export { detectIntegrationBranch } from './toolchain/branch.js';

@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
+import { effortSchema, modelSchema } from '../runner/selection.js';
 import { type Graph, type GraphNode, type Id, makeGraph } from './model.js';
 
 export class GraphValidationError extends Error {
@@ -33,6 +34,9 @@ const nodeSchema = z
     deps: z.array(z.string().min(1)).default([]),
     /** Path globs the task's work stays within; stays in the payload. See specs/scheduling-policy "Scope declaration". */
     scope: z.array(z.string().min(1)).optional(),
+    /** The worker model and effort for this task's launches; stay in the payload. See specs/model-selection "Task selectors". */
+    model: modelSchema.optional(),
+    effort: effortSchema.optional(),
   })
   .passthrough();
 

@@ -191,6 +191,16 @@ describe('package entrypoints', () => {
       expect(text, skill).toContain('needsConfig');
       expect(text, skill).toContain('configure');
     }
+    // See specs/model-selection and specs/host-integration "Work skill and workflow" (worker agent runs with the claimed selection).
+    expect(run).toContain('workers claude-opus-5-5 at medium');
+    expect(run).toContain('config.model.applied');
+    expect(readFileSync(path.join(plugin, 'skills/work/SKILL.md'), 'utf8')).toContain('claude-opus-5-5');
+    const imp = readFileSync(path.join(plugin, 'skills/import/SKILL.md'), 'utf8');
+    for (const word of ['model:<name>', 'effort:<level>', 'ignoredLabels']) expect(imp, word).toContain(word);
+    const workflow = readFileSync(path.join(plugin, 'workflows/work.js'), 'utf8');
+    expect(workflow).toMatch(/model: c\.model/);
+    expect(workflow).toMatch(/effort: c\.effort/);
+    expect(workflow).toContain("enum: ['low', 'medium', 'high', 'xhigh', 'max']");
   });
 
   it('declares the session hooks', () => {

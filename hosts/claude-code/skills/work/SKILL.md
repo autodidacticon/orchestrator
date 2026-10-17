@@ -15,7 +15,11 @@ the workflow hands back: questions, reviews, and the end.
 
 - A graph must be loaded: call `start` and then `status`; if no graph is loaded, use the
   `import` skill first. `start` also returns the resolved configuration: report the check
-  command and the integration branch with their sources in one line, and when `needsConfig`
+  command, the integration branch, and the worker model and effort (`config.model`,
+  `config.effort`; default `claude-opus-5-5` at `medium`, changeable with `configure`, and
+  overridable per task by `model`/`effort` in its payload or `model:`/`effort:` labels) with
+  their sources in one line, for example "detected: npm test on main; workers claude-opus-5-5
+  at medium (default)", and when `needsConfig`
   names `checkCommand`, follow the run skill's section 1b (find the test command in
   `CLAUDE.md`, the README, or the root manifests and set it with `configure`, or ask the user)
   before running workers, since submitted work is held until it is set.
@@ -34,7 +38,8 @@ Workflow({ scriptPath: "<plugin dir>/workflows/work.js", args: { workers: 2, run
 ```
 
 Each worker loop claims a launch with the worker id `<runTag>-<n>`, runs a worker agent on
-the brief, and claims again until nothing is claimable. The workflow runs in the background
+the brief with the model and effort the claim carries (the task's choice, else the run
+default), and claims again until nothing is claimable. The workflow runs in the background
 and returns short outcomes per launch; never paste briefs or logs into the conversation.
 
 ## 3. Monitor while it runs

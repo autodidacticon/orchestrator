@@ -33,7 +33,7 @@ describe('claim and release over the real API', () => {
 
     const c1 = await http(h, 'POST', '/v1/claims', { workerId: 'w1' });
     expect(c1.status).toBe(200);
-    expect(c1.body).toMatchObject({ launchId: l1!.launchId, taskId: 'T1', token: l1!.token, worktree: l1!.worktree, baseSha: l1!.baseSha, apiUrl: h.orch.apiBaseUrl, branch: 'task/T1/l1' });
+    expect(c1.body).toMatchObject({ launchId: l1!.launchId, taskId: 'T1', token: l1!.token, worktree: l1!.worktree, baseSha: l1!.baseSha, apiUrl: h.orch.apiBaseUrl, branch: 'task/T1/l1', model: 'claude-opus-5-5', effort: 'medium' }); // specs/pull-runner "Claim carries the selection"
     expect(existsSync(String(c1.body['briefPath']))).toBe(true);
     expect((c1.body['brief'] as { taskId: string; task: Record<string, unknown> }).task['description']).toBe('d');
     const claimed = h.store.getLaunch(l1!.launchId)!;

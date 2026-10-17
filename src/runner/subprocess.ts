@@ -47,6 +47,9 @@ export class SubprocessRunner implements AgentRunner {
       taskId: launch.taskId,
       mcpConfig: path.join(orchDir, 'mcp.json'),
       allowedTools: quoteRules(this.opts.allowedTools?.() ?? []),
+      // Fixed on the launch at preparation; validated as safe tokens before they got there. See specs/model-selection.
+      model: launch.model ?? '',
+      effort: launch.effort ?? '',
     });
     const log = await open(logPath(this.opts.logDir, launch.launchId), 'a');
     try {

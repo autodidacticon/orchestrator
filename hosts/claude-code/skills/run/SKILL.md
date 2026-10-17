@@ -21,12 +21,18 @@ and this session's own subagents do the work (section 1a), so the user sees ever
 choices: `start` with `mode`, or `runner.mode` in `orchestrator.yaml`, which wins.
 
 Tell the user who is executing the work, and report the toolchain in one line: the check
-command and the integration branch with the source of each and, when the daemon spawns agents
-(`spawn`, or `mixed` after the claim window), the toolchains whose commands agents may run, for
-example "detected: npm test on main; agents may run npm and node". When this session's
-subagents work the launches (`pull`), omit the allow-list part: workers run under this
-session's own permissions. If `needsConfig` is not empty, resolve it now (section 1b). Then
-call `status`. If no graph is loaded, say so and suggest the `import` skill.
+command, the integration branch, and the worker model and effort (`config.model` and
+`config.effort`, default `claude-opus-5-5` at `medium`) with the source of each and, when the
+daemon spawns agents (`spawn`, or `mixed` after the claim window), the toolchains whose
+commands agents may run, for example
+"detected: npm test on main; workers claude-opus-5-5 at medium (default); agents may run npm and node".
+When this session's subagents work the launches (`pull`), omit the allow-list part: workers
+run under this session's own permissions.
+When `config.model.applied` is false (a `runnerCommand` without the `{model}` slot), omit the
+model part. A task can choose its own model or effort: `model` and `effort` in its payload, or
+`model:<name>` and `effort:<level>` labels on its issue; `status.liveLaunches` shows what each
+launch runs with. If `needsConfig` is not empty, resolve it now (section 1b). Then call
+`status`. If no graph is loaded, say so and suggest the `import` skill.
 
 ## 1b. Resolve what detection could not
 
@@ -39,9 +45,10 @@ and their counterparts). When one is stated unambiguously, call `configure` with
 and tell the user the command and where you found it ("set checkCommand to `make check` from
 CLAUDE.md"). Otherwise propose your best reading, or say you found none, and call `configure`
 only with what the user confirms. `configure` also takes `capacity`, `allowedTools` (rules
-appended to the derived list for spawned agents, such as `Bash(docker:*)`), and
-`runnerCommand`; a null clears an override so the value falls back to the file, detection, or
-the default. The integration branch is start-only: pass `integrationBranch` to `start` before
+appended to the derived list for spawned agents, such as `Bash(docker:*)`), `runnerCommand`,
+and `model` and `effort` (the worker defaults for launches prepared from then on; effort is
+`low`, `medium`, `high`, `xhigh`, or `max`); a null clears an override so the value falls back
+to the file, detection, or the default. The integration branch is start-only: pass `integrationBranch` to `start` before
 the run holds any launch; a running daemon refuses it.
 
 ## 1a. Work the run with session subagents

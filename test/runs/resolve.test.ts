@@ -99,7 +99,38 @@ describe('layered resolution', () => {
     writeConfigJson(dir, record);
     expect(readConfigJson(dir)).toEqual(JSON.parse(JSON.stringify(record)));
     expect(readConfigJson(dir)?.config.capacity).toEqual({ value: 3, source: 'argument' });
+    expect(readConfigJson(dir)?.config.model).toEqual({ value: 'claude-opus-5-5', source: 'default', applied: true });
+    expect(readConfigJson(dir)?.config.effort).toEqual({ value: 'medium', source: 'default', applied: true });
     expect(readConfigJson(path.join(dir, 'nope'))).toBeUndefined();
+  });
+
+  // See specs/model-selection "Run default model and effort".
+  it('model and effort default, take the file, take an argument, clear to the next layer, and report applied', () => {
+    const d = resolveLayers({ base: defaultConfig(), detected: { toolchain: node } });
+    expect(d.model).toEqual({ value: 'claude-opus-5-5', applied: true });
+    expect(d.effort).toEqual({ value: 'medium', applied: true });
+    expect(d.provenance).toMatchObject({ model: 'default', effort: 'default' });
+    expect(d.config.runner.claude).toMatchObject({ model: 'claude-opus-5-5', effort: 'medium' });
+    const f = resolveLayers({ ...file({ runner: { claude: { model: 'opus' } } }), detected: { toolchain: node } }, { effort: 'high' });
+    expect(f.model).toEqual({ value: 'opus', applied: true });
+    expect(f.effort).toEqual({ value: 'high', applied: true });
+    expect(f.provenance).toMatchObject({ model: 'file', effort: 'argument' });
+    const a = resolveLayers({ base: defaultConfig(), detected: { toolchain: node } }, { model: 'claude-sonnet-5-5', effort: 'low' });
+    expect(a.provenance).toMatchObject({ model: 'argument', effort: 'argument' });
+    expect(a.config.runner.claude).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' });
+    const cleared = resolveLayers({ ...file({ runner: { claude: { model: 'opus' } } }) }, mergeOverrides({ model: 'claude-sonnet-5-5', effort: 'low' }, { model: null }));
+    expect(cleared.model).toEqual({ value: 'opus', applied: true });
+    expect(cleared.provenance).toMatchObject({ model: 'file', effort: 'argument' });
+    const verbatim = resolveLayers({ ...file({ runnerCommand: 'claude -p {allowedTools} < {brief}' }) });
+    expect(verbatim.model.applied).toBe(false);
+    expect(verbatim.effort.applied).toBe(false);
+    expect(verbatim.allowedTools.applied).toBe(true);
+    const report = reportOf(a, 1);
+    expect(report.config.model).toEqual({ value: 'claude-sonnet-5-5', source: 'argument', applied: true });
+    expect(report.config.effort).toEqual({ value: 'low', source: 'argument', applied: true });
+    expect(DEFAULT_CLAUDE_COMMAND).toContain('--model {model} --effort {effort}');
+    expect(() => defaultConfig({ runner: { claude: { effort: 'huge' as never } } })).toThrow();
+    expect(() => defaultConfig({ runner: { claude: { model: 'opus; rm' } } })).toThrow();
   });
 
   it('parses --set flags per key and refuses unknown keys, bad values, and unsafe rules', () => {
@@ -116,5 +147,8 @@ describe('layered resolution', () => {
     expect(() => parseSetFlags(['allowedTools=Bash(echo "$HOME")'])).toThrow(/Bash\(echo/);
     expect(() => parseSetFlags(['allowedTools=[1]'])).toThrow(/JSON array/);
     expect(() => parseSetFlags(['checkCommand='])).toThrow(/non-empty/);
+    expect(parseSetFlags(['model=claude-sonnet-5-5', 'effort=high'])).toEqual({ model: 'claude-sonnet-5-5', effort: 'high' });
+    expect(() => parseSetFlags(['effort=huge'])).toThrow(/^--set effort/);
+    expect(() => parseSetFlags(['model=opus;rm'])).toThrow(/^--set model/);
   });
 });

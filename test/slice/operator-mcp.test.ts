@@ -63,7 +63,7 @@ describe('operator MCP server', () => {
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     expect(tools.tools).toHaveLength(31);
     const configure = tools.tools.find((t) => t.name === 'configure');
-    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'runnerCommand']);
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'effort', 'model', 'runnerCommand']);
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);
@@ -83,6 +83,10 @@ describe('operator MCP server', () => {
     expect(await tool('configure', { capacity: 3 })).toMatchObject({ status: 200, ok: true, applied: ['capacity'], config: { capacity: { value: 3, source: 'argument' } } });
     expect(await tool('configure', { capacity: null })).toMatchObject({ status: 200, ok: true, config: { capacity: { value: 2, source: 'file' } } });
     expect((await tool('status'))['config']).toMatchObject({ capacity: { value: 2, source: 'file' } });
+    // See specs/operator-mcp "Configure tool" (model) and "Start tool" (effort).
+    expect(await tool('configure', { model: 'claude-sonnet-5-5' })).toMatchObject({ status: 200, ok: true, applied: ['model'], config: { model: { value: 'claude-sonnet-5-5', source: 'argument', applied: false } } });
+    expect(await tool('start', { effort: 'high' })).toMatchObject({ started: false, applied: ['effort'], config: { effort: { value: 'high', source: 'argument', applied: false }, model: { value: 'claude-sonnet-5-5', source: 'argument' } } });
+    expect(await tool('configure', { model: null, effort: null })).toMatchObject({ status: 200, ok: true, config: { model: { value: 'claude-opus-5-5', source: 'default' }, effort: { value: 'medium', source: 'default' } } });
 
     const imported = await tool('import_graph', {
       content: ['nodes:',

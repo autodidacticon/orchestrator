@@ -3,6 +3,7 @@
  */
 import { z } from 'zod';
 import { DEFAULT_CLAUDE_COMMAND } from './runner/command.js';
+import { DEFAULT_EFFORT, DEFAULT_MODEL, effortSchema, modelSchema } from './runner/selection.js';
 import { isSafeRule } from './toolchain/tools.js';
 
 /** Admission ordering stages. See specs/scheduling-policy "Ordering chain". */
@@ -52,6 +53,9 @@ export const configSchema = z.object({
           allowedTools: z.array(z.string().refine(isSafeRule, { message: 'a rule must not contain a double quote, backslash, dollar sign, or backtick' })).default([]),
           /** Derive rules from the toolchains found in the repository root. */
           deriveTools: z.boolean().default(true),
+          /** The worker model and effort for launches prepared under this run. See specs/model-selection. */
+          model: modelSchema.default(DEFAULT_MODEL),
+          effort: effortSchema.default(DEFAULT_EFFORT),
         })
         .default({}),
     })

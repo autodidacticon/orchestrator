@@ -44,6 +44,7 @@ import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, runCostUsd } from '
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { type ConfigReport, configSummary, mergeOverrides, type OverridableKey, overridesSchema, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
+import { type Effort, isEffort, isModelName } from '../runner/selection.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 
 export const questionSchema = z.object({
@@ -140,6 +141,9 @@ export interface StatusReport {
     costUsd?: number;
     /** Kept releases the task had absorbed when this launch was created. */
     interruptions: number;
+    /** Fixed when the launch was prepared. See specs/model-selection. */
+    model?: string;
+    effort?: Effort;
   }>;
   /** Health: flagged tasks, why admission is paused, cost and the configured budgets. See specs/health-monitoring. */
   stuck: Id[];
@@ -481,6 +485,16 @@ export class Orchestrator implements OrchestratorCore {
   payloadOf(node: GraphNode): Record<string, unknown> {
     const overlay = this.store.getPayloadOverlay(node.id, this.graphRev());
     return overlay ? { ...node.payload, ...overlay } : { ...node.payload };
+  }
+
+  /** Task selectors over the run default. The graph validated the selectors' shape at load. See specs/model-selection. */
+  selectionFor(taskId: Id): { model: string; effort: Effort } {
+    const payload = this.payloadOf(this.requireNode(taskId));
+    const eff = this.effective();
+    return {
+      model: isModelName(payload['model']) ? payload['model'] : eff.model.value,
+      effort: isEffort(payload['effort']) ? payload['effort'] : eff.effort.value,
+    };
   }
 
   briefInput(launch: Launch): BriefInput {
@@ -1199,6 +1213,8 @@ export class Orchestrator implements OrchestratorCore {
       branch: launch.branch,
       apiUrl: this.apiBaseUrl,
       workerId: launch.worker?.id,
+      model: launch.model,
+      effort: launch.effort,
       ...(pending ? { pending } : {}),
     };
   }
@@ -1380,6 +1396,8 @@ export class Orchestrator implements OrchestratorCore {
       stuck: l.stuckSince !== undefined,
       costUsd: l.costUsd,
       interruptions: l.interruptions ?? 0,
+      model: l.model,
+      effort: l.effort,
     }));
     return {
       finished: q.finished(g, o),

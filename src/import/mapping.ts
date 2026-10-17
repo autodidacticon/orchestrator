@@ -5,6 +5,7 @@
 import { stringify as toYaml } from 'yaml';
 import { z } from 'zod';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
+import { isEffort, isModelName } from '../runner/selection.js';
 
 export const issueStateSchema = z.enum(['open', 'inProgress', 'done', 'cancelled']);
 
@@ -64,6 +65,22 @@ export interface ImportSummary {
   missingCriteria: string[];
   unknownExternal: string[];
   inProgressAsExternal: string[];
+  /** `model:` and `effort:` labels whose value failed the shape rule; the label stays, the key is not set. See specs/model-selection. */
+  ignoredLabels: Array<{ id: string; label: string }>;
+}
+
+/** Selector labels: a case-insensitive `model:` or `effort:` prefix sets the payload key when the value has the right shape. */
+function selectorsOf(i: { id: string; labels?: string[] }, ignored: Array<{ id: string; label: string }>): { model?: string; effort?: string } {
+  const out: { model?: string; effort?: string } = {};
+  for (const label of i.labels ?? []) {
+    const m = /^(model|effort):(.*)$/i.exec(label);
+    if (!m) continue;
+    const key = m[1]!.toLowerCase() as 'model' | 'effort';
+    const value = m[2]!.trim();
+    if (key === 'model' ? isModelName(value) : isEffort(value)) out[key] = value;
+    else ignored.push({ id: i.id, label });
+  }
+  return out;
 }
 
 export class ImportError extends Error {
@@ -137,7 +154,7 @@ export function mapIssues(raw: unknown): { nodes: GraphFileNode[]; content: stri
   const childIds = new Set(children.map((c) => c.id));
 
   const nodes: GraphFileNode[] = [];
-  const summary: ImportSummary = { tasks: 0, external: 0, milestones: 0, missingCriteria: [], unknownExternal: [], inProgressAsExternal: [] };
+  const summary: ImportSummary = { tasks: 0, external: 0, milestones: 0, missingCriteria: [], unknownExternal: [], inProgressAsExternal: [], ignoredLabels: [] };
   const externalIds = new Set<string>();
 
   const payloadOf = (i: IssueRecord) => {
@@ -148,6 +165,7 @@ export function mapIssues(raw: unknown): { nodes: GraphFileNode[]; content: stri
       acceptanceCriteria,
       ...(scope ? { scope } : {}),
       ...(i.labels ? { labels: i.labels } : {}),
+      ...selectorsOf(i, summary.ignoredLabels),
       // Linear's 0 means no priority; every other value passes through unchanged. See specs/graph-import "Priority normalisation".
       ...(i.priority !== undefined && i.priority !== 0 ? { priority: i.priority } : {}),
       ...(i.url ? { url: i.url } : {}),

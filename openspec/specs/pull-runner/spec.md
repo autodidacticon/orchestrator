@@ -25,7 +25,7 @@ The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `m
 - **THEN** both are spawned on the next tick
 
 ### Requirement: Claim
-`POST /v1/claims` SHALL take `workerId`, an optional `taskId`, and an optional `access`. Without `taskId` it SHALL hand over the oldest claimable launch by creation time; with `taskId` it SHALL hand over that task's claimable launch, answering 404 when the task has no launch and 409 naming the launch state when its launch is not claimable. When nothing is claimable, or the run is paused, it SHALL answer 404 with `paused` set accordingly. On success the launch SHALL become `live` with `worker: { id, claimedAt }` and no pid, its lease SHALL be reset to expire `leaseTtlMs` after the claim, and the response SHALL be `{ launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl }`, where `brief` is the launch's `brief.json` content and `briefPath` the path of its `brief.md`. The token of a claimable launch SHALL NOT authenticate until the claim is recorded.
+`POST /v1/claims` SHALL take `workerId`, an optional `taskId`, and an optional `access`. Without `taskId` it SHALL hand over the oldest claimable launch by creation time; with `taskId` it SHALL hand over that task's claimable launch, answering 404 when the task has no launch and 409 naming the launch state when its launch is not claimable. When nothing is claimable, or the run is paused, it SHALL answer 404 with `paused` set accordingly. On success the launch SHALL become `live` with `worker: { id, claimedAt }` and no pid, its lease SHALL be reset to expire `leaseTtlMs` after the claim, and the response SHALL be `{ launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, model, effort }`, where `brief` is the launch's `brief.json` content, `briefPath` the path of its `brief.md`, and `model` and `effort` the values fixed when the launch was prepared. The token of a claimable launch SHALL NOT authenticate until the claim is recorded.
 
 #### Scenario: Oldest first
 - **WHEN** T1 and then T2 were parked and a worker claims without a task id
@@ -42,6 +42,10 @@ The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `m
 #### Scenario: Claim makes the launch live
 - **WHEN** a worker claims T1's parked launch
 - **THEN** the launch is `live` with the worker id and no pid, its lease expires `leaseTtlMs` later, and the token now authenticates
+
+#### Scenario: Claim carries the selection
+- **WHEN** a worker claims the launch of a task that declares `effort: high` under the run default model
+- **THEN** the response has `effort: "high"` and `model: "claude-opus-5-5"`
 
 ### Requirement: Worker identity
 `workerId` SHALL be an opaque string chosen by the worker and unique within a run. A worker SHALL hold at most one live launch. A claim by a worker that already holds a live launch SHALL return that launch again with the same token when `taskId` is absent or matches, and 409 otherwise. The repeated response SHALL also carry `pending: { seq, question, answer? }` when the launch has an open question or an admitted answer, so that a fresh worker can collect the answer with `block` and the same seq. `status` SHALL list every worker with its launch.

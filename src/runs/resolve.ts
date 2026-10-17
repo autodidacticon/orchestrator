@@ -6,11 +6,12 @@
  */
 import { z } from 'zod';
 import { type Config, configSchema } from '../config.js';
-import { hasAllowedToolsSlot } from '../runner/command.js';
+import { hasAllowedToolsSlot, hasEffortSlot, hasModelSlot } from '../runner/command.js';
+import { type Effort, effortSchema, modelSchema } from '../runner/selection.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { type AllowedToolsParts, composeAllowedTools, isSafeRule } from '../toolchain/tools.js';
 
-export const OVERRIDABLE_KEYS = ['checkCommand', 'integrationBranch', 'capacity', 'allowedTools', 'runnerCommand'] as const;
+export const OVERRIDABLE_KEYS = ['checkCommand', 'integrationBranch', 'capacity', 'allowedTools', 'runnerCommand', 'model', 'effort'] as const;
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number];
 export const START_ONLY_KEYS: readonly OverridableKey[] = ['integrationBranch'];
 
@@ -24,6 +25,8 @@ export const overridesSchema = z
     capacity: z.number().int().positive().nullable().optional(),
     allowedTools: z.array(rule).nullable().optional(),
     runnerCommand: z.string().min(1).nullable().optional(),
+    model: modelSchema.nullable().optional(),
+    effort: effortSchema.nullable().optional(),
   })
   .strict();
 export type Overrides = z.infer<typeof overridesSchema>;
@@ -36,6 +39,8 @@ export interface Provenance {
   capacity: Source;
   runnerCommand: Source;
   allowedTools: Source;
+  model: Source;
+  effort: Source;
 }
 
 export interface ResolveInputs {
@@ -52,6 +57,9 @@ export interface Resolved {
   config: Config;
   provenance: Provenance;
   allowedTools: { value: string[]; parts: AllowedToolsParts; applied: boolean };
+  /** The run default model and effort; `applied` is whether the runner command carries the slot. See specs/model-selection. */
+  model: { value: string; applied: boolean };
+  effort: { value: Effort; applied: boolean };
   toolchain: ToolchainRecord | undefined;
   needsConfig: OverridableKey[];
   overrides: Overrides;
@@ -64,12 +72,17 @@ function fileHas(raw: Record<string, unknown> | undefined, key: string): boolean
   return raw !== undefined && raw[key] !== undefined && raw[key] !== null;
 }
 
-function fileClaude(raw: Record<string, unknown> | undefined): { allowedTools?: string[]; deriveTools?: boolean } {
+function fileClaude(raw: Record<string, unknown> | undefined): { allowedTools?: string[]; deriveTools?: boolean; model?: string; effort?: string } {
   const runner = raw?.['runner'];
   const claude = runner && typeof runner === 'object' ? (runner as Record<string, unknown>)['claude'] : undefined;
   if (!claude || typeof claude !== 'object') return {};
   const c = claude as Record<string, unknown>;
-  return { allowedTools: Array.isArray(c['allowedTools']) ? c['allowedTools'].map(String) : undefined, deriveTools: typeof c['deriveTools'] === 'boolean' ? c['deriveTools'] : undefined };
+  return {
+    allowedTools: Array.isArray(c['allowedTools']) ? c['allowedTools'].map(String) : undefined,
+    deriveTools: typeof c['deriveTools'] === 'boolean' ? c['deriveTools'] : undefined,
+    model: typeof c['model'] === 'string' ? c['model'] : undefined,
+    effort: typeof c['effort'] === 'string' ? c['effort'] : undefined,
+  };
 }
 
 /** Merge a patch into an override document: a null clears the key. */
@@ -127,11 +140,19 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
   });
   provenance.allowedTools = 'composed';
 
+  // Model and effort: argument over file over default; an in-memory config with no file stands for the file layer.
+  const model = overrides.model ?? base.runner.claude.model;
+  provenance.model = overrides.model ? 'argument' : claude.model !== undefined || (fileRaw === undefined && base.runner.claude.model !== DEFAULTS.runner.claude.model) ? 'file' : 'default';
+  const effort = overrides.effort ?? base.runner.claude.effort;
+  provenance.effort = overrides.effort ? 'argument' : claude.effort !== undefined || (fileRaw === undefined && base.runner.claude.effort !== DEFAULTS.runner.claude.effort) ? 'file' : 'default';
+
   const needsConfig: OverridableKey[] = checkCommand === undefined ? ['checkCommand'] : [];
   return {
-    config: { ...base, checkCommand, integrationBranch, capacity, runnerCommand },
+    config: { ...base, checkCommand, integrationBranch, capacity, runnerCommand, runner: { ...base.runner, claude: { ...base.runner.claude, model, effort } } },
     provenance,
     allowedTools: { ...composed, applied: hasAllowedToolsSlot(runnerCommand) },
+    model: { value: model, applied: hasModelSlot(runnerCommand) },
+    effort: { value: effort, applied: hasEffortSlot(runnerCommand) },
     toolchain: detected?.toolchain,
     needsConfig,
     overrides,
@@ -154,6 +175,8 @@ export interface ConfigReport {
     capacity: ConfigLeaf<number>;
     runnerCommand: ConfigLeaf<string>;
     allowedTools: ConfigLeaf<string[]> & { parts: AllowedToolsParts; applied: boolean };
+    model: ConfigLeaf<string> & { applied: boolean };
+    effort: ConfigLeaf<Effort> & { applied: boolean };
   };
   toolchain: ToolchainRecord | undefined;
   overrides: Overrides;
@@ -169,6 +192,8 @@ export function configSummary(report: ConfigReport): Record<string, unknown> {
     capacity: c.capacity,
     runnerCommand: { source: c.runnerCommand.source },
     allowedTools: { source: c.allowedTools.source, count: c.allowedTools.value.length, applied: c.allowedTools.applied, parts: Object.fromEntries(Object.entries(c.allowedTools.parts).map(([k, v]) => [k, v.length])) },
+    model: c.model,
+    effort: c.effort,
     toolchain: report.toolchain ? { kinds: report.toolchain.kinds, checkCommand: report.toolchain.checkCommand, checkFrom: report.toolchain.checkFrom, packageManager: report.toolchain.packageManager } : undefined,
     needsConfig: report.needsConfig,
     overrides: Object.keys(report.overrides),
@@ -189,8 +214,8 @@ export function readOverrides(store: { getKv(key: string): string | undefined })
 
 /**
  * `--set key=value` flags into an override document: `capacity` as an integer,
- * `allowedTools` as a JSON array or one rule per flag (appended), the rest as
- * strings. Throws a usage error on an unknown key or a bad value.
+ * `allowedTools` as a JSON array or one rule per flag (appended), `model` and
+ * `effort` checked by their shape rules, the rest as strings. Throws a usage error on an unknown key or a bad value.
  */
 export function parseSetFlags(flags: readonly string[]): Overrides {
   const out: Record<string, unknown> = {};
@@ -247,6 +272,8 @@ export function reportOf(resolved: Resolved, now: number): ConfigReport {
       capacity: { value: resolved.config.capacity, source: resolved.provenance.capacity },
       runnerCommand: { value: resolved.config.runnerCommand, source: resolved.provenance.runnerCommand },
       allowedTools: { value: resolved.allowedTools.value, source: 'composed', parts: resolved.allowedTools.parts, applied: resolved.allowedTools.applied },
+      model: { value: resolved.model.value, source: resolved.provenance.model, applied: resolved.model.applied },
+      effort: { value: resolved.effort.value, source: resolved.provenance.effort, applied: resolved.effort.applied },
     },
     toolchain: resolved.toolchain,
     overrides: resolved.overrides,

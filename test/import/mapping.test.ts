@@ -62,7 +62,7 @@ describe('mapping rules', () => {
     expect(byId['OPS-9']).toMatchObject({ kind: 'external', done: false, unknown: true });
     expect(byId['ENG-1']).toMatchObject({ kind: 'milestone', gated: true, title: 'Checkout epic' });
     expect([...(byId['ENG-1']!.deps as string[])].sort()).toEqual(['ENG-2', 'ENG-3', 'ENG-4', 'ENG-5', 'ENG-6', 'OPS-9']);
-    expect(r.summary).toEqual({ tasks: 3, external: 4, milestones: 1, missingCriteria: ['ENG-5'], unknownExternal: ['OPS-9'], inProgressAsExternal: ['ENG-6'] });
+    expect(r.summary).toEqual({ tasks: 3, external: 4, milestones: 1, missingCriteria: ['ENG-5'], unknownExternal: ['OPS-9'], inProgressAsExternal: ['ENG-6'], ignoredLabels: [] });
     const g = parseGraph(r.content);
     expect(g.rev).toBe(r.rev);
     expect(g.nodes.size).toBe(8);
@@ -92,6 +92,31 @@ describe('mapping rules', () => {
     const byId2 = Object.fromEntries(renamed.nodes.map((n) => [n.id, n]));
     expect(byId2['D']).toMatchObject({ scope: ['lib/**'] });
     expect('scope' in byId2['A']!).toBe(false);
+  });
+
+  // See specs/graph-import "Mapping rules" (selector labels) and specs/model-selection.
+  it('model: and effort: labels set the selectors, stay in labels, and a bad value is ignored with a note', () => {
+    const r = mapIssues({
+      root: 'E',
+      issues: [
+        { id: 'E', title: 'epic', state: 'open', blockedBy: [] },
+        { id: 'A', parent: 'E', state: 'open', description: 'A.\n\n## Acceptance criteria\n- a', blockedBy: [], labels: ['Effort:low', 'model:claude-sonnet-5-5', 'backend'] },
+        { id: 'KNO-7', parent: 'E', state: 'open', description: 'B.\n\n## Acceptance criteria\n- b', blockedBy: [], labels: ['effort:huge', 'MODEL: opus; rm'] },
+        { id: 'C', parent: 'E', state: 'open', description: 'C.\n\n## Acceptance criteria\n- c', blockedBy: [] },
+      ],
+    });
+    const byId = Object.fromEntries(r.nodes.map((n) => [n.id, n]));
+    expect(byId['A']).toMatchObject({ effort: 'low', model: 'claude-sonnet-5-5', labels: ['Effort:low', 'model:claude-sonnet-5-5', 'backend'] });
+    expect('effort' in byId['KNO-7']!).toBe(false);
+    expect('model' in byId['KNO-7']!).toBe(false);
+    expect(byId['KNO-7']).toMatchObject({ labels: ['effort:huge', 'MODEL: opus; rm'] });
+    expect('model' in byId['C']!).toBe(false);
+    expect(r.summary.ignoredLabels).toEqual([
+      { id: 'KNO-7', label: 'effort:huge' },
+      { id: 'KNO-7', label: 'MODEL: opus; rm' },
+    ]);
+    const g = parseGraph(r.content);
+    expect(g.nodes.get('A')?.payload).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' });
   });
 
   it("the root's description and acceptance criteria ride on the milestone", () => {

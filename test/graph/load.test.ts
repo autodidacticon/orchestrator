@@ -61,6 +61,29 @@ describe('graph loading', () => {
     expect(() => parseGraph(': : :')).toThrow(GraphValidationError);
   });
 
+  // See specs/model-selection "Task selectors".
+  it('model and effort load into the payload; a bad value is rejected naming the node and the key', () => {
+    const g = parseGraph(`nodes:\n  - { id: A, deps: [], model: claude-sonnet-5-5, effort: low }\n  - { id: B, deps: [] }`);
+    expect(g.nodes.get('A')?.payload).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' });
+    expect(g.nodes.get('B')?.payload).toEqual({});
+    for (const [bad, key] of [
+      ['effort: huge', 'effort'],
+      ['effort: 3', 'effort'],
+      ['model: "opus; rm -rf /"', 'model'],
+      ['model: ""', 'model'],
+    ] as const) {
+      try {
+        parseGraph(`nodes:\n  - { id: A, deps: [] }\n  - { id: T4, deps: [A], ${bad} }`);
+        expect.unreachable();
+      } catch (err) {
+        const e = err as GraphValidationError;
+        expect(e.code).toBe('schema');
+        expect(e.message).toMatch(/node "T4"/);
+        expect(e.message).toMatch(new RegExp(key));
+      }
+    }
+  });
+
   it('scope loads into the payload; a malformed scope is rejected naming the node', () => {
     const g = parseGraph(`nodes:\n  - { id: A, deps: [], scope: ["src/api/**", "package.json"] }\n  - { id: B, deps: [] }`);
     expect(g.nodes.get('A')?.payload).toEqual({ scope: ['src/api/**', 'package.json'] });

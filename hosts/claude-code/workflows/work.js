@@ -24,6 +24,8 @@ const CLAIM_SCHEMA = {
     briefMarkdown: { type: 'string' },
     pendingSeq: { type: 'number' },
     pendingAnswer: { type: 'string' },
+    model: { type: 'string' },
+    effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
     finished: { type: 'boolean' },
     stalled: { type: 'boolean' },
     openQuestions: { type: 'array', items: { type: 'string' } },
@@ -47,7 +49,7 @@ function claimPrompt(workerId, heldCount) {
   return [
     `You are the claimer for orchestrator worker "${workerId}". Use the orchestrator operator MCP tools (names end in claim, wait, status; load them with ToolSearch if needed).`,
     `1. Call claim with workerId "${workerId}" and access "local".`,
-    '2. If it returns a launch (status 200): read the markdown brief at briefPath and return { claimed: true, launchId, taskId, token, worktree, briefPath, briefMarkdown: <the full brief file>, pendingSeq, pendingAnswer } (pending fields only when the response carries pending).',
+    '2. If it returns a launch (status 200): read the markdown brief at briefPath and return { claimed: true, launchId, taskId, token, worktree, briefPath, briefMarkdown: <the full brief file>, model, effort, pendingSeq, pendingAnswer } (model and effort exactly as the response gives them; pending fields only when the response carries pending).',
     '3. If it returns 404 (nothing claimable or paused): call wait with until "any" and timeoutMs 30000, then call status. Return { claimed: false, stop, finished, stalled, openQuestions, awaitingReview, claimable } from status.',
     `   stop is true when finished is true, or stalled is true, or (claimable is 0 and ${heldCount} launches are held by other loops is false and (openQuestions is non-empty or awaitingReview is non-empty)). Otherwise stop is false.`,
     '4. On any other error return { claimed: false, stop: true }.',
@@ -89,7 +91,8 @@ async function loop(i) {
     }
     held[workerId] = c.taskId
     log(`${workerId}: working ${c.taskId}`)
-    const r = await agent(workerPrompt(c), { label: `work:${c.taskId}`, phase: 'Work', schema: OUTCOME_SCHEMA })
+    // The launch's model and effort were fixed when the daemon prepared it; the worker agent runs with them. See specs/model-selection.
+    const r = await agent(workerPrompt(c), { label: `work:${c.taskId}`, phase: 'Work', schema: OUTCOME_SCHEMA, ...(c.model ? { model: c.model } : {}), ...(c.effort ? { effort: c.effort } : {}) })
     delete held[workerId]
     const outcome = r || { taskId: c.taskId, outcome: 'failed', summary: 'worker agent returned nothing' }
     outcomes.push({ worker: workerId, ...outcome })

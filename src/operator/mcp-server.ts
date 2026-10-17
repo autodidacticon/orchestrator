@@ -8,6 +8,7 @@ import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema, tracker
 import { randomUUID } from 'node:crypto';
 import { ancestorPids } from '../runs/ancestry.js';
 import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
+import { EFFORT_LEVELS } from '../runner/selection.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 
 /** The cap keeps every tool call under Claude Code's two-minute foreground limit; ORCH_WAIT_CAP_MS shortens it for tests. */
@@ -195,7 +196,9 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         integrationBranch: z.string().optional().describe('Start-only: the branch work is published to; pinned for the run once chosen.'),
         capacity: z.number().int().optional().describe('Agents in parallel.'),
         allowedTools: z.array(z.string()).optional().describe('Rules appended to the derived allow list for spawned agents, e.g. "Bash(docker:*)".'),
-        runnerCommand: z.string().optional().describe('The runner command template; {allowedTools} is filled at spawn.'),
+        runnerCommand: z.string().optional().describe('The runner command template; {allowedTools}, {model}, and {effort} are filled at spawn.'),
+        model: z.string().optional().describe('The worker model for launches prepared from now on (default claude-opus-5-5); a task payload or a model:<name> label overrides it per task.'),
+        effort: z.enum(EFFORT_LEVELS).optional().describe('The worker effort for launches prepared from now on (default medium); a task payload or an effort:<level> label overrides it per task.'),
       },
     },
     async (a) =>
@@ -209,12 +212,14 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     'configure',
     {
       description:
-        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every launch spawned afterwards). A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start).',
+        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every launch spawned afterwards), model and effort (every launch prepared afterwards; defaults claude-opus-5-5 at medium; effort is low, medium, high, xhigh, or max; a task payload or a model:/effort: label overrides them per task). A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start).',
       inputSchema: {
         checkCommand: z.string().nullable().optional(),
         capacity: z.number().int().nullable().optional(),
         allowedTools: z.array(z.string()).nullable().optional(),
         runnerCommand: z.string().nullable().optional(),
+        model: z.string().nullable().optional(),
+        effort: z.enum(EFFORT_LEVELS).nullable().optional(),
       },
     },
     async (a) => guarded(() => client.call('PUT', '/v1/config', Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)))),
@@ -225,7 +230,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       return { status: r.stopped ? 200 : 409, body: r };
     }),
   );
-  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (allowedTools with its parts and whether the runner command applies it), toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async () =>
+  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (allowedTools with its parts and whether the runner command applies it; model and effort likewise, each live launch also listing its own model and effort), toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async () =>
     guarded(() => client.call('GET', '/v1/status')),
   );
   server.registerTool('runs', { description: 'List every run under ORCH_HOME with its repository, daemon liveness, and, for a daemon that is gone, its exit record (idle, stop, or signal with the last digest) or none after a crash.', inputSchema: {} }, async () =>
