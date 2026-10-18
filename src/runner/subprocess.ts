@@ -24,10 +24,28 @@ export interface SubprocessRunnerOptions {
   extraEnv?: Record<string, string>;
   /** Runner-specific slots read at every spawn, filled after the fixed ones (e.g. the Codex runner's {sandbox} and {codexOverrides}). */
   extraVars?: (launch: Launch) => Record<string, string>;
+  /** Composes the whole command for a launch in place of the template substitution (the Codex runner's `composeCodexCommand`). */
+  compose?: (launch: Launch) => string;
 }
 
 export function substitute(template: string, vars: Record<string, string>): string {
   return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? (vars[k] as string) : m));
+}
+
+/** The slots every template gets from the launch alone: paths under `.orchestrator/`, ids, model, and effort. */
+export function fixedSlots(launch: Pick<Launch, 'worktree' | 'launchId' | 'taskId' | 'model' | 'effort'>): Record<string, string> {
+  const orchDir = path.join(launch.worktree, '.orchestrator');
+  return {
+    brief: path.join(orchDir, 'brief.md'),
+    briefJson: path.join(orchDir, 'brief.json'),
+    worktree: launch.worktree,
+    launchId: launch.launchId,
+    taskId: launch.taskId,
+    mcpConfig: path.join(orchDir, 'mcp.json'),
+    // Fixed on the launch at preparation; validated as safe tokens before they got there. See specs/model-selection.
+    model: launch.model ?? '',
+    effort: launch.effort ?? '',
+  };
 }
 
 export function logPath(logDir: string, launchId: string): string {
@@ -39,21 +57,14 @@ export class SubprocessRunner implements AgentRunner {
 
   async spawn(launch: Launch, env: Record<string, string>): Promise<SpawnResult> {
     await mkdir(this.opts.logDir, { recursive: true });
-    const orchDir = path.join(launch.worktree, '.orchestrator');
     const template = typeof this.opts.command === 'function' ? this.opts.command() : this.opts.command;
-    const cmd = substitute(template, {
-      brief: path.join(orchDir, 'brief.md'),
-      briefJson: path.join(orchDir, 'brief.json'),
-      worktree: launch.worktree,
-      launchId: launch.launchId,
-      taskId: launch.taskId,
-      mcpConfig: path.join(orchDir, 'mcp.json'),
-      allowedTools: quoteRules(this.opts.allowedTools?.() ?? []),
-      // Fixed on the launch at preparation; validated as safe tokens before they got there. See specs/model-selection.
-      model: launch.model ?? '',
-      effort: launch.effort ?? '',
-      ...this.opts.extraVars?.(launch),
-    });
+    const cmd =
+      this.opts.compose?.(launch) ??
+      substitute(template, {
+        ...fixedSlots(launch),
+        allowedTools: quoteRules(this.opts.allowedTools?.() ?? []),
+        ...this.opts.extraVars?.(launch),
+      });
     const log = await open(logPath(this.opts.logDir, launch.launchId), 'a');
     try {
       // An empty value in env/extraEnv removes the variable (e.g. a parent session's CLAUDECODE marker).

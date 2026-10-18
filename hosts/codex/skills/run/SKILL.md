@@ -20,8 +20,9 @@ approval, tell the user which of the two applies and stop.
 
 ## 1. Start
 
-This session has no subagents to work launches, so the daemon spawns the agents headless and
-you only monitor; `spawn` is the Codex host's default until a Codex work loop exists. An
+This session has no subagents to work launches, so by default the daemon spawns the agents
+headless and you only monitor; `spawn` is the Codex host's default. Pull mode is worked by the
+Codex work loop (`orchestrator-work`, below), which the user starts from a shell. An
 explicit `mode` overrides `runner.mode` in `orchestrator.yaml` and is applied to a daemon
 that is already running, so choose it before calling `start`:
 
@@ -38,10 +39,22 @@ URL, the runner `mode` in force, and the resolved configuration: `config` (every
 `unresolved`), `toolchain` (what detection found in the repository root), `needsConfig` (keys
 no layer supplied), and `modeNote`. It is safe to repeat.
 
-When the mode in force is `pull` (or `mixed`, whose claim window nobody here fills), launches
-are parked for session workers that this host does not have, and nothing progresses until
-the claim window ends or a Claude Code session works them. Say so, show `modeNote` when it is
-set, and offer `start` with `mode: "spawn"` unless another session is working the run.
+When the mode in force is `pull` (or `mixed`), launches are parked for workers, and nothing
+progresses until a worker claims them or a `mixed` claim window ends. Say so and show
+`modeNote` when it is set. Then offer two choices, unless another session is working the run:
+`start` with `mode: "spawn"`, or the Codex work loop, which the user starts from a shell in
+the repository:
+
+    node <hosts/codex>/bin/work.mjs --workers <n> --run-tag <tag> --capacity <config.capacity>
+
+(`npx orchestrator-work ...` from an install of the package.) The loop claims only `codex`
+launches (`status.claimableByKind.codex`). For each one it runs `codex exec` with the command
+a spawned launch gets, then posts the usage. It stops when the run is finished or stalled, or
+when nothing is claimable for codex while a question or review waits. Do not start it from
+this session as a background command: nobody has verified that such a process outlives the
+turn. `claude-code` launches still need `spawn` or a Claude Code session. While the loop
+runs, monitor as usual; its workers show in `status.workers` as `<tag>-<n>`. After you answer
+a question, the user restarts the loop if it stopped.
 
 The runner kind (`config.runnerKind`, from `runner.kind` in `orchestrator.yaml`, `start` or
 `configure` with `runnerKind`, or `--set runnerKind=codex`) is `claude-code` by default or

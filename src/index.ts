@@ -19,7 +19,7 @@ export { fifoPolicy, chainPolicy, admit, scopesOverlap, staticPrefix, type Polic
 export type { AgentRunner, RunnerFailure, SpawnResult } from './runner/runner.js';
 export { SubprocessRunner, substitute, pidAlive, killTree } from './runner/subprocess.js';
 export { ClaudeCodeRunner } from './runner/claude-code.js';
-export { CodexRunner, parseCodexUsage, classifyCodexFailure, codexOverrides, defaultCodexApproval, type CodexFailureReason, type CodexRunnerOptions, type CodexSettings } from './runner/codex.js';
+export { CodexRunner, parseCodexUsage, classifyCodexFailure, codexOverrides, composeCodexCommand, writeCodexShimEnv, defaultCodexApproval, type CodexCommandPolicy, type CodexFailureReason, type CodexRunnerOptions, type CodexSettings } from './runner/codex.js';
 export { shimCommand, shimEnv } from './runner/shim-command.js';
 export { DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND, ALLOWED_TOOLS_SLOT, MODEL_SLOT, EFFORT_SLOT, hasAllowedToolsSlot, hasModelSlot, hasEffortSlot, quoteRules } from './runner/command.js';
 export { EFFORT_LEVELS, EFFORT_LEVELS_ALL, EFFORT_LEVELS_BY_KIND, EFFORT_FALLBACK, RUNNER_KINDS, DEFAULT_MODEL, DEFAULT_MODEL_BY_KIND, DEFAULT_EFFORT, MODEL_PATTERN, isModelName, isEffort, isEffortFor, isRunnerKind, modelSchema, effortSchema, effortSchemaFor, type Effort, type RunnerKind } from './runner/selection.js';

@@ -1344,8 +1344,11 @@ export class Orchestrator implements OrchestratorCore {
       apiUrl: this.apiBaseUrl,
       workerId: launch.worker?.id,
       runner: runnerOf(launch),
+      commitPolicy: commitPolicyOf(launch),
       model: launch.model,
       effort: launch.effort,
+      // A codex worker loop composes the same `codex exec` as a spawned launch: the effective runner.codex keys, the long-poll ceiling, and the agent environment. See specs/pull-runner "Claim".
+      ...(runnerOf(launch) === 'codex' ? { codex: { settings: this.effective().config.runner.codex, maxWaitMs: this.config.maxWaitMs, retryWindowMs: this.config.retryWindowMs, env: this.agentEnv(launch) } } : {}),
       ...(pending ? { pending } : {}),
     };
   }

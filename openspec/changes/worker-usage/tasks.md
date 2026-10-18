@@ -11,4 +11,4 @@
 ## 3. Finish
 
 - [x] 3.1 Spec deltas for pull-runner, health-monitoring, and operator-control; `openspec/specs/` is updated when the change is archived
-- [ ] 3.2 The Codex work loop (codex-work-loop) posts the summed `turn.completed.usage` after `codex exec` exits
+- [x] 3.2 The Codex work loop (codex-work-loop) posts the summed `turn.completed.usage` after `codex exec` exits

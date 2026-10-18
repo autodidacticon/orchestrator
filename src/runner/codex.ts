@@ -10,11 +10,12 @@ import path from 'node:path';
 import { TOOL_NAMES } from '../agent/mcp-shim.js';
 import type { Launch } from '../state/store.js';
 import type { CodexSandbox } from './selection.js';
-import { logPath, SubprocessRunner, type SubprocessRunnerOptions } from './subprocess.js';
+import { DEFAULT_CODEX_COMMAND } from './command.js';
+import { fixedSlots, logPath, SubprocessRunner, substitute, type SubprocessRunnerOptions } from './subprocess.js';
 import type { RunnerFailure, SpawnResult, TokenUsage, Usage } from './runner.js';
 import { formatEnvFile, shimCommand, shimEnv } from './shim-command.js';
 
-export { DEFAULT_CODEX_COMMAND } from './command.js';
+export { DEFAULT_CODEX_COMMAND };
 
 /** The MCP server id the shim is registered under; the agent sees its tools as `orchestrator.<tool>`. */
 export const CODEX_MCP_ID = 'orchestrator';
@@ -102,17 +103,59 @@ export function codexSlots(launch: Pick<Launch, 'worktree'>, settings: CodexSett
   };
 }
 
+/** What `composeCodexCommand` needs beyond the launch: the template, the `runner.codex` keys, and the long-poll ceiling. */
+export interface CodexCommandPolicy {
+  /** The command template; unset is DEFAULT_CODEX_COMMAND. */
+  template?: string;
+  settings: CodexSettings;
+  maxWaitMs: number;
+  shim?: { command: string; args: string[] };
+  /** The file fed to stdin through {brief}; unset is `.orchestrator/brief.md`. A worker loop passes its preamble plus the brief. */
+  brief?: string;
+}
+
+/**
+ * The `codex exec` shell command for a launch: the template with the fixed slots, the model and
+ * effort fixed on the launch, and the Codex slots (sandbox, flags, the shim's `-c` overrides). The
+ * Codex runner and the Codex work loop (hosts/codex/bin/work.mjs) both compose through this, so a
+ * claimed launch runs the same command as a spawned one. See specs/worker-runners "Codex runner
+ * command composition" and specs/host-integration "Codex work loop".
+ */
+export function composeCodexCommand(launch: Pick<Launch, 'worktree' | 'launchId' | 'taskId' | 'model' | 'effort'>, policy: CodexCommandPolicy): string {
+  return substitute(policy.template ?? DEFAULT_CODEX_COMMAND, {
+    ...fixedSlots(launch),
+    ...(policy.brief ? { brief: policy.brief } : {}),
+    allowedTools: '',
+    ...codexSlots(launch, policy.settings, policy.maxWaitMs, policy.shim),
+  });
+}
+
+/**
+ * Write the shim's 0600 env file for a launch: the MCP server codex starts is not sandboxed and
+ * receives no ORCH_* from the agent's environment, so the file carries them. See specs/agent-protocol
+ * "Launch token scoping".
+ */
+export async function writeCodexShimEnv(launch: Pick<Launch, 'worktree' | 'launchId' | 'token'>, env: Record<string, string>, retryWindowMs: number): Promise<string> {
+  await mkdir(path.join(launch.worktree, '.orchestrator'), { recursive: true });
+  const file = shimEnvPath(launch.worktree);
+  await writeFile(file, formatEnvFile(shimEnv(launch as Launch, env, retryWindowMs)), { encoding: 'utf8', mode: 0o600 });
+  await chmod(file, 0o600);
+  return file;
+}
+
 export class CodexRunner extends SubprocessRunner {
   constructor(private readonly cxOpts: CodexRunnerOptions) {
-    super({ ...cxOpts, extraVars: (launch) => codexSlots(launch, cxOpts.settings(), cxOpts.maxWaitMs, cxOpts.shim) });
+    super({
+      ...cxOpts,
+      compose: (launch) => {
+        const template = typeof cxOpts.command === 'function' ? cxOpts.command() : cxOpts.command;
+        return composeCodexCommand(launch, { template, settings: cxOpts.settings(), maxWaitMs: cxOpts.maxWaitMs, shim: cxOpts.shim });
+      },
+    });
   }
 
   async spawn(launch: Launch, env: Record<string, string>): Promise<SpawnResult> {
-    await mkdir(path.join(launch.worktree, '.orchestrator'), { recursive: true });
-    // The MCP server codex starts is not sandboxed and receives no ORCH_* from the agent's environment; the env file carries them. See specs/agent-protocol "Launch token scoping".
-    const file = shimEnvPath(launch.worktree);
-    await writeFile(file, formatEnvFile(shimEnv(launch, env, this.cxOpts.retryWindowMs)), { encoding: 'utf8', mode: 0o600 });
-    await chmod(file, 0o600);
+    await writeCodexShimEnv(launch, env, this.cxOpts.retryWindowMs);
     return super.spawn(launch, env);
   }
 

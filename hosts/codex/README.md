@@ -71,7 +71,8 @@ discovery directories loads nothing.
 The skills differ from the Claude Code plugin's. A Codex session has no subagents, so there
 is no work workflow and no `work` skill. A fresh run is started with `mode: "spawn"` (unless
 `orchestrator.yaml` sets `runner.mode`), and the daemon runs the agents headless while the
-session monitors. The test command is looked up in
+session monitors. To work a `pull` or `mixed` run, start the Codex work loop from a shell
+(section 4). The test command is looked up in
 `AGENTS.md`, with `CLAUDE.md` as the fallback when a repository has no `AGENTS.md`. The
 toolchain line always names the runner kind.
 
@@ -97,6 +98,37 @@ dead.
 Codex runs a configured hook only after it is trusted. The trust is recorded under
 `hooks.state` in `config.toml` after you review the hook in an interactive session. Under
 `codex exec`, untrusted hooks do not run unless you pass `--dangerously-bypass-hook-trust`.
+
+## 4. Codex work loop (pull mode)
+
+`bin/work.mjs` is the Codex host's pull-mode worker. It is also the package executable
+`orchestrator-work`. Start it from a shell in the target repository while the run is in
+`pull` or `mixed` mode:
+
+```sh
+node /path/to/orchestrator/hosts/codex/bin/work.mjs --workers 2 --run-tag cx --capacity 4
+# or, from an install of the package: npx orchestrator-work --workers 2 --run-tag cx
+```
+
+- Each of the N loops claims launches prepared for `codex` (`workerId cx-<n>`). It runs
+  `codex exec` in the claimed worktree with the command a spawned launch gets: the same
+  orchestrator MCP registration, approvals, sandbox and model. On stdin it passes a short
+  preamble followed by the brief. When codex exits, the loop posts the token usage and then
+  claims again.
+- A codex that fails to start is released with `keep`. After `--max-failures` (default 3)
+  launches in a row that ended without codex running or reporting, a loop stops.
+- A loop stops when the run is finished or stalled, when nothing is claimable for codex while
+  a question or review waits on a human, or after `--idle-exit-ms` (default 120000) with
+  nothing claimable for codex.
+- The daemon is found by `--url`, `ORCH_URL`, or the run directory of `--repo` (default: the
+  current directory).
+- Ctrl-C terminates the codex processes and releases their launches with `keep`.
+- Progress lines go to stderr. A summary JSON goes to stdout on exit. Each launch's codex
+  output is in `<worktree>/.orchestrator/codex-work.log`.
+
+The shell is the primary path because nobody has verified that a background process started
+from a Codex session outlives the turn. Codex's `features.multi_agent` subagents are an
+unverified alternative.
 
 ## Approvals
 

@@ -10,7 +10,8 @@
     "orchestrator": "dist/src/main.js",
     "orchestrator-ctl": "dist/src/operator/cli.js",
     "orchestrator-mcp": "dist/src/operator/mcp.js",
-    "orchestrator-mcp-shim": "dist/src/agent/mcp-shim.js"
+    "orchestrator-mcp-shim": "dist/src/agent/mcp-shim.js",
+    "orchestrator-work": "hosts/codex/bin/work.mjs"
   },
   "exports": {
     ".": {
