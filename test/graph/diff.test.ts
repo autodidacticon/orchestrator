@@ -64,6 +64,23 @@ describe('reload classification', () => {
     expect(classifyReload(base, unstartedMilestone, running)).toMatchObject({ compatible: true, milestoneDepsChanged: [] });
   });
 
+  // See specs/task-graph "Reload compatibility": the finished-task exception.
+  it('a done task may become a done external; an unfinished external or a running task may not', () => {
+    const done = overlayWith({ T1: 'done', T2: 'running' });
+    const asDoneExternal = variant(`nodes:${standardNodes.replace('id: T1, title: Schema migration,', 'id: T1, kind: external, done: true, title: Schema migration,')}`);
+    const ok = classifyReload(base, asDoneExternal, done);
+    expect(ok).toMatchObject({ compatible: true, changed: ['T1'] });
+    expect(done.get('T1')?.status.kind).toBe('done');
+    const asOpenExternal = variant(`nodes:${standardNodes.replace('id: T1, title: Schema migration,', 'id: T1, kind: external, done: false, title: Schema migration,')}`);
+    const bad = classifyReload(base, asOpenExternal, done);
+    expect(bad.compatible).toBe(false);
+    if (!bad.compatible) expect(bad.reasons.map((r) => [r.id, r.code])).toEqual([['T1', 'kindChangedStarted']]);
+    const runningToExternal = variant(`nodes:${standardNodes.replace('id: T2, title: Feature A API,', 'id: T2, kind: external, done: true, title: Feature A API,')}`);
+    const bad2 = classifyReload(base, runningToExternal, done);
+    expect(bad2.compatible).toBe(false);
+    if (!bad2.compatible) expect(bad2.reasons[0]).toMatchObject({ id: 'T2', code: 'kindChangedStarted' });
+  });
+
   it('deps change on an unstarted node is compatible', () => {
     const next = variant(`nodes:${standardNodes.replace('deps: [T2] }', 'deps: [T2, T3] }')}`);
     expect(classifyReload(base, next, running)).toMatchObject({ compatible: true, changed: ['T4'] });

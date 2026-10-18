@@ -61,7 +61,9 @@ export function classifyReload(prev: Graph, next: Graph, overlay: Overlay): Relo
     if (started && depsChanged) {
       reasons.push({ id, code: 'depsChangedStarted', message: `deps of ${id} changed while started` });
     }
-    if (started && kindChanged) {
+    // A published task re-imported as a done external is what the run's own progress produces; the entry stays done. See specs/task-graph "Reload compatibility".
+    const finishedToDoneExternal = old.kind === 'task' && nu.kind === 'external' && status.kind === 'done' && nu.done === true;
+    if (started && kindChanged && !finishedToDoneExternal) {
       reasons.push({ id, code: 'kindChangedStarted', message: `kind of ${id} changed while started` });
     }
   }

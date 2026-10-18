@@ -59,6 +59,9 @@ query($owner:String!, $repo:String!, $n:Int!) { repository(owner:$owner, name:$r
 
 If the root has no sub-issues (or the milestone no issues), say so and stop: this skill does
 not parse task lists or "blocked by" text in issue bodies, and an empty epic is not imported.
+A re-import after the run has published tasks needs no special handling: send the tracker's
+current states as they are. The daemon accepts a published task becoming a closed (done)
+external node; a task the tracker shows reopened is not reopened by import but with `reopen`.
 Repositories on plans without sub-issues or dependencies need the parent to be a milestone.
 
 ## 3. Build normalized records
