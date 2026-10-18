@@ -9,6 +9,8 @@ import { type Config, type ConfigInput, defaultConfig } from '../../src/config.j
 import { FileGraphSource, StaticGraphSource } from '../../src/graph/source.js';
 import { Orchestrator } from '../../src/loop/orchestrator.js';
 import { registerOperatorRoutes } from '../../src/operator/routes.js';
+import { CodexRunner } from '../../src/runner/codex.js';
+import { DEFAULT_CODEX_COMMAND } from '../../src/runner/command.js';
 import { SubprocessRunner } from '../../src/runner/subprocess.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import type { Launch, VerifierJob } from '../../src/state/store.js';
@@ -20,6 +22,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const scriptedAgent = path.resolve(here, '../agents/scripted.ts');
 /** Absolute loader path: the agent runs with the worktree as cwd, where `tsx` cannot be resolved. */
 export const tsxLoader = path.resolve(here, '../../node_modules/tsx/dist/loader.mjs');
+export const fakeCodex = path.resolve(here, '../agents/fake-codex.ts');
+/** The real Codex template with the fake standing in for the `codex` executable, so no codex is needed on PATH. */
+export const fakeCodexCommand = DEFAULT_CODEX_COMMAND.replace(/^codex /, `node --import ${tsxLoader} ${fakeCodex} `);
 
 /** Publishes the sealed sha without touching git; the real verifier is group 4. */
 export class PassthroughVerifier implements VerifierBackend {
@@ -64,7 +69,7 @@ export interface SliceHarness {
   cleanup(): Promise<void>;
 }
 
-export async function makeSlice(opts: { graph: string; config?: ConfigInput; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean }): Promise<SliceHarness> {
+export async function makeSlice(opts: { graph: string; config?: ConfigInput; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean; kind?: 'codex' }): Promise<SliceHarness> {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-slice-'));
   const repo = opts.repo ?? makeRepo(dir);
   const dataDir = path.join(dir, 'run');
@@ -83,6 +88,8 @@ export async function makeSlice(opts: { graph: string; config?: ConfigInput; ver
     runnerCommand: `node --import ${tsxLoader} ${scriptedAgent} {briefJson}`,
     graphPath: path.join(dataDir, 'graph.yaml'),
     ...opts.config,
+    // A codex slice: launches run the Codex runner with the fake as `runner.codex.command`.
+    ...(opts.kind === 'codex' ? { runner: { ...opts.config?.runner, kind: 'codex' as const, codex: { command: fakeCodexCommand, ...opts.config?.runner?.codex } } } : {}),
   });
   const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
   const graphPath = path.join(dataDir, 'graph.yaml');
@@ -91,7 +98,18 @@ export async function makeSlice(opts: { graph: string; config?: ConfigInput; ver
   let orch!: Orchestrator;
   let server!: ApiServer;
   // The command and its allow list are read from the effective configuration at every spawn. See specs/toolchain-discovery "Runner command composition".
-  const runner = new SubprocessRunner({ command: () => orch.effective().config.runnerCommand, allowedTools: () => orch.effective().allowedTools.value, logDir: path.join(dataDir, 'logs'), graceMs: 500, extraEnv: { ORCH_PIDLOG: pidlog } });
+  const runner =
+    opts.kind === 'codex'
+      ? new CodexRunner({
+          command: () => orch.effective().config.runner.codex.command ?? DEFAULT_CODEX_COMMAND,
+          settings: () => orch.effective().config.runner.codex,
+          maxWaitMs: config.maxWaitMs,
+          retryWindowMs: config.retryWindowMs,
+          logDir: path.join(dataDir, 'logs'),
+          graceMs: 500,
+          extraEnv: { ORCH_PIDLOG: pidlog },
+        })
+      : new SubprocessRunner({ command: () => orch.effective().config.runnerCommand, allowedTools: () => orch.effective().allowedTools.value, logDir: path.join(dataDir, 'logs'), graceMs: 500, extraEnv: { ORCH_PIDLOG: pidlog } });
   // A runner that cannot observe its processes: the lease TTL is the only bound on silence.
   if (opts.unobserved) runner.liveness = async () => 'unknown';
   const workspace = new GitWorkspace(repo, config.integrationBranch, path.join(dataDir, 'worktrees'));

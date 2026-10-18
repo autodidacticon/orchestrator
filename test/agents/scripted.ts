@@ -227,7 +227,8 @@ async function main(): Promise<void> {
   pidlog('exit');
 }
 
-main().catch((err) => {
+/** Settles when the behaviour has run; the fake codex awaits it before printing its final events. */
+export const finished = main().catch((err) => {
   pidlog(`error ${String(err).replace(/\s+/g, ' ')}`);
   process.stderr.write(`${String(err)}\n`);
   process.exit(1);

@@ -1,0 +1,7 @@
+{"type":"thread.started","thread_id":"0f000000-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"First turn done."}}
+{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":100,"reasoning_output_tokens":10}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Second turn done."}}
+{"type":"turn.completed","usage":{"input_tokens":2000,"cached_input_tokens":1500,"cache_write_input_tokens":50,"output_tokens":300,"reasoning_output_tokens":20}}

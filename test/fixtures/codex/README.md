@@ -18,6 +18,7 @@ facts recorded in Linear ORC-47 and the P-ORC-6 project description:
 | `E-events.jsonl` | facts/E-events.jsonl | A plain successful run (`--ephemeral --ignore-user-config`). The usage is synthetic. |
 | `G-events.jsonl` | spike/G-events.jsonl | Probe G: an MCP call completed under `approval_policy="never"` with both approve keys set. The usage is synthetic. |
 | `probe-mcp-server.mjs` | facts/probe-mcp-server.mjs | A minimal stdio MCP server with one `echo` tool. |
+| `two-turns.jsonl` | hand-written (ORC-50) | **A test decision, not a probe output.** Two `turn.completed` lines in one exec, which a real codex has not been seen to print. It pins the rule that usage is summed over every `turn.completed`. |
 
 Event shapes other than `thread.started`, `turn.started`, `turn.completed{usage}`,
 `turn.failed`, and `error` are approximate. If byte-identical copies are wanted,

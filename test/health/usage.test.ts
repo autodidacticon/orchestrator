@@ -68,6 +68,10 @@ describe('Codex usage parser', () => {
     expect(parseCodexUsage(log)).toEqual({ tokens: { input: 150, cachedInput: 40, cacheWriteInput: 5, output: 17, reasoningOutput: 3 }, source: 'codex' });
   });
 
+  it('sums the two turns of the hand-written two-turns.jsonl fixture (a test decision)', () => {
+    expect(parseCodexUsage(fixture('two-turns.jsonl'))).toEqual({ tokens: { input: 3000, cachedInput: 1900, cacheWriteInput: 50, output: 400, reasoningOutput: 30 }, source: 'codex' });
+  });
+
   it('yields nothing for a log cut off before turn.completed, a failed turn, or a Claude log', () => {
     expect(parseCodexUsage(fixture('git-err.txt'))).toBeUndefined();
     expect(parseCodexUsage(fixture('C-events.jsonl'))).toBeUndefined();
