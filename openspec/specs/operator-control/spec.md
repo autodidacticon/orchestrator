@@ -24,7 +24,7 @@ Each operator command SHALL be appended to the event log before the orchestrator
 - **THEN** the event log contains an operator cancel event for T2 with that reason, followed by the transition
 
 ### Requirement: Status report
-`status` SHALL report the `ready`, `running`, `waiting`, `submitted`, `blocked`, and `external` sets, `stallRoots`, `awaitingReview`, `openQuestions`, whether the run is `finished` or `stalled`, whether it is paused, any `graphRejected` reasons, the active graph revision, any foreign commits, the run directory, the graph file path, the daemon's pid and URL, and the latest event sequence number.
+`status` SHALL report the `ready`, `running`, `waiting`, `submitted`, `blocked`, and `external` sets, `stallRoots`, `awaitingReview`, `openQuestions`, whether the run is `finished` or `stalled`, whether it is paused, any `graphRejected` reasons, the active graph revision, any foreign commits, the run directory, the graph file path, the daemon's pid and URL, the latest event sequence number, and `claimableByKind`: the number of claimable launches per runner kind, every kind present, beside the unchanged `claimable` list. The event digest SHALL carry `claimableByKind` beside its `claimable` count.
 
 #### Scenario: Stalled run names its roots
 - **WHEN** the run is stalled on a failed T1
@@ -37,6 +37,10 @@ Each operator command SHALL be appended to the event log before the orchestrator
 #### Scenario: Run facts are reported
 - **WHEN** `status` is requested
 - **THEN** it includes the run directory, graph path, daemon pid and URL, and the latest event sequence number
+
+#### Scenario: Claimable launches counted per kind
+- **WHEN** one launch is parked for `claude-code` and one for `codex`
+- **THEN** `status.claimable` lists both tasks and `status.claimableByKind` is `{ "claude-code": 1, "codex": 1 }`, and the digest shows `claimable: 2` with the same `claimableByKind`
 
 ### Requirement: Answer
 `answer` SHALL apply to a task that is `waiting` or `blocked` with a question. For a `waiting` task the answer SHALL be persisted before resume is attempted. For a `blocked` task it SHALL act as unblock with the answer attached to the next brief.
