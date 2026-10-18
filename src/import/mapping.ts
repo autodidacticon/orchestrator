@@ -32,10 +32,15 @@ export const importOptionsSchema = z.object({
 });
 
 /** The tracker an import came from; recorded by the daemon so effects can be derived. See specs/graph-import "Tracker record". */
-export const trackerSchema = z.object({
-  kind: z.enum(['linear', 'atlassian']),
-  workspace: z.string().min(1).optional(),
-});
+export const trackerSchema = z
+  .object({
+    kind: z.enum(['linear', 'atlassian', 'github']),
+    /** Linear workspace key, Jira site, or GitHub repository as `owner/repo`. */
+    workspace: z.string().min(1).optional(),
+    /** GitHub only: the label that stands for the in-progress state, read at import and applied at sync. */
+    inProgressLabel: z.string().min(1).optional(),
+  })
+  .refine((t) => t.inProgressLabel === undefined || t.kind === 'github', { message: 'inProgressLabel applies to kind github only', path: ['inProgressLabel'] });
 
 export type TrackerInput = z.infer<typeof trackerSchema>;
 

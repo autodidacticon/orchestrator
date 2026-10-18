@@ -133,8 +133,11 @@ export interface OutboxEffect {
 export type NewOutboxEffect = Pick<OutboxEffect, 'sourceSeq' | 'taskId' | 'kind' | 'payload' | 'createdAt'>;
 
 export interface TrackerRecord {
-  kind: 'linear' | 'atlassian';
+  kind: 'linear' | 'atlassian' | 'github';
+  /** Linear workspace key, Jira site, or GitHub `owner/repo`. */
   workspace?: string;
+  /** GitHub only: the label that stands for the in-progress state. See specs/graph-import "Tracker record". */
+  inProgressLabel?: string;
   recordedAt: number;
 }
 

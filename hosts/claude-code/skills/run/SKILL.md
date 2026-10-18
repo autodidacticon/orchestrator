@@ -110,7 +110,10 @@ answers (section 2b), then act on the digest:
   user's decision. On acceptance in a run imported from a tracker, first create the issue
   with this session's tracker tools: a child of the epic, blocked by the proposing task's
   issue, with the acceptance criteria under the configured heading in its description; then
-  call `accept_proposal` with the new issue's key as `nodeId`. In a file-based run call
+  call `accept_proposal` with the new issue's key as `nodeId`. GitHub: `gh issue create
+  --repo <owner/repo> --parent <root url> --title ... --body-file -` creates the sub-issue;
+  add the dependency with the GraphQL mutation `addBlockedBy(input: { issueId, blockingIssueId })`
+  (node ids from `gh api graphql`); the `nodeId` is `GH-<new number>`. In a file-based run call
   `accept_proposal` without `nodeId` and report the new node id. On rejection call
   `reject_proposal` with the user's note. Never accept a proposal the user has not approved.
 - **pausedReason** is `costBudget`: the run cost reached its ceiling. Report `cost.runUsd`
@@ -137,12 +140,23 @@ tracker tools in this session, acknowledging each one before the next:
   type `started` for `inProgress`, `completed` for `done`, `canceled` for `cancelled`. Jira:
   transition to a status in category In Progress or Done; for `cancelled`, a canceled-type
   status when the workflow has one. When the tracker has no canceled-type state, leave the
-  status, post a comment saying the task was cancelled, and acknowledge. On success call
-  `ack { id, result: { stateId } }`.
-- `comment`: list the issue's recent comments first. If one already contains the effect's
-  `marker`, call `ack { id, result: { commentId } }` with that comment's id and do not post
-  again (a previous session posted it and crashed before acknowledging). Otherwise post
-  `body`, a blank line, and the `marker` as the last line, then `ack { id, result: { commentId } }`.
+  status, post a comment saying the task was cancelled, and acknowledge. GitHub (act on the
+  effect's `url` with `gh`, never on the `GH-` id):
+  `done`: `gh issue close <url> --reason completed`;
+  `cancelled`: `gh issue close <url> --reason "not planned"`;
+  `inProgress`: `gh issue reopen <url>` when the issue is closed, then
+  `gh issue edit <url> --add-label <policy.tracker.inProgressLabel>`; when the policy has no
+  `inProgressLabel`, call `ack { id, result: { skipped: true } }` and change nothing.
+  A milestone root (`GH-M<n>`, the effect's `url` is a milestone): `done` closes the milestone
+  with `gh api`; acknowledge `inProgress` as skipped. On success call
+  `ack { id, result: { stateId } }` (for GitHub, `{ state }`).
+- `comment`: list the issue's recent comments first (GitHub: `gh issue view <url> --comments`
+  or the GraphQL `comments` connection). If one already contains the effect's `marker`, call
+  `ack { id, result: { commentId } }` with that comment's id and do not post again (a previous
+  session posted it and crashed before acknowledging). Otherwise post `body`, a blank line,
+  and the `marker` as the last line (GitHub: `gh issue comment <url> --body-file -`), then
+  `ack { id, result: { commentId } }`. A GitHub milestone root takes no comments: acknowledge
+  the effect as skipped.
 - On a tracker error: `ack { id, error: "<message>" }`, then skip the remaining effects for
   that issue in this drain; they come back next time. The daemon retries a rejected effect
   up to its cap and then lists it in `trackerErrors`; when the digest shows `trackerErrors`,
@@ -154,7 +168,8 @@ conversation.
 ### 2b. Relay answers from the tracker
 
 When `policy.answersFromComments` is true and the digest lists `openQuestions`: for each
-task, list its issue's comments; ignore any containing "— orchestrator run"; take the first
+task, list its issue's comments (GitHub: `gh issue view <url> --comments`); ignore any
+containing "— orchestrator run"; take the first
 human comment posted after the latest marked comment that you have not relayed before; send
 it with `answer`; remember that comment's id so you never relay it twice. If the daemon
 answers 409, the task is no longer waiting or blocked (someone answered first): tell the

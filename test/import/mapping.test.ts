@@ -46,6 +46,11 @@ describe('tracker record', () => {
     expect(tracked.rev).toBe(plain.rev);
     expect(() => mapIssues({ ...epic, tracker: { kind: 'jira' } })).toThrow(ImportError);
     expect(() => mapIssues({ ...epic, tracker: { kind: 'atlassian', workspace: '' } })).toThrow(ImportError);
+    // GitHub: owner/repo as the workspace and an optional in-progress label; the label is refused elsewhere. See specs/graph-import "Tracker record".
+    const github = mapIssues({ ...epic, tracker: { kind: 'github', workspace: 'acme/app', inProgressLabel: 'in-progress' } });
+    expect(github.content).toBe(plain.content);
+    expect(() => mapIssues({ ...epic, tracker: { kind: 'linear', inProgressLabel: 'x' } })).toThrow(/inProgressLabel/);
+    expect(() => mapIssues({ ...epic, tracker: { kind: 'github', inProgressLabel: '' } })).toThrow(ImportError);
   });
 });
 

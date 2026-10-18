@@ -217,6 +217,11 @@ describe('package entrypoints', () => {
       expect(text, skill).toContain('capacity:');
       expect(text, skill).toContain('--add-dir ~/.orchestrator');
     }
+    // GitHub Issues as a tracker through gh. See specs/host-integration "Import skill records the tracker" and "Run skill mirrors to the tracker".
+    const importSkill = readFileSync(path.join(plugin, 'skills/import/SKILL.md'), 'utf8');
+    for (const word of ['gh auth status', 'inProgressLabel', 'GH-<number>', 'GH-M<number>', 'stateReason', 'subIssues', 'blockedBy', 'No tracker connector is available']) expect(importSkill, word).toContain(word);
+    const runSkill = readFileSync(path.join(plugin, 'skills/run/SKILL.md'), 'utf8');
+    for (const word of ['gh issue close', '--reason completed', '"not planned"', 'gh issue reopen', '--add-label', 'inProgressLabel', 'skipped: true', 'gh issue comment', '--parent', 'addBlockedBy']) expect(runSkill, word).toContain(word);
   });
 
   it('declares the session hooks', () => {

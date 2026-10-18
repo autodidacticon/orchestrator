@@ -74,6 +74,13 @@ describe('outbox routes', () => {
     const bad = await http(h, 'PUT', '/v1/graph', { content: G, tracker: { kind: 'jira' } });
     expect(bad.status).toBe(400);
     expect(h.store.listEvents({ kind: 'tracker.recorded' })).toHaveLength(1);
+    // A GitHub tracker carries owner/repo and the in-progress label, which status and the outbox policy report to drainers. See specs/graph-import "Tracker record".
+    const gh = await http(h, 'PUT', '/v1/graph', { content: G, tracker: { kind: 'github', workspace: 'acme/app', inProgressLabel: 'in-progress' } });
+    expect(gh.body).toMatchObject({ accepted: true });
+    expect((await http(h, 'GET', '/v1/status')).body['tracker']).toMatchObject({ kind: 'github', workspace: 'acme/app', inProgressLabel: 'in-progress' });
+    expect((await http(h, 'GET', '/v1/outbox')).body['policy']).toMatchObject({ tracker: { kind: 'github', inProgressLabel: 'in-progress' } });
+    expect((await http(h, 'PUT', '/v1/graph', { content: G, tracker: { kind: 'linear', inProgressLabel: 'x' } })).status).toBe(400);
+    expect(h.store.listEvents({ kind: 'tracker.recorded' })).toHaveLength(2);
   });
 
   it('a run with no tracker recorded and auto mode produces no effects', async () => {
