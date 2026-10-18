@@ -214,7 +214,23 @@ export function parseOverridePatch(patch: unknown, kind?: RunnerKind): PatchResu
   return { ok: false, key, error: issue?.message ?? 'invalid value' };
 }
 
-export type ApplyResult = { ok: true; patch: Overrides; next: Overrides } | { ok: false; key: string; error: string };
+/**
+ * Operator-surface arguments into an override patch: `sandbox` is codex's, and
+ * `commit` lands under the namespace of the patch's own `runnerKind`, else of
+ * `kind` (the kind in force). Used by `orchestrator-ctl config` and the MCP
+ * `start` and `configure` tools. See specs/operator-control "Configuration route".
+ */
+export function foldRunnerArgs(args: Record<string, unknown>, kind: RunnerKind): Record<string, unknown> {
+  const { sandbox, commit, ...out } = args;
+  const put = (ns: Namespace, leafKey: string, v: unknown) => {
+    if (v !== undefined) out[ns] = { ...(isObject(out[ns]) ? out[ns] : {}), [leafKey]: v };
+  };
+  put('codex', 'sandbox', sandbox);
+  put(NAMESPACE_OF[isRunnerKind(out['runnerKind']) ? out['runnerKind'] : kind], 'commit', commit);
+  return out;
+}
+
+export type ApplyResult ={ ok: true; patch: Overrides; next: Overrides } | { ok: false; key: string; error: string };
 
 /**
  * Validate a patch against the document in force and merge it. The flat `model`

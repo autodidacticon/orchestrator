@@ -194,9 +194,13 @@ describe('package entrypoints', () => {
     // See specs/model-selection and specs/host-integration "Work skill and workflow" (worker agent runs with the claimed selection).
     expect(run).toContain('workers claude-opus-5-5 at medium');
     expect(run).toContain('config.model.applied');
-    expect(readFileSync(path.join(plugin, 'skills/work/SKILL.md'), 'utf8')).toContain('claude-opus-5-5');
+    // The toolchain line names the kind-specific default per runner kind; codex omits the allow list. See specs/host-integration "Skills report the toolchain".
+    const codexLine = 'workers codex gpt-6-astra at medium (file); sandbox workspace-write, daemon commits';
+    for (const word of [codexLine, 'runner.kind', 'runner.codex.*', 'budgets.prices', 'config.runnerKind', 'modeNote', 'Codex launches are worked only in `spawn` or `mixed` mode, because pull-mode workers\nare this session\'s Claude subagents', 'claimableByKind["claude-code"]', 'Do not start it for a codex-default run']) expect(run, word).toContain(word);
+    const work = readFileSync(path.join(plugin, 'skills/work/SKILL.md'), 'utf8');
+    for (const word of ['claude-opus-5-5', 'gpt-6-astra', codexLine.split(' (file)')[0]!, 'Pull-mode workers are this session\'s Claude subagents', 'worked only in `spawn` or `mixed` mode']) expect(work.replace(/\n\s*/g, ' '), word).toContain(word.replace(/\n\s*/g, ' '));
     const imp = readFileSync(path.join(plugin, 'skills/import/SKILL.md'), 'utf8');
-    for (const word of ['model:<name>', 'effort:<level>', 'ignoredLabels']) expect(imp, word).toContain(word);
+    for (const word of ['runner:<kind>', 'model:<name>', 'effort:<level>', 'ignoredLabels', 'config.runnerKind', 'gpt-6-astra']) expect(imp, word).toContain(word);
     const workflow = readFileSync(path.join(plugin, 'workflows/work.js'), 'utf8');
     expect(workflow).toMatch(/model: c\.model/);
     expect(workflow).toMatch(/effort: c\.effort/);

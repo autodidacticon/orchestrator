@@ -20,19 +20,46 @@ and this session's own subagents do the work (section 1a), so the user sees ever
 `spawn` (the daemon runs headless agents, for unattended runs) and `mixed` are explicit
 choices: `start` with `mode`, or `runner.mode` in `orchestrator.yaml`, which wins.
 
+The runner kind (`config.runnerKind`, from `runner.kind` in `orchestrator.yaml`, `start` or
+`configure` with `runnerKind`, or `--set runnerKind=codex`) is `claude-code` by default or
+`codex`. Codex launches are worked only in `spawn` or `mixed` mode, because pull-mode workers
+are this session's Claude subagents and claim only `claude-code` launches. So a `start`
+without `mode` whose runner kind is `codex` (the `runnerKind` argument, or already in force
+for the run) starts the daemon in `spawn` instead of `pull`, and the result's `modeNote` says
+so; tell the user the daemon runs the Codex agents headless and you only monitor. When
+`modeNote` warns that a codex run is in `pull` mode, offer `start` with `mode: "spawn"` or
+`"mixed"`. A task can also choose its kind (`runner` in its payload, or a `runner:<kind>`
+label), so one run can hold both kinds; `status.claimableByKind` counts parked launches per kind.
+
 Tell the user who is executing the work, and report the toolchain in one line: the check
-command, the integration branch, and the worker model and effort (`config.model` and
-`config.effort`, default `claude-opus-5-5` at `medium`) with the source of each and, when the
-daemon spawns agents (`spawn`, or `mixed` after the claim window), the toolchains whose
-commands agents may run, for example
+command, the integration branch, and the worker kind, model and effort (`config.runnerKind`,
+`config.model` and `config.effort`; the defaults are `claude-opus-5-5` at `medium` for
+`claude-code` and `gpt-6-astra` at `medium` for `codex`) with the source of each and, when the
+daemon spawns Claude Code agents (`spawn`, or `mixed` after the claim window), the toolchains
+whose commands agents may run, for example
 "detected: npm test on main; workers claude-opus-5-5 at medium (default); agents may run npm and node".
+For a `claude-code` run you may leave the kind out of the line, as above. For a `codex` run name
+the kind, the sandbox, and the commit policy (`config.codex.sandbox`, `config.codex.commit`) and
+omit the allow-list part, since Codex runs under its sandbox instead of an allow list, for example
+"detected: npm test on main; workers codex gpt-6-astra at medium (file); sandbox workspace-write, daemon commits".
 When this session's subagents work the launches (`pull`), omit the allow-list part: workers
 run under this session's own permissions.
 When `config.model.applied` is false (a `runnerCommand` without the `{model}` slot), omit the
 model part. A task can choose its own model or effort: `model` and `effort` in its payload, or
 `model:<name>` and `effort:<level>` labels on its issue; `status.liveLaunches` shows what each
-launch runs with. If `needsConfig` is not empty, resolve it now (section 1b). Then call
-`status`. If no graph is loaded, say so and suggest the `import` skill.
+launch runs with (its `runner`, `model`, and `effort`). If `needsConfig` is not empty, resolve
+it now (section 1b). Then call `status`. If no graph is loaded, say so and suggest the
+`import` skill.
+
+The configuration keys for the runner kinds, in `orchestrator.yaml`: `runner.kind`
+(`claude-code` or `codex`); `runner.claude.*` (`model`, `effort`, `commit`, `allowedTools`,
+`deriveTools`); `runner.codex.*` (`model`, `effort` up to `ultra`, `sandbox`: `read-only`,
+`workspace-write` (the default), or `danger-full-access`, and `commit`: `daemon` by default,
+`agent` under `danger-full-access`); and `budgets.prices`, the per-model token prices
+(`{ <model>: { inputPerMTok, outputPerMTok, cachedInputPerMTok? } }`, USD per million tokens) that turn Codex token
+counts into cost. A Codex launch without a price for its model counts in
+`cost.unpricedLaunches` and its cost stays unknown, so `budgets.maxRunCostUsd` cannot stop it;
+mention this when a codex run has a cost budget and no price.
 
 ## 1b. Resolve what detection could not
 
@@ -45,17 +72,23 @@ and their counterparts). When one is stated unambiguously, call `configure` with
 and tell the user the command and where you found it ("set checkCommand to `make check` from
 CLAUDE.md"). Otherwise propose your best reading, or say you found none, and call `configure`
 only with what the user confirms. `configure` also takes `capacity`, `allowedTools` (rules
-appended to the derived list for spawned agents, such as `Bash(docker:*)`), `runnerCommand`,
-and `model` and `effort` (the worker defaults for launches prepared from then on; effort is
-`low`, `medium`, `high`, `xhigh`, or `max`); a null clears an override so the value falls back
+appended to the derived list for spawned Claude Code agents, such as `Bash(docker:*)`),
+`runnerCommand`, `runnerKind` (`claude-code` or `codex`), `model` and `effort` (the worker
+defaults of the kind in force, or of `runnerKind` in the same call, for launches prepared from
+then on; effort is `low`, `medium`, `high`, `xhigh`, or `max`, and `ultra` is codex-only),
+`codex` (`{ model, effort }` for codex whichever kind is in force), `sandbox` (the codex
+sandbox), and `commit` (`agent` or `daemon`, the commit policy of the kind in force); a null clears an override so the value falls back
 to the file, detection, or the default. The integration branch is start-only: pass `integrationBranch` to `start` before
 the run holds any launch; a running daemon refuses it.
 
 ## 1a. Work the run with session subagents
 
-When the mode in force is `pull` or `mixed`, run the bundled workflow before the first `wait`,
-with a worker count no larger than the run's `capacity` (from `status`), usually 2 to 4, and
-a run tag such as `work-1`:
+When the mode in force is `pull` or `mixed` and the run can hold `claude-code` launches, run
+the bundled workflow before the first `wait`. Do not start it for a codex-default run
+(`config.runnerKind` is `codex`) unless the graph has tasks with `runner: claude-code` or
+`status.claimableByKind["claude-code"]` is above 0: the workers claim only `claude-code`
+launches, so they would find nothing and stop. Use a worker count no larger than the run's
+`capacity` (from `status`), usually 2 to 4, and a run tag such as `work-1`:
 
 ```
 Workflow({ scriptPath: "<plugin dir>/workflows/work.js", args: { workers: 2, runTag: "work-1", capacity: <status.config.capacity.value> } })

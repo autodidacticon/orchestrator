@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { runCli } from '../../src/operator/cli.js';
 import { digestOf } from '../../src/operator/routes.js';
 import { health, listRuns, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
+import { parseSetFlags } from '../../src/runs/resolve.js';
 import { readConfigJson, runPaths } from '../../src/runs/runDir.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { gitIn, makeRepo, makeSlice, scriptedAgent, single, tsxLoader, type SliceHarness } from './harness.js';
@@ -124,6 +125,46 @@ describe('orchestrator-ctl config', () => {
     expect(huge.body).toMatchObject({ key: 'effort' });
     expect(h.orch.effective().effort.value).toBe('high');
   });
+
+  // See specs/operator-control "Configuration route" and "Start arguments" (runner kind).
+  it('selects the runner kind, the codex sandbox, and the commit policy, prints the codex leaves with sources, and names both kinds in the usage', async () => {
+    h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000 } });
+    const url = h.orch.apiBaseUrl;
+    const set = await runCli(['--url', url, 'config', '--runner-kind', 'codex', '--sandbox', 'danger-full-access']);
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ ok: true, overrides: { runnerKind: 'codex', codex: { sandbox: 'danger-full-access' } } });
+    const shown = await runCli(['--url', url, 'config']);
+    expect(shown.body).toMatchObject({
+      config: {
+        runnerKind: { value: 'codex', source: 'argument' },
+        model: { value: 'gpt-6-astra', source: 'default' },
+        codex: { sandbox: { value: 'danger-full-access', source: 'argument' }, commit: { value: 'agent', source: 'default' } },
+      },
+    });
+    // --commit binds to the kind in force (codex here), or to --runner-kind in the same call.
+    const commit = await runCli(['--url', url, 'config', '--commit', 'daemon']);
+    expect(commit.body).toMatchObject({ config: { codex: { commit: { value: 'daemon', source: 'argument' } }, claude: { commit: { value: 'agent', source: 'default' } } } });
+    const claude = await runCli(['--url', url, 'config', '--runner-kind', 'claude-code', '--commit', 'daemon', '--effort', 'high']);
+    expect(claude.body).toMatchObject({ config: { runnerKind: { value: 'claude-code', source: 'argument' }, claude: { commit: { value: 'daemon', source: 'argument' } }, effort: { value: 'high', source: 'argument' } } });
+    const cleared = await runCli(['--url', url, 'config', '--clear', 'codex.sandbox', '--clear', 'runnerKind']);
+    expect(cleared.body).toMatchObject({ config: { runnerKind: { value: 'claude-code', source: 'default' }, codex: { sandbox: { value: 'workspace-write', source: 'default' }, commit: { value: 'daemon', source: 'argument' } } } });
+    const bad = await runCli(['--url', url, 'config', '--sandbox', 'open']);
+    expect(bad.status).toBe(400);
+    expect(bad.body).toMatchObject({ key: 'codex.sandbox' });
+    const usage = ((await runCli(['--help'])).body as { usage: string }).usage;
+    for (const word of ['--runner-kind', '--sandbox', '--commit', 'runnerKind=claude-code|codex', 'codex.{model,effort,sandbox,commit,command}', 'claude-opus-5-5 at medium', 'gpt-6-astra at medium', 'ultra is codex-only']) expect(usage, word).toContain(word);
+  });
+
+  it('start accepts --set runnerKind=codex and the dotted codex keys', async () => {
+    env = { ...process.env, ORCH_HOME: fresh('orch-kind-home-') };
+    const repo = realpathSync(makeRepo(fresh('orch-kind-repo-')));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), `runnerCommand: "${scripted}"\ncheckCommand: "true"\n`);
+    const overrides = parseSetFlags(['runnerKind=codex', 'codex.model=gpt-6-pro', 'codex.sandbox=read-only', 'effort=ultra']);
+    expect(overrides).toEqual({ runnerKind: 'codex', codex: { model: 'gpt-6-pro', sandbox: 'read-only', effort: 'ultra' } });
+    const started = await startDaemon({ repo, env, overrides });
+    expect(started.config).toMatchObject({ runnerKind: { value: 'codex', source: 'argument' }, effort: { value: 'ultra', source: 'argument' }, codex: { model: { value: 'gpt-6-pro', source: 'argument' }, sandbox: { value: 'read-only', source: 'argument' }, commit: { value: 'daemon', source: 'default' } } });
+    await stopDaemon({ repo, env });
+  }, 60_000);
 });
 
 // See specs/toolchain-discovery "Resolved configuration record" and "Integration branch detection and pinning".

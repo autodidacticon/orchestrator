@@ -51,7 +51,10 @@ agents may run are detected from the repository root, and every value records
 where it came from (argument, file, pinned, detected, default) in
 <runDir>/config.json and in status. --set key=value stores a durable override
 for the run before resolving; keys: checkCommand, integrationBranch (start-only),
-capacity, allowedTools (a JSON array, or one rule per flag), runnerCommand. An
+capacity, allowedTools (a JSON array, or one rule per flag), runnerCommand,
+runnerKind (claude-code or codex), model and effort (bound to the kind in
+force), and the per-kind keys claude.model, claude.effort, claude.commit,
+codex.model, codex.effort, codex.sandbox, codex.commit, codex.command. An
 unknown key or a bad value is a usage error (exit 2). While checkCommand is
 unresolved, submitted work is held until it is set (orchestrator-ctl config).
 

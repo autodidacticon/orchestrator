@@ -22,7 +22,12 @@ session and hand over normalized records.
 - The orchestrator daemon must be running for this repository. Call the `start` tool; it is
   idempotent and returns the run directory, the graph path, and the resolved configuration.
   Report the toolchain in one line: the check command and the integration branch with the
-  source of each (for example "detected: npm test on main"). When `needsConfig` names
+  source of each (for example "detected: npm test on main"), and for a run whose
+  `config.runnerKind` is `codex` also the kind, its model and effort, the sandbox, and the
+  commit policy (for example "detected: npm test on main; workers codex gpt-6-astra at medium
+  (file); sandbox workspace-write, daemon commits"). Codex launches are worked only in `spawn`
+  or `mixed` mode, because pull-mode workers are this session's Claude subagents; the run
+  skill explains it. When `needsConfig` names
   `checkCommand`, follow the run skill's section 1b (read `CLAUDE.md`, the README, and the
   root manifests; set it with `configure` when it is stated unambiguously, otherwise ask) before
   continuing, so that the first submission is not held.

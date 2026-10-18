@@ -2,7 +2,7 @@
 /**
  * Operator CLI over the daemon's HTTP API.
  *   orchestrator-ctl status
- *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--model <name>] [--effort <level>] [--clear <key>]...
+ *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>] [--model <name>] [--effort <level>] [--sandbox <mode>] [--commit <agent|daemon>] [--clear <key>]...
  *   orchestrator-ctl answer <task> <text>
  *   orchestrator-ctl cancel <task> [--release] [--reason <text>]
  *   orchestrator-ctl reopen <task> [--cascade]
@@ -25,7 +25,8 @@
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
-import { parseSetFlags } from '../runs/resolve.js';
+import { foldRunnerArgs, parseSetFlags } from '../runs/resolve.js';
+import { isRunnerKind, type RunnerKind } from '../runner/selection.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 import { SqliteStore } from '../state/sqlite.js';
 import { isEntrypoint } from '../entry.js';
@@ -78,13 +79,20 @@ export async function call(base: string, method: 'GET' | 'POST' | 'PUT', route: 
 export const USAGE = `orchestrator-ctl: operate a running orchestrator.
 
   orchestrator-ctl start [--repo <path>] [--set key=value]...   start the daemon for a repository (idempotent);
-                                               --set checkCommand=..., integrationBranch=..., capacity=..., allowedTools=..., runnerCommand=..., model=..., effort=...
+                                               --set checkCommand=..., integrationBranch=..., capacity=..., allowedTools=..., runnerCommand=...,
+                                               runnerKind=claude-code|codex, model=..., effort=..., claude.{model,effort,commit}=...,
+                                               codex.{model,effort,sandbox,commit,command}=...
   orchestrator-ctl stop [--reap] [--repo <path>]
   orchestrator-ctl runs                         list runs under ORCH_HOME
   orchestrator-ctl status
   orchestrator-ctl config                       the resolved configuration: every key with its value and source, the toolchain, needsConfig
-  orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--model <name>] [--effort <level>] [--clear <key>]...
-                                               model and effort are the worker defaults (claude-opus-5-5 at medium); effort is low, medium, high, xhigh, or max
+  orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>]
+                          [--model <name>] [--effort <level>] [--sandbox <mode>] [--commit <agent|daemon>] [--clear <key>]...
+                                               the runner kind is claude-code (default) or codex; model and effort are the worker defaults of
+                                               the kind in force (claude-code: claude-opus-5-5 at medium; codex: gpt-6-astra at medium);
+                                               effort is low, medium, high, xhigh, or max, and ultra is codex-only; --sandbox sets
+                                               codex.sandbox (read-only, workspace-write, danger-full-access); --commit sets the commit policy
+                                               of --runner-kind, else of the kind in force; --clear takes a key or one such as codex.sandbox
   orchestrator-ctl answer <task> <text>
   orchestrator-ctl cancel <task> [--release] [--reason <text>]
   orchestrator-ctl reopen <task> [--cascade]       cascade resets started dependents and returns the plan
@@ -144,6 +152,9 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       capacity: { type: 'string' },
       allow: { type: 'string', multiple: true },
       'runner-command': { type: 'string' },
+      'runner-kind': { type: 'string' },
+      sandbox: { type: 'string' },
+      commit: { type: 'string' },
       model: { type: 'string' },
       effort: { type: 'string' },
       clear: { type: 'string', multiple: true },
@@ -167,13 +178,24 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       return call(base, 'GET', '/v1/status');
     case 'config': {
       // One PUT for every flag given; `--allow` appends to the rules already set by argument. See specs/operator-control "Configuration route".
-      const patch: Record<string, unknown> = {};
-      for (const k of values.clear ?? []) patch[k] = null;
+      let patch: Record<string, unknown> = {};
+      for (const k of values.clear ?? []) {
+        // A per-kind key such as codex.sandbox clears one leaf of its namespace.
+        const [ns, leafKey] = k.split('.');
+        if (ns && leafKey) patch[ns] = { ...(patch[ns] as Record<string, unknown> | undefined), [leafKey]: null };
+        else patch[k] = null;
+      }
       if (values['check-command'] !== undefined) patch['checkCommand'] = values['check-command'];
       if (values.capacity !== undefined) patch['capacity'] = Number(values.capacity);
       if (values['runner-command'] !== undefined) patch['runnerCommand'] = values['runner-command'];
+      if (values['runner-kind'] !== undefined) patch['runnerKind'] = values['runner-kind'];
       if (values.model !== undefined) patch['model'] = values.model;
       if (values.effort !== undefined) patch['effort'] = values.effort;
+      if (values.sandbox !== undefined) patch['sandbox'] = values.sandbox;
+      if (values.commit !== undefined) patch['commit'] = values.commit;
+      // The commit policy is per kind: it binds to --runner-kind, else to the kind in force.
+      const kind = values.commit === undefined || isRunnerKind(patch['runnerKind']) ? undefined : ((await call(base, 'GET', '/v1/config')).body as { config?: { runnerKind?: { value?: RunnerKind } } }).config?.runnerKind?.value;
+      patch = foldRunnerArgs(patch, kind ?? 'claude-code');
       if (values.allow?.length) {
         const cur = await call(base, 'GET', '/v1/config');
         const existing = patch['allowedTools'] === null ? [] : ((cur.body as { overrides?: { allowedTools?: string[] } }).overrides?.allowedTools ?? []);

@@ -8,8 +8,9 @@ import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema, tracker
 import { randomUUID } from 'node:crypto';
 import { ancestorPids } from '../runs/ancestry.js';
 import { daemonState, listRuns, remoteDaemonUrl, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
-import { EFFORT_LEVELS, RUNNER_KINDS } from '../runner/selection.js';
-import { resolveRepoPath, runPaths } from '../runs/runDir.js';
+import { CODEX_SANDBOXES, COMMIT_POLICIES, EFFORT_LEVELS_ALL, EFFORT_LEVELS_BY_KIND, isRunnerKind, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
+import { foldRunnerArgs, type Overrides } from '../runs/resolve.js';
+import { readConfigJson, readRepoConfigRaw, resolveRepoPath, runPaths } from '../runs/runDir.js';
 
 /** The cap keeps every tool call under Claude Code's two-minute foreground limit; ORCH_WAIT_CAP_MS shortens it for tests. */
 export const WAIT_CAP_MS = Number(process.env['ORCH_WAIT_CAP_MS'] ?? 90_000);
@@ -46,6 +47,24 @@ export function digestSatisfies(digest: Record<string, unknown>, until: Until | 
     case 'stalled':
       return digest['stalled'] === true;
   }
+}
+
+/** The runner arguments `start` and `configure` share. See specs/operator-mcp "Start tool" and "Configure tool". */
+const RUNNER_ARG_TEXT = {
+  runnerKind: 'The runner kind for launches prepared from now on: claude-code (the default) or codex. A task payload runner or a runner:<kind> label overrides it per task.',
+  model: 'The worker model of the kind in force, or of runnerKind in the same call, for launches prepared from now on (defaults: claude-code claude-opus-5-5, codex gpt-6-astra); a task payload or a model:<name> label overrides it per task.',
+  effort: 'The worker effort of the kind in force, or of runnerKind in the same call (default medium); low, medium, high, xhigh, or max, and ultra for codex only (refused for claude-code). A task payload or an effort:<level> label overrides it per task.',
+  codex: 'The codex model and effort (default gpt-6-astra at medium), whichever kind is in force.',
+  sandbox: 'The codex sandbox (codex.sandbox): read-only, workspace-write (the default), or danger-full-access.',
+  commit: 'The commit policy of runnerKind in the same call, else of the kind in force: agent (the agent commits) or daemon (the orchestrator commits at submit). Defaults: claude-code agent; codex daemon, or agent under danger-full-access.',
+};
+
+/** The runner kind a run would start with when the start call names none: the run's stored override (config.json), else orchestrator.yaml, else claude-code. */
+export function kindOfRun(repo: string, env: NodeJS.ProcessEnv): RunnerKind {
+  const stored = readConfigJson(runPaths(repo, env).runDir)?.overrides?.runnerKind;
+  if (isRunnerKind(stored)) return stored;
+  const file = (readRepoConfigRaw(repo)?.['runner'] as { kind?: unknown } | undefined)?.kind;
+  return isRunnerKind(file) ? file : 'claude-code';
 }
 
 export interface OperatorContext {
@@ -195,40 +214,66 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     'start',
     {
       description:
-        'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path, the runner mode in force, and the resolved configuration: config (every key as { value, source }: argument, file, pinned, detected, default, or unresolved), toolchain (what detection found in the repository root), needsConfig (keys no layer supplied; checkCommand there means submitted work is held until it is set), and applied / rejected for the configuration arguments. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull unless orchestrator.yaml sets runner.mode or the run chose a mode before; a running daemon keeps its mode. Configuration arguments become durable overrides for the run: passed to a daemon this call spawns, applied through the configuration route to one already running; integrationBranch is start-only and lands under rejected on a running daemon. After an idle exit or a crash every other tool revives the daemon by itself.',
+        'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path, the runner mode in force, and the resolved configuration: config (every key as { value, source }: argument, file, pinned, detected, default, or unresolved; runnerKind and the claude and codex leaves included), toolchain (what detection found in the repository root), needsConfig (keys no layer supplied; checkCommand there means submitted work is held until it is set), and applied / rejected for the configuration arguments. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull, or to spawn when the runner kind is codex (runnerKind here, or already in force for the run), because pull-mode workers are this session\'s Claude subagents and never claim codex launches; orchestrator.yaml runner.mode, or a mode the run chose before, wins, and a running daemon keeps its mode. modeNote in the result says when the codex default applied, or warns that a codex run is in pull mode. Configuration arguments become durable overrides for the run: passed to a daemon this call spawns, applied through the configuration route to one already running; integrationBranch is start-only and lands under rejected on a running daemon. After an idle exit or a crash every other tool revives the daemon by itself.',
       inputSchema: {
         mode: z.enum(['spawn', 'pull', 'mixed']).optional(),
         checkCommand: z.string().optional().describe('The command the verifier runs on every rebased submission, e.g. "npm test".'),
         integrationBranch: z.string().optional().describe('Start-only: the branch work is published to; pinned for the run once chosen.'),
         capacity: z.number().int().optional().describe('Agents in parallel.'),
-        allowedTools: z.array(z.string()).optional().describe('Rules appended to the derived allow list for spawned agents, e.g. "Bash(docker:*)".'),
-        runnerCommand: z.string().optional().describe('The runner command template; {allowedTools}, {model}, and {effort} are filled at spawn.'),
-        model: z.string().optional().describe('The worker model for launches prepared from now on (default claude-opus-5-5); a task payload or a model:<name> label overrides it per task.'),
-        effort: z.enum(EFFORT_LEVELS).optional().describe('The worker effort for launches prepared from now on (default medium); a task payload or an effort:<level> label overrides it per task.'),
+        allowedTools: z.array(z.string()).optional().describe('Rules appended to the derived allow list for spawned Claude Code agents, e.g. "Bash(docker:*)".'),
+        runnerCommand: z.string().optional().describe('The Claude Code runner command template; {allowedTools}, {model}, and {effort} are filled at spawn.'),
+        runnerKind: z.enum(RUNNER_KINDS).optional().describe(RUNNER_ARG_TEXT.runnerKind),
+        model: z.string().optional().describe(RUNNER_ARG_TEXT.model),
+        effort: z.enum(EFFORT_LEVELS_ALL).optional().describe(RUNNER_ARG_TEXT.effort),
+        codex: z.object({ model: z.string().optional(), effort: z.enum(EFFORT_LEVELS_BY_KIND.codex).optional() }).optional().describe(RUNNER_ARG_TEXT.codex),
+        sandbox: z.enum(CODEX_SANDBOXES).optional().describe(RUNNER_ARG_TEXT.sandbox),
+        commit: z.enum(COMMIT_POLICIES).optional().describe(RUNNER_ARG_TEXT.commit),
       },
     },
     async (a) =>
       guarded(async () => {
         const { mode, ...rest } = a;
-        const overrides = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
-        return { status: 200, body: await startDaemon({ repo: values.repo, env, mode, ...(mode ? {} : { defaultMode: 'pull' as const }), ...(Object.keys(overrides).length ? { overrides } : {}) }) };
+        const repo = await client.repo();
+        // The kind in force decides the plugin's mode default: the argument, else the run's stored override, else orchestrator.yaml. See specs/operator-mcp "Start tool".
+        const kind = rest.runnerKind ?? kindOfRun(repo, env);
+        const defaultMode = kind === 'codex' ? ('spawn' as const) : ('pull' as const);
+        const overrides = foldRunnerArgs(Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)), kind) as Overrides;
+        const r = await startDaemon({ repo: values.repo, env, mode, ...(mode ? {} : { defaultMode }), ...(Object.keys(overrides).length ? { overrides } : {}) });
+        const kindNow = r.config?.runnerKind.value ?? kind;
+        const modeNote =
+          kindNow === 'codex' && r.mode === 'pull'
+            ? 'runner kind codex in pull mode: codex launches park until a codex worker claims them, and this session\'s workers claim only claude-code launches; call start with mode spawn or mixed to have the daemon run them'
+            : !mode && r.started && defaultMode === 'spawn' && r.mode === 'spawn'
+              ? 'runner kind codex: the run is in spawn (the plugin\'s default for a codex run, unless orchestrator.yaml or the run chose a mode), because pull-mode workers are this session\'s Claude subagents; the daemon runs the codex agents'
+              : undefined;
+        return { status: 200, body: { ...r, ...(modeNote ? { modeNote } : {}) } };
       }),
   );
   server.registerTool(
     'configure',
     {
       description:
-        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every launch spawned afterwards), model and effort (every launch prepared afterwards; defaults claude-opus-5-5 at medium; effort is low, medium, high, xhigh, or max; a task payload or a model:/effort: label overrides them per task). A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start).',
+        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every Claude Code launch spawned afterwards), runnerKind (claude-code or codex), model and effort (the worker defaults of the kind in force, or of runnerKind in the same call), codex { model, effort } (the codex defaults whichever kind is in force), sandbox (codex.sandbox) and commit (the commit policy of the kind in force), all for every launch prepared afterwards. Defaults: claude-code runs claude-opus-5-5 at medium, codex runs gpt-6-astra at medium with sandbox workspace-write; effort is low, medium, high, xhigh, or max, and ultra is codex-only (refused with 400 for a claude-code effort); a task payload or a runner:/model:/effort: label overrides them per task. A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start).',
       inputSchema: {
         checkCommand: z.string().nullable().optional(),
         capacity: z.number().int().nullable().optional(),
         allowedTools: z.array(z.string()).nullable().optional(),
         runnerCommand: z.string().nullable().optional(),
-        model: z.string().nullable().optional(),
-        effort: z.enum(EFFORT_LEVELS).nullable().optional(),
+        runnerKind: z.enum(RUNNER_KINDS).nullable().optional().describe(RUNNER_ARG_TEXT.runnerKind),
+        model: z.string().nullable().optional().describe(RUNNER_ARG_TEXT.model),
+        effort: z.enum(EFFORT_LEVELS_ALL).nullable().optional().describe(RUNNER_ARG_TEXT.effort),
+        codex: z.object({ model: z.string().nullable().optional(), effort: z.enum(EFFORT_LEVELS_BY_KIND.codex).nullable().optional() }).nullable().optional().describe(RUNNER_ARG_TEXT.codex),
+        sandbox: z.enum(CODEX_SANDBOXES).nullable().optional().describe(RUNNER_ARG_TEXT.sandbox),
+        commit: z.enum(COMMIT_POLICIES).nullable().optional().describe(RUNNER_ARG_TEXT.commit),
       },
     },
-    async (a) => guarded(() => client.call('PUT', '/v1/config', Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined)))),
+    async (a) =>
+      guarded(async () => {
+        const patch = Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined));
+        // The commit policy binds to runnerKind in the same call, else to the kind in force on the daemon.
+        const kind = a.commit === undefined || a.runnerKind ? (a.runnerKind ?? 'claude-code') : (((await client.call('GET', '/v1/config')).body['config'] as { runnerKind?: { value?: RunnerKind } } | undefined)?.runnerKind?.value ?? 'claude-code');
+        return client.call('PUT', '/v1/config', foldRunnerArgs(patch, kind));
+      }),
   );
   server.registerTool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a) =>
     guarded(async () => {
@@ -236,7 +281,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       return { status: r.stopped ? 200 : 409, body: r };
     }),
   );
-  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (allowedTools with its parts and whether the runner command applies it; model and effort likewise, each live launch also listing its own model and effort), toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async () =>
+  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (runnerKind, the kind in force; allowedTools with its parts and whether the runner command applies it, claude-code only; model and effort of the kind in force likewise; the claude and codex leaves such as codex.sandbox and codex.commit; each live launch also listing its own runner, model, and effort), claimableByKind: parked launches per runner kind, toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async () =>
     guarded(() => client.call('GET', '/v1/status')),
   );
   server.registerTool('runs', { description: 'List every run under ORCH_HOME with its repository, daemon liveness, and, for a daemon that is gone, its exit record (idle, stop, or signal with the last digest) or none after a crash.', inputSchema: {} }, async () =>

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { clampWait, digestSatisfies, TOOL_NAMES, WAIT_CAP_MS, WAIT_DEFAULT_MS } from '../../src/operator/mcp-server.js';
+import { clampWait, digestSatisfies, kindOfRun, TOOL_NAMES, WAIT_CAP_MS, WAIT_DEFAULT_MS } from '../../src/operator/mcp-server.js';
 import { listRuns, stopDaemon } from '../../src/runs/lifecycle.js';
 import { pidAlive } from '../../src/runner/subprocess.js';
 import { gitIn, makeRepo, scriptedAgent, tsxLoader } from './harness.js';
@@ -63,7 +63,14 @@ describe('operator MCP server', () => {
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     expect(tools.tools).toHaveLength(31);
     const configure = tools.tools.find((t) => t.name === 'configure');
-    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'effort', 'model', 'runnerCommand']);
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'codex', 'commit', 'effort', 'model', 'runnerCommand', 'runnerKind', 'sandbox']);
+    const codexArg = (configure?.inputSchema as { properties: Record<string, { anyOf?: Array<{ properties?: Record<string, unknown> }>; properties?: Record<string, unknown> }> }).properties['codex'];
+    expect(JSON.stringify(codexArg)).toContain('"model"');
+    expect(JSON.stringify(codexArg)).toContain('"ultra"');
+    const statusTool = tools.tools.find((t) => t.name === 'status');
+    for (const word of ['runnerKind', 'runner', 'codex.sandbox', 'claimableByKind']) expect(statusTool?.description, word).toContain(word);
+    const startTool = tools.tools.find((t) => t.name === 'start');
+    for (const word of ['claude-opus-5-5', 'gpt-6-astra', 'ultra', 'spawn when the runner kind is codex']) expect(JSON.stringify(startTool), word).toContain(word);
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);
@@ -200,6 +207,51 @@ describe('operator MCP server', () => {
     client = new Client({ name: 'test', version: '0' });
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
     expect(await tool('start')).toMatchObject({ started: true, mode: 'spawn' });
+  }, 120_000);
+
+  // See specs/operator-mcp "Start tool" (mode default for codex) and "Configure tool". No graph is loaded: a codex daemon in spawn would exec codex.
+  it('defaults a plugin-started codex run to spawn, by argument or by the kind already in force, and binds sandbox and commit to codex', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    const started = await tool('start', { runnerKind: 'codex', sandbox: 'read-only', codex: { effort: 'ultra' } });
+    expect(started).toMatchObject({
+      status: 200,
+      started: true,
+      mode: 'spawn',
+      config: { runnerKind: { value: 'codex', source: 'argument' }, effort: { value: 'ultra', source: 'argument' }, codex: { sandbox: { value: 'read-only', source: 'argument' }, commit: { value: 'daemon', source: 'default' } } },
+    });
+    expect(started['modeNote']).toMatch(/codex.*spawn/);
+    expect((await tool('status'))['runner']).toMatchObject({ mode: 'spawn' });
+    // commit binds to the kind in force on the daemon.
+    expect(await tool('configure', { commit: 'agent' })).toMatchObject({ status: 200, config: { codex: { commit: { value: 'agent', source: 'argument' } }, claude: { commit: { value: 'agent', source: 'default' } } } });
+    expect(await tool('configure', { sandbox: null, commit: null })).toMatchObject({ status: 200, config: { codex: { sandbox: { value: 'workspace-write', source: 'default' }, commit: { value: 'daemon', source: 'default' } } } });
+    // ultra is codex-only: refused for a claude-code effort.
+    const refused = await client.callTool({ name: 'configure', arguments: { runnerKind: 'claude-code', effort: 'ultra' } });
+    expect(refused.isError).toBe(true);
+    expect(parse(refused)).toMatchObject({ status: 400, key: 'effort' });
+    await stopDaemon({ repo, env, reap: true });
+    // Already in force for the run: the stored override (config.json) names codex for a start without arguments; a fresh run directory reads the file.
+    expect(kindOfRun(repo, env)).toBe('codex');
+    await client.close();
+    client = undefined;
+
+    const filed = realpathSync(makeRepo(mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'))));
+    dirs.push(path.dirname(filed));
+    writeFileSync(path.join(filed, 'orchestrator.yaml'), ['checkCommand: "true"', 'runner: { kind: codex }'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: filed };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    expect(await tool('start')).toMatchObject({ started: true, mode: 'spawn', config: { runnerKind: { value: 'codex', source: 'file' } } });
+    // A codex run switched to pull is warned about.
+    const pulled = await tool('start', { mode: 'pull' });
+    expect(pulled).toMatchObject({ started: false, mode: 'pull' });
+    expect(pulled['modeNote']).toMatch(/pull mode/);
   }, 120_000);
 
   it('revives the daemon after an idle exit and refuses after a stop', async () => {
