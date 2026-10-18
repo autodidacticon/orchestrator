@@ -186,6 +186,9 @@ describe('runner-specific brief text', () => {
     expect(markdown).toContain('reapply its changes as file edits');
     expect(markdown).toContain('leave the delta in the worktree for the orchestrator to commit');
     expect(markdown).not.toContain('Bash rules are in force');
+    // The sandbox blocks a command's network access, so reporting goes through the MCP server (found by the codex e2e).
+    expect(section(markdown, 'Reporting')).toContain("through the `orchestrator` MCP server's tools");
+    expect(section(markdown, 'Reporting')).toContain('Do not call the API from a command');
     for (const s of gitWrites) expect(markdown, s).not.toContain(s);
     expect(json.runner).toEqual({ kind: 'codex', sandbox: 'workspace-write', commitPolicy: 'daemon' });
     expect(json.allowedTools).toBeUndefined();
@@ -206,6 +209,7 @@ describe('runner-specific brief text', () => {
     expect(claude).toBe(plain);
     expect(claude).toContain('these Bash rules are in force: `Bash(git:*)`');
     expect(claude).not.toContain('Codex sandbox');
+    expect(claude).not.toContain('MCP server');
     for (const s of gitWrites) expect(claude, s).toContain(s);
   });
 

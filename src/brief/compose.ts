@@ -198,6 +198,11 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     );
   }
   lines.push('## Reporting', '');
+  // A Codex sandbox refuses network access to commands, so the API is reachable only through the MCP server, which Codex runs outside the sandbox.
+  if (kind === 'codex')
+    lines.push(
+      '- Call these operations through the `orchestrator` MCP server\'s tools (`heartbeat`, `report`, `block`, `inbox`, `log`). Do not call the API from a command (curl, a script): the sandbox blocks its network access. Use the fallback file below only when an MCP tool call itself fails.',
+    );
   lines.push(
     `- API: \`${input.apiBaseUrl}/v1/launches/${launch.launchId}/...\` with header \`Authorization: Bearer <token from brief.json>\`.`,
     '- Operations: heartbeat, report (kind submit|fail, with seq), block (a question; waits for the answer), inbox, log.',

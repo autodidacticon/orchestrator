@@ -120,7 +120,7 @@ By default agents are headless Claude Code sessions (`runnerCommand`, with `{all
 
 ### Tests
 
-`npm test` runs everything that needs no model: unit tests, slices with real subprocess agents, git, and the HTTP API, and the crash-injection suite in `test/crash`, which is the project gate. Three opt-in tests use a real model: `ORCH_E2E_CLAUDE=1 npm test -- test/e2e/claude` runs three Claude Code agents, `ORCH_E2E_CLAUDE_PLUGIN=1 npm test -- test/e2e/plugin` has a Claude Code session operate a run through the plugin, and `ORCH_E2E_CLAUDE_WORK=1 npm test -- test/e2e/work` has a session execute a run in pull mode with two workers through the work skill.
+`npm test` runs everything that needs no model: unit tests, slices with real subprocess agents, git, and the HTTP API, and the crash-injection suite in `test/crash`, which is the project gate. Four opt-in tests use a real model: `ORCH_E2E_CLAUDE=1 npm test -- test/e2e/claude` runs three Claude Code agents, `ORCH_E2E_CLAUDE_PLUGIN=1 npm test -- test/e2e/plugin` has a Claude Code session operate a run through the plugin, and `ORCH_E2E_CLAUDE_WORK=1 npm test -- test/e2e/work` has a session execute a run in pull mode with two workers through the work skill. `ORCH_E2E_CODEX=1 npm test -- test/e2e/codex` has Codex workers (a logged-in `codex` on PATH; skipped with a warning without one) publish three tasks plus a fourth whose `block` is answered after 90 s, and checks recorded tokens, the daemon commit policy, and the MCP tool timeout.
 
 ### Running on Kubernetes
 
