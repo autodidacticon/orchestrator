@@ -15,7 +15,7 @@ facts recorded in Linear ORC-47 and the P-ORC-6 project description:
 | `mcp-last.txt` | probe/mcp-last.txt | The `-o` last-message file of the MCP probe. |
 | `C-events.jsonl` | facts/C-events.jsonl | An unknown `-m`: an `error` item, then `turn.failed`. Exit 1. |
 | `D-stderr.txt` | facts/D-stderr.txt | `required=true` with a server that fails to start. Exit 1, no JSONL, the error on stderr. |
-| `E-events.jsonl` | facts/E-events.jsonl | A plain successful run (`--ephemeral --ignore-user-config`). The usage is synthetic. |
+| `E-events.jsonl` | facts/E-events.jsonl | An MCP tool call refused for approval: a failed `mcp_tool_call` item, then the process exits without `turn.completed`. Rewritten for ORC-51: the ORC-47 reconstruction showed a plain successful run, which did not match the recorded fact E (an approval refusal). The error text is synthetic. |
 | `G-events.jsonl` | spike/G-events.jsonl | Probe G: an MCP call completed under `approval_policy="never"` with both approve keys set. The usage is synthetic. |
 | `probe-mcp-server.mjs` | facts/probe-mcp-server.mjs | A minimal stdio MCP server with one `echo` tool. |
 | `two-turns.jsonl` | hand-written (ORC-50) | **A test decision, not a probe output.** Two `turn.completed` lines in one exec, which a real codex has not been seen to print. It pins the rule that usage is summed over every `turn.completed`. |

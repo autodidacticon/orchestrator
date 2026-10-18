@@ -143,7 +143,13 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   if (input.carry && Object.keys(input.carry).length) {
     lines.push('## Context from previous attempts', '');
     const c = input.carry as Record<string, unknown>;
-    if (c['priorFailure']) lines.push(`- Previous attempt failed: ${JSON.stringify(c['priorFailure'])}`);
+    if (c['priorFailure']) {
+      lines.push(`- Previous attempt failed: ${JSON.stringify(c['priorFailure'])}`);
+      const rf = (c['priorFailure'] as { detail?: { runnerFailure?: { reason?: unknown; detail?: unknown } } }).detail?.runnerFailure;
+      if (rf && typeof rf.reason === 'string') {
+        lines.push(`- The runner's diagnosis of the previous launch: \`${rf.reason}\`${typeof rf.detail === 'string' && rf.detail ? `: ${rf.detail}` : ''}. Fix or avoid that cause rather than retrying the same way; if it is outside the worktree (model, login, MCP setup, sandbox), ask with a question.`);
+      }
+    }
     if (c['verifierOutput']) lines.push('- Verifier output:', '', '```', String(c['verifierOutput']).slice(0, 8000), '```');
     if (c['conflict']) {
       const k = c['conflict'] as { files?: string[]; since?: string[]; previousBranch?: string };

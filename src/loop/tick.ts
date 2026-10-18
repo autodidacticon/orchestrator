@@ -185,10 +185,15 @@ async function handleDeadLaunch(o: Orchestrator, launch: Launch, entry: Entry): 
   } else if (entry.status.kind === 'waiting') {
     o.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');
     if (entry.status.answer !== undefined) o.unblock(launch.taskId, { answer: entry.status.answer });
-  } else if (entry.status.kind === 'running') {
-    o.fail(launch.taskId, { kind: 'exitedWithoutReport', message: 'process exited without a report' }, 'orchestrator', 'deadOrExpired');
   }
-  o.endLaunch(launch, fb ? `fallback:${fb.kind}` : 'exited');
+  let runnerFailure: unknown;
+  if (!fb && entry.status.kind === 'running') {
+    // The runner's diagnosis goes into the failure (and so the next brief) and the launch.ended event.
+    const reason = await o.exitedWithoutReport(launch, 'process exited without a report');
+    runnerFailure = reason.detail?.['runnerFailure'];
+    o.fail(launch.taskId, reason, 'orchestrator', 'deadOrExpired');
+  }
+  o.endLaunch(launch, fb ? `fallback:${fb.kind}` : 'exited', runnerFailure ? { runnerFailure } : {});
   const after = o.entry(launch.taskId);
   if (after.status.kind !== 'submitted') await o.workspace.remove(launch);
 }

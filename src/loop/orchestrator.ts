@@ -624,10 +624,10 @@ export class Orchestrator implements OrchestratorCore {
     });
   }
 
-  endLaunch(launch: Launch, endReason: string): void {
+  endLaunch(launch: Launch, endReason: string, extra: Record<string, unknown> = {}): void {
     if (launch.status === 'ended' || launch.status === 'revoked') return;
     this.store.updateLaunch(launch.launchId, { status: 'ended', endedAt: this.now(), endReason });
-    this.store.appendEvent({ kind: 'launch.ended', taskId: launch.taskId, launchId: launch.launchId, payload: { endReason } }, this.now());
+    this.store.appendEvent({ kind: 'launch.ended', taskId: launch.taskId, launchId: launch.launchId, payload: { endReason, ...extra } }, this.now());
     this.resolveWaiters(launch.launchId, { status: 200, body: { timeout: true, reason: endReason } });
   }
 
@@ -741,6 +741,21 @@ export class Orchestrator implements OrchestratorCore {
   }
 
   /** Read and store the launch's usage once, when it is observed dead or ended. */
+  /**
+   * The `exitedWithoutReport` reason of a launch whose process ended without a report, with the
+   * runner's diagnosis in the message and in `detail.runnerFailure` when it has one.
+   * See specs/task-lifecycle "Health failure reasons".
+   */
+  async exitedWithoutReport(launch: Launch, message: string): Promise<FailedReason> {
+    const failure = await this.runner.readFailure?.(launch).catch(() => undefined);
+    if (!failure) return { kind: 'exitedWithoutReport', message };
+    return {
+      kind: 'exitedWithoutReport',
+      message: `${message}: ${failure.reason}${failure.detail ? `: ${failure.detail}` : ''}`,
+      detail: { runnerFailure: failure },
+    };
+  }
+
   async recordUsage(launch: Launch): Promise<void> {
     if (!this.runner.readUsage) return;
     const cur = this.store.getLaunch(launch.launchId);

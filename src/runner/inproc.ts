@@ -4,7 +4,7 @@
  * agent-call API directly.
  */
 import type { Launch } from '../state/store.js';
-import type { AgentRunner, Liveness, SpawnResult, Usage } from './runner.js';
+import type { AgentRunner, Liveness, RunnerFailure, SpawnResult, Usage } from './runner.js';
 
 export class InprocRunner implements AgentRunner {
   readonly spawned: Launch[] = [];
@@ -15,6 +15,8 @@ export class InprocRunner implements AgentRunner {
   unknownForAll = false;
   /** Test script: usage returned for a launch id or a task id. */
   readonly usageScript = new Map<string, Usage>();
+  /** Test script: the failure diagnosis returned for a launch id or a task id. */
+  readonly failureScript = new Map<string, RunnerFailure>();
 
   async spawn(launch: Launch): Promise<SpawnResult> {
     this.spawned.push(launch);
@@ -33,6 +35,10 @@ export class InprocRunner implements AgentRunner {
 
   async readUsage(launch: Launch): Promise<Usage | undefined> {
     return this.usageScript.get(launch.launchId) ?? this.usageScript.get(launch.taskId);
+  }
+
+  async readFailure(launch: Launch): Promise<RunnerFailure | undefined> {
+    return this.failureScript.get(launch.launchId) ?? this.failureScript.get(launch.taskId);
   }
 
   async reap(launch: Launch): Promise<void> {

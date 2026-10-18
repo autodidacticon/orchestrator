@@ -32,6 +32,17 @@ export interface TokenUsage {
 
 export type UsageSource = 'claude-code' | 'codex' | 'scripted' | 'worker';
 
+/**
+ * Why a launch's process ended without a report, when the runner can tell. Runner-provided detail
+ * on `exitedWithoutReport`, not a failure kind. See specs/task-lifecycle "Health failure reasons".
+ */
+export interface RunnerFailure {
+  /** A short name, e.g. the Codex runner's `unknownModel`, `authFailed`, `mcpStartupFailed`. */
+  reason: string;
+  /** The log line that shows it. */
+  detail?: string;
+}
+
 export interface AgentRunner {
   spawn(launch: Launch, env: Record<string, string>): Promise<SpawnResult>;
   alive(launch: Launch): Promise<boolean>;
@@ -43,4 +54,6 @@ export interface AgentRunner {
   killByLaunchId(launchId: string): Promise<void>;
   /** Usage of a launch that ended, if the runner can read it. */
   readUsage?(launch: Launch): Promise<Usage | undefined>;
+  /** Why a launch that ended without a report failed, if the runner can tell from its log. */
+  readFailure?(launch: Launch): Promise<RunnerFailure | undefined>;
 }

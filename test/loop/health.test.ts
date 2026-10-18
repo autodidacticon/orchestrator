@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { composeBrief } from '../../src/brief/compose.js';
 import type { Config, ConfigInput } from '../../src/config.js';
 import type { StuckDiagnoser } from '../../src/health/stuck.js';
 import { Orchestrator } from '../../src/loop/orchestrator.js';
@@ -39,6 +40,41 @@ describe('health: liveness and leases', () => {
     expect(h.runner.isAlive(l1.launchId)).toBe(false);
     expect(h.orch.entry('T1')).toMatchObject({ attempts: 1, launches: 2, status: { kind: 'running' } });
     expect(h.workspace.briefs.get(h.launchOf('T1').launchId)?.carry).toMatchObject({ priorFailure: { kind: 'leaseExpired' } });
+  });
+
+  // See specs/health-monitoring "Process liveness" and specs/task-lifecycle "Health failure reasons".
+  it("a dead launch fails exitedWithoutReport with the runner's reason and detail, and the next brief carries it", async () => {
+    const h = harness();
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    const detail = 'The model `no-such-model` does not exist or you do not have access to it.';
+    h.runner.failureScript.set(l1.launchId, { reason: 'unknownModel', detail });
+    h.runner.die(l1.launchId);
+    await h.orch.tick();
+    expect(kinds(h, 'T1', 'launch.ended').find((e) => e.launchId === l1.launchId)?.payload).toEqual({ endReason: 'exited', runnerFailure: { reason: 'unknownModel', detail } });
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 1, launches: 2, status: { kind: 'running' } });
+    const l2 = h.launchOf('T1');
+    expect(l2.launchId).not.toBe(l1.launchId);
+    const prior = h.workspace.briefs.get(l2.launchId)?.carry?.['priorFailure'] as { kind: string; message: string; detail: unknown };
+    expect(prior.kind).toBe('exitedWithoutReport');
+    expect(prior.message).toContain('unknownModel');
+    expect(prior.message).toContain(detail);
+    expect(prior.detail).toEqual({ runnerFailure: { reason: 'unknownModel', detail } });
+    const { markdown } = composeBrief(h.workspace.briefs.get(l2.launchId)!, { fallbackPath: '/x' });
+    expect(markdown).toContain("The runner's diagnosis of the previous launch: `unknownModel`: " + detail);
+  });
+
+  it('a runner without readFailure fails a dead launch as before', async () => {
+    const h = harness();
+    (h.runner as { readFailure?: unknown }).readFailure = undefined;
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    h.runner.die(l1.launchId);
+    await h.orch.tick();
+    const prior = h.workspace.briefs.get(h.launchOf('T1').launchId)?.carry?.['priorFailure'];
+    expect(prior).toEqual({ kind: 'exitedWithoutReport', message: 'process exited without a report' });
+    const { markdown } = composeBrief(h.workspace.briefs.get(h.launchOf('T1').launchId)!, { fallbackPath: '/x' });
+    expect(markdown).not.toContain("runner's diagnosis");
   });
 });
 

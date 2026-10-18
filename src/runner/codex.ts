@@ -11,7 +11,7 @@ import { TOOL_NAMES } from '../agent/mcp-shim.js';
 import type { Launch } from '../state/store.js';
 import type { CodexSandbox } from './selection.js';
 import { logPath, SubprocessRunner, type SubprocessRunnerOptions } from './subprocess.js';
-import type { SpawnResult, TokenUsage, Usage } from './runner.js';
+import type { RunnerFailure, SpawnResult, TokenUsage, Usage } from './runner.js';
 import { formatEnvFile, shimCommand, shimEnv } from './shim-command.js';
 
 export { DEFAULT_CODEX_COMMAND } from './command.js';
@@ -121,6 +121,126 @@ export class CodexRunner extends SubprocessRunner {
     const text = await readFile(logPath(this.cxOpts.logDir, launch.launchId), 'utf8').catch(() => '');
     return parseCodexUsage(text);
   }
+
+  /** Why the launch ended without a report, from the same log; see `classifyCodexFailure`. */
+  async readFailure(launch: Launch): Promise<RunnerFailure | undefined> {
+    const text = await readFile(logPath(this.cxOpts.logDir, launch.launchId), 'utf8').catch(() => undefined);
+    return text === undefined ? undefined : classifyCodexFailure(text);
+  }
+}
+
+/** The reasons `classifyCodexFailure` names. Runner detail on `exitedWithoutReport`, not failure kinds. */
+export type CodexFailureReason = 'unknownModel' | 'authFailed' | 'mcpStartupFailed' | 'mcpApprovalRefused' | 'sandboxDenied' | 'turnFailed' | 'exitBeforeTurn';
+
+const UNKNOWN_MODEL = /model metadata for .* not found|model\b.*\b(does not exist|not found|is not supported|unknown)|unknown model|model_not_found/i;
+const AUTH_FAILED = /\b401\b|unauthori[sz]ed|not logged in|codex login|authentication|invalid api key|api key\b.*\b(missing|invalid|not set)|token (has )?expired/i;
+const MCP_STARTUP = /mcp server\b.*\b(failed to start|failed to initiali[sz]e)|mcp servers? failed to initiali[sz]e/i;
+const APPROVAL = /approv|reject|denied|declin|cancel/i;
+const NOT_PERMITTED = /operation not permitted/i;
+
+function str(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+function errorText(v: unknown): string | undefined {
+  if (typeof v === 'string') return str(v);
+  if (v && typeof v === 'object') return str((v as Record<string, unknown>)['message']);
+  return undefined;
+}
+
+/** The first line of `text` that matches, else the first line. */
+function lineOf(text: string, re?: RegExp): string {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  return (re && lines.find((l) => re.test(l))) ?? lines[0] ?? text.trim();
+}
+
+/**
+ * Why a Codex launch ended without a report, from its log (stdout JSONL and stderr in one file):
+ * - an `error` event, an `error` item, or `turn.failed` naming an unknown model (`unknownModel`),
+ *   a missing or rejected login (`authFailed`), or a required MCP server that did not start (`mcpStartupFailed`);
+ * - a failed `mcp_tool_call` refused for approval (`mcpApprovalRefused`);
+ * - the last `command_execution` failing with `Operation not permitted` (`sandboxDenied`);
+ * - any other `turn.failed` or `error` (`turnFailed`);
+ * - otherwise undefined once a turn completed, else stderr is matched the same way, else `exitBeforeTurn`
+ *   when no turn ever started.
+ * `detail` is the message or log line that shows it. See specs/task-lifecycle "Health failure reasons".
+ */
+export function classifyCodexFailure(text: string): { reason: CodexFailureReason; detail?: string } | undefined {
+  const tail = text.length > 256 * 1024 ? text.slice(text.length - 256 * 1024) : text;
+  const errors: string[] = [];
+  const stderr: string[] = [];
+  let refused: string | undefined;
+  let lastCommand: { command: string; failed: boolean; output: string } | undefined;
+  let started = false;
+  let completed = false;
+  for (const line of tail.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let o: Record<string, unknown> | undefined;
+    if (trimmed.startsWith('{')) {
+      try {
+        const parsed: unknown = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') o = parsed as Record<string, unknown>;
+      } catch {
+        /* a stderr line that starts with a brace */
+      }
+    }
+    if (!o) {
+      stderr.push(trimmed);
+      continue;
+    }
+    const type = o['type'];
+    if (type === 'turn.started') started = true;
+    else if (type === 'turn.completed') completed = true;
+    else if (type === 'error') {
+      const m = errorText(o['message']) ?? errorText(o['error']);
+      if (m) errors.push(m);
+    } else if (type === 'turn.failed') {
+      started = true;
+      const m = errorText(o['error']) ?? errorText(o['message']);
+      if (m) errors.push(m);
+    } else if (type === 'item.completed' && o['item'] && typeof o['item'] === 'object') {
+      const item = o['item'] as Record<string, unknown>;
+      if (item['type'] === 'error') {
+        const m = errorText(item['message']) ?? errorText(item['error']);
+        if (m) errors.push(m);
+      } else if (item['type'] === 'mcp_tool_call' && item['status'] === 'failed') {
+        const m = errorText(item['error']) ?? str(item['result']) ?? '';
+        if (APPROVAL.test(m)) refused = `${String(item['server'] ?? '')}.${String(item['tool'] ?? '')}: ${m}`;
+      } else if (item['type'] === 'command_execution') {
+        const code = item['exit_code'];
+        lastCommand = {
+          command: String(item['command'] ?? ''),
+          failed: item['status'] === 'failed' || (typeof code === 'number' && code !== 0),
+          output: String(item['aggregated_output'] ?? ''),
+        };
+      }
+    }
+  }
+  const named = (texts: string[]): { reason: CodexFailureReason; detail: string } | undefined => {
+    for (const [reason, re] of [['mcpStartupFailed', MCP_STARTUP], ['authFailed', AUTH_FAILED], ['unknownModel', UNKNOWN_MODEL]] as const) {
+      const hit = texts.find((t) => re.test(t));
+      if (hit) return { reason, detail: lineOf(hit, re) };
+    }
+    return undefined;
+  };
+  const fromErrors = named(errors);
+  if (fromErrors) return fromErrors;
+  if (refused) return { reason: 'mcpApprovalRefused', detail: refused };
+  if (lastCommand?.failed && NOT_PERMITTED.test(lastCommand.output)) {
+    return { reason: 'sandboxDenied', detail: `${lastCommand.command}: ${lineOf(lastCommand.output, NOT_PERMITTED)}` };
+  }
+  if (errors.length) return { reason: 'turnFailed', detail: errors[errors.length - 1] };
+  if (completed) return undefined;
+  const fromStderr = named(stderr);
+  if (fromStderr) return fromStderr;
+  const denied = stderr.find((l) => NOT_PERMITTED.test(l));
+  if (denied) return { reason: 'sandboxDenied', detail: denied };
+  if (!started) {
+    const last = [...stderr].reverse().find((l) => /error|fatal|failed/i.test(l)) ?? stderr[stderr.length - 1];
+    return { reason: 'exitBeforeTurn', ...(last ? { detail: last } : {}) };
+  }
+  return undefined;
 }
 
 const TOKEN_FIELDS = [

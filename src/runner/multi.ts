@@ -5,7 +5,7 @@
  * See specs/worker-runners "Runner dispatch by launch kind".
  */
 import { type Launch, runnerOf } from '../state/store.js';
-import type { AgentRunner, Liveness, SpawnResult, Usage } from './runner.js';
+import type { AgentRunner, Liveness, RunnerFailure, SpawnResult, Usage } from './runner.js';
 import type { RunnerKind } from './selection.js';
 
 export class MultiRunner implements AgentRunner {
@@ -45,5 +45,9 @@ export class MultiRunner implements AgentRunner {
 
   async readUsage(launch: Launch): Promise<Usage | undefined> {
     return this.runnerFor(launch)?.readUsage?.(launch);
+  }
+
+  async readFailure(launch: Launch): Promise<RunnerFailure | undefined> {
+    return this.runnerFor(launch)?.readFailure?.(launch);
   }
 }

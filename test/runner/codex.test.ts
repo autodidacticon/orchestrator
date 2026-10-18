@@ -8,6 +8,8 @@ import { TOOL_NAMES } from '../../src/agent/mcp-shim.js';
 import { ClaudeCodeRunner } from '../../src/runner/claude-code.js';
 import { CodexRunner, codexSlots, type CodexSettings } from '../../src/runner/codex.js';
 import { DEFAULT_CODEX_COMMAND } from '../../src/runner/command.js';
+import { InprocRunner } from '../../src/runner/inproc.js';
+import { MultiRunner } from '../../src/runner/multi.js';
 import { parseEnvFile } from '../../src/runner/shim-command.js';
 import { substitute } from '../../src/runner/subprocess.js';
 import type { Launch } from '../../src/state/store.js';
@@ -162,5 +164,84 @@ describe('Codex runner spawn', () => {
       expect(src(f)).toMatch(/import \{[^}]*\bshimCommand\b[^}]*\bshimEnv\b[^}]*\} from '\.\/shim-command\.js'/);
       expect(src(f)).not.toMatch(/function shimCommand/);
     }
+  });
+});
+
+const FIXTURES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/codex');
+const fixture = (f: string) => readFileSync(path.join(FIXTURES, f), 'utf8');
+
+// See specs/task-lifecycle "Health failure reasons" and specs/health-monitoring "Process liveness".
+describe('Codex runner readFailure', () => {
+  /** A runner whose launch log (stdout and stderr in one file, as spawn writes it) holds `log`. */
+  function withLog(log: string | undefined): { runner: CodexRunner; launch: Launch } {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-codex-fail-'));
+    dirs.push(dir);
+    const logDir = path.join(dir, 'logs');
+    mkdirSync(logDir, { recursive: true });
+    const launch = launchIn(path.join(dir, 'wt'));
+    if (log !== undefined) writeFileSync(path.join(logDir, `${launch.launchId}.log`), log);
+    const runner = new CodexRunner({ command: 'true', settings: () => defaults, maxWaitMs: MAX_WAIT_MS, retryWindowMs: 5000, logDir, shim: SHIM });
+    return { runner, launch };
+  }
+  const readFailure = (log: string | undefined) => {
+    const { runner, launch } = withLog(log);
+    return runner.readFailure(launch);
+  };
+
+  it('names an unknown model with the model in the detail (C-events.jsonl)', async () => {
+    const f = await readFailure(fixture('C-events.jsonl'));
+    expect(f?.reason).toBe('unknownModel');
+    expect(f?.detail).toContain('no-such-model');
+  });
+
+  it("names the brief's 'Model metadata ... not found' error item as unknownModel", async () => {
+    const log = [
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `gpt-nope` not found."}}',
+      '{"type":"turn.failed","error":{"message":"unexpected status 400 Bad Request"}}',
+    ].join('\n');
+    expect(await readFailure(log)).toEqual({ reason: 'unknownModel', detail: 'Model metadata for `gpt-nope` not found.' });
+  });
+
+  it('names a required MCP server that failed to start, with the stderr line (empty stdout plus D-stderr.txt)', async () => {
+    const stderr = fixture('D-stderr.txt');
+    expect(await readFailure(stderr)).toEqual({ reason: 'mcpStartupFailed', detail: stderr.trim() });
+  });
+
+  it('names an MCP tool call refused for approval (E-events.jsonl)', async () => {
+    const f = await readFailure(fixture('E-events.jsonl'));
+    expect(f?.reason).toBe('mcpApprovalRefused');
+    expect(f?.detail).toContain('orchestrator.heartbeat');
+  });
+
+  it('names a sandbox denial when the last command_execution failed with .git Operation not permitted', async () => {
+    const f = await readFailure(fixture('git2-events.jsonl'));
+    expect(f?.reason).toBe('sandboxDenied');
+    expect(f?.detail).toMatch(/^git commit -m probe: fatal: Unable to create '.*\.git.*': Operation not permitted$/);
+  });
+
+  it('names a missing login as authFailed', async () => {
+    const log = ['{"type":"turn.started"}', '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Missing bearer authentication"}}'].join('\n');
+    expect((await readFailure(log))?.reason).toBe('authFailed');
+  });
+
+  it('names an exit before any turn, with the last error line on stderr', async () => {
+    expect(await readFailure('OpenAI Codex v0.163.0 (research preview)\nError: something went wrong\n')).toEqual({ reason: 'exitBeforeTurn', detail: 'Error: something went wrong' });
+    expect(await readFailure('')).toEqual({ reason: 'exitBeforeTurn' });
+  });
+
+  it('returns undefined for a complete run with turn.completed, and for a missing log', async () => {
+    expect(await readFailure(fixture('git-events.jsonl'))).toBeUndefined();
+    expect(await readFailure(fixture('G-events.jsonl'))).toBeUndefined();
+    expect(await readFailure(fixture('mcp-events.jsonl'))).toBeUndefined();
+    expect(await readFailure(undefined)).toBeUndefined();
+  });
+
+  it('the MultiRunner routes readFailure by kind; a runner without it gives undefined', async () => {
+    const { runner, launch } = withLog(fixture('C-events.jsonl'));
+    expect((await new MultiRunner({ codex: runner }).readFailure(launch))?.reason).toBe('unknownModel');
+    const bare = new InprocRunner();
+    (bare as { readFailure?: unknown }).readFailure = undefined;
+    expect(await new MultiRunner({ codex: bare }).readFailure(launch)).toBeUndefined();
   });
 });
