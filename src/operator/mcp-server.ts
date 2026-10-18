@@ -187,7 +187,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   const client = new OperatorClient({ repo: values.repo, env });
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
-  const server = new McpServer({ name: 'orchestrator-operator', version: '0.3.0' });
+  const server = new McpServer({ name: 'orchestrator-operator', version: '0.3.1' });
   const task = { task: z.string().describe('Task id as it appears in the graph, e.g. ENG-123') };
   const milestone = { milestone: z.string().describe('Milestone id') };
 
