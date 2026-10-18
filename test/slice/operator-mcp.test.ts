@@ -62,6 +62,8 @@ describe('operator MCP server', () => {
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     expect(tools.tools).toHaveLength(31);
+    // The wait description quotes the cap in force, which a Codex registration sizes tool_timeout_sec against. See specs/operator-mcp "Wait tool".
+    expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain(`cap ${WAIT_CAP_MS}`);
     const configure = tools.tools.find((t) => t.name === 'configure');
     expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'codex', 'commit', 'effort', 'model', 'runnerCommand', 'runnerKind', 'sandbox']);
     const codexArg = (configure?.inputSchema as { properties: Record<string, { anyOf?: Array<{ properties?: Record<string, unknown> }>; properties?: Record<string, unknown> }> }).properties['codex'];

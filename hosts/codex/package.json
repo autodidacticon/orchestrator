@@ -1,0 +1,7 @@
+{
+  "name": "orchestrator-codex-host",
+  "private": true,
+  "dependencies": {
+    "@autodidacticon/orchestrator": "0.3.1"
+  }
+}

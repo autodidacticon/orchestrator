@@ -5,3 +5,4 @@ dist/
 *.sqlite-shm
 .orchestrator-run/
 hosts/claude-code/node_modules/
+hosts/codex/node_modules/

@@ -12,7 +12,11 @@ import { CODEX_SANDBOXES, COMMIT_POLICIES, EFFORT_LEVELS_ALL, EFFORT_LEVELS_BY_K
 import { foldRunnerArgs, type Overrides } from '../runs/resolve.js';
 import { readConfigJson, readRepoConfigRaw, resolveRepoPath, runPaths } from '../runs/runDir.js';
 
-/** The cap keeps every tool call under Claude Code's two-minute foreground limit; ORCH_WAIT_CAP_MS shortens it for tests. */
+/**
+ * The cap keeps every tool call under the host's tool-call timeout: Claude Code's two-minute
+ * foreground limit, Codex's mcp_servers.<id>.tool_timeout_sec. ORCH_WAIT_CAP_MS shortens it
+ * (for tests, and for a Codex registration that keeps the 60 s default timeout).
+ */
 export const WAIT_CAP_MS = Number(process.env['ORCH_WAIT_CAP_MS'] ?? 90_000);
 export const WAIT_DEFAULT_MS = Math.min(60_000, WAIT_CAP_MS);
 /** Each daemon-side long-poll is shorter than the cap so a cancelled client never leaves a long server wait. */

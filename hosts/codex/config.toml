@@ -1,0 +1,13 @@
+# The orchestrator's operator MCP server for a Codex session. Append this block to
+# ~/.codex/config.toml (or a project's .codex/config.toml) and replace <hosts/codex> with the
+# absolute path of this directory. See hosts/codex/README.md.
+#
+# The id uses an underscore: Codex names the tools mcp__orchestrator_operator__<tool>.
+# tool_timeout_sec must exceed the operator server's wait cap (90 s, ORCH_WAIT_CAP_MS) by
+# at least 30 s, or Codex abandons `wait` and `launch_block` before they return; Codex's
+# own default of 60 s is too short.
+[mcp_servers.orchestrator_operator]
+command = "node"
+args = ["<hosts/codex>/bin/orchestrator.mjs", "mcp"]
+startup_timeout_sec = 30
+tool_timeout_sec = 180
