@@ -25,11 +25,15 @@ The configuration SHALL carry a model and an effort per runner kind (see worker-
 - **THEN** it is read as `claude.model`, and under `claude-code` `config.model` is `{ value: "opus", source: "argument" }`
 
 ### Requirement: Task selectors
-A task MAY carry `model` and `effort` in its payload. A present `effort` SHALL be one of the levels some runner kind accepts (`low`, `medium`, `high`, `xhigh`, `max`, and `ultra` for `codex`; see worker-runners "Per-kind effort sets"), and a present `model` SHALL be a string matching `^[A-Za-z0-9][A-Za-z0-9._:-]*$`; a present value of any other shape SHALL fail graph validation naming the node and the key. A task without a selector SHALL use the run default for that key.
+A task MAY carry `runner`, `model`, and `effort` in its payload. A present `runner` SHALL be one of the runner kinds (`claude-code`, `codex`). A present `effort` SHALL be one of the levels some runner kind accepts (`low`, `medium`, `high`, `xhigh`, `max`, and `ultra` for `codex`; see worker-runners "Per-kind effort sets"); whether the chosen kind accepts it is checked when the launch is prepared, not at load. A present `model` SHALL be a string matching `^[A-Za-z0-9][A-Za-z0-9._:-]*$`. A present value of any other shape SHALL fail graph validation naming the node and the key. A task without a selector SHALL use the run default for that key; for `model` and `effort` that is the default of the kind the launch runs under.
 
 #### Scenario: Selectors load from the graph file
 - **WHEN** a node declares `model: claude-sonnet-5-5` and `effort: low`
 - **THEN** the loaded node's payload carries both values
+
+#### Scenario: Runner selector loads from the graph file
+- **WHEN** a node declares `runner: codex`
+- **THEN** the loaded node's payload carries `runner: codex`
 
 #### Scenario: Codex-only level loads
 - **WHEN** a node declares `effort: ultra`
@@ -39,12 +43,16 @@ A task MAY carry `model` and `effort` in its payload. A present `effort` SHALL b
 - **WHEN** a node declares `effort: huge`
 - **THEN** loading fails and the error names the node and `effort`
 
+#### Scenario: Unknown runner refused at load
+- **WHEN** a node declares `runner: bogus`
+- **THEN** loading fails and the error names the node and `runner`
+
 #### Scenario: Unsafe model refused at load
 - **WHEN** a node declares `model: "opus; rm -rf /"`
 - **THEN** loading fails and the error names the node and `model`
 
 ### Requirement: Resolution fixed at preparation
-When a launch is prepared the daemon SHALL set the launch's `runner` to the runner kind in force, its `model` to the task's `model` when present, else the default model of that kind (never another kind's), and its `effort` to the task's `effort` when present, else the default effort of that kind. The effort SHALL be checked against the chosen kind's effort set before the kind's fallback applies: a level the kind accepts is kept, a level it lacks is replaced by the kind's fallback (`ultra` as `max` for `claude-code`), and the level asked for SHALL then be recorded as `effortRequested`. The daemon SHALL record `runner`, `model`, and `effort`, and `effortRequested` when present, in the `launch.created` event payload. The values SHALL NOT change for that launch afterwards: a later override (of the kind, the model, or the effort) applies to launches prepared after it, and a retry is a new launch that resolves again from the task and the run default in force at that time.
+When a launch is prepared the daemon SHALL set the launch's `runner` to the task's `runner` when present, else the runner kind in force, its `model` to the task's `model` when present, else the default model of that kind (never another kind's), and its `effort` to the task's `effort` when present, else the default effort of that kind. The effort SHALL be checked against the chosen kind's effort set before the kind's fallback applies: a level the kind accepts is kept, a level it lacks is replaced by the kind's fallback (`ultra` as `max` for `claude-code`), and the level asked for SHALL then be recorded as `effortRequested`. The daemon SHALL record `runner`, `model`, and `effort`, and `effortRequested` when present, in the `launch.created` event payload. The values SHALL NOT change for that launch afterwards: a later override (of the kind, the model, or the effort) applies to launches prepared after it, and a retry is a new launch that resolves again from the task and the run default in force at that time.
 
 #### Scenario: Task selector wins over the run default
 - **WHEN** the run default effort is `medium` and T2 declares `effort: high`
@@ -70,9 +78,17 @@ When a launch is prepared the daemon SHALL set the launch's `runner` to the runn
 - **WHEN** the run kind is `codex` and a task declares neither `model` nor `effort`
 - **THEN** its launch has `model: "gpt-6-astra"` and `effort: "medium"`
 
+#### Scenario: Task runner selector wins over the run kind
+- **WHEN** the run kind is `claude-code` and a task declares `runner: codex` and no `model` or `effort`
+- **THEN** its launch, its `launch.created` payload, its `status.liveLaunches[]` entry, and its claim response carry `runner: "codex"`, `model: "gpt-6-astra"`, and `effort: "medium"`, while a task without a selector in the same run gets `runner: "claude-code"` and `model: "claude-opus-5-5"`
+
 #### Scenario: Ultra falls back under Claude Code
 - **WHEN** a task declares `effort: ultra` and the run kind is `claude-code`
 - **THEN** its launch has `effort: "max"` and `launch.created` carries `effortRequested: "ultra"`; under `codex` the launch keeps `effort: "ultra"` and no `effortRequested` is recorded
+
+#### Scenario: Effort checked against the task's kind
+- **WHEN** the run kind is `claude-code`, task CU declares `runner: codex` and `effort: ultra`, and task K declares `effort: ultra` and no runner
+- **THEN** CU's launch keeps `effort: "ultra"` with no `effortRequested`, and K's launch has `effort: "max"` with `effortRequested: "ultra"`
 
 ### Requirement: Runners and workers receive the values
 The spawn runner SHALL fill `{model}` and `{effort}` in the runner command from the launch at every spawn. The claim response SHALL carry the launch's `runner`, `model`, and `effort`. The brief input of every launch SHALL carry `runner: { kind }`, the kind fixed on the launch. The daemon SHALL NOT validate a model name against any list: a name the CLI rejects fails the launch at spawn, and the failure is recorded by health monitoring like any other dead process.

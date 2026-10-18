@@ -13,7 +13,7 @@ Import SHALL accept records of the form `{ id, title, description?, state, block
 - **THEN** the import fails naming that record and `state`, and nothing is written
 
 ### Requirement: Mapping rules
-The import SHALL map: every child of the root with state `open` to a task whose id is the tracker key; every `blockedBy` edge between two tasks to a dependency; every `blockedBy` target outside the child set, and every child with state `done`, `cancelled`, or `inProgress`, to an `external` node whose `done` flag is true for state `done` and for state `cancelled` (work that is finished or will never happen; either way nothing waits on it) and false for `inProgress` and for an outside blocker that is still open; and the root to a gated milestone depending on every child. Node payloads SHALL carry `title`, `description`, `acceptanceCriteria`, `labels`, `priority`, `url`, and `trackerState`. A label `model:<value>` SHALL set the payload's `model` to `<value>` and a label `effort:<value>` SHALL set `effort` to `<value>`, the prefix matched without regard to case, when the value satisfies the model-selection shape rules; the label SHALL stay in `labels` either way, and a label whose value fails the rule SHALL set nothing and SHALL be listed in the import summary under `ignoredLabels` with its issue id. The milestone SHALL carry the root's `description` and `acceptanceCriteria` when the root record has a description, so that a review shows what the milestone must satisfy. The in-progress rule SHALL be configurable to import such issues as tasks instead.
+The import SHALL map: every child of the root with state `open` to a task whose id is the tracker key; every `blockedBy` edge between two tasks to a dependency; every `blockedBy` target outside the child set, and every child with state `done`, `cancelled`, or `inProgress`, to an `external` node whose `done` flag is true for state `done` and for state `cancelled` (work that is finished or will never happen; either way nothing waits on it) and false for `inProgress` and for an outside blocker that is still open; and the root to a gated milestone depending on every child. Node payloads SHALL carry `title`, `description`, `acceptanceCriteria`, `labels`, `priority`, `url`, and `trackerState`. A label `model:<value>` SHALL set the payload's `model` to `<value>`, a label `effort:<value>` SHALL set `effort` to `<value>`, and a label `runner:<value>` SHALL set `runner` to `<value>`, the prefix matched without regard to case, when the value satisfies the model-selection shape rules (for `runner`, one of the runner kinds); the label SHALL stay in `labels` either way, and a label whose value fails the rule SHALL set nothing and SHALL be listed in the import summary under `ignoredLabels` with its issue id. The milestone SHALL carry the root's `description` and `acceptanceCriteria` when the root record has a description, so that a review shows what the milestone must satisfy. The in-progress rule SHALL be configurable to import such issues as tasks instead.
 
 #### Scenario: Epic with mixed children
 - **WHEN** an epic has children A (open), B (open, blocked by A), C (done), and D (open, blocked by X where X is outside the epic)
@@ -35,9 +35,17 @@ The import SHALL map: every child of the root with state `open` to a task whose 
 - **WHEN** an open child carries the labels `Effort:low` and `model:claude-sonnet-5-5`
 - **THEN** its task payload has `effort: "low"` and `model: "claude-sonnet-5-5"` and `labels` still lists both labels
 
+#### Scenario: Runner label mapped
+- **WHEN** an open child carries the label `Runner:codex`
+- **THEN** its task payload has `runner: "codex"` and `labels` still lists the label
+
 #### Scenario: Unrecognised selector label ignored with a note
 - **WHEN** an open child KNO-7 carries the label `effort:huge`
 - **THEN** its task payload has no `effort`, `labels` still lists the label, and the import summary's `ignoredLabels` contains `{ id: "KNO-7", label: "effort:huge" }`
+
+#### Scenario: Unknown runner kind ignored with a note
+- **WHEN** an open child KNO-8 carries the label `runner:bogus`
+- **THEN** its task payload has no `runner`, `labels` still lists the label, and the import summary's `ignoredLabels` contains `{ id: "KNO-8", label: "runner:bogus" }`
 
 ### Requirement: Acceptance criteria from the description
 The import SHALL split a description at the first heading matching the configured text, default "Acceptance criteria", case-insensitively. Bullet, numbered, and checklist items under that heading up to the next heading SHALL become the `acceptanceCriteria` array; the text before the heading SHALL become `description`. A description without the heading SHALL yield no criteria, and the import summary SHALL name such tasks as ones that will block at ready.
