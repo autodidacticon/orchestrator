@@ -198,7 +198,7 @@ The daemon SHALL expose `outbox`, returning pending effects with `id` greater th
 - **THEN** the response is 409 naming `unstarted` and no notice is queued
 
 ### Requirement: Status report: health facts
-`status` SHALL additionally report `stuck` (task ids flagged stuck), `pausedReason` (`operator` or `costBudget` while paused), `cost` with `runUsd`, `byTask`, `ceilingUsd`, and `overrides`, `budgets` with the configured `maxLaunchMs`, `maxRunCostUsd`, `stuckAfterMs`, and `stuckFailAfterMs`, and for every live launch `elapsedMs`, `progressAt`, `lastSignal`, `idleMs`, `stuck`, and `costUsd` when known.
+`status` SHALL additionally report `stuck` (task ids flagged stuck), `pausedReason` (`operator` or `costBudget` while paused), `cost` with `runUsd`, `byTask`, `ceilingUsd`, `overrides`, and `unpricedLaunches` (launches that recorded tokens but no cost, outside `runUsd`), `tokens` with `run` and `byTask` (token counts summed over launch rows in the shape `{ input, cachedInput?, cacheWriteInput?, output, reasoningOutput? }`), `budgets` with the configured `maxLaunchMs`, `maxRunCostUsd`, `stuckAfterMs`, and `stuckFailAfterMs`, and for every live launch `elapsedMs`, `progressAt`, `lastSignal`, `idleMs`, `stuck`, and `costUsd` and `tokens` when known.
 
 #### Scenario: Stuck task is visible
 - **WHEN** T3's launch has been flagged stuck for two minutes
@@ -206,7 +206,11 @@ The daemon SHALL expose `outbox`, returning pending effects with `id` greater th
 
 #### Scenario: Cost is reported
 - **WHEN** two launches recorded 1.25 and 0.75 USD
-- **THEN** `status` shows `cost.runUsd` 2 and `cost.byTask` with both tasks
+- **THEN** `status` shows `cost.runUsd` 2 and `cost.byTask` with both tasks, and `cost.unpricedLaunches` 0
+
+#### Scenario: Tokens without a price are reported
+- **WHEN** T1's launch recorded 40361 input and 260 output tokens and no cost
+- **THEN** `status` shows `tokens.run` and `tokens.byTask.T1` as `{ input: 40361, output: 260 }`, `cost.runUsd` 0, and `cost.unpricedLaunches` 1
 
 ### Requirement: Budget pause and override
 When the run cost budget is reached, the run SHALL be paused with `pausedReason: 'costBudget'`, stored as durably as an operator pause, while running work and verification continue. `resume` SHALL accept `overrideBudget`. Without it, `resume` while the run cost is at or above the ceiling SHALL be refused with 409 naming `costBudget`, the run cost, and the ceiling. With it, the override SHALL be recorded as an operator event and the pause lifted. The CLI flag SHALL be `--override-budget`.
