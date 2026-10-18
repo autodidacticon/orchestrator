@@ -73,3 +73,22 @@ The daemon SHALL hold one agent runner per runner kind behind a single dispatchi
 #### Scenario: No runner for the kind
 - **WHEN** a `codex` launch is spawned while no `codex` runner is registered
 - **THEN** the spawn fails with an error naming `codex`
+
+### Requirement: Sandbox and commit policy
+The configuration SHALL carry `runner.codex.sandbox` with one of `read-only`, `workspace-write`, or `danger-full-access`, defaulting to `workspace-write`. Each runner kind SHALL carry a commit policy, `runner.<kind>.commit`, with one of `agent` (the agent commits before it submits) or `daemon` (the daemon commits what the agent left when it submits). `runner.claude.commit` SHALL default to `agent`. When `runner.codex.commit` is unset it SHALL be derived from the sandbox in force: `daemon`, or `agent` when the sandbox is `danger-full-access`. The reason is that under `workspace-write` Codex cannot run `git add` or `git commit` in a linked worktree: the index lock under `<repo>/.git/worktrees/<wt>/` is refused with `Operation not permitted`, and Codex keeps `.git` and the resolved gitdir read-only even inside writable roots. `codex.sandbox`, `codex.commit`, and `claude.commit` SHALL be accepted as runtime overrides that apply to launches prepared afterwards. A derived value moves with a sandbox override, and an explicit `commit` wins over the derivation. The policy SHALL be resolved from the launch's runner kind when the launch is prepared, recorded on the launch row as `commitPolicy` and in `launch.created`, and passed to the brief input with the sandbox of a `codex` launch. A row without a policy SHALL be treated as `agent`. Under `daemon` the daemon SHALL set `ORCH_COMMIT_POLICY=daemon` in the agent's environment and in the MCP façade's.
+
+#### Scenario: Claude Code commits by default
+- **WHEN** a run uses the default configuration
+- **THEN** `runner.claude.commit` resolves to `agent` and a claude-code launch is prepared with `commitPolicy: agent`
+
+#### Scenario: Codex under the default sandbox
+- **WHEN** a run sets `runner.kind: codex` and sets neither `runner.codex.sandbox` nor `runner.codex.commit`
+- **THEN** the sandbox resolves to `workspace-write`, `runner.codex.commit` resolves to `daemon`, and the launch is prepared with `commitPolicy: daemon`
+
+#### Scenario: Codex with full access
+- **WHEN** `runner.codex.sandbox` is `danger-full-access` and `runner.codex.commit` is unset
+- **THEN** `runner.codex.commit` resolves to `agent`
+
+#### Scenario: Daemon commits chosen for Claude Code
+- **WHEN** the operator sets `claude.commit: daemon` at runtime
+- **THEN** claude-code launches prepared afterwards carry `commitPolicy: daemon` and launches already prepared keep theirs
