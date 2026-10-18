@@ -126,6 +126,25 @@ describe('mapping rules', () => {
     expect(g.nodes.get('A')?.payload).toMatchObject({ model: 'claude-sonnet-5-5', effort: 'low' });
   });
 
+  it('a runner: label sets the payload runner, stays in labels, and an unknown kind is ignored with a note', () => {
+    const r = mapIssues({
+      root: 'E',
+      issues: [
+        { id: 'E', title: 'epic', state: 'open', blockedBy: [] },
+        { id: 'X', parent: 'E', state: 'open', description: 'X.\n\n## Acceptance criteria\n- x', blockedBy: [], labels: ['runner:codex', 'backend'] },
+        { id: 'Y', parent: 'E', state: 'open', description: 'Y.\n\n## Acceptance criteria\n- y', blockedBy: [], labels: ['Runner:codex'] },
+        { id: 'KNO-8', parent: 'E', state: 'open', description: 'Z.\n\n## Acceptance criteria\n- z', blockedBy: [], labels: ['runner:bogus'] },
+      ],
+    });
+    const byId = Object.fromEntries(r.nodes.map((n) => [n.id, n]));
+    expect(byId['X']).toMatchObject({ runner: 'codex', labels: ['runner:codex', 'backend'] });
+    expect(byId['Y']).toMatchObject({ runner: 'codex', labels: ['Runner:codex'] });
+    expect('runner' in byId['KNO-8']!).toBe(false);
+    expect(byId['KNO-8']).toMatchObject({ labels: ['runner:bogus'] });
+    expect(r.summary.ignoredLabels).toEqual([{ id: 'KNO-8', label: 'runner:bogus' }]);
+    expect(parseGraph(r.content).nodes.get('X')?.payload).toMatchObject({ runner: 'codex' });
+  });
+
   it("the root's description and acceptance criteria ride on the milestone", () => {
     const r = mapIssues({
       root: 'E',

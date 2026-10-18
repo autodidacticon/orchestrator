@@ -62,17 +62,20 @@ describe('graph loading', () => {
   });
 
   // See specs/model-selection "Task selectors".
-  it('model and effort load into the payload; a bad value is rejected naming the node and the key', () => {
+  it('model, effort and runner load into the payload; a bad value is rejected naming the node and the key', () => {
     const g = parseGraph(`nodes:\n  - { id: A, deps: [], model: claude-sonnet-5-5, effort: low }\n  - { id: B, deps: [] }`);
     expect(g.nodes.get('A')?.payload).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' });
     expect(g.nodes.get('B')?.payload).toEqual({});
     // The shape check is the union of every kind's set; see specs/worker-runners "Per-kind effort sets".
     expect(parseGraph(`nodes:\n  - { id: U, deps: [], effort: ultra }`).nodes.get('U')?.payload).toEqual({ effort: 'ultra' });
+    expect(parseGraph(`nodes:\n  - { id: R, deps: [], runner: codex }`).nodes.get('R')?.payload).toEqual({ runner: 'codex' });
+    expect(parseGraph(`nodes:\n  - { id: R, deps: [], runner: claude-code }`).nodes.get('R')?.payload).toEqual({ runner: 'claude-code' });
     for (const [bad, key] of [
       ['effort: huge', 'effort'],
       ['effort: 3', 'effort'],
       ['model: "opus; rm -rf /"', 'model'],
       ['model: ""', 'model'],
+      ['runner: bogus', 'runner'],
     ] as const) {
       try {
         parseGraph(`nodes:\n  - { id: A, deps: [] }\n  - { id: T4, deps: [A], ${bad} }`);

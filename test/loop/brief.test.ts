@@ -138,6 +138,20 @@ describe('check command and tool rules', () => {
     expect(composeBrief(second, { fallbackPath: '/x' }).markdown).toContain('`make check`');
     expect(h.workspace.briefs.get(first)!.checkCommand).toBe('true');
   });
+
+  // See specs/worker-runners "Runner dispatch by launch kind" (a task-level selector).
+  it('in a mixed run a codex task gets no Bash rules while a default task keeps the base rules', async () => {
+    h = makeHarness({ graph: 'nodes:\n  - { id: C, deps: [], description: d, acceptanceCriteria: [a], runner: codex }\n  - { id: P, deps: [], description: d, acceptanceCriteria: [a] }', config: { capacity: 2 } });
+    await h.orch.tick();
+    const codex = h.workspace.briefs.get(h.launchOf('C').launchId)!;
+    expect(codex.runner).toMatchObject({ kind: 'codex' });
+    expect(codex.allowedTools).toBeUndefined();
+    expect(composeBrief(codex, { fallbackPath: '/x' }).markdown).not.toContain('Bash rules are in force');
+    const plain = h.workspace.briefs.get(h.launchOf('P').launchId)!;
+    expect(plain.runner).toMatchObject({ kind: 'claude-code' });
+    expect(plain.allowedTools).toEqual([...BASE_RULES]);
+    expect(composeBrief(plain, { fallbackPath: '/x' }).markdown).toContain('Bash rules are in force');
+  });
 });
 
 // See specs/worker-runners "Sandbox and commit policy" and specs/agent-protocol "Standalone brief".

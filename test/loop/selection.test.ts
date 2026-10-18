@@ -97,6 +97,52 @@ describe('model and effort per launch', () => {
     expect(codex.store.listEvents({ kind: 'launch.created', taskId: 'T1' })[0]?.payload).not.toHaveProperty('effortRequested');
   });
 
+  // See specs/model-selection "Task selectors" and specs/worker-runners "Runner dispatch by launch kind".
+  it('a task runner selector wins over the run kind, and model and effort come from the chosen kind', async () => {
+    const mixed = `nodes:
+  - { id: C, deps: [], description: d, acceptanceCriteria: [a], runner: codex }
+  - { id: CU, deps: [], description: d, acceptanceCriteria: [a], runner: codex, effort: ultra }
+  - { id: K, deps: [], description: d, acceptanceCriteria: [a], effort: ultra }
+  - { id: P, deps: [], description: d, acceptanceCriteria: [a] }`;
+    const h = makeHarness({ graph: mixed, config: { capacity: 4 } });
+    open.push(h);
+    await h.orch.tick();
+    expect(h.launchOf('C')).toMatchObject({ runner: 'codex', model: 'gpt-6-astra', effort: 'medium' });
+    expect(h.store.listEvents({ kind: 'launch.created', taskId: 'C' })[0]?.payload).toMatchObject({ runner: 'codex', model: 'gpt-6-astra', effort: 'medium' });
+    expect(h.launchOf('CU')).toMatchObject({ runner: 'codex', effort: 'ultra' });
+    expect(h.store.listEvents({ kind: 'launch.created', taskId: 'CU' })[0]?.payload).not.toHaveProperty('effortRequested');
+    expect(h.launchOf('K')).toMatchObject({ runner: 'claude-code', model: 'claude-opus-5-5', effort: 'max' });
+    expect(h.store.listEvents({ kind: 'launch.created', taskId: 'K' })[0]?.payload).toMatchObject({ runner: 'claude-code', effort: 'max', effortRequested: 'ultra' });
+    expect(h.launchOf('P')).toMatchObject({ runner: 'claude-code', model: 'claude-opus-5-5', effort: 'medium' });
+    const live = h.orch.status().liveLaunches;
+    expect(live.find((l) => l.taskId === 'C')).toMatchObject({ runner: 'codex', model: 'gpt-6-astra' });
+    expect(live.find((l) => l.taskId === 'P')).toMatchObject({ runner: 'claude-code' });
+    // One run, two fleets: each launch went to its own kind's runner.
+    expect(h.runners.codex.spawned.map((l) => l.taskId).sort()).toEqual(['C', 'CU']);
+    expect(h.runners['claude-code'].spawned.map((l) => l.taskId).sort()).toEqual(['K', 'P']);
+    // The selector beats a run kind of codex the other way round too.
+    const back = makeHarness({ graph: 'nodes:\n  - { id: T, deps: [], description: d, acceptanceCriteria: [a], runner: claude-code }', config: { runner: { kind: 'codex' } } });
+    open.push(back);
+    await back.orch.tick();
+    expect(back.launchOf('T')).toMatchObject({ runner: 'claude-code', model: 'claude-opus-5-5' });
+    expect(back.orch.selectionFor('T')).toEqual({ runner: 'claude-code', model: 'claude-opus-5-5', effort: 'medium' });
+  });
+
+  it('in pull mode the claim response and the runner filter follow the per-task runner', async () => {
+    const mixed = `nodes:
+  - { id: C, deps: [], description: d, acceptanceCriteria: [a], runner: codex }
+  - { id: P, deps: [], description: d, acceptanceCriteria: [a] }`;
+    const h = makeHarness({ graph: mixed, config: { capacity: 2, runner: { mode: 'pull' } } });
+    open.push(h);
+    await h.orch.tick();
+    expect(h.orch.status().claimableByKind).toEqual({ 'claude-code': 1, codex: 1 });
+    const c = await h.orch.claim({ workerId: 'w1', runner: 'codex' });
+    expect(c.status).toBe(200);
+    expect(c.body).toMatchObject({ taskId: 'C', runner: 'codex', model: 'gpt-6-astra' });
+    const p = await h.orch.claim({ workerId: 'w2', runner: 'claude-code' });
+    expect(p.body).toMatchObject({ taskId: 'P', runner: 'claude-code', model: 'claude-opus-5-5' });
+  });
+
   it('a retry resolves again from the run default in force when it is prepared', async () => {
     const h = makeHarness({ graph: 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }', config: { capacity: 1, maxAttempts: 2 } });
     open.push(h);

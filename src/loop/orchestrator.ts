@@ -496,14 +496,15 @@ export class Orchestrator implements OrchestratorCore {
   }
 
   /**
-   * The runner kind in force, then task selectors over that kind's own defaults. The graph validated the
-   * selectors' shape at load; the effort is checked against the kind's set before its fallback applies
-   * (claude-code `ultra -> max`), and `effortRequested` records the value asked for when it differed. See specs/model-selection.
+   * The task's runner selector over the run kind in force, then the model and effort selectors over that
+   * kind's own defaults. The graph validated the selectors' shape at load; the effort is checked against the
+   * kind's set before its fallback applies (claude-code `ultra -> max`), and `effortRequested` records the
+   * value asked for when it differed. See specs/model-selection.
    */
   selectionFor(taskId: Id): Selection {
     const payload = this.payloadOf(this.requireNode(taskId));
     const eff = this.effective();
-    const runner = eff.kind.value;
+    const runner: RunnerKind = isRunnerKind(payload['runner']) ? payload['runner'] : eff.kind.value;
     const defaults = runner === 'codex' ? eff.config.runner.codex : eff.config.runner.claude;
     const requested: Effort = isEffort(payload['effort']) ? payload['effort'] : defaults.effort;
     const fallback = EFFORT_FALLBACK[runner]?.[requested];

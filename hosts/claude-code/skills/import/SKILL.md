@@ -98,11 +98,13 @@ One record per issue you fetched, including the root:
   `state` is `open` for an open issue, `inProgress` for an open issue carrying the in-progress
   label when one is configured, `done` for a closed issue whose `stateReason` is `COMPLETED`,
   and `cancelled` for `NOT_PLANNED` or `DUPLICATE`. `parent` is the root's id for every child.
-- `labels` are passed through. Two label shapes choose the worker for the task: `model:<name>`
-  (for example `model:claude-sonnet-5-5`) and `effort:<level>` (`low`, `medium`, `high`,
-  `xhigh`, or `max`). Without them a task runs with the run's defaults (`claude-opus-5-5` at
-  `medium`, changeable with `configure`). A label whose value is not recognised is left as a
-  plain label and reported under `ignoredLabels`.
+- `labels` are passed through. Three label shapes choose the worker for the task:
+  `runner:<kind>` (`claude-code` or `codex`), `model:<name>` (for example
+  `model:claude-sonnet-5-5`), and `effort:<level>` (`low`, `medium`, `high`, `xhigh`, `max`,
+  or `ultra`, which Claude Code runs as `max`). Without them a task runs with the run's
+  defaults (the run's runner kind, and that kind's default model at `medium`, changeable with
+  `configure`). A label whose value is not recognised is left as a plain label and reported
+  under `ignoredLabels`.
 
 ## 4. Import
 
@@ -126,7 +128,7 @@ appear where a human is needed.
 ## 5. Report
 
 Show the user the summary: counts of tasks, external nodes, and milestones; any
-`ignoredLabels` (say which issue's `model:` or `effort:` label was not recognised and that the
+`ignoredLabels` (say which issue's `runner:`, `model:`, or `effort:` label was not recognised and that the
 task will use the run default); the tasks missing
 acceptance criteria, which will block at ready until someone adds them; any unknown external
 blockers; and whether the graph was accepted by the daemon. If the import was rejected as an

@@ -5,7 +5,7 @@
 import { stringify as toYaml } from 'yaml';
 import { z } from 'zod';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
-import { isEffort, isModelName } from '../runner/selection.js';
+import { isEffort, isModelName, isRunnerKind } from '../runner/selection.js';
 
 export const issueStateSchema = z.enum(['open', 'inProgress', 'done', 'cancelled']);
 
@@ -70,19 +70,22 @@ export interface ImportSummary {
   missingCriteria: string[];
   unknownExternal: string[];
   inProgressAsExternal: string[];
-  /** `model:` and `effort:` labels whose value failed the shape rule; the label stays, the key is not set. See specs/model-selection. */
+  /** `model:`, `effort:` and `runner:` labels whose value failed the shape rule; the label stays, the key is not set. See specs/model-selection. */
   ignoredLabels: Array<{ id: string; label: string }>;
 }
 
-/** Selector labels: a case-insensitive `model:` or `effort:` prefix sets the payload key when the value has the right shape. */
-function selectorsOf(i: { id: string; labels?: string[] }, ignored: Array<{ id: string; label: string }>): { model?: string; effort?: string } {
-  const out: { model?: string; effort?: string } = {};
+const SELECTOR_CHECKS = { model: isModelName, effort: isEffort, runner: isRunnerKind } as const;
+type SelectorKey = keyof typeof SELECTOR_CHECKS;
+
+/** Selector labels: a case-insensitive `model:`, `effort:` or `runner:` prefix sets the payload key when the value has the right shape. */
+function selectorsOf(i: { id: string; labels?: string[] }, ignored: Array<{ id: string; label: string }>): Partial<Record<SelectorKey, string>> {
+  const out: Partial<Record<SelectorKey, string>> = {};
   for (const label of i.labels ?? []) {
-    const m = /^(model|effort):(.*)$/i.exec(label);
+    const m = /^(model|effort|runner):(.*)$/i.exec(label);
     if (!m) continue;
-    const key = m[1]!.toLowerCase() as 'model' | 'effort';
+    const key = m[1]!.toLowerCase() as SelectorKey;
     const value = m[2]!.trim();
-    if (key === 'model' ? isModelName(value) : isEffort(value)) out[key] = value;
+    if (SELECTOR_CHECKS[key](value)) out[key] = value;
     else ignored.push({ id: i.id, label });
   }
   return out;
