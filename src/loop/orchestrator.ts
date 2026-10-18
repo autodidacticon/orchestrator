@@ -580,6 +580,7 @@ export class Orchestrator implements OrchestratorCore {
       ORCH_LAUNCH_ID: launch.launchId,
       ORCH_TOKEN: launch.token,
       ORCH_API: this.apiBaseUrl,
+      ORCH_RETRY_WINDOW_MS: String(this.config.retryWindowMs),
       ORCH_TASK_ID: launch.taskId,
       ORCH_WORKTREE: launch.worktree,
       // Read by the MCP shim to phrase the report tool; unset means `agent`. See specs/worker-runners "Sandbox and commit policy".

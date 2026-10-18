@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ALLOWED_TOOLS_SLOT, DEFAULT_CLAUDE_COMMAND, hasAllowedToolsSlot, hasEffortSlot, hasModelSlot, quoteRules } from '../../src/runner/command.js';
+import { ALLOWED_TOOLS_SLOT, DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND, hasAllowedToolsSlot, hasEffortSlot, hasModelSlot, quoteRules } from '../../src/runner/command.js';
 import { SubprocessRunner, substitute } from '../../src/runner/subprocess.js';
 import type { Launch } from '../../src/state/store.js';
 import { detectToolchain } from '../../src/toolchain/detect.js';
@@ -65,5 +65,15 @@ describe('runner command composition', () => {
     mkdirSync(path.join(third.worktree, '.orchestrator'), { recursive: true });
     await verbatim.spawn(third, {});
     expect(await waitForFile(path.join(third.worktree, '.orchestrator', 'out.txt'))).toBe('verbatim L3');
+  });
+
+  // One template per kind; the Codex one has no allow list. See specs/worker-runners "Codex runner command composition".
+  it('fills the Codex template slots and has no allow-list slot', () => {
+    expect(hasAllowedToolsSlot(DEFAULT_CODEX_COMMAND)).toBe(false);
+    expect(hasModelSlot(DEFAULT_CODEX_COMMAND)).toBe(true);
+    expect(hasEffortSlot(DEFAULT_CODEX_COMMAND)).toBe(true);
+    const cmd = substitute(DEFAULT_CODEX_COMMAND, { worktree: '/wt', brief: '/wt/b.md', model: 'gpt-6-astra', effort: 'high', sandbox: 'workspace-write', ephemeral: '--ephemeral', ignoreUserConfig: '--ignore-user-config', codexOverrides: '-c x=1' });
+    expect(cmd).toBe(`codex exec --json --ephemeral --ignore-user-config -C /wt -m gpt-6-astra -c model_reasoning_effort='"high"' -s workspace-write -c x=1 -o /wt/.orchestrator/last-message.txt - < /wt/b.md`);
+    expect(cmd).not.toMatch(/\{\w+\}/);
   });
 });

@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000003"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"mcp_tool_call","server":"probe","tool":"echo","arguments":{"text":"hello"},"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"echo returned hello"}}
+{"type":"turn.completed","usage":{"input_tokens":2000,"cached_input_tokens":1024,"cache_write_input_tokens":0,"output_tokens":50,"reasoning_output_tokens":0}}

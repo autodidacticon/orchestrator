@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000002"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"git commit -m probe","aggregated_output":"fatal: Unable to create '/repo/.git/worktrees/wt/index.lock': Operation not permitted\n","exit_code":128,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"git commit is not permitted in this sandbox."}}
+{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":100,"reasoning_output_tokens":0}}

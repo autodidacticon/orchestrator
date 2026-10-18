@@ -1,7 +1,7 @@
 /**
  * Command-template runner: spawns the agent detached with stdio redirected to
  * per-launch log files so it survives the daemon. Used by the scripted test
- * agent and by the Claude Code runner.
+ * agent and by the Claude Code and Codex runners.
  */
 import { execFile, spawn } from 'node:child_process';
 import { mkdir, open } from 'node:fs/promises';
@@ -14,7 +14,7 @@ import { quoteRules } from './command.js';
 const execFileP = promisify(execFile);
 
 export interface SubprocessRunnerOptions {
-  /** Shell command, or a getter read at every spawn; {brief}, {briefJson}, {worktree}, {launchId}, {taskId}, {mcpConfig}, {allowedTools} are substituted. */
+  /** Shell command, or a getter read at every spawn; {brief}, {briefJson}, {worktree}, {launchId}, {taskId}, {mcpConfig}, {allowedTools}, {model}, {effort}, and the `extraVars` slots are substituted. */
   command: string | (() => string);
   /** The allow list filled into {allowedTools}, read at every spawn. See specs/toolchain-discovery "Runner command composition". */
   allowedTools?: () => string[];
@@ -22,6 +22,8 @@ export interface SubprocessRunnerOptions {
   /** Grace period between SIGTERM and SIGKILL. */
   graceMs?: number;
   extraEnv?: Record<string, string>;
+  /** Runner-specific slots read at every spawn, filled after the fixed ones (e.g. the Codex runner's {sandbox} and {codexOverrides}). */
+  extraVars?: (launch: Launch) => Record<string, string>;
 }
 
 export function substitute(template: string, vars: Record<string, string>): string {
@@ -50,6 +52,7 @@ export class SubprocessRunner implements AgentRunner {
       // Fixed on the launch at preparation; validated as safe tokens before they got there. See specs/model-selection.
       model: launch.model ?? '',
       effort: launch.effort ?? '',
+      ...this.opts.extraVars?.(launch),
     });
     const log = await open(logPath(this.opts.logDir, launch.launchId), 'a');
     try {

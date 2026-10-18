@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"00000000-0000-7000-8000-00000000000c"}
+{"type":"turn.started"}
+{"type":"error","message":"The model `no-such-model` does not exist or you do not have access to it."}
+{"type":"turn.failed","error":{"message":"The model `no-such-model` does not exist or you do not have access to it."}}

@@ -3,25 +3,15 @@
  * on stdin and a per-launch MCP config pointing at the shim, which carries the
  * launch token in its environment.
  */
-import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Launch } from '../state/store.js';
 import { logPath, SubprocessRunner, type SubprocessRunnerOptions } from './subprocess.js';
 import type { SpawnResult, TokenUsage, Usage } from './runner.js';
+import { shimCommand, shimEnv } from './shim-command.js';
 
 export { DEFAULT_CLAUDE_COMMAND } from './command.js';
-
-/** The shim entrypoint: the built .js next to this file if present, else the .ts via tsx. */
-export function shimCommand(): { command: string; args: string[] } {
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const js = path.resolve(here, '../agent/mcp-shim.js');
-  if (existsSync(js)) return { command: 'node', args: [js] };
-  const ts = path.resolve(here, '../agent/mcp-shim.ts');
-  const loader = path.resolve(here, '../../node_modules/tsx/dist/loader.mjs');
-  return { command: 'node', args: ['--import', loader, ts] };
-}
+export { shimCommand } from './shim-command.js';
 
 export interface ClaudeCodeRunnerOptions extends SubprocessRunnerOptions {
   retryWindowMs: number;
@@ -42,17 +32,14 @@ export class ClaudeCodeRunner extends SubprocessRunner {
         orchestrator: {
           command: shim.command,
           args: shim.args,
-          env: {
-            ORCH_API: env['ORCH_API'] ?? '',
-            ORCH_LAUNCH_ID: launch.launchId,
-            ORCH_TOKEN: launch.token,
-            ORCH_RETRY_WINDOW_MS: String(this.ccOpts.retryWindowMs),
-            ...(env['ORCH_COMMIT_POLICY'] ? { ORCH_COMMIT_POLICY: env['ORCH_COMMIT_POLICY'] } : {}),
-          },
+          env: shimEnv(launch, env, this.ccOpts.retryWindowMs),
         },
       },
     };
-    await writeFile(path.join(orchDir, 'mcp.json'), JSON.stringify(mcp, null, 2), 'utf8');
+    // The file carries the launch token; mode applies only on create, so chmod covers a rewrite. See specs/agent-protocol "Launch token scoping".
+    const mcpPath = path.join(orchDir, 'mcp.json');
+    await writeFile(mcpPath, JSON.stringify(mcp, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await chmod(mcpPath, 0o600);
     // Do not inherit a parent Claude Code session's marker; the agent is its own session.
     return super.spawn(launch, { ...env, CLAUDECODE: '', CLAUDE_CODE_ENTRYPOINT: '' });
   }

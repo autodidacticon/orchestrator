@@ -5,10 +5,15 @@
  * environment. Retries through daemon restarts for the retry window.
  *
  * Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN, ORCH_RETRY_WINDOW_MS (default 120000),
- * ORCH_COMMIT_POLICY (agent | daemon, default agent).
+ * ORCH_COMMIT_POLICY (agent | daemon, default agent). `--orch-env-file <path>` reads them
+ * from a KEY=VALUE file over the process environment, so they need not be on argv. (Not
+ * `--env-file`: Node 22 takes that flag from anywhere in argv, after the script too, and
+ * loads or rejects the file itself.)
  */
+import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { isEntrypoint } from '../entry.js';
+import { parseEnvFile } from '../runner/shim-command.js';
 
 export interface ShimEnv {
   api: string;
@@ -25,6 +30,24 @@ export function envFromProcess(env = process.env): ShimEnv {
   const token = env['ORCH_TOKEN'];
   if (!api || !launchId || !token) throw new Error('ORCH_API, ORCH_LAUNCH_ID and ORCH_TOKEN are required');
   return { api, launchId, token, retryWindowMs: Number(env['ORCH_RETRY_WINDOW_MS'] ?? 120_000), commitPolicy: env['ORCH_COMMIT_POLICY'] === 'daemon' ? 'daemon' : 'agent' };
+}
+
+/**
+ * The environment the shim runs with: `--orch-env-file <path>` in argv layers the file over `env`. A missing
+ * or unreadable file throws naming the path, so a misregistered shim fails at startup.
+ */
+export function envWithFile(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const i = argv.indexOf('--orch-env-file');
+  if (i < 0) return env;
+  const file = argv[i + 1];
+  if (!file) throw new Error('--orch-env-file needs a path');
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    throw new Error(`--orch-env-file ${file}: cannot read the shim env file (${(err as NodeJS.ErrnoException).code ?? String(err)})`);
+  }
+  return { ...env, ...parseEnvFile(text) };
 }
 
 /** The report tool's description; the clean-worktree requirement holds only when the agent commits. */
@@ -114,19 +137,22 @@ export async function startShim(env: ShimEnv): Promise<void> {
 
 export const USAGE = `orchestrator-mcp-shim: MCP façade for an agent launch.
 
-  orchestrator-mcp-shim
+  orchestrator-mcp-shim [--orch-env-file <path>]
 
 A stdio MCP server exposing heartbeat, report, block, inbox, and log, forwarded
 to the daemon with the launch token. Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN,
-ORCH_RETRY_WINDOW_MS. The orchestrator writes this into each launch's mcp.json.
+ORCH_RETRY_WINDOW_MS, read from --orch-env-file (KEY=VALUE lines) when given. The
+orchestrator writes this into each launch's mcp.json (Claude Code) or shim.env (Codex).
 `;
 
 const isEntry = isEntrypoint(import.meta.url);
 if (isEntry && (process.argv.includes('--help') || process.argv.includes('-h'))) {
   process.stdout.write(USAGE);
 } else if (isEntry) {
-  startShim(envFromProcess()).catch((err) => {
-    process.stderr.write(`${String(err)}\n`);
-    process.exit(1);
-  });
+  Promise.resolve()
+    .then(() => startShim(envFromProcess(envWithFile(process.argv.slice(2)))))
+    .catch((err) => {
+      process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    });
 }
