@@ -1,7 +1,7 @@
 {
   "name": "orchestrator",
   "displayName": "Orchestrator",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Run a dependency graph of tasks with parallel coding agents: import an epic, start a run, monitor it, answer questions, review milestones.",
   "author": { "name": "Richard" },
   "license": "MIT",
