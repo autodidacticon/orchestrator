@@ -3,6 +3,7 @@
  * The brief is standalone: a person could perform the task from it alone.
  */
 import type { BriefInput } from '../workspace/workspace.js';
+import type { CodexSandbox, CommitPolicy, RunnerKind } from '../runner/selection.js';
 
 export interface ComposeOptions {
   fallbackPath: string;
@@ -20,6 +21,8 @@ export interface BriefJson {
   integrationBranch: string;
   checkCommand?: string;
   allowedTools?: string[];
+  /** The launch's runner kind, commit policy and (codex) sandbox; absent when the brief input had none. See specs/worker-runners. */
+  runner?: { kind: RunnerKind; commitPolicy?: CommitPolicy; sandbox?: CodexSandbox };
   retryWindowMs: number;
   fallbackPath: string;
   attempt: number;
@@ -52,6 +55,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     integrationBranch: input.integrationBranch,
     checkCommand: input.checkCommand,
     allowedTools: input.allowedTools,
+    ...(input.runner ? { runner: input.runner } : {}),
     retryWindowMs: input.retryWindowMs,
     fallbackPath: opts.fallbackPath,
     attempt: launch.attempt,
@@ -70,6 +74,9 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
 
   const title = String(node.payload['title'] ?? node.id);
   const description = String(node.payload['description'] ?? '');
+  // Without a runner the brief is the Claude Code text under the `agent` commit policy. See specs/worker-runners "Sandbox and commit policy".
+  const kind = input.runner?.kind ?? 'claude-code';
+  const daemonCommits = input.runner?.commitPolicy === 'daemon';
   const lines: string[] = [];
   lines.push(`# Task ${node.id}: ${title}`, '');
   if (description) lines.push(description, '');
@@ -78,8 +85,15 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   else lines.push('- (none declared)');
   lines.push('', '## Definition of done', '');
   lines.push(
-    `- Commit all work on branch \`${launch.branch}\` in this worktree. Uncommitted or untracked files make your submission be rejected with 409 and the file list; commit and resubmit.`,
-    `- Never merge into, push to, or check out \`${input.integrationBranch}\`. You may rebase your launch branch onto it when a baseMoved notice says it advanced; the orchestrator integrates your branch after verification.`,
+    ...(daemonCommits
+      ? [
+          `- Leave your changes in this worktree on branch \`${launch.branch}\`, committed or not; the orchestrator commits what is uncommitted when it accepts your report.`,
+          `- Never merge into, push to, or check out \`${input.integrationBranch}\`. The orchestrator rebases your branch onto the integration head at verification and integrates it after verification.`,
+        ]
+      : [
+          `- Commit all work on branch \`${launch.branch}\` in this worktree. Uncommitted or untracked files make your submission be rejected with 409 and the file list; commit and resubmit.`,
+          `- Never merge into, push to, or check out \`${input.integrationBranch}\`. You may rebase your launch branch onto it when a baseMoved notice says it advanced; the orchestrator integrates your branch after verification.`,
+        ]),
     input.checkCommand
       ? `- Run the check command before submitting: \`${input.checkCommand}\`.`
       : '- No check command is configured for this repository yet; the operator is being asked. Run the project\'s documented test suite before submitting.',
@@ -90,11 +104,17 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   );
   lines.push('## Workspace', '');
   lines.push(`- Worktree: \`${launch.worktree}\``, `- Branch: \`${launch.branch}\``, `- Base commit: \`${launch.baseSha}\``, `- Integration branch: \`${input.integrationBranch}\``);
-  if (input.allowedTools?.length) {
+  if (kind === 'claude-code' && input.allowedTools?.length) {
     const bash = input.allowedTools.filter((r) => r.startsWith('Bash('));
     lines.push(
       `- If the orchestrator spawned you, these Bash rules are in force: ${bash.map((r) => `\`${r}\``).join(', ')}. A worker holding a claimed launch runs under its own permissions instead.`,
       '- Run commands from the worktree root without `cd`: every part of a compound command must match a rule on its own. When you need a command these rules do not cover, ask with a `needsAccess` question naming the command rather than retrying it.',
+    );
+  }
+  if (kind === 'codex') {
+    const sandbox = input.runner?.sandbox ? `the Codex sandbox \`${input.runner.sandbox}\`` : 'the Codex sandbox';
+    lines.push(
+      `- You run under ${sandbox} with approvals disabled: a command the sandbox refuses fails with 'Operation not permitted' and will not be approved at runtime. Do not retry it; ask with a \`needsAccess\` question naming the command. The operator can run it for you, or change \`runner.codex.sandbox\` for your next launch.`,
     );
   }
   lines.push(
@@ -127,14 +147,22 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     if (c['verifierOutput']) lines.push('- Verifier output:', '', '```', String(c['verifierOutput']).slice(0, 8000), '```');
     if (c['conflict']) {
       const k = c['conflict'] as { files?: string[]; since?: string[]; previousBranch?: string };
-      lines.push(`- Your previous branch \`${k.previousBranch ?? ''}\` conflicted on rebase in: ${(k.files ?? []).join(', ')}. Tasks published since your base: ${(k.since ?? []).join(', ') || 'none'}. Rebase that branch or start over from the new base.`);
+      lines.push(`- Your previous branch \`${k.previousBranch ?? ''}\` conflicted on rebase in: ${(k.files ?? []).join(', ')}. Tasks published since your base: ${(k.since ?? []).join(', ') || 'none'}. ${
+          daemonCommits
+            ? 'Inspect that branch with `git show`/`git diff` and reapply its changes as file edits on the new base, or start over.'
+            : 'Rebase that branch or start over from the new base.'
+        }`);
     }
     if (c['interrupted']) {
       const k = c['interrupted'] as import('../state/status.js').InterruptedContext;
       lines.push(
         `- Your previous launch \`${k.priorLaunchId}\` was interrupted (${k.reason}); this is interruption ${k.interruptions} for this task. Its branch \`${k.priorBranch}\` holds the work so far at \`${k.headSha}\`${
           k.wipCommit ? `, and commit \`${k.wipCommit}\` is a work-in-progress commit of changes it had not committed` : ''
-        }. Continue from that branch by merging or cherry-picking it onto your base, or inspect it and start over${k.wipCommit ? '; squash the work-in-progress commit before submitting' : ''}.`,
+        }. ${
+          daemonCommits
+            ? 'Continue from that branch by inspecting it with `git show`/`git diff` and reapplying its changes as file edits, or start over.'
+            : `Continue from that branch by merging or cherry-picking it onto your base, or inspect it and start over${k.wipCommit ? '; squash the work-in-progress commit before submitting' : ''}.`
+        }`,
       );
     }
     if (c['question'] || c['answer']) lines.push(`- Question asked earlier: ${JSON.stringify(c['question'])}`, `- Human answer: ${String(c['answer'] ?? '')}`);
@@ -156,7 +184,12 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
       }.`,
     );
     if (revision.priorReportSummary) lines.push(`- Prior report: ${revision.priorReportSummary}`);
-    lines.push('- Revise the prior work rather than redoing it: build on what the base commit already contains, and commit the delta.', '');
+    lines.push(
+      daemonCommits
+        ? '- Revise the prior work rather than redoing it: build on what the base commit already contains, inspect the prior branch with `git show`/`git diff` and reapply changes as file edits, and leave the delta in the worktree for the orchestrator to commit.'
+        : '- Revise the prior work rather than redoing it: build on what the base commit already contains, and commit the delta.',
+      '',
+    );
   }
   lines.push('## Reporting', '');
   lines.push(

@@ -33,8 +33,8 @@ export interface BriefInput {
   integrationBranch: string;
   /** The Bash rules in force for a launch the daemon spawns; absent when the runner command carries its own list. */
   allowedTools?: string[];
-  /** The kind the launch was prepared for; the brief writes kind-specific text from it. See specs/worker-runners. */
-  runner: { kind: RunnerKind; commitPolicy: CommitPolicy; sandbox?: CodexSandbox };
+  /** The kind the launch was prepared for; the brief writes kind-specific text from it. Absent: the Claude Code text under the `agent` policy. See specs/worker-runners "Sandbox and commit policy". */
+  runner?: { kind: RunnerKind; commitPolicy: CommitPolicy; sandbox?: CodexSandbox };
 }
 
 export interface Workspace {

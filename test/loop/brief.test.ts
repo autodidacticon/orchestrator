@@ -140,6 +140,69 @@ describe('check command and tool rules', () => {
   });
 });
 
+// See specs/worker-runners "Sandbox and commit policy" and specs/agent-protocol "Standalone brief".
+describe('runner-specific brief text', () => {
+  const launch = { launchId: 'L2', taskId: 'T2', attempt: 1, launchNo: 2, status: 'live', token: 't', branch: 'task/T2/l2', worktree: '/w', baseSha: 'base2', graphRev: 'r', createdAt: 1 } as const;
+  const carry = {
+    interrupted: { priorLaunchId: 'L1', priorBranch: 'task/T2/l1', headSha: 'H1', wipCommit: 'W1', reason: 'sessionEnded', interruptions: 1 },
+    conflict: { previousBranch: 'task/T2/l0', files: ['src/a.ts'], since: ['T1'] },
+    revision: { cause: 'reopened', priorLaunchId: 'L1', priorBranch: 'task/T2/l1' },
+  };
+  const base = {
+    launch: launch as unknown as Parameters<typeof composeBrief>[0]['launch'],
+    node: { id: 'T2', kind: 'task' as const, payload: { title: 'x', description: 'd', acceptanceCriteria: ['a'] }, deps: [] },
+    depReports: [],
+    carry,
+    apiBaseUrl: 'http://127.0.0.1:1',
+    retryWindowMs: 1000,
+    checkCommand: 'npm test',
+    integrationBranch: 'main',
+  };
+  const gitWrites = ['commit and resubmit', 'You may rebase', 'Rebase that branch or start over', 'squash the work-in-progress commit', 'commit the delta'];
+  const section = (md: string, name: string) => md.split(`## ${name}\n`)[1]!.split('\n## ')[0]!;
+
+  it('a codex launch under daemon commits gets the sandbox paragraph and read-only git text', () => {
+    const { markdown, json } = composeBrief({ ...base, runner: { kind: 'codex', sandbox: 'workspace-write', commitPolicy: 'daemon' } }, { fallbackPath: '/x' });
+    expect(markdown).toContain('You run under the Codex sandbox `workspace-write` with approvals disabled');
+    expect(markdown).toContain("fails with 'Operation not permitted' and will not be approved at runtime. Do not retry it; ask with a `needsAccess` question naming the command.");
+    expect(markdown).toContain('change `runner.codex.sandbox` for your next launch');
+    expect(markdown).toContain('the orchestrator commits what is uncommitted when it accepts your report');
+    expect(markdown).toContain('The orchestrator rebases your branch onto the integration head at verification');
+    expect(markdown).toContain('Never merge into, push to, or check out `main`');
+    expect(markdown).toContain('reapply its changes as file edits');
+    expect(markdown).toContain('leave the delta in the worktree for the orchestrator to commit');
+    expect(markdown).not.toContain('Bash rules are in force');
+    for (const s of gitWrites) expect(markdown, s).not.toContain(s);
+    expect(json.runner).toEqual({ kind: 'codex', sandbox: 'workspace-write', commitPolicy: 'daemon' });
+    expect(json.allowedTools).toBeUndefined();
+  });
+
+  it('a codex launch under agent commits keeps the git-write sentences and names its sandbox', () => {
+    const { markdown } = composeBrief({ ...base, runner: { kind: 'codex', sandbox: 'danger-full-access', commitPolicy: 'agent' } }, { fallbackPath: '/x' });
+    expect(markdown).toContain('You run under the Codex sandbox `danger-full-access` with approvals disabled');
+    for (const s of gitWrites) expect(markdown, s).toContain(s);
+    expect(markdown).not.toContain('orchestrator commits what is uncommitted');
+  });
+
+  it('a claude-code launch and a brief without a runner write the same Definition of done and Workspace sections', () => {
+    const allowedTools = [...BASE_RULES, 'Bash(npm test:*)'];
+    const claude = composeBrief({ ...base, allowedTools, runner: { kind: 'claude-code', commitPolicy: 'agent' } }, { fallbackPath: '/x' }).markdown;
+    const plain = composeBrief({ ...base, allowedTools }, { fallbackPath: '/x' }).markdown;
+    for (const name of ['Definition of done', 'Workspace']) expect(section(claude, name), name).toBe(section(plain, name));
+    expect(claude).toBe(plain);
+    expect(claude).toContain('these Bash rules are in force: `Bash(git:*)`');
+    expect(claude).not.toContain('Codex sandbox');
+    for (const s of gitWrites) expect(claude, s).toContain(s);
+  });
+
+  it('a claude-code launch under daemon commits gets the daemon text without a sandbox paragraph', () => {
+    const { markdown } = composeBrief({ ...base, runner: { kind: 'claude-code', commitPolicy: 'daemon' } }, { fallbackPath: '/x' });
+    expect(markdown).toContain('the orchestrator commits what is uncommitted when it accepts your report');
+    expect(markdown).not.toContain('Codex sandbox');
+    for (const s of gitWrites) expect(markdown, s).not.toContain(s);
+  });
+});
+
 describe('slot validation', () => {
   it('reports missing required slots; arrays count; milestones are skipped', () => {
     const g = parseGraph(graph);
