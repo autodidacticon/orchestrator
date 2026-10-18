@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Launch } from '../state/store.js';
 import { logPath, SubprocessRunner, type SubprocessRunnerOptions } from './subprocess.js';
-import type { SpawnResult, Usage } from './runner.js';
+import type { SpawnResult, TokenUsage, Usage } from './runner.js';
 
 export { DEFAULT_CLAUDE_COMMAND } from './command.js';
 
@@ -82,7 +82,27 @@ export function parseUsage(text: string): Usage | undefined {
     const durationMs = num('duration_ms');
     const turns = num('num_turns');
     if (costUsd === undefined && durationMs === undefined && turns === undefined) continue;
-    return { costUsd, turns, durationMs };
+    return { costUsd, turns, durationMs, tokens: parseTokens(o['usage']), source: 'claude-code' };
   }
   return undefined;
+}
+
+/**
+ * Claude's `usage` object as runner-neutral tokens. Claude's `input_tokens` excludes cache reads and
+ * cache writes, so cache reads are added to `input` (the pricing formula treats `cachedInput` as part
+ * of `input`) and cache writes stay apart. See specs/health-monitoring "Run cost budget".
+ */
+function parseTokens(v: unknown): TokenUsage | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const u = v as Record<string, unknown>;
+  const num = (k: string) => (typeof u[k] === 'number' && Number.isFinite(u[k]) && (u[k] as number) >= 0 ? (u[k] as number) : undefined);
+  const input = num('input_tokens');
+  const output = num('output_tokens');
+  if (input === undefined || output === undefined) return undefined;
+  const cacheRead = num('cache_read_input_tokens');
+  const cacheWrite = num('cache_creation_input_tokens');
+  const tokens: TokenUsage = { input: input + (cacheRead ?? 0), output };
+  if (cacheRead !== undefined) tokens.cachedInput = cacheRead;
+  if (cacheWrite !== undefined) tokens.cacheWriteInput = cacheWrite;
+  return tokens;
 }

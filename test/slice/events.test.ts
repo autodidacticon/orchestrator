@@ -59,6 +59,6 @@ describe('event stream, review bundle, status facts', () => {
     const s = await get(h, '/v1/status');
     expect(s.body).toMatchObject({ runDir: h.config.dataDir, graphPath: h.config.graphPath, daemonPid: process.pid, daemonUrl: h.orch.apiBaseUrl, external: [] });
     expect(s.body['latestSeq']).toBe(h.store.latestEventSeq());
-    expect(s.body).toMatchObject({ stuck: [], cost: { runUsd: 0, byTask: {}, overrides: 0 }, budgets: { maxLaunchMs: h.config.budgets.maxLaunchMs, stuckAfterMs: h.config.health.stuckAfterMs } });
+    expect(s.body).toMatchObject({ stuck: [], cost: { runUsd: 0, byTask: {}, overrides: 0, unpricedLaunches: 0 }, tokens: { run: { input: 0, output: 0 }, byTask: {} }, budgets: { maxLaunchMs: h.config.budgets.maxLaunchMs, stuckAfterMs: h.config.health.stuckAfterMs } });
   });
 });

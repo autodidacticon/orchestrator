@@ -3,6 +3,7 @@
  * makes a claim, a dedup write, or a transition one transaction.
  */
 import type { Id } from '../graph/model.js';
+import type { TokenUsage, UsageSource } from '../runner/runner.js';
 import type { Effort, RunnerKind } from '../runner/selection.js';
 import type { Entry } from './status.js';
 
@@ -66,6 +67,10 @@ export interface Launch {
   costUsd?: number;
   turns?: number;
   durationMs?: number;
+  tokens?: TokenUsage;
+  usageSource?: UsageSource;
+  /** `reported` when the runner gave the cost, `priced` when it was computed from `tokens` and `budgets.prices`. */
+  costSource?: 'reported' | 'priced';
 }
 
 export type JobStatus =

@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 const health = (over: Partial<Config['health']> = {}): Config['health'] => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true, ...over });
-const budgets = (over: Partial<Config['budgets']> = {}): Config['budgets'] => ({ maxLaunchMs: 0, maxRunCostUsd: 0, ...over });
+const budgets = (over: Partial<Config['budgets']> = {}): Config['budgets'] => ({ maxLaunchMs: 0, maxRunCostUsd: 0, prices: {}, ...over });
 
 function harness(config: ConfigInput = {}, extra: { diagnoser?: StuckDiagnoser } = {}): Harness {
   const h = makeHarness({ config: { tickIntervalMs: 100, health: health(), budgets: budgets(), ...config }, stuckDiagnoser: extra.diagnoser });
@@ -230,7 +230,7 @@ describe('health: budgets and usage', () => {
     await h.orch.tick();
     expect(h.store.listEvents({ kind: 'launch.usage' })).toHaveLength(2);
     const s = h.orch.status();
-    expect(s.cost).toEqual({ runUsd: 2, byTask: { T1: 1.25, T5: 0.75 }, ceilingUsd: undefined, overrides: 0 });
+    expect(s.cost).toEqual({ runUsd: 2, byTask: { T1: 1.25, T5: 0.75 }, ceilingUsd: undefined, overrides: 0, unpricedLaunches: 0 });
     const again = new Orchestrator({ store: h.store, config: h.orch.config, graphSource: h.source, runner: h.runner, workspace: h.workspace, verifier: h.verifier, clock: () => h.now.value });
     await again.loadGraph();
     expect(again.status().cost).toEqual(s.cost);
@@ -324,5 +324,70 @@ describe('health: budgets and usage', () => {
     expect(h.store.listEvents({ kind: 'operator.resume' }).at(-1)?.payload).toEqual({ overrideBudget: true });
     await h.orch.tick();
     expect(h.orch.status().byStatus.running).toHaveLength(1);
+  });
+
+  // See specs/health-monitoring "Usage accounting" and "Run cost budget": tokens without a price.
+  it('a usage with only tokens is recorded; without a price its cost is unknown, counted as unpriced, and does not pause admission', async () => {
+    const h = harness({ budgets: budgets({ maxRunCostUsd: 5 }), capacity: 1 });
+    const tokens = { input: 40361, output: 260 };
+    h.runner.usageScript.set('T1', { tokens, source: 'codex' });
+    await h.orch.tick();
+    await h.submit('T1');
+    await h.orch.settle();
+    await h.orch.tick();
+    const row = h.store.listLaunches({ taskId: 'T1' })[0]!;
+    expect(row).toMatchObject({ status: 'ended', tokens, usageSource: 'codex' });
+    expect(row.costUsd).toBeUndefined();
+    expect(row.costSource).toBeUndefined();
+    expect(row.durationMs).toBeUndefined();
+    const usage = h.store.listEvents({ kind: 'launch.usage' });
+    expect(usage).toHaveLength(1);
+    expect(usage[0]!.payload).toEqual({ tokens, source: 'codex' });
+    const s = h.orch.status();
+    expect(s.tokens).toEqual({ run: tokens, byTask: { T1: tokens } });
+    expect(s.cost).toMatchObject({ runUsd: 0, byTask: {}, unpricedLaunches: 1 });
+    expect(s.paused).toBe(false);
+    expect(s.pausedReason).toBeUndefined();
+    expect(s.byStatus.running).toEqual(['T5']);
+    expect(s.liveLaunches[0]?.tokens).toBeUndefined();
+  });
+
+  it('tokens priced from budgets.prices count toward the run cost budget; two priced launches past it pause admission', async () => {
+    const h = harness({ runner: { kind: 'codex' }, budgets: budgets({ maxRunCostUsd: 5, prices: { 'gpt-6-astra': { inputPerMTok: 100, outputPerMTok: 1000 } } }), capacity: 1 });
+    const tokens = { input: 40361, output: 260 };
+    h.runners.codex.usageScript.set('T1', { tokens, source: 'codex' });
+    h.runners.codex.usageScript.set('T5', { tokens, source: 'codex' });
+    await h.orch.tick();
+    expect(h.launchOf('T1')).toMatchObject({ runner: 'codex', model: 'gpt-6-astra' });
+    await h.submit('T1');
+    await h.orch.settle();
+    await h.orch.tick();
+    // 40361 * 100 / 1e6 + 260 * 1000 / 1e6
+    expect(h.store.listLaunches({ taskId: 'T1' })[0]).toMatchObject({ tokens, costUsd: 4.2961, costSource: 'priced', usageSource: 'codex' });
+    expect(h.store.listEvents({ kind: 'launch.usage' })[0]?.payload).toMatchObject({ tokens, costUsd: 4.2961, costSource: 'priced' });
+    expect(h.orch.status().cost).toMatchObject({ runUsd: 4.2961, unpricedLaunches: 0 });
+    expect(h.orch.status().byStatus.running).toEqual(['T5']);
+    await h.submit('T5');
+    await h.orch.settle();
+    await h.orch.tick();
+    await h.orch.tick();
+    const s = h.orch.status();
+    expect(s.paused).toBe(true);
+    expect(s.pausedReason).toBe('costBudget');
+    expect(s.cost).toMatchObject({ runUsd: 8.5922, byTask: { T1: 4.2961, T5: 4.2961 }, ceilingUsd: 5, unpricedLaunches: 0 });
+    expect(s.tokens.run).toEqual({ input: 80722, output: 520 });
+    expect(s.byStatus.running).toEqual([]);
+    expect(h.store.listEvents({ kind: 'budget.exceeded' })).toMatchObject([{ payload: { runUsd: 8.5922, ceilingUsd: 5 } }]);
+  });
+
+  it('a runner-reported cost is kept as reported and never re-priced', async () => {
+    const h = harness({ runner: { kind: 'codex' }, budgets: budgets({ prices: { 'gpt-6-astra': { inputPerMTok: 100, outputPerMTok: 1000 } } }) });
+    h.runners.codex.usageScript.set('T1', { costUsd: 0.5, tokens: { input: 40361, output: 260 }, source: 'scripted' });
+    await h.orch.tick();
+    await h.submit('T1');
+    await h.orch.settle();
+    await h.orch.tick();
+    expect(h.store.listLaunches({ taskId: 'T1' })[0]).toMatchObject({ costUsd: 0.5, costSource: 'reported', usageSource: 'scripted' });
+    expect(h.orch.status().cost).toMatchObject({ runUsd: 0.5, byTask: { T1: 0.5 }, unpricedLaunches: 0 });
   });
 });

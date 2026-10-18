@@ -10,6 +10,19 @@ import { isSafeRule } from './toolchain/tools.js';
 export const stageNames = ['criticalPath', 'priority', 'fifo'] as const;
 export type StageName = (typeof stageNames)[number];
 
+/** One model's token rates in USD per million tokens; the optional rates fall back as `priceUsage` states. */
+const rate = z.number().nonnegative();
+export const priceSchema = z
+  .object({
+    inputPerMTok: rate,
+    cachedInputPerMTok: rate.optional(),
+    cacheWriteInputPerMTok: rate.optional(),
+    outputPerMTok: rate,
+    reasoningOutputPerMTok: rate.optional(),
+  })
+  .strict();
+export type Price = z.infer<typeof priceSchema>;
+
 export const configSchema = z.object({
   /** Repository the orchestrator integrates into (the primary clone). */
   repoPath: z.string().default('.'),
@@ -117,6 +130,8 @@ export const configSchema = z.object({
       maxLaunchMs: z.number().int().nonnegative().default(2 * 3600_000),
       /** 0 means unlimited. */
       maxRunCostUsd: z.number().nonnegative().default(0),
+      /** USD per million tokens by model, for launches whose runner reports tokens but no cost. See specs/health-monitoring "Run cost budget". */
+      prices: z.record(modelSchema, priceSchema).default({}),
     })
     .default({}),
   /** Tracker mirroring policy. See specs/tracker-sync. */

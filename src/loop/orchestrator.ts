@@ -13,7 +13,7 @@ import { GraphValidationError, parseGraph } from '../graph/load.js';
 import type { Graph, GraphNode, Id } from '../graph/model.js';
 import * as q from '../graph/query.js';
 import type { GraphSource } from '../graph/source.js';
-import type { AgentRunner } from '../runner/runner.js';
+import type { AgentRunner, TokenUsage, Usage } from '../runner/runner.js';
 import {
   type AttemptContext,
   type BlockedReason,
@@ -40,7 +40,7 @@ import { chainPolicy, type Deferral, type Policy } from './schedule.js';
 import { pidAlive } from '../runner/subprocess.js';
 import { runTick } from './tick.js';
 import { deriveEffects } from '../tracker/effects.js';
-import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, runCostUsd } from '../health/budgets.js';
+import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, priceFor, priceUsage, runCostUsd, tokensOf, unpricedLaunches } from '../health/budgets.js';
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
@@ -141,6 +141,7 @@ export interface StatusReport {
     idleMs: number;
     stuck: boolean;
     costUsd?: number;
+    tokens?: TokenUsage;
     /** Kept releases the task had absorbed when this launch was created. */
     interruptions: number;
     /** Fixed when the launch was prepared. See specs/model-selection. */
@@ -151,7 +152,9 @@ export interface StatusReport {
   /** Health: flagged tasks, why admission is paused, cost and the configured budgets. See specs/health-monitoring. */
   stuck: Id[];
   pausedReason: PausedReason | undefined;
-  cost: { runUsd: number; byTask: Record<Id, number>; ceilingUsd: number | undefined; overrides: number };
+  /** `unpricedLaunches`: launches with tokens and no cost, outside `runUsd`. See specs/health-monitoring "Run cost budget". */
+  cost: { runUsd: number; byTask: Record<Id, number>; ceilingUsd: number | undefined; overrides: number; unpricedLaunches: number };
+  tokens: { run: TokenUsage; byTask: Record<Id, TokenUsage> };
   budgets: { maxLaunchMs: number; maxRunCostUsd: number; stuckAfterMs: number; stuckFailAfterMs: number };
   foreignCommits: string[];
   runDir: string;
@@ -222,6 +225,8 @@ export class Orchestrator implements OrchestratorCore {
   private readonly boot: Resolved;
   private configMemo: { key: string; resolved: Resolved } | undefined;
   private readonly heldJobsLogged = new Set<string>();
+  /** Models already warned about as having tokens but no price. */
+  private readonly unpricedModelsLogged = new Set<string>();
 
   private readonly clock: () => number;
   private _graph: Graph | undefined;
@@ -711,12 +716,28 @@ export class Orchestrator implements OrchestratorCore {
   async recordUsage(launch: Launch): Promise<void> {
     if (!this.runner.readUsage) return;
     const cur = this.store.getLaunch(launch.launchId);
-    if (!cur || cur.costUsd !== undefined || cur.durationMs !== undefined || cur.turns !== undefined) return;
-    const u = await this.runner.readUsage(cur).catch(() => undefined);
-    if (!u || (u.costUsd === undefined && u.durationMs === undefined && u.turns === undefined)) return;
+    if (!cur || hasUsage(cur)) return;
+    const read = await this.runner.readUsage(cur).catch(() => undefined);
+    if (!read || !hasUsage(read)) return;
+    const u: Usage = { ...read };
+    let costSource: Launch['costSource'];
+    if (u.costUsd !== undefined) costSource = 'reported';
+    else if (u.tokens) {
+      const price = priceFor(this.config, cur.model);
+      if (price) {
+        u.costUsd = priceUsage(u.tokens, price);
+        costSource = 'priced';
+      } else {
+        const model = cur.model ?? '(none)';
+        if (!this.unpricedModelsLogged.has(model)) {
+          this.unpricedModelsLogged.add(model);
+          this.log.warn('launch usage has tokens but no price for its model; its cost is unknown and outside the run cost budget (set budgets.prices)', { model, launchId: cur.launchId });
+        }
+      }
+    }
     this.store.transaction(() => {
-      this.store.updateLaunch(cur.launchId, { costUsd: u.costUsd, turns: u.turns, durationMs: u.durationMs });
-      this.store.appendEvent({ kind: 'launch.usage', taskId: cur.taskId, launchId: cur.launchId, payload: { ...u } }, this.now());
+      this.store.updateLaunch(cur.launchId, { costUsd: u.costUsd, turns: u.turns, durationMs: u.durationMs, tokens: u.tokens, usageSource: u.source, costSource });
+      this.store.appendEvent({ kind: 'launch.usage', taskId: cur.taskId, launchId: cur.launchId, payload: { ...u, ...(costSource ? { costSource } : {}) } }, this.now());
     });
   }
 
@@ -1424,6 +1445,7 @@ export class Orchestrator implements OrchestratorCore {
       idleMs: idleMsOf(l, now),
       stuck: l.stuckSince !== undefined,
       costUsd: l.costUsd,
+      tokens: l.tokens,
       interruptions: l.interruptions ?? 0,
       runner: runnerOf(l),
       model: l.model,
@@ -1444,7 +1466,8 @@ export class Orchestrator implements OrchestratorCore {
       liveLaunches,
       stuck: liveLaunches.filter((l) => l.stuck).map((l) => l.taskId),
       pausedReason: this.pausedReason(),
-      cost: { runUsd: runCostUsd(this.store), byTask: costByTask(this.store), ceilingUsd: ceilingUsd(this.config, this.store), overrides: budgetOverrides(this.store) },
+      cost: { runUsd: runCostUsd(this.store), byTask: costByTask(this.store), ceilingUsd: ceilingUsd(this.config, this.store), overrides: budgetOverrides(this.store), unpricedLaunches: unpricedLaunches(this.store) },
+      tokens: tokensOf(this.store),
       budgets: {
         maxLaunchMs: this.config.budgets.maxLaunchMs,
         maxRunCostUsd: this.config.budgets.maxRunCostUsd,
@@ -1661,4 +1684,9 @@ function countByKind(launches: readonly Launch[]): Record<RunnerKind, number> {
   const out = Object.fromEntries(RUNNER_KINDS.map((k) => [k, 0])) as Record<RunnerKind, number>;
   for (const l of launches) out[runnerOf(l)] += 1;
   return out;
+}
+
+/** A launch row or a runner's read counts as usage through any of cost, turns, duration, or tokens. */
+function hasUsage(u: Pick<Usage, 'costUsd' | 'turns' | 'durationMs' | 'tokens'>): boolean {
+  return u.costUsd !== undefined || u.turns !== undefined || u.durationMs !== undefined || u.tokens !== undefined;
 }
