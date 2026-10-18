@@ -108,9 +108,11 @@ describe('mapping rules', () => {
         { id: 'A', parent: 'E', state: 'open', description: 'A.\n\n## Acceptance criteria\n- a', blockedBy: [], labels: ['Effort:low', 'model:claude-sonnet-5-5', 'backend'] },
         { id: 'KNO-7', parent: 'E', state: 'open', description: 'B.\n\n## Acceptance criteria\n- b', blockedBy: [], labels: ['effort:huge', 'MODEL: opus; rm'] },
         { id: 'C', parent: 'E', state: 'open', description: 'C.\n\n## Acceptance criteria\n- c', blockedBy: [] },
+        { id: 'U', parent: 'E', state: 'open', description: 'U.\n\n## Acceptance criteria\n- u', blockedBy: [], labels: ['effort:ultra'] },
       ],
     });
     const byId = Object.fromEntries(r.nodes.map((n) => [n.id, n]));
+    expect(byId['U']).toMatchObject({ effort: 'ultra' });
     expect(byId['A']).toMatchObject({ effort: 'low', model: 'claude-sonnet-5-5', labels: ['Effort:low', 'model:claude-sonnet-5-5', 'backend'] });
     expect('effort' in byId['KNO-7']!).toBe(false);
     expect('model' in byId['KNO-7']!).toBe(false);

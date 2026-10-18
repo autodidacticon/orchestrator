@@ -66,6 +66,8 @@ describe('graph loading', () => {
     const g = parseGraph(`nodes:\n  - { id: A, deps: [], model: claude-sonnet-5-5, effort: low }\n  - { id: B, deps: [] }`);
     expect(g.nodes.get('A')?.payload).toEqual({ model: 'claude-sonnet-5-5', effort: 'low' });
     expect(g.nodes.get('B')?.payload).toEqual({});
+    // The shape check is the union of every kind's set; see specs/worker-runners "Per-kind effort sets".
+    expect(parseGraph(`nodes:\n  - { id: U, deps: [], effort: ultra }`).nodes.get('U')?.payload).toEqual({ effort: 'ultra' });
     for (const [bad, key] of [
       ['effort: huge', 'effort'],
       ['effort: 3', 'effort'],

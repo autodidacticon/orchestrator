@@ -43,7 +43,7 @@ import { deriveEffects } from '../tracker/effects.js';
 import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, runCostUsd } from '../health/budgets.js';
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
-import { type ConfigReport, configSummary, mergeOverrides, type OverridableKey, overridesSchema, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
+import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
 import { type Effort, isEffort, isModelName } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
@@ -433,19 +433,17 @@ export class Orchestrator implements OrchestratorCore {
    * event in one transaction, followed by `config.resolved`, the hook, and a wake.
    */
   setConfig(patch: unknown): SetConfigResult {
-    const parsed = overridesSchema.safeParse(patch ?? {});
-    if (!parsed.success) {
-      const issue = parsed.error.issues[0];
-      const key = issue?.code === 'unrecognized_keys' ? String(issue.keys[0] ?? '') : String(issue?.path[0] ?? '');
-      return { ok: false, status: 400, key, error: `${key || 'config'}: ${issue?.message ?? 'invalid value'}` };
-    }
-    const doc = parsed.data as Record<string, unknown>;
+    // The flat model and effort bind to the kind in force once the patch applies. See specs/toolchain-discovery "Runtime overrides and start-only keys".
+    const parsed = applyOverridePatch(this.boot.inputs, readOverrides(this.store), patch ?? {});
+    if (!parsed.ok) return { ok: false, status: 400, key: parsed.key, error: `${parsed.key || 'config'}: ${parsed.error}` };
+    // Applied keys are named as the caller sent them: a flat model stays `model` though it is stored under its kind.
+    const doc = (patch ?? {}) as Record<string, unknown>;
     const keys = Object.keys(doc).filter((k) => doc[k] !== undefined) as OverridableKey[];
     const startOnly = keys.filter((k) => START_ONLY_KEYS.includes(k));
     if (startOnly.length) return { ok: false, status: 409, startOnly, error: `${startOnly.join(', ')} is start-only: pass it to start, which applies it when the daemon is spawned` };
-    const next = mergeOverrides(readOverrides(this.store), parsed.data);
+    const next = parsed.next;
     this.store.transaction(() => {
-      this.operatorEvent('config', undefined, { patch: parsed.data, overrides: next });
+      this.operatorEvent('config', undefined, { patch: parsed.patch, overrides: next });
       this.store.setKv('config.overrides', JSON.stringify(next));
     });
     const report = this.configReport();

@@ -20,7 +20,7 @@ import { ClaudeCodeRunner } from './runner/claude-code.js';
 import { SqliteStore } from './state/sqlite.js';
 import { GitVerifierBackend } from './verify/verifier.js';
 import { DAEMON_PID, ensureRunDir, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
-import { configSummary, mergeOverrides, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved } from './runs/resolve.js';
+import { applyOverridePatch, configSummary, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved, resolveLayers } from './runs/resolve.js';
 import { digestOf } from './operator/routes.js';
 import { runIdOf, setRunId } from './state/store.js';
 import { randomUUID } from 'node:crypto';
@@ -118,9 +118,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
 
   // Arguments are durable overrides: merged over the store's document for resolution and persisted once the start is accepted, so a restart without flags keeps them and a refused start leaves nothing behind. See specs/toolchain-discovery "Resolution order and provenance".
-  const overrides = mergeOverrides(readOverrides(store), flags);
+  // The flat model and effort bind to the kind in force once the flags apply. See specs/toolchain-discovery "Runtime overrides and start-only keys".
+  const current = readOverrides(store);
   const pinned = store.getKv('integrationBranch') || undefined;
-  const resolved = await resolveWith({ overrides, pinned });
+  const first = await resolveWith({ overrides: current, pinned });
+  const patched = applyOverridePatch(first.inputs, current, flags);
+  if (!patched.ok) {
+    store.close();
+    process.stderr.write(`--set ${patched.key}: ${patched.error}\n\n${USAGE}`);
+    process.exit(2);
+  }
+  const overrides = patched.next;
+  const resolved = resolveLayers(first.inputs, overrides);
   const config = resolved.config;
 
   // The branch the run first used is pinned; only an explicit layer can name another one, and only on an untouched run. See specs/toolchain-discovery "Integration branch detection and pinning".

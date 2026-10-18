@@ -54,6 +54,17 @@ npm link            # puts orchestrator, orchestrator-ctl, orchestrator-mcp, orc
      maxRunCostUsd: 20             # pause admission when the run has spent this much
    ```
 
+   `runner.kind` picks the agent CLI: `claude-code` (the default) or `codex`, each with its own block, default model, and effort levels (Codex adds `ultra`). Select it in the file, or at runtime with `--set runnerKind=codex` or `PUT /v1/config { runnerKind: "codex" }`; a flat `model` or `effort` argument binds to the kind in force, and `--set codex.model=...` names a kind's key directly. Under `codex` no allow list is composed (`config.allowedTools.applied` is false). The Codex runner itself lands separately; until then the daemon still spawns Claude Code.
+
+   ```yaml
+   runner:
+     kind: codex
+     codex:
+       model: gpt-6-astra        # the Codex default
+       effort: medium            # low, medium, high, xhigh, max, or ultra
+       sandbox: workspace-write  # read-only, workspace-write, or danger-full-access
+   ```
+
 2. Start the daemon for that repository. It records run data under `~/.orchestrator/runs/<id>/` and prints the graph file path:
 
    ```
@@ -151,6 +162,7 @@ Current specs in `openspec/specs/`, synced from the archived changes `add-orches
   - [toolchain-discovery](openspec/specs/toolchain-discovery/spec.md): resolution order and provenance, toolchain detection and the package manager, integration branch detection and pinning, derived allowed tools, runner command composition with the allow-list, model, and effort slots, the resolved configuration record, runtime overrides and start-only keys
   - [cluster-runtime](openspec/specs/cluster-runtime/spec.md): bind host and advertised URL, health probes, the daemon image, the reference kustomize manifests and kind overlay, the read-only mounted graph, the smoke test
   - [model-selection](openspec/specs/model-selection/spec.md): the run default worker model and effort with provenance, per-task selectors and their validation, resolution fixed at preparation, delivery to spawned agents and claimed workers, visibility to operators
+  - [worker-runners](openspec/specs/worker-runners/spec.md): the runner kinds (`claude-code`, `codex`), `runner.kind` and the `runnerKind` override, each kind's block and default model, per-kind effort sets
 - Archived change `add-orchestrator-v1` (the v1 runtime): [Proposal](openspec/changes/archive/2026-10-12-add-orchestrator-v1/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-orchestrator-v1/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-orchestrator-v1/tasks.md)
 - Archived change `add-session-operator` (operate from a Claude Code session): [Proposal](openspec/changes/archive/2026-10-12-add-session-operator/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-session-operator/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-session-operator/tasks.md)
 - Archived change `add-tracker-sync` (mirror the run to the tracker): [Proposal](openspec/changes/archive/2026-10-12-add-tracker-sync/proposal.md), [Design](openspec/changes/archive/2026-10-12-add-tracker-sync/design.md), [Tasks](openspec/changes/archive/2026-10-12-add-tracker-sync/tasks.md)

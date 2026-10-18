@@ -7,17 +7,44 @@
 import { z } from 'zod';
 import { type Config, configSchema } from '../config.js';
 import { hasAllowedToolsSlot, hasEffortSlot, hasModelSlot } from '../runner/command.js';
-import { type Effort, effortSchema, modelSchema } from '../runner/selection.js';
+import { type Effort, effortSchema, effortSchemaFor, isRunnerKind, modelSchema, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { type AllowedToolsParts, composeAllowedTools, isSafeRule } from '../toolchain/tools.js';
 
-export const OVERRIDABLE_KEYS = ['checkCommand', 'integrationBranch', 'capacity', 'allowedTools', 'runnerCommand', 'model', 'effort'] as const;
+export const OVERRIDABLE_KEYS = ['checkCommand', 'integrationBranch', 'capacity', 'allowedTools', 'runnerCommand', 'runnerKind', 'model', 'effort', 'claude', 'codex'] as const;
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number];
 export const START_ONLY_KEYS: readonly OverridableKey[] = ['integrationBranch'];
 
+/** The override namespace of each runner kind, and the leaves it holds. */
+const NAMESPACE_OF = { 'claude-code': 'claude', codex: 'codex' } as const satisfies Record<RunnerKind, string>;
+type Namespace = (typeof NAMESPACE_OF)[RunnerKind];
+const NAMESPACES: readonly Namespace[] = ['claude', 'codex'];
+const NAMESPACE_LEAVES: Record<Namespace, readonly string[]> = { claude: ['model', 'effort'], codex: ['model', 'effort', 'sandbox', 'commit', 'command'] };
+
 const rule = z.string().refine(isSafeRule, (r) => ({ message: `rule ${JSON.stringify(r)} must not be empty or contain a double quote, backslash, dollar sign, or backtick` }));
 
-/** An override document: a value sets the key, null clears it. */
+const claudeOverridesSchema = z
+  .object({
+    model: modelSchema.nullable().optional(),
+    effort: effortSchemaFor('claude-code').nullable().optional(),
+  })
+  .strict();
+
+const codexOverridesSchema = z
+  .object({
+    model: modelSchema.nullable().optional(),
+    effort: effortSchemaFor('codex').nullable().optional(),
+    sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).nullable().optional(),
+    commit: z.enum(['agent', 'daemon']).nullable().optional(),
+    command: z.string().min(1).nullable().optional(),
+  })
+  .strict();
+
+/**
+ * An override document: a value sets the key, null clears it. The stored document
+ * keeps model and effort per kind under `claude` and `codex`; the flat `model` and
+ * `effort` are accepted in a patch and bound to the kind in force when it is written.
+ */
 export const overridesSchema = z
   .object({
     checkCommand: z.string().min(1).nullable().optional(),
@@ -25,8 +52,11 @@ export const overridesSchema = z
     capacity: z.number().int().positive().nullable().optional(),
     allowedTools: z.array(rule).nullable().optional(),
     runnerCommand: z.string().min(1).nullable().optional(),
+    runnerKind: z.enum(RUNNER_KINDS).nullable().optional(),
     model: modelSchema.nullable().optional(),
     effort: effortSchema.nullable().optional(),
+    claude: claudeOverridesSchema.nullable().optional(),
+    codex: codexOverridesSchema.nullable().optional(),
   })
   .strict();
 export type Overrides = z.infer<typeof overridesSchema>;
@@ -38,6 +68,7 @@ export interface Provenance {
   integrationBranch: Source;
   capacity: Source;
   runnerCommand: Source;
+  runnerKind: Source;
   allowedTools: Source;
   model: Source;
   effort: Source;
@@ -53,13 +84,34 @@ export interface ResolveInputs {
   pinned?: string;
 }
 
+export interface ConfigLeaf<T> {
+  value: T;
+  source: Source;
+}
+
+/** The Codex runner's leaves, resolved whichever kind is in force. */
+export interface CodexLeaves {
+  model: ConfigLeaf<string>;
+  effort: ConfigLeaf<Effort>;
+  command: ConfigLeaf<string | undefined>;
+  sandbox: ConfigLeaf<Config['runner']['codex']['sandbox']>;
+  commit: ConfigLeaf<Config['runner']['codex']['commit']>;
+  networkAccess: ConfigLeaf<boolean | undefined>;
+  ignoreUserConfig: ConfigLeaf<boolean>;
+  ephemeral: ConfigLeaf<boolean>;
+}
+
 export interface Resolved {
   config: Config;
   provenance: Provenance;
+  /** The runner kind in force. See specs/worker-runners. */
+  kind: ConfigLeaf<RunnerKind>;
+  /** The allow list; composed for claude-code only, empty and not applied for codex. */
   allowedTools: { value: string[]; parts: AllowedToolsParts; applied: boolean };
-  /** The run default model and effort; `applied` is whether the runner command carries the slot. See specs/model-selection. */
+  /** The run default model and effort of the kind in force; `applied` is whether that kind's template carries the slot. See specs/model-selection. */
   model: { value: string; applied: boolean };
   effort: { value: Effort; applied: boolean };
+  codex: CodexLeaves;
   toolchain: ToolchainRecord | undefined;
   needsConfig: OverridableKey[];
   overrides: Overrides;
@@ -68,36 +120,119 @@ export interface Resolved {
 
 const DEFAULTS = configSchema.parse({});
 
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 function fileHas(raw: Record<string, unknown> | undefined, key: string): boolean {
   return raw !== undefined && raw[key] !== undefined && raw[key] !== null;
 }
 
-function fileClaude(raw: Record<string, unknown> | undefined): { allowedTools?: string[]; deriveTools?: boolean; model?: string; effort?: string } {
+/** The file's `runner` block as written. */
+function fileRunnerBlock(raw: Record<string, unknown> | undefined): Record<string, unknown> {
   const runner = raw?.['runner'];
-  const claude = runner && typeof runner === 'object' ? (runner as Record<string, unknown>)['claude'] : undefined;
-  if (!claude || typeof claude !== 'object') return {};
-  const c = claude as Record<string, unknown>;
-  return {
-    allowedTools: Array.isArray(c['allowedTools']) ? c['allowedTools'].map(String) : undefined,
-    deriveTools: typeof c['deriveTools'] === 'boolean' ? c['deriveTools'] : undefined,
-    model: typeof c['model'] === 'string' ? c['model'] : undefined,
-    effort: typeof c['effort'] === 'string' ? c['effort'] : undefined,
-  };
+  return isObject(runner) ? runner : {};
 }
 
-/** Merge a patch into an override document: a null clears the key. */
+/** The file's `runner.<namespace>` block as written. */
+function fileRunner(raw: Record<string, unknown> | undefined, ns: Namespace): Record<string, unknown> {
+  const block = fileRunnerBlock(raw)[ns];
+  return isObject(block) ? block : {};
+}
+
+/** Merge a patch into an override document: a null clears the key; inside `claude` and `codex` a null clears one leaf. */
 export function mergeOverrides(current: Overrides, patch: Overrides): Overrides {
   const out: Record<string, unknown> = { ...current };
   for (const [k, v] of Object.entries(patch)) {
     if (v === null) delete out[k];
-    else if (v !== undefined) out[k] = v;
+    else if (v === undefined) continue;
+    else if ((NAMESPACES as readonly string[]).includes(k) && isObject(v)) {
+      const ns: Record<string, unknown> = isObject(out[k]) ? { ...(out[k] as Record<string, unknown>) } : {};
+      for (const [leaf, lv] of Object.entries(v)) {
+        if (lv === null) delete ns[leaf];
+        else if (lv !== undefined) ns[leaf] = lv;
+      }
+      if (Object.keys(ns).length) out[k] = ns;
+      else delete out[k];
+    } else out[k] = v;
   }
   return out as Overrides;
 }
 
+/** Move a patch's flat `model` and `effort` under the namespace of `kind`; an explicit namespaced leaf wins. */
+function bindFlat(patch: Record<string, unknown>, kind: RunnerKind): { doc: Record<string, unknown>; bound: Set<string> } {
+  const ns = NAMESPACE_OF[kind];
+  const bound = new Set<string>();
+  if (patch[ns] === null || (patch[ns] !== undefined && !isObject(patch[ns]))) return { doc: patch, bound };
+  const doc: Record<string, unknown> = { ...patch };
+  const nested: Record<string, unknown> = isObject(patch[ns]) ? { ...(patch[ns] as Record<string, unknown>) } : {};
+  for (const key of ['model', 'effort']) {
+    if (doc[key] === undefined) continue;
+    if (nested[key] === undefined) nested[key] = doc[key];
+    delete doc[key];
+    bound.add(key);
+  }
+  if (bound.size) doc[ns] = nested;
+  return { doc, bound };
+}
+
+export type PatchResult = { ok: true; patch: Overrides } | { ok: false; key: string; error: string };
+
+/**
+ * Validate an override patch. With a kind (the patch's own `runnerKind` first),
+ * the flat `model` and `effort` are bound to that kind's namespace and `effort`
+ * is checked against the kind's set; without one they stay flat.
+ */
+export function parseOverridePatch(patch: unknown, kind?: RunnerKind): PatchResult {
+  let doc = patch ?? {};
+  let bound = new Set<string>();
+  let ns: Namespace | undefined;
+  if (isObject(doc)) {
+    const k = isRunnerKind(doc['runnerKind']) ? doc['runnerKind'] : kind;
+    if (k) {
+      ns = NAMESPACE_OF[k];
+      ({ doc, bound } = bindFlat(doc, k));
+      const d = doc as Record<string, unknown>;
+      if (d[ns] === null && (d['model'] !== undefined || d['effort'] !== undefined)) return { ok: false, key: ns, error: `a null ${ns} clears its model and effort and cannot be combined with a flat model or effort` };
+    }
+  }
+  const parsed = overridesSchema.safeParse(doc);
+  if (parsed.success) return { ok: true, patch: parsed.data };
+  const issue = parsed.error.issues[0];
+  const path = issue?.code === 'unrecognized_keys' ? [...issue.path, String(issue.keys[0] ?? '')] : (issue?.path ?? []);
+  // A flat key bound to the kind keeps its own name in the refusal; the message names the kind.
+  const named = (NAMESPACES as readonly unknown[]).includes(path[0]) ? path.slice(0, 2) : path.slice(0, 1);
+  const key = named.length === 2 && named[0] === ns && bound.has(String(named[1])) ? String(named[1]) : named.map(String).join('.');
+  return { ok: false, key, error: issue?.message ?? 'invalid value' };
+}
+
+export type ApplyResult = { ok: true; patch: Overrides; next: Overrides } | { ok: false; key: string; error: string };
+
+/**
+ * Validate a patch against the document in force and merge it. The flat `model`
+ * and `effort` bind to the kind in force once the patch applies: its own
+ * `runnerKind`, else the kind the current document resolves to.
+ */
+export function applyOverridePatch(inputs: ResolveInputs, current: Overrides, patch: unknown): ApplyResult {
+  const raw = isObject(patch) ? patch['runnerKind'] : undefined;
+  const kind = isRunnerKind(raw) ? raw : resolveLayers(inputs, raw === null ? { ...current, runnerKind: undefined } : current).kind.value;
+  const parsed = parseOverridePatch(patch, kind);
+  if (!parsed.ok) return parsed;
+  return { ok: true, patch: parsed.patch, next: mergeOverrides(current, parsed.patch) };
+}
+
+/** A scalar leaf: argument over file over default; an in-memory config with no file stands for the file layer. */
+function leaf<T>(argument: T | null | undefined, fileSets: boolean, base: T, fallback: T, noFile: boolean): ConfigLeaf<T> {
+  if (argument !== undefined && argument !== null) return { value: argument, source: 'argument' };
+  return { value: base, source: fileSets || (noFile && base !== fallback) ? 'file' : 'default' };
+}
+
+const EMPTY_PARTS: AllowedToolsParts = { default: [], detected: [], file: [], argument: [] };
+
 export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}): Resolved {
   const { base, fileRaw, detected, pinned } = inputs;
   const provenance = {} as Provenance;
+  const noFile = fileRaw === undefined;
 
   // An in-memory config with no file (the harnesses) stands for the file layer.
   const fileCheck = fileRaw === undefined || fileHas(fileRaw, 'checkCommand') ? base.checkCommand : undefined;
@@ -131,38 +266,77 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
   const runnerCommand = overrides.runnerCommand ?? base.runnerCommand;
   provenance.runnerCommand = overrides.runnerCommand ? 'argument' : fileHas(fileRaw, 'runnerCommand') || (fileRaw === undefined && base.runnerCommand !== DEFAULTS.runnerCommand) ? 'file' : 'default';
 
-  const claude = fileClaude(fileRaw);
-  const composed = composeAllowedTools({
-    record: detected?.toolchain,
-    deriveTools: claude.deriveTools ?? base.runner.claude.deriveTools,
-    fileRules: claude.allowedTools ?? base.runner.claude.allowedTools,
-    argumentRules: overrides.allowedTools ?? [],
-  });
-  provenance.allowedTools = 'composed';
+  const kind = leaf(overrides.runnerKind, fileHas(fileRunnerBlock(fileRaw), 'kind'), base.runner.kind, DEFAULTS.runner.kind, noFile);
+  provenance.runnerKind = kind.source;
 
-  // Model and effort: argument over file over default; an in-memory config with no file stands for the file layer.
-  const model = overrides.model ?? base.runner.claude.model;
-  provenance.model = overrides.model ? 'argument' : claude.model !== undefined || (fileRaw === undefined && base.runner.claude.model !== DEFAULTS.runner.claude.model) ? 'file' : 'default';
-  const effort = overrides.effort ?? base.runner.claude.effort;
-  provenance.effort = overrides.effort ? 'argument' : claude.effort !== undefined || (fileRaw === undefined && base.runner.claude.effort !== DEFAULTS.runner.claude.effort) ? 'file' : 'default';
+  // Model and effort per kind; a flat key in an unbound document stands for the kind in force.
+  const flat = (k: RunnerKind) => (k === kind.value ? { model: overrides.model, effort: overrides.effort } : {});
+  const claudeFile = fileRunner(fileRaw, 'claude');
+  const codexFile = fileRunner(fileRaw, 'codex');
+  const claudeModel = leaf(flat('claude-code').model ?? overrides.claude?.model, fileHas(claudeFile, 'model'), base.runner.claude.model, DEFAULTS.runner.claude.model, noFile);
+  const claudeEffort = leaf<Effort>(flat('claude-code').effort ?? overrides.claude?.effort, fileHas(claudeFile, 'effort'), base.runner.claude.effort, DEFAULTS.runner.claude.effort, noFile);
+  const c = base.runner.codex;
+  const d = DEFAULTS.runner.codex;
+  const o = overrides.codex ?? {};
+  const codex: CodexLeaves = {
+    model: leaf(flat('codex').model ?? o.model, fileHas(codexFile, 'model'), c.model, d.model, noFile),
+    effort: leaf<Effort>(flat('codex').effort ?? o.effort, fileHas(codexFile, 'effort'), c.effort, d.effort, noFile),
+    command: leaf(o.command, fileHas(codexFile, 'command'), c.command, d.command, noFile),
+    sandbox: leaf(o.sandbox, fileHas(codexFile, 'sandbox'), c.sandbox, d.sandbox, noFile),
+    commit: leaf(o.commit, fileHas(codexFile, 'commit'), c.commit, d.commit, noFile),
+    networkAccess: leaf(undefined, fileHas(codexFile, 'networkAccess'), c.networkAccess, d.networkAccess, noFile),
+    ignoreUserConfig: leaf(undefined, fileHas(codexFile, 'ignoreUserConfig'), c.ignoreUserConfig, d.ignoreUserConfig, noFile),
+    ephemeral: leaf(undefined, fileHas(codexFile, 'ephemeral'), c.ephemeral, d.ephemeral, noFile),
+  };
+  const isCodex = kind.value === 'codex';
+  const model = isCodex ? codex.model : claudeModel;
+  const effort = isCodex ? codex.effort : claudeEffort;
+  provenance.model = model.source;
+  provenance.effort = effort.source;
+
+  // Allow-list composition is claude-code only. Codex's built-in template carries the model and effort slots; a template from the file or an argument is read for them.
+  const allowedTools = isCodex
+    ? { value: [], parts: EMPTY_PARTS, applied: false }
+    : {
+        ...composeAllowedTools({
+          record: detected?.toolchain,
+          deriveTools: typeof claudeFile['deriveTools'] === 'boolean' ? claudeFile['deriveTools'] : base.runner.claude.deriveTools,
+          fileRules: Array.isArray(claudeFile['allowedTools']) ? claudeFile['allowedTools'].map(String) : base.runner.claude.allowedTools,
+          argumentRules: overrides.allowedTools ?? [],
+        }),
+        applied: hasAllowedToolsSlot(runnerCommand),
+      };
+  provenance.allowedTools = 'composed';
+  const template = isCodex ? codex.command.value : runnerCommand;
+  const modelApplied = template === undefined ? true : hasModelSlot(template);
+  const effortApplied = template === undefined ? true : hasEffortSlot(template);
 
   const needsConfig: OverridableKey[] = checkCommand === undefined ? ['checkCommand'] : [];
   return {
-    config: { ...base, checkCommand, integrationBranch, capacity, runnerCommand, runner: { ...base.runner, claude: { ...base.runner.claude, model, effort } } },
+    config: {
+      ...base,
+      checkCommand,
+      integrationBranch,
+      capacity,
+      runnerCommand,
+      runner: {
+        ...base.runner,
+        kind: kind.value,
+        claude: { ...base.runner.claude, model: claudeModel.value, effort: claudeEffort.value },
+        codex: { ...c, model: codex.model.value, effort: codex.effort.value, command: codex.command.value, sandbox: codex.sandbox.value, commit: codex.commit.value },
+      },
+    },
     provenance,
-    allowedTools: { ...composed, applied: hasAllowedToolsSlot(runnerCommand) },
-    model: { value: model, applied: hasModelSlot(runnerCommand) },
-    effort: { value: effort, applied: hasEffortSlot(runnerCommand) },
+    kind,
+    allowedTools,
+    model: { value: model.value, applied: modelApplied },
+    effort: { value: effort.value, applied: effortApplied },
+    codex,
     toolchain: detected?.toolchain,
     needsConfig,
     overrides,
     inputs,
   };
-}
-
-export interface ConfigLeaf<T> {
-  value: T;
-  source: Source;
 }
 
 /** The report shape shared by `status`, `GET /v1/config`, the start result, and `config.json`. */
@@ -174,9 +348,11 @@ export interface ConfigReport {
     integrationBranch: ConfigLeaf<string>;
     capacity: ConfigLeaf<number>;
     runnerCommand: ConfigLeaf<string>;
+    runnerKind: ConfigLeaf<RunnerKind>;
     allowedTools: ConfigLeaf<string[]> & { parts: AllowedToolsParts; applied: boolean };
     model: ConfigLeaf<string> & { applied: boolean };
     effort: ConfigLeaf<Effort> & { applied: boolean };
+    codex: CodexLeaves;
   };
   toolchain: ToolchainRecord | undefined;
   overrides: Overrides;
@@ -191,6 +367,7 @@ export function configSummary(report: ConfigReport): Record<string, unknown> {
     integrationBranch: c.integrationBranch,
     capacity: c.capacity,
     runnerCommand: { source: c.runnerCommand.source },
+    runnerKind: c.runnerKind,
     allowedTools: { source: c.allowedTools.source, count: c.allowedTools.value.length, applied: c.allowedTools.applied, parts: Object.fromEntries(Object.entries(c.allowedTools.parts).map(([k, v]) => [k, v.length])) },
     model: c.model,
     effort: c.effort,
@@ -200,32 +377,57 @@ export function configSummary(report: ConfigReport): Record<string, unknown> {
   };
 }
 
-/** The override document kept in the store under `config.overrides`; empty when absent or unreadable. */
+/**
+ * The override document kept in the store under `config.overrides`; empty when absent or unreadable.
+ * A document stored before runner kinds holds a flat `model` and `effort`; they are read as `claude.*`.
+ */
 export function readOverrides(store: { getKv(key: string): string | undefined }): Overrides {
   const raw = store.getKv('config.overrides');
   if (!raw) return {};
   try {
-    const parsed = overridesSchema.safeParse(JSON.parse(raw));
+    let doc: unknown = JSON.parse(raw);
+    if (isObject(doc) && (doc['model'] !== undefined || doc['effort'] !== undefined)) doc = bindFlat(doc, 'claude-code').doc;
+    const parsed = overridesSchema.safeParse(doc);
     return parsed.success ? parsed.data : {};
   } catch {
     return {};
   }
 }
 
+const DOTTED_KEYS = NAMESPACES.flatMap((ns) => NAMESPACE_LEAVES[ns].map((l) => `${ns}.${l}`));
+
 /**
  * `--set key=value` flags into an override document: `capacity` as an integer,
- * `allowedTools` as a JSON array or one rule per flag (appended), `model` and
- * `effort` checked by their shape rules, the rest as strings. Throws a usage error on an unknown key or a bad value.
+ * `allowedTools` as a JSON array or one rule per flag (appended), `claude.<leaf>`
+ * and `codex.<leaf>` folded into their namespace (or `claude=`/`codex=` as a JSON
+ * object), the rest as strings. With a `runnerKind` flag or a `kind`, the flat
+ * `model` and `effort` bind to that kind and `effort` is checked against its set.
+ * Throws a usage error on an unknown key or a bad value.
  */
-export function parseSetFlags(flags: readonly string[]): Overrides {
+export function parseSetFlags(flags: readonly string[], kind?: RunnerKind): Overrides {
   const out: Record<string, unknown> = {};
   for (const flag of flags) {
     const eq = flag.indexOf('=');
     if (eq <= 0) throw new Error(`--set expects key=value, not ${JSON.stringify(flag)}`);
     const key = flag.slice(0, eq).trim();
     const raw = flag.slice(eq + 1);
-    if (!(OVERRIDABLE_KEYS as readonly string[]).includes(key)) throw new Error(`--set: unknown key ${JSON.stringify(key)}; one of ${OVERRIDABLE_KEYS.join(', ')}`);
-    if (key === 'capacity') {
+    if (DOTTED_KEYS.includes(key)) {
+      const [ns, leafKey] = key.split('.') as [Namespace, string];
+      if (!raw.trim()) throw new Error(`--set ${key} expects a non-empty value`);
+      out[ns] = { ...(isObject(out[ns]) ? out[ns] : {}), [leafKey]: raw };
+      continue;
+    }
+    if (!(OVERRIDABLE_KEYS as readonly string[]).includes(key)) throw new Error(`--set: unknown key ${JSON.stringify(key)}; one of ${[...OVERRIDABLE_KEYS.filter((k) => !(NAMESPACES as readonly string[]).includes(k)), ...DOTTED_KEYS].join(', ')}`);
+    if ((NAMESPACES as readonly string[]).includes(key)) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = undefined;
+      }
+      if (!isObject(parsed)) throw new Error(`--set ${key} expects a JSON object, or use ${NAMESPACE_LEAVES[key as Namespace].map((l) => `${key}.${l}`).join(', ')}`);
+      out[key] = { ...(isObject(out[key]) ? out[key] : {}), ...parsed };
+    } else if (key === 'capacity') {
       const n = Number(raw);
       if (!raw.trim() || !Number.isInteger(n) || n <= 0) throw new Error(`--set capacity expects a positive integer, not ${JSON.stringify(raw)}`);
       out[key] = n;
@@ -249,12 +451,9 @@ export function parseSetFlags(flags: readonly string[]): Overrides {
       out[key] = raw;
     }
   }
-  const parsed = overridesSchema.safeParse(out);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    throw new Error(`--set ${String(issue?.path[0] ?? '')}: ${issue?.message ?? 'invalid value'}`);
-  }
-  return parsed.data;
+  const parsed = parseOverridePatch(out, kind);
+  if (!parsed.ok) throw new Error(`--set ${parsed.key}: ${parsed.error}`);
+  return parsed.patch;
 }
 
 export type SetConfigResult =
@@ -271,9 +470,11 @@ export function reportOf(resolved: Resolved, now: number): ConfigReport {
       integrationBranch: { value: resolved.config.integrationBranch, source: resolved.provenance.integrationBranch },
       capacity: { value: resolved.config.capacity, source: resolved.provenance.capacity },
       runnerCommand: { value: resolved.config.runnerCommand, source: resolved.provenance.runnerCommand },
+      runnerKind: resolved.kind,
       allowedTools: { value: resolved.allowedTools.value, source: 'composed', parts: resolved.allowedTools.parts, applied: resolved.allowedTools.applied },
       model: { value: resolved.model.value, source: resolved.provenance.model, applied: resolved.model.applied },
       effort: { value: resolved.effort.value, source: resolved.provenance.effort, applied: resolved.effort.applied },
+      codex: resolved.codex,
     },
     toolchain: resolved.toolchain,
     overrides: resolved.overrides,

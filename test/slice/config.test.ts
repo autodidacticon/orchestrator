@@ -193,7 +193,7 @@ describe('the daemon resolves, records, and pins', () => {
     expect(log).toContain('fresh run directory');
     const fourth = await startDaemon({ repo, env });
     expect(fourth.config?.integrationBranch).toEqual({ value: 'main', source: 'pinned' });
-    expect(readConfigJson(paths.runDir)?.overrides).toEqual({ runnerCommand: scripted, capacity: 3, model: 'claude-sonnet-5-5' });
+    expect(readConfigJson(paths.runDir)?.overrides).toEqual({ runnerCommand: scripted, capacity: 3, claude: { model: 'claude-sonnet-5-5' } });
     await stopDaemon({ repo, env });
   }, 180_000);
 
@@ -221,5 +221,33 @@ describe('the daemon resolves, records, and pins', () => {
     expect(store.getKv('baselineHead')).toBe(gitIn(repo, 'rev-parse', 'develop'));
     expect(store.getKv('baselineHead')).not.toBe(mainHead);
     store.close();
+  }, 60_000);
+
+  // See specs/worker-runners "Runner kinds and defaults" and specs/toolchain-discovery "Runtime overrides and start-only keys".
+  it('selects codex through the route and a namespaced start argument, records the codex leaves, and refuses an unknown kind or an effort the kind lacks', async () => {
+    env = { ...process.env, ORCH_HOME: fresh('orch-kind-home-') };
+    const repo = realpathSync(makeRepo(fresh('orch-kind-repo-')));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), `runnerCommand: "${scripted}"\ncheckCommand: "true"\n`);
+    const paths = runPaths(repo, env);
+    const first = await startDaemon({ repo, env, overrides: { codex: { model: 'gpt-6-pro' } } });
+    expect(first.config?.runnerKind).toEqual({ value: 'claude-code', source: 'default' });
+    expect(first.config?.codex.model).toEqual({ value: 'gpt-6-pro', source: 'argument' });
+    expect((await http(first.url, 'PUT', '/v1/config', { effort: 'ultra' })).body).toMatchObject({ key: 'effort', error: expect.stringContaining('claude-code') });
+    const put = await http(first.url, 'PUT', '/v1/config', { runnerKind: 'codex' });
+    expect(put.status).toBe(200);
+    const record = readConfigJson(paths.runDir);
+    expect(record?.config.runnerKind).toEqual({ value: 'codex', source: 'argument' });
+    expect(record?.config.model).toEqual({ value: 'gpt-6-pro', source: 'argument', applied: true });
+    expect(record?.config.allowedTools).toMatchObject({ value: [], applied: false });
+    expect(record?.config.codex).toMatchObject({ effort: { value: 'medium', source: 'default' }, sandbox: { value: 'workspace-write', source: 'default' }, ignoreUserConfig: { value: true, source: 'default' }, ephemeral: { value: true, source: 'default' } });
+    expect((await http(first.url, 'PUT', '/v1/config', { effort: 'ultra' })).status).toBe(200);
+    const cursor = await http(first.url, 'PUT', '/v1/config', { runnerKind: 'cursor' });
+    expect(cursor.status).toBe(400);
+    expect(cursor.body).toMatchObject({ key: 'runnerKind' });
+    const huge = await http(first.url, 'PUT', '/v1/config', { effort: 'huge' });
+    expect(huge.status).toBe(400);
+    expect(huge.body).toMatchObject({ key: 'effort', error: expect.stringContaining('codex') });
+    expect(readConfigJson(paths.runDir)?.overrides).toEqual({ runnerKind: 'codex', codex: { model: 'gpt-6-pro', effort: 'ultra' } });
+    await stopDaemon({ repo, env });
   }, 60_000);
 });

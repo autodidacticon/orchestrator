@@ -6,7 +6,7 @@ How the worker model and effort level are decided for a launch: a run default re
 ## Requirements
 
 ### Requirement: Run default model and effort
-The configuration SHALL carry `runner.claude.model`, defaulting to `claude-opus-5-5`, and `runner.claude.effort`, defaulting to `medium`. Both SHALL resolve through the configuration layers as the flat keys `model` and `effort`: an argument (a `start` argument, a `--set` flag, or a runtime override) beats the file, which beats the default, and the resolved record SHALL carry the source of each. Neither key SHALL be detected or pinned, and neither SHALL be start-only.
+The configuration SHALL carry a model and an effort per runner kind (see worker-runners "Runner kinds and defaults"): `runner.claude.model`, defaulting to `claude-opus-5-5`, and `runner.claude.effort` for `claude-code`; `runner.codex.model`, defaulting to `gpt-6-astra`, and `runner.codex.effort` for `codex`; each effort defaulting to `medium`. The run default SHALL be the model and effort of the kind in force, resolved through the configuration layers as the flat keys `model` and `effort`: an argument (a `start` argument, a `--set` flag, or a runtime override) beats the file, which beats the default, and the resolved record SHALL carry the source of each. An argument MAY name a kind's key directly (`claude.model`, `codex.effort`); a flat `model` or `effort` argument SHALL bind to the kind in force when it is written, or to a `runnerKind` in the same patch, so changing the kind later does not carry one kind's model to another. Neither key SHALL be detected or pinned, and neither SHALL be start-only.
 
 #### Scenario: Defaults without a file
 - **WHEN** the daemon starts in a repository with no `orchestrator.yaml` and no overrides
@@ -16,12 +16,24 @@ The configuration SHALL carry `runner.claude.model`, defaulting to `claude-opus-
 - **WHEN** `orchestrator.yaml` sets `runner.claude.model: opus` and the daemon starts with `--set effort=high`
 - **THEN** `config.model` is `{ value: "opus", source: "file" }` and `config.effort` is `{ value: "high", source: "argument" }`
 
+#### Scenario: Codex default model
+- **WHEN** the file sets `runner.kind: codex` and no model
+- **THEN** `config.model` is `{ value: "gpt-6-astra", source: "default" }`, not a Claude model
+
+#### Scenario: Stored flat override read as Claude Code's
+- **WHEN** a run's stored override document, written before runner kinds, holds `{ model: "opus" }`
+- **THEN** it is read as `claude.model`, and under `claude-code` `config.model` is `{ value: "opus", source: "argument" }`
+
 ### Requirement: Task selectors
-A task MAY carry `model` and `effort` in its payload. A present `effort` SHALL be one of `low`, `medium`, `high`, `xhigh`, `max`, and a present `model` SHALL be a string matching `^[A-Za-z0-9][A-Za-z0-9._:-]*$`; a present value of any other shape SHALL fail graph validation naming the node and the key. A task without a selector SHALL use the run default for that key.
+A task MAY carry `model` and `effort` in its payload. A present `effort` SHALL be one of the levels some runner kind accepts (`low`, `medium`, `high`, `xhigh`, `max`, and `ultra` for `codex`; see worker-runners "Per-kind effort sets"), and a present `model` SHALL be a string matching `^[A-Za-z0-9][A-Za-z0-9._:-]*$`; a present value of any other shape SHALL fail graph validation naming the node and the key. A task without a selector SHALL use the run default for that key.
 
 #### Scenario: Selectors load from the graph file
 - **WHEN** a node declares `model: claude-sonnet-5-5` and `effort: low`
 - **THEN** the loaded node's payload carries both values
+
+#### Scenario: Codex-only level loads
+- **WHEN** a node declares `effort: ultra`
+- **THEN** the loaded node's payload carries `effort: ultra`
 
 #### Scenario: Invalid effort refused at load
 - **WHEN** a node declares `effort: huge`

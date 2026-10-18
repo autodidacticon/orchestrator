@@ -4,7 +4,8 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { type ConfigInput, defaultConfig } from '../../src/config.js';
 import { DEFAULT_CLAUDE_COMMAND } from '../../src/runner/command.js';
-import { mergeOverrides, parseSetFlags, reportOf, resolveLayers } from '../../src/runs/resolve.js';
+import { ZodError } from 'zod';
+import { applyOverridePatch, mergeOverrides, parseSetFlags, readOverrides, reportOf, resolveLayers } from '../../src/runs/resolve.js';
 import { readConfigJson, writeConfigJson } from '../../src/runs/runDir.js';
 import type { ToolchainRecord } from '../../src/toolchain/detect.js';
 import { BASE_RULES } from '../../src/toolchain/tools.js';
@@ -150,5 +151,87 @@ describe('layered resolution', () => {
     expect(parseSetFlags(['model=claude-sonnet-5-5', 'effort=high'])).toEqual({ model: 'claude-sonnet-5-5', effort: 'high' });
     expect(() => parseSetFlags(['effort=huge'])).toThrow(/^--set effort/);
     expect(() => parseSetFlags(['model=opus;rm'])).toThrow(/^--set model/);
+
+    // Runner kinds: flat keys bind to the kind in the same patch, dotted keys fold into their namespace. See specs/worker-runners.
+    const both = parseSetFlags(['runnerKind=codex', 'model=gpt-6-astra']);
+    expect(both).toEqual({ runnerKind: 'codex', codex: { model: 'gpt-6-astra' } });
+    const codexRun = resolveLayers({ base: defaultConfig() }, both);
+    expect(codexRun.kind).toEqual({ value: 'codex', source: 'argument' });
+    expect(reportOf(codexRun, 1).config.model).toEqual({ value: 'gpt-6-astra', source: 'argument', applied: true });
+    const back = reportOf(resolveLayers({ base: defaultConfig() }, mergeOverrides(both, { runnerKind: null })), 1);
+    expect(back.config.runnerKind).toEqual({ value: 'claude-code', source: 'default' });
+    expect(back.config.model).toEqual({ value: 'claude-opus-5-5', source: 'default', applied: true });
+    expect(back.config.codex.model).toEqual({ value: 'gpt-6-astra', source: 'argument' });
+    expect(() => parseSetFlags(['runnerKind=cursor'])).toThrow(/^--set runnerKind/);
+    expect(parseSetFlags(['codex.sandbox=read-only', 'codex.model=gpt-6-pro', 'claude.effort=high'])).toEqual({ codex: { sandbox: 'read-only', model: 'gpt-6-pro' }, claude: { effort: 'high' } });
+    expect(parseSetFlags(['codex={"model":"gpt-6-pro"}'])).toEqual({ codex: { model: 'gpt-6-pro' } });
+    expect(() => parseSetFlags(['codex.sandbox=open'])).toThrow(/^--set codex\.sandbox/);
+    expect(() => parseSetFlags(['codex.nope=1'])).toThrow(/unknown key "codex.nope"/);
+    expect(() => parseSetFlags(['effort=ultra'], 'claude-code')).toThrow(/^--set effort: .*claude-code/);
+    expect(() => parseSetFlags(['runnerKind=claude-code', 'effort=ultra'])).toThrow(/^--set effort: .*claude-code/);
+    expect(() => parseSetFlags(['claude.effort=ultra'])).toThrow(/^--set claude\.effort: .*claude-code/);
+    expect(parseSetFlags(['effort=ultra'], 'codex')).toEqual({ codex: { effort: 'ultra' } });
+    expect(parseSetFlags(['runnerKind=codex', 'effort=ultra'])).toEqual({ runnerKind: 'codex', codex: { effort: 'ultra' } });
+  });
+});
+
+// See specs/worker-runners "Runner kinds and defaults" and "Per-kind effort sets".
+describe('runner kinds', () => {
+  it('defaults to claude-code and resolves codex defaults, file values, and no allow list under codex', () => {
+    const d = reportOf(resolveLayers({ base: defaultConfig(), detected: { toolchain: node } }), 1);
+    expect(d.config.runnerKind).toEqual({ value: 'claude-code', source: 'default' });
+    expect(d.config.model).toEqual({ value: 'claude-opus-5-5', source: 'default', applied: true });
+    expect(d.config.codex.model).toEqual({ value: 'gpt-6-astra', source: 'default' });
+    const c = reportOf(resolveLayers({ ...file({ runner: { kind: 'codex' } }), detected: { toolchain: node } }), 1);
+    expect(c.config.runnerKind).toEqual({ value: 'codex', source: 'file' });
+    expect(c.config.model).toEqual({ value: 'gpt-6-astra', source: 'default', applied: true });
+    expect(c.config.effort).toEqual({ value: 'medium', source: 'default', applied: true });
+    expect(c.config.allowedTools).toEqual({ value: [], source: 'composed', parts: { default: [], detected: [], file: [], argument: [] }, applied: false });
+    expect(c.config.codex).toMatchObject({ command: { value: undefined, source: 'default' }, sandbox: { value: 'workspace-write', source: 'default' }, ignoreUserConfig: { value: true, source: 'default' }, ephemeral: { value: true, source: 'default' } });
+    const pro = reportOf(resolveLayers(file({ runner: { kind: 'codex', codex: { model: 'gpt-6-pro', sandbox: 'read-only', networkAccess: true } } })), 1);
+    expect(pro.config.model).toEqual({ value: 'gpt-6-pro', source: 'file', applied: true });
+    expect(pro.config.codex).toMatchObject({ sandbox: { value: 'read-only', source: 'file' }, networkAccess: { value: true, source: 'file' } });
+    // A codex template from the file is read for the slots; the claude template no longer decides.
+    const verbatim = resolveLayers(file({ runner: { kind: 'codex', codex: { command: 'codex exec -m {model} < {brief}' } } }));
+    expect(verbatim.model.applied).toBe(true);
+    expect(verbatim.effort.applied).toBe(false);
+    expect(resolveLayers(file({ runnerCommand: 'claude -p < {brief}', runner: { kind: 'codex' } })).model.applied).toBe(true);
+    // In memory, a kind other than the default stands for the file layer.
+    expect(resolveLayers({ base: defaultConfig({ runner: { kind: 'codex' } }) }).kind).toEqual({ value: 'codex', source: 'file' });
+  });
+
+  it('validates the kind and the per-kind effort in the file', () => {
+    let error: unknown;
+    try {
+      defaultConfig({ runner: { kind: 'cursor' as never } });
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toBeInstanceOf(ZodError);
+    expect((error as ZodError).issues[0]?.path).toEqual(['runner', 'kind']);
+    expect(() => defaultConfig({ runner: { claude: { effort: 'ultra' } } })).toThrow(/claude-code/);
+    expect(defaultConfig({ runner: { codex: { effort: 'ultra' } } }).runner.codex.effort).toBe('ultra');
+  });
+
+  it('reads a stored flat model and effort as claude.* and clears one namespaced leaf with null', () => {
+    const kv = (doc: unknown) => ({ getKv: (k: string) => (k === 'config.overrides' ? JSON.stringify(doc) : undefined) });
+    const stored = readOverrides(kv({ model: 'opus', effort: 'high', capacity: 3 }));
+    expect(stored).toEqual({ claude: { model: 'opus', effort: 'high' }, capacity: 3 });
+    expect(reportOf(resolveLayers({ base: defaultConfig() }, stored), 1).config.model).toEqual({ value: 'opus', source: 'argument', applied: true });
+    expect(readOverrides(kv({ model: 'opus', claude: { model: 'sonnet' } }))).toEqual({ claude: { model: 'sonnet' } });
+    const doc = { runnerKind: 'codex' as const, codex: { model: 'gpt-6-pro', sandbox: 'read-only' as const }, claude: { model: 'opus' } };
+    expect(mergeOverrides(doc, { codex: { model: null } })).toEqual({ runnerKind: 'codex', codex: { sandbox: 'read-only' }, claude: { model: 'opus' } });
+    expect(mergeOverrides(doc, { codex: { model: null, sandbox: null } })).toEqual({ runnerKind: 'codex', claude: { model: 'opus' } });
+    expect(mergeOverrides(doc, { codex: null })).toEqual({ runnerKind: 'codex', claude: { model: 'opus' } });
+  });
+
+  it('binds a patch to the kind in force when it is applied', () => {
+    const inputs = { base: defaultConfig() };
+    const toCodex = applyOverridePatch(inputs, { runnerKind: 'codex' }, { model: 'gpt-6-pro', effort: 'ultra' });
+    expect(toCodex).toMatchObject({ ok: true, next: { runnerKind: 'codex', codex: { model: 'gpt-6-pro', effort: 'ultra' } } });
+    expect(applyOverridePatch(inputs, {}, { effort: 'ultra' })).toMatchObject({ ok: false, key: 'effort', error: expect.stringContaining('claude-code') });
+    expect(applyOverridePatch(inputs, { runnerKind: 'codex' }, { codex: null, model: 'gpt-6-pro' })).toMatchObject({ ok: false, key: 'codex' });
+    // Clearing the kind in the same patch binds the flat keys to the kind it falls back to.
+    expect(applyOverridePatch({ base: defaultConfig({ runner: { kind: 'codex' } }) }, { runnerKind: 'claude-code' }, { runnerKind: null, effort: 'ultra' })).toMatchObject({ ok: true, next: { codex: { effort: 'ultra' } } });
   });
 });

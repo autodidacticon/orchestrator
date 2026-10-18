@@ -65,6 +65,31 @@ describe('effective configuration', () => {
     expect(h.store.listEvents({ kind: 'operator.config' })).toEqual([]);
   });
 
+  // See specs/worker-runners "Runner kinds and defaults" and "Per-kind effort sets".
+  it('selects the runner kind at runtime, binds the flat model and effort to the kind in force, and names the kind in an effort refusal', () => {
+    const h = harness();
+    expect(h.orch.setConfig({ runnerKind: 'cursor' })).toMatchObject({ ok: false, status: 400, key: 'runnerKind' });
+    const ultra = h.orch.setConfig({ effort: 'ultra' });
+    expect(ultra).toMatchObject({ ok: false, status: 400, key: 'effort' });
+    expect((ultra as { error: string }).error).toContain('claude-code');
+    expect(h.store.listEvents({ kind: 'operator.config' })).toEqual([]);
+    expect(h.orch.setConfig({ model: 'claude-sonnet-5-5' })).toMatchObject({ ok: true, applied: ['model'] });
+    expect(h.orch.setConfig({ runnerKind: 'codex' })).toMatchObject({ ok: true, applied: ['runnerKind'] });
+    const r = h.orch.configReport();
+    expect(r.config.runnerKind).toEqual({ value: 'codex', source: 'argument' });
+    expect(r.config.model).toEqual({ value: 'gpt-6-astra', source: 'default', applied: true });
+    expect(r.config.codex).toMatchObject({ model: { value: 'gpt-6-astra', source: 'default' }, sandbox: { value: 'workspace-write', source: 'default' }, command: { source: 'default' } });
+    expect(r.config.allowedTools).toMatchObject({ value: [], applied: false });
+    const huge = h.orch.setConfig({ effort: 'huge' });
+    expect(huge).toMatchObject({ ok: false, status: 400, key: 'effort' });
+    expect((huge as { error: string }).error).toContain('codex');
+    expect(h.orch.setConfig({ effort: 'ultra', codex: { sandbox: 'read-only' } })).toMatchObject({ ok: true, applied: ['effort', 'codex'] });
+    expect(h.orch.configReport().config.effort).toEqual({ value: 'ultra', source: 'argument', applied: true });
+    expect(h.orch.configReport().overrides).toEqual({ runnerKind: 'codex', claude: { model: 'claude-sonnet-5-5' }, codex: { effort: 'ultra', sandbox: 'read-only' } });
+    expect(h.orch.setConfig({ runnerKind: null, codex: { sandbox: null } })).toMatchObject({ ok: true });
+    expect(h.orch.configReport().config).toMatchObject({ runnerKind: { value: 'claude-code', source: 'default' }, model: { value: 'claude-sonnet-5-5', source: 'argument' }, codex: { sandbox: { value: 'workspace-write', source: 'default' }, effort: { value: 'ultra', source: 'argument' } } });
+  });
+
   it('refuses invalid values with 400 naming the key, the unsafe rule, or the unknown key, and applies nothing', () => {
     const h = harness();
     expect(h.orch.setConfig({ capacity: 0 })).toMatchObject({ ok: false, status: 400, key: 'capacity' });

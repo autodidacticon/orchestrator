@@ -3,7 +3,7 @@
  */
 import { z } from 'zod';
 import { DEFAULT_CLAUDE_COMMAND } from './runner/command.js';
-import { DEFAULT_EFFORT, DEFAULT_MODEL, effortSchema, modelSchema } from './runner/selection.js';
+import { DEFAULT_EFFORT, DEFAULT_MODEL_BY_KIND, effortSchemaFor, modelSchema, RUNNER_KINDS } from './runner/selection.js';
 import { isSafeRule } from './toolchain/tools.js';
 
 /** Admission ordering stages. See specs/scheduling-policy "Ordering chain". */
@@ -38,7 +38,7 @@ export const configSchema = z.object({
   apiBaseUrl: z.string().url().optional(),
   /** Agent retry window before falling back to the report file. */
   retryWindowMs: z.number().int().positive().default(120_000),
-  /** Runner command template; {brief}, {worktree}, {launchId}, {mcpConfig}, and {allowedTools} are substituted at every spawn. */
+  /** The Claude Code runner's command template; {brief}, {worktree}, {launchId}, {mcpConfig}, and {allowedTools} are substituted at every spawn. */
   runnerCommand: z.string().default(DEFAULT_CLAUDE_COMMAND),
   validateAt: z.enum(['ready', 'ingest']).default('ready'),
   onInsufficient: z.enum(['block', 'remediate']).default('block'),
@@ -50,6 +50,8 @@ export const configSchema = z.object({
       /** spawn: the daemon spawns a process; pull: launches wait for a worker; mixed: parked for claimWindowMs, then spawned. */
       mode: z.enum(['spawn', 'pull', 'mixed']).default('spawn'),
       claimWindowMs: z.number().int().nonnegative().default(60_000),
+      /** The agent CLI launches run under. See specs/worker-runners "Runner kinds and defaults". */
+      kind: z.enum(RUNNER_KINDS).default('claude-code'),
       /** The allow list of spawned Claude Code agents. See specs/toolchain-discovery "Derived allowed tools". */
       claude: z
         .object({
@@ -58,8 +60,26 @@ export const configSchema = z.object({
           /** Derive rules from the toolchains found in the repository root. */
           deriveTools: z.boolean().default(true),
           /** The worker model and effort for launches prepared under this run. See specs/model-selection. */
-          model: modelSchema.default(DEFAULT_MODEL),
-          effort: effortSchema.default(DEFAULT_EFFORT),
+          model: modelSchema.default(DEFAULT_MODEL_BY_KIND['claude-code']),
+          effort: effortSchemaFor('claude-code').default(DEFAULT_EFFORT),
+        })
+        .default({}),
+      /** The Codex runner: model, effort, command template, and policies. The policies' semantics belong to the Codex runner and the sandbox and commit policy. */
+      codex: z
+        .object({
+          /** Command template; unset uses the runner's built-in one, which carries the model and effort slots. */
+          command: z.string().min(1).optional(),
+          model: modelSchema.default(DEFAULT_MODEL_BY_KIND.codex),
+          effort: effortSchemaFor('codex').default(DEFAULT_EFFORT),
+          sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).default('workspace-write'),
+          /** Who commits the work: the agent, or the daemon once the agent reports. */
+          commit: z.enum(['agent', 'daemon']).optional(),
+          networkAccess: z.boolean().optional(),
+          ignoreUserConfig: z.boolean().default(true),
+          ephemeral: z.boolean().default(true),
+          mcpApproval: z.string().optional(),
+          toolTimeoutSec: z.number().int().positive().optional(),
+          startupTimeoutSec: z.number().int().positive().optional(),
         })
         .default({}),
     })
