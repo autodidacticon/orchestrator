@@ -55,7 +55,7 @@ describe('package entrypoints', () => {
     ['orchestrator-mcp-shim', 'src/agent/mcp-shim.ts', 'MCP façade'],
   ])('%s --help prints usage', async (name, entry, phrase) => {
     const bin = pkg.bin[name] as string;
-    expect(bin.replace('./dist/', '').replace(/\.js$/, '.ts')).toBe(entry);
+    expect(bin.replace(/^(\.\/)?dist\//, '').replace(/\.js$/, '.ts')).toBe(entry);
     const { stdout } = await execFileP('node', ['--import', tsxLoader, path.join(root, entry), '--help'], { cwd: root });
     expect(stdout).toContain(name);
     expect(stdout).toContain(phrase);

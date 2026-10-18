@@ -1,16 +1,16 @@
 {
   "name": "@autodidacticon/orchestrator",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Parallel coding-agent orchestrator over a task DAG",
   "type": "module",
   "engines": {
     "node": ">=22.13.0"
   },
   "bin": {
-    "orchestrator": "./dist/src/main.js",
-    "orchestrator-ctl": "./dist/src/operator/cli.js",
-    "orchestrator-mcp": "./dist/src/operator/mcp.js",
-    "orchestrator-mcp-shim": "./dist/src/agent/mcp-shim.js"
+    "orchestrator": "dist/src/main.js",
+    "orchestrator-ctl": "dist/src/operator/cli.js",
+    "orchestrator-mcp": "dist/src/operator/mcp.js",
+    "orchestrator-mcp-shim": "dist/src/agent/mcp-shim.js"
   },
   "exports": {
     ".": {
