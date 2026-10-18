@@ -2,7 +2,7 @@
  * The Codex host: hosts/codex's launcher, pinned package.json, MCP registration template, and
  * skill edition. See specs/host-integration "Codex host".
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { WAIT_CAP_MS } from '../../src/operator/mcp-server.js';
+import { makeSlice } from '../slice/harness.js';
 
 const execFileP = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -20,14 +21,26 @@ const hostPkg = JSON.parse(readFileSync(path.join(host, 'package.json'), 'utf8')
 const claudePkg = JSON.parse(readFileSync(path.join(root, 'hosts/claude-code/package.json'), 'utf8')) as { dependencies: Record<string, string> };
 
 type TomlValue = string | number | boolean | string[];
+type TomlTable = Record<string, TomlValue>;
 
-/** The flat subset of TOML the template uses: [table] headers and key = string | number | boolean | string array. */
-function parseTomlSubset(text: string): Record<string, Record<string, TomlValue>> {
-  const tables: Record<string, Record<string, TomlValue>> = {};
-  let current: Record<string, TomlValue> | undefined;
+/**
+ * The flat subset of TOML the template uses: [table] and [[array.of.tables]] headers and
+ * key = string | number | boolean | string array. An array of tables is listed under its full
+ * dotted name, not nested under its parent.
+ */
+function parseTomlSubset(text: string): { tables: Record<string, TomlTable>; arrays: Record<string, TomlTable[]> } {
+  const tables: Record<string, TomlTable> = {};
+  const arrays: Record<string, TomlTable[]> = {};
+  let current: TomlTable | undefined;
   for (const raw of text.split('\n')) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
+    const element = /^\[\[([A-Za-z0-9_.-]+)\]\]$/.exec(line);
+    if (element) {
+      current = {};
+      (arrays[element[1]!] ??= []).push(current);
+      continue;
+    }
     const header = /^\[([A-Za-z0-9_.-]+)\]$/.exec(line);
     if (header) {
       current = tables[header[1]!] = {};
@@ -37,7 +50,7 @@ function parseTomlSubset(text: string): Record<string, Record<string, TomlValue>
     if (!kv || !current) throw new Error(`unparsed line: ${line}`);
     current[kv[1]!] = JSON.parse(kv[2]!) as TomlValue;
   }
-  return tables;
+  return { tables, arrays };
 }
 
 const dryRun = async (dir: string, entry: string) => {
@@ -45,9 +58,29 @@ const dryRun = async (dir: string, entry: string) => {
   return JSON.parse(stdout) as { source: string; command: string; args: string[] };
 };
 
+/** Runs hosts/codex's session end script with the given hook input on stdin. */
+const sessionEnd = (home: string, input: Record<string, unknown>) =>
+  new Promise<{ code: number | null; stdout: string }>((resolve) => {
+    const child = spawn('node', [path.join(host, 'hooks/session-end.mjs')], { env: { ...process.env, ORCH_HOME: home } });
+    let stdout = '';
+    child.stdout.on('data', (d: Buffer) => (stdout += d.toString()));
+    child.on('exit', (code) => resolve({ code, stdout }));
+    child.stdin.end(JSON.stringify(input));
+  });
+
+/** A fabricated run directory whose daemon.json points at a live API; the test process stands in for the daemon pid. */
+function liveRun(home: string, repo: string, url: string): void {
+  const dir = path.join(home, 'runs', 'live');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'repo'), `${repo}\n`);
+  writeFileSync(path.join(dir, 'daemon.pid'), `${process.pid}\n`);
+  writeFileSync(path.join(dir, 'daemon.json'), JSON.stringify({ pid: process.pid, url, port: 0, startedAt: 1, repo }));
+}
+
 describe('codex host', () => {
   const template = readFileSync(path.join(host, 'config.toml'), 'utf8');
-  const server = parseTomlSubset(template)['mcp_servers.orchestrator_operator'];
+  const parsed = parseTomlSubset(template);
+  const server = parsed.tables['mcp_servers.orchestrator_operator'];
 
   it('the config template registers the operator server through the launcher with a tool timeout above the wait cap', () => {
     expect(server).toBeDefined();
@@ -74,6 +107,97 @@ describe('codex host', () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  // See specs/host-integration "Session start hook" and "Session end hook".
+  it('the config template declares the session hooks running the two scripts with node, gated by features.hooks', () => {
+    expect(parsed.tables['features']).toEqual({ hooks: true });
+    expect(template).toContain('features.hooks = true');
+    expect(parsed.arrays['hooks.SessionStart']).toEqual([{ matcher: 'startup|resume|clear' }]);
+    expect(parsed.arrays['hooks.SessionStart.hooks']).toEqual([{ type: 'command', command: 'node "<hosts/codex>/hooks/session-start.mjs"', timeout: 10 }]);
+    expect(parsed.arrays['hooks.SessionEnd']).toEqual([{}]);
+    expect(parsed.arrays['hooks.SessionEnd.hooks']).toEqual([{ type: 'command', command: 'node "<hosts/codex>/hooks/session-end.mjs"' }]);
+    const readme = readFileSync(path.join(host, 'README.md'), 'utf8');
+    for (const word of ['features.hooks', '--dangerously-bypass-hook-trust', '"other"', '.agents/skills', 'skills.config']) expect(readme, word).toContain(word);
+  });
+
+  it('the hook scripts are the Claude Code plugin\'s, byte for byte', () => {
+    for (const name of ['session-start.mjs', 'session-end.mjs']) {
+      expect(readFileSync(path.join(host, 'hooks', name)).equals(readFileSync(path.join(root, 'hosts/claude-code/hooks', name))), name).toBe(true);
+    }
+  });
+
+  it('the session end script exits 0 within one second when no daemon is alive', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-hook-home-'));
+    try {
+      // A run whose daemon is dead: nothing to post to.
+      const dir = path.join(home, 'runs', 'dead');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path.join(dir, 'daemon.pid'), '999999\n');
+      writeFileSync(path.join(dir, 'daemon.json'), JSON.stringify({ pid: 999_999, url: 'http://127.0.0.1:1', port: 1, startedAt: 1 }));
+      const t0 = Date.now();
+      const end = await sessionEnd(home, { reason: 'x' });
+      expect(Date.now() - t0).toBeLessThan(1000);
+      expect(end).toEqual({ code: 0, stdout: '' });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('the session end script, given Codex\'s hook input, ends the attachment whose chain holds its ancestor and releases its launch with keep', async () => {
+    const h = await makeSlice({ graph: 'nodes:\n  - { id: T1, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }', config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-hook-home-'));
+    // Stands in for the operator server; the test process stands in for the codex process, the parent of both the server and the hook.
+    const server = spawn('node', ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+    try {
+      await h.orch.tick();
+      liveRun(home, h.repo, h.orch.apiBaseUrl);
+      const post = (route: string, body: Record<string, unknown>) => fetch(`${h.orch.apiBaseUrl}${route}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json() as Promise<Record<string, unknown>>);
+      await post('/v1/attachments', { id: 'codex', pids: [server.pid!, process.pid] });
+      const claim = await post('/v1/claims', { workerId: 'w1', taskId: 'T1', attachment: 'codex' });
+      expect(claim['launchId']).toBeDefined();
+      // Codex's session-end.command.input: its reason is always "other".
+      const end = await sessionEnd(home, { session_id: 's1', transcript_path: null, cwd: h.repo, hook_event_name: 'SessionEnd', reason: 'other' });
+      expect(end).toEqual({ code: 0, stdout: '' });
+      expect(h.orch.isLiveAttachment('codex')).toBe(false);
+      await h.orch.tick();
+      expect(h.store.listEvents({ kind: 'attachment.ended' }).map((e) => e.payload)).toEqual([expect.objectContaining({ id: 'codex', reason: 'other' })]);
+      expect(h.store.getLaunch(String(claim['launchId']))).toMatchObject({ status: 'ended', endReason: 'released' });
+      expect(h.store.listEvents({ kind: 'launch.released' }).map((e) => e.payload)).toEqual([expect.objectContaining({ keep: true, reason: 'session ended (other)' })]);
+      expect(h.orch.entry('T1')).toMatchObject({ attempts: 0 });
+      expect(h.store.listLaunches({ taskId: 'T1', status: 'claimable' })).toHaveLength(1);
+    } finally {
+      server.kill();
+      rmSync(home, { recursive: true, force: true });
+      await h.cleanup();
+    }
+  });
+
+  // Codex itself runs the template's SessionEnd hook: its stdin and its ancestry (codex is the hook's parent) reach the daemon.
+  it('codex runs the template\'s SessionEnd hook, whose ancestry and reason end the attachment', async () => {
+    const h = await makeSlice({ graph: 'nodes:\n  - { id: T1, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }', config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-hook-home-'));
+    const codexHome = mkdtempSync(path.join(tmpdir(), 'orch-codex-home-'));
+    const server = spawn('node', ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+    try {
+      await h.orch.tick();
+      liveRun(home, h.repo, h.orch.apiBaseUrl);
+      // The hooks only: the operator server is not needed to watch the hook.
+      writeFileSync(path.join(codexHome, 'config.toml'), template.slice(template.indexOf('\n[features]\n')).replaceAll('<hosts/codex>', host));
+      await fetch(`${h.orch.apiBaseUrl}/v1/attachments`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: 'codex', pids: [server.pid!, process.pid] }) });
+      await execFileP('codex', ['--dangerously-bypass-hook-trust', 'debug', 'prompt-input', 'hi'], { cwd: h.repo, env: { ...process.env, CODEX_HOME: codexHome, ORCH_HOME: home }, timeout: 60_000 });
+      expect(h.orch.isLiveAttachment('codex')).toBe(false);
+      await h.orch.tick();
+      expect(h.store.listEvents({ kind: 'attachment.ended' }).map((e) => e.payload)).toEqual([expect.objectContaining({ id: 'codex', reason: 'other' })]);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      console.warn('codex CLI not installed; SessionEnd hook check through codex skipped');
+    } finally {
+      server.kill();
+      rmSync(home, { recursive: true, force: true });
+      rmSync(codexHome, { recursive: true, force: true });
+      await h.cleanup();
+    }
+  }, 90_000);
 
   it('package.json pins the published package at the Claude Code plugin\'s version, and the launcher reads it', async () => {
     expect(hostPkg.private).toBe(true);
