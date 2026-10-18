@@ -9,7 +9,7 @@ afterEach(async () => {
   h = undefined;
 });
 
-const health = (over: Partial<Config['health']> = {}): Config['health'] => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true, ...over });
+const health = (over: Partial<Config['health']> = {}): Config['health'] => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true, ...over });
 const budgets: Config['budgets'] = { maxLaunchMs: 0, maxRunCostUsd: 0 };
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

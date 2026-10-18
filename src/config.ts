@@ -85,6 +85,8 @@ export const configSchema = z.object({
       stuckAfterMs: z.number().int().nonnegative().default(15 * 60_000),
       /** Idle time before a stuck launch is failed; 0 disables. */
       stuckFailAfterMs: z.number().int().nonnegative().default(45 * 60_000),
+      /** How long a submitted task's process may keep running so the runner can write its usage; 0 reaps at once. See specs/health-monitoring "Usage accounting". */
+      reportGraceMs: z.number().int().nonnegative().default(30_000),
       baseMovedNotice: z.boolean().default(true),
     })
     .default({}),

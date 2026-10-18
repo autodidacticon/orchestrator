@@ -42,6 +42,8 @@ export interface Launch {
   interruptions?: number;
   endedAt?: number;
   endReason?: string;
+  /** When a submit was accepted; the report grace runs from here. See specs/health-monitoring "Usage accounting". */
+  reportedAt?: number;
   createdAt: number;
   /** Last answered block, for replay after disconnect. */
   pendingAnswer?: { seq: number; answer: string };

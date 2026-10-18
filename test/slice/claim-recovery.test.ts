@@ -9,7 +9,7 @@ afterEach(async () => {
   h = undefined;
 });
 
-const pull = (leaseTtlMs = 60_000) => ({ leaseTtlMs, runner: { mode: 'pull' as const, claimWindowMs: 60_000 }, health: { stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true } });
+const pull = (leaseTtlMs = 60_000) => ({ leaseTtlMs, runner: { mode: 'pull' as const, claimWindowMs: 60_000 }, health: { stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true } });
 
 describe('recovery of parked and claimed launches', () => {
   it('a restart keeps a parked launch claimable and re-prepares a deleted worktree for the same launch', async () => {

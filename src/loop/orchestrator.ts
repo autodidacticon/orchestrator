@@ -816,6 +816,8 @@ export class Orchestrator implements OrchestratorCore {
     });
     // The agent's claim is recorded as submitted; structural checks are the verifier's first step.
     this.transition(launch.taskId, { kind: 'submitted' }, 'agent', 'submit', { interruptions: 0 });
+    // The process may keep running for the report grace so its usage reaches the log. See specs/health-monitoring "Usage accounting".
+    this.store.updateLaunch(launch.launchId, { reportedAt: this.now() });
     const check = checkSubmission({
       sealedSha,
       baseSha: launch.baseSha,

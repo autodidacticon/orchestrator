@@ -21,7 +21,7 @@ function tracked(over: Partial<Config['tracker']> = {}, extra: { graph?: string;
     config: {
       tracker: trackerCfg(over),
       leaseTtlMs: 4 * 3600_000,
-      health: { stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true },
+      health: { stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true },
       budgets: { maxLaunchMs: 0, maxRunCostUsd: 0 },
     },
     briefValidator: extra.validator ? new SlotValidator(defaultSlots) : undefined,

@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 function harness(runner: Partial<Config['runner']> = {}, config: ConfigInput = {}): Harness {
-  const h = makeHarness({ config: { runner: { mode: 'spawn', claimWindowMs: 60_000, ...runner }, tickIntervalMs: 100, health: { stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true }, budgets: { maxLaunchMs: 0, maxRunCostUsd: 0 }, ...config } });
+  const h = makeHarness({ config: { runner: { mode: 'spawn', claimWindowMs: 60_000, ...runner }, tickIntervalMs: 100, health: { stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true }, budgets: { maxLaunchMs: 0, maxRunCostUsd: 0 }, ...config } });
   open.push(h);
   return h;
 }

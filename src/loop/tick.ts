@@ -93,6 +93,9 @@ export async function reconcile(o: Orchestrator): Promise<void> {
     const active = owns && (entry.status.kind === 'running' || entry.status.kind === 'waiting');
 
     if (entry.status.kind === 'cancelled' || (!active && !owns)) {
+      // A submitted task's process writes its usage only when it exits: leave it for the report grace. See specs/health-monitoring "Usage accounting".
+      const reported = entry.status.kind === 'submitted' || entry.status.kind === 'done';
+      if (reported && launch.reportedAt !== undefined && now - launch.reportedAt < o.config.health.reportGraceMs && (await o.runner.alive(launch))) continue;
       // Cancelled, or superseded: reap and end.
       if (await o.runner.alive(launch)) await o.runner.reap(launch);
       await o.recordUsage(launch);

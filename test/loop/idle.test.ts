@@ -13,7 +13,7 @@ const QUIET = `nodes:
   - { id: T1, deps: [X] }`;
 
 function harness(config: ConfigInput = {}, graph?: string): Harness {
-  const h = makeHarness({ graph, config: { health: { stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true }, ...config } });
+  const h = makeHarness({ graph, config: { health: { stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true }, ...config } });
   open.push(h);
   return h;
 }

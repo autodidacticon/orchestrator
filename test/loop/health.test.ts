@@ -9,7 +9,7 @@ afterEach(() => {
   for (const h of open.splice(0)) h.cleanup();
 });
 
-const health = (over: Partial<Config['health']> = {}): Config['health'] => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, baseMovedNotice: true, ...over });
+const health = (over: Partial<Config['health']> = {}): Config['health'] => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true, ...over });
 const budgets = (over: Partial<Config['budgets']> = {}): Config['budgets'] => ({ maxLaunchMs: 0, maxRunCostUsd: 0, ...over });
 
 function harness(config: ConfigInput = {}, extra: { diagnoser?: StuckDiagnoser } = {}): Harness {
@@ -235,6 +235,39 @@ describe('health: budgets and usage', () => {
     await again.loadGraph();
     expect(again.status().cost).toEqual(s.cost);
     expect(h.store.listLaunches({ taskId: 'T1' })[0]).toMatchObject({ costUsd: 1.25, turns: 3, durationMs: 1000 });
+  });
+
+  // See specs/health-monitoring "Usage accounting": the report grace.
+  it('a submitted launch is left alive for the report grace, ends reported with usage when its process exits, and is reaped when the grace elapses', async () => {
+    const h = harness({ health: { reportGraceMs: 30_000 } });
+    h.runner.usageScript.set('T1', { costUsd: 1.5, turns: 2, durationMs: 900 });
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    const l5 = h.launchOf('T5');
+    await h.submit('T1');
+    await h.submit('T5');
+    await h.orch.tick();
+    // Within the grace, both launches are still live and their processes untouched.
+    expect(h.store.getLaunch(l1.launchId)).toMatchObject({ status: 'live', reportedAt: h.now.value });
+    expect(h.runner.isAlive(l1.launchId)).toBe(true);
+    expect(h.store.listEvents({ kind: 'launch.usage' })).toHaveLength(0);
+    // T1's process exits on its own: the next tick records its usage and ends the launch as reported.
+    h.runner.die(l1.launchId);
+    await h.orch.tick();
+    expect(h.store.getLaunch(l1.launchId)).toMatchObject({ status: 'ended', endReason: 'reported', costUsd: 1.5, turns: 2 });
+    // T5's process lingers past the grace: reaped and ended.
+    h.advance(31_000);
+    await h.orch.tick();
+    expect(h.store.getLaunch(l5.launchId)).toMatchObject({ status: 'ended', endReason: 'reported' });
+    expect(h.runner.isAlive(l5.launchId)).toBe(false);
+    // A cancelled task's launch is reaped at once, grace or not.
+    await h.orch.settle();
+    await h.orch.tick();
+    const l2 = h.launchOf('T2');
+    h.orch.cancel('T2', 'x');
+    await h.orch.tick();
+    expect(h.store.getLaunch(l2.launchId)).toMatchObject({ status: 'ended', endReason: 'cancelled' });
+    expect(h.runner.isAlive(l2.launchId)).toBe(false);
   });
 
   it('crossing the run cost budget pauses admission; resume is refused until overridden', async () => {
