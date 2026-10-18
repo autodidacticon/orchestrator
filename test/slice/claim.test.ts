@@ -161,6 +161,35 @@ describe('claim and release over the real API', () => {
     expect(h.orch.entry('T1').lease!.expiresAt).toBeGreaterThan(Date.now() + 50_000);
   }, 30_000);
 
+  // See specs/pull-runner "Worker usage" and specs/health-monitoring "Run cost budget".
+  it('a worker posts usage for its claimed launch after submit, and the priced cost reaches status', async () => {
+    const prices = { 'claude-opus-5-5': { inputPerMTok: 100, outputPerMTok: 1000 } };
+    h = await makeSlice({ graph: G, config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 }, budgets: { maxLaunchMs: 0, maxRunCostUsd: 0, prices } } });
+    await h.orch.tick();
+    const c = await http(h, 'POST', '/v1/claims', { workerId: 'w1', taskId: 'T1' });
+    const launchId = String(c.body['launchId']);
+    const token = String(c.body['token']);
+    writeFileSync(path.join(String(c.body['worktree']), 'T1.txt'), 'done\n');
+    gitIn(String(c.body['worktree']), 'add', '.');
+    gitIn(String(c.body['worktree']), 'commit', '-q', '-m', 'T1');
+    const report = await http(h, 'POST', `/v1/launches/${launchId}/report`, { seq: 1, kind: 'submit', summary: 'done' }, token);
+    expect(report.status).toBe(200);
+    // The pid-less launch ends on a tick after the submit, with no usage of its own.
+    await h.waitFor(() => h!.store.getLaunch(launchId)?.status === 'ended', 10_000);
+    expect(h.store.getLaunch(launchId)?.tokens).toBeUndefined();
+    expect((await http(h, 'POST', `/v1/launches/${launchId}/report`, { seq: 2, kind: 'submit', summary: 'again' }, token)).status).toBe(401);
+
+    const tokens = { input: 40361, output: 260 };
+    expect((await http(h, 'POST', `/v1/launches/${launchId}/usage`, { workerId: 'w2', usage: { tokens } })).status).toBe(409);
+    const posted = await http(h, 'POST', `/v1/launches/${launchId}/usage`, { workerId: 'w1', usage: { tokens, model: 'claude-opus-5-5' } });
+    expect(posted).toMatchObject({ status: 200, body: { ok: true, recorded: true, costUsd: 4.2961 } });
+    expect(h.store.getLaunch(launchId)).toMatchObject({ tokens, usageSource: 'worker', costSource: 'priced', costUsd: 4.2961 });
+    expect(h.store.listEvents({ kind: 'operator.usage' })).toHaveLength(2);
+    const status = await http(h, 'GET', '/v1/status');
+    expect(status.body['cost']).toMatchObject({ runUsd: 4.2961, byTask: { T1: 4.2961 }, unpricedLaunches: 0 });
+    expect(status.body['tokens']).toMatchObject({ run: tokens, byTask: { T1: tokens } });
+  }, 30_000);
+
   it('a dead or ended attachment releases its launches with keep, matched by any pid in its chain', async () => {
     h = await makeSlice({ graph: G, config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
     await h.orch.tick();

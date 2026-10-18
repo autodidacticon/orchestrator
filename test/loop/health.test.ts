@@ -276,6 +276,55 @@ describe('health: budgets and usage', () => {
     expect(h.store.listLaunches({ taskId: 'T1' })[0]).toMatchObject({ costUsd: 1.25, turns: 3, durationMs: 1000 });
   });
 
+  // See specs/pull-runner "Worker usage": a claimed launch has no log, so its worker posts the usage.
+  it('a claimed launch ends with no usage, its worker posts it once, and a spawned launch still reads its runner', async () => {
+    const h = harness({ runner: { mode: 'mixed', claimWindowMs: 2000 } });
+    // A misrouted runner read for the claimed T1 would show as this cost.
+    h.runner.usageScript.set('T1', { costUsd: 99 });
+    h.runner.usageScript.set('T5', { costUsd: 0.75, turns: 2 });
+    await h.orch.tick();
+    const c = await h.orch.claim({ workerId: 'w1' });
+    expect(c.body).toMatchObject({ taskId: 'T1' });
+    const l1 = h.store.getLaunch(String(c.body['launchId']))!;
+    expect(l1.pid).toBeUndefined();
+    h.advance(2500);
+    await h.orch.tick();
+    const l5 = h.launchOf('T5');
+    expect(l5.pid).toBeGreaterThan(0);
+
+    await h.orch.agentCall(l1.launchId, l1.token, 'report', { seq: 1, kind: 'submit', summary: 'done' });
+    // The pid-less launch is ended on the next tick, with no usage of its own.
+    await h.orch.tick();
+    const ended = h.store.getLaunch(l1.launchId)!;
+    expect(ended).toMatchObject({ status: 'ended', endReason: 'reported' });
+    expect(ended.costUsd).toBeUndefined();
+    expect(ended.tokens).toBeUndefined();
+    expect(h.store.listEvents({ kind: 'launch.usage', taskId: 'T1' })).toHaveLength(0);
+    await h.orch.settle();
+
+    const tokens = { input: 40361, cachedInput: 32128, output: 260 };
+    expect(h.orch.recordWorkerUsage(l1.launchId, { workerId: 'w2', usage: { tokens } }).status).toBe(409);
+    expect(h.orch.recordWorkerUsage(l5.launchId, { workerId: 'w1', usage: { tokens } }).status).toBe(409);
+    expect(h.orch.recordWorkerUsage(l1.launchId, { workerId: 'w1', usage: { tokens: { input: -1, output: 0 } } }).status).toBe(400);
+    expect(h.store.listEvents({ kind: 'launch.usage' })).toHaveLength(0);
+    expect(h.store.getLaunch(l5.launchId)?.tokens).toBeUndefined();
+
+    expect(h.orch.recordWorkerUsage(l1.launchId, { workerId: 'w1', usage: { tokens } })).toMatchObject({ status: 200, body: { ok: true, recorded: true } });
+    expect(h.store.getLaunch(l1.launchId)).toMatchObject({ tokens, usageSource: 'worker' });
+    expect(h.store.getLaunch(l1.launchId)?.costUsd).toBeUndefined();
+    expect(h.store.listEvents({ kind: 'launch.usage', taskId: 'T1' })).toMatchObject([{ payload: { tokens, source: 'worker' } }]);
+    // A second post is a no-op.
+    expect(h.orch.recordWorkerUsage(l1.launchId, { workerId: 'w1', usage: { tokens: { input: 1, output: 1 }, costUsd: 5 } })).toMatchObject({ status: 200, body: { ok: true, recorded: false } });
+    expect(h.store.getLaunch(l1.launchId)).toMatchObject({ tokens });
+    expect(h.store.listEvents({ kind: 'launch.usage', taskId: 'T1' })).toHaveLength(1);
+    expect(h.orch.status().tokens.byTask['T1']).toMatchObject({ input: 40361, output: 260 });
+
+    // The spawned T5 still gets its usage from the runner when it ends.
+    await h.orch.agentCall(l5.launchId, l5.token, 'report', { seq: 1, kind: 'submit', summary: 'done' });
+    await h.orch.tick();
+    expect(h.store.getLaunch(l5.launchId)).toMatchObject({ status: 'ended', costUsd: 0.75, turns: 2, costSource: 'reported' });
+  });
+
   // See specs/worker-runners "Runner dispatch by launch kind": the row's kind picks the usage parser, also for a launch observed dead.
   it('launches of different kinds record usage through their own runner', async () => {
     const h = harness({ capacity: 1 });

@@ -77,6 +77,20 @@ export const submitBodySchema = z.object({
   proposals: z.array(proposalSchema).default([]),
 });
 
+const count = z.number().int().nonnegative();
+
+/** The body of `POST /v1/launches/:id/usage`. See specs/pull-runner "Worker usage". */
+export const workerUsageBodySchema = z.object({
+  workerId: z.string().min(1),
+  usage: z
+    .object({
+      tokens: z.object({ input: count, cachedInput: count.optional(), cacheWriteInput: count.optional(), output: count, reasoningOutput: count.optional() }).strict(),
+      model: z.string().min(1).optional(),
+      costUsd: z.number().nonnegative().optional(),
+    })
+    .strict(),
+});
+
 export type ReopenResult =
   | { ok: true; reset: CascadeStep[] }
   | { ok: false; reason: string; blockers?: Id[]; publishing?: Id };
@@ -756,22 +770,45 @@ export class Orchestrator implements OrchestratorCore {
     };
   }
 
+  /** Read a spawned launch's usage from its runner and store it once. A claimed launch has no log: its worker posts usage instead. */
   async recordUsage(launch: Launch): Promise<void> {
     if (!this.runner.readUsage) return;
     const cur = this.store.getLaunch(launch.launchId);
-    if (!cur || hasUsage(cur)) return;
+    if (!cur || cur.worker || hasUsage(cur)) return;
     const read = await this.runner.readUsage(cur).catch(() => undefined);
     if (!read || !hasUsage(read)) return;
-    const u: Usage = { ...read };
+    this.storeUsage(cur, { ...read });
+  }
+
+  /**
+   * Usage a worker posts for the launch it claimed, after its agent exits. Spawned launches keep
+   * the runner as the sole source; the first usage recorded wins. See specs/pull-runner "Worker usage".
+   */
+  recordWorkerUsage(launchId: string, body: unknown): ApiResponse {
+    const parsed = workerUsageBodySchema.safeParse(body);
+    if (!parsed.success) return { status: 400, body: { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') } };
+    const { workerId, usage } = parsed.data;
+    const cur = this.store.getLaunch(launchId);
+    if (!cur) return { status: 404, body: { ok: false, reason: `no launch ${launchId}` } };
+    if (cur.pid !== undefined || !cur.worker) return { status: 409, body: { ok: false, reason: `launch ${launchId} is not a claimed launch; its runner reports its usage` } };
+    if (cur.worker.id !== workerId) return { status: 409, body: { ok: false, reason: `launch ${launchId} is held by another worker` } };
+    if (cur.status !== 'live' && cur.status !== 'ended') return { status: 409, body: { ok: false, reason: `launch ${launchId} is ${cur.status}` } };
+    if (hasUsage(cur)) return { status: 200, body: { ok: true, recorded: false } };
+    const u = this.storeUsage(cur, { tokens: usage.tokens, ...(usage.costUsd !== undefined ? { costUsd: usage.costUsd } : {}), source: 'worker' }, usage.model);
+    return { status: 200, body: { ok: true, recorded: true, costUsd: u.costUsd } };
+  }
+
+  /** Price a usage when it has tokens and no cost, then store it on the row and append `launch.usage`. */
+  private storeUsage(cur: Launch, u: Usage, postedModel?: string): Usage {
     let costSource: Launch['costSource'];
     if (u.costUsd !== undefined) costSource = 'reported';
     else if (u.tokens) {
-      const price = priceFor(this.config, cur.model);
+      const price = priceFor(this.config, postedModel ?? cur.model);
       if (price) {
         u.costUsd = priceUsage(u.tokens, price);
         costSource = 'priced';
       } else {
-        const model = cur.model ?? '(none)';
+        const model = postedModel ?? cur.model ?? '(none)';
         if (!this.unpricedModelsLogged.has(model)) {
           this.unpricedModelsLogged.add(model);
           this.log.warn('launch usage has tokens but no price for its model; its cost is unknown and outside the run cost budget (set budgets.prices)', { model, launchId: cur.launchId });
@@ -780,8 +817,9 @@ export class Orchestrator implements OrchestratorCore {
     }
     this.store.transaction(() => {
       this.store.updateLaunch(cur.launchId, { costUsd: u.costUsd, turns: u.turns, durationMs: u.durationMs, tokens: u.tokens, usageSource: u.source, costSource });
-      this.store.appendEvent({ kind: 'launch.usage', taskId: cur.taskId, launchId: cur.launchId, payload: { ...u, ...(costSource ? { costSource } : {}) } }, this.now());
+      this.store.appendEvent({ kind: 'launch.usage', taskId: cur.taskId, launchId: cur.launchId, payload: { ...u, ...(costSource ? { costSource } : {}), ...(postedModel ? { model: postedModel } : {}) } }, this.now());
     });
+    return u;
   }
 
   async agentCall(launchId: string, token: string, op: AgentOp, body: Record<string, unknown> = {}): Promise<ApiResponse> {

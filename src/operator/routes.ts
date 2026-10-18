@@ -245,7 +245,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     return r.ok ? { status: 200, body: { ok: true, paused: false } } : { status: 409, body: { ok: false, reason: r.reason, runUsd: r.runUsd, ceilingUsd: r.ceilingUsd, paused: orch.isPaused() } };
   });
   server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/nudge$/, async (_req, body, [id]) => result(orch.nudge(id as string, String(body['message'] ?? ''))));
-  // Pull runner: claims, releases, and the mode override. See specs/operator-control "Claims and releases".
+  // Pull runner: claims, releases, worker usage, and the mode override. See specs/operator-control "Claims and releases".
   server.addRoute('POST', /^\/v1\/claims$/, async (_req, body) => {
     if (!orch.hasGraph()) return { status: 409, body: { ok: false, reason: 'graph not loaded' } };
     const args = {
@@ -264,6 +264,11 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     const keep = body['keep'] === true || body['keep'] === 'true';
     orch.store.appendEvent({ kind: 'operator.release', launchId: id as string, payload: { reason, keep } }, orch.now());
     return orch.release(id as string, reason, { keep });
+  });
+  // A claimed launch has no log: its worker posts the usage it read after the agent exited. See specs/pull-runner "Worker usage".
+  server.addRoute('POST', /^\/v1\/launches\/([^/]+)\/usage$/, async (_req, body, [id]) => {
+    orch.store.appendEvent({ kind: 'operator.usage', launchId: id as string, payload: { ...body } }, orch.now());
+    return orch.recordWorkerUsage(id as string, body);
   });
   // Session attachments: a session's operator server registers, ends on close, and a session end posts its ancestry. See specs/operator-control "Session attachments".
   server.addRoute('POST', /^\/v1\/attachments$/, async (_req, body) => {
