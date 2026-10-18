@@ -27,6 +27,8 @@ The brief MUST be sufficient for a person to perform the task without any other 
 ### Requirement: Launch token scoping
 Every API call SHALL carry a bearer token issued for one launch. A call whose token does not match the launch in the path, or whose launch has been revoked or ended, SHALL be answered with 401 and SHALL have no effect.
 
+A runner SHALL NOT put the launch token on the argv of any process it starts. The token SHALL reach the shim through a file in `<worktree>/.orchestrator/` with mode 0600: `mcp.json` for Claude Code, or `shim.env`, named by the shim's `--orch-env-file`, for Codex.
+
 #### Scenario: Token for another launch
 - **WHEN** launch L1's token is used against launch L2's endpoints
 - **THEN** the response is 401 and no event is recorded
@@ -34,6 +36,10 @@ Every API call SHALL carry a bearer token issued for one launch. A call whose to
 #### Scenario: Revoked launch
 - **WHEN** a launch has been revoked by recovery and its process calls `report`
 - **THEN** the response is 401 and the task state is unchanged
+
+#### Scenario: Token off argv
+- **WHEN** a codex launch is spawned
+- **THEN** its command line names `.orchestrator/shim.env` but does not contain the token, and the file's mode is 0600
 
 ### Requirement: Agent operations
 The API SHALL expose exactly five operations on loopback: `heartbeat` with optional progress, `report` with kind `submit` or `fail`, `block` with a structured question, `inbox` returning pending notices, and `log` with free text. `inbox` SHALL be pull-based; the orchestrator SHALL never push to an agent.
@@ -99,7 +105,9 @@ When the brief contains acceptance criteria, the submit report MUST include an `
 - **THEN** both criteria are covered
 
 ### Requirement: Block and wait
-`block` SHALL persist the question, move the task to `waiting`, release its run slot, and hold the connection open until an answer is delivered or `maxWait` elapses. An operator answer SHALL be persisted before any resume. The task SHALL return to `running` and the long-poll SHALL complete only after the scheduler admits it. A dropped connection SHALL be recoverable by re-issuing `block` with the same `seq`, which returns the stored answer once admitted. When `maxWait` elapses the task SHALL become `blocked` with the question preserved, and a later answer SHALL act as unblock-with-answer.
+`block` SHALL persist the question, move the task to `waiting`, release its run slot, and hold the connection open until an answer is delivered or `maxWait` elapses. An operator answer SHALL be persisted before any resume. The task SHALL return to `running`, and the long-poll SHALL complete only after the scheduler admits it. A dropped connection SHALL be recoverable by re-issuing `block` with the same `seq`, which returns the stored answer once admitted. When `maxWait` elapses, the task SHALL become `blocked` with the question preserved, and a later answer SHALL act as unblock-with-answer.
+
+A runner whose CLI times out MCP tool calls SHALL size that timeout above `maxWait`. The Codex runner's default is `ceil(maxWaitMs/1000)+60` seconds.
 
 #### Scenario: Answer then admission then resume
 - **WHEN** an agent blocks, a human answers, and a slot is free
@@ -129,7 +137,13 @@ The brief and the MCP façade SHALL instruct the agent to retry the API with bac
 - **THEN** the task is `blocked` with that question
 
 ### Requirement: MCP façade
-A stdio MCP server launched per agent SHALL expose the five operations as tools, forward them to the HTTP API with the token from its environment, and retry through daemon restarts for the retry window before surfacing an error. The `report` tool's description SHALL state that a submit requires a committed, clean worktree only when `ORCH_COMMIT_POLICY` is unset or `agent`.
+A stdio MCP server launched per agent SHALL expose the five operations as tools, forward them to the HTTP API with the token from its environment, and retry through daemon restarts for the retry window before surfacing an error.
+
+Started with `--orch-env-file <path>`, the façade SHALL layer the file's `KEY=VALUE` lines over its environment. When the file is missing or unreadable, it SHALL exit 1 with a message naming the path. The flag is not `--env-file`, because Node takes that flag from anywhere in argv.
+
+The `report` tool's description SHALL state that a submit requires a committed, clean worktree only when `ORCH_COMMIT_POLICY` is unset or `agent`.
+
+A runner whose CLI can treat an MCP server as optional or gate its tools behind approvals SHALL register the façade as required and with its tools pre-approved. For Codex this means `required=true`, plus the default and per-tool `approve` keys.
 
 #### Scenario: Daemon restart during a call
 - **WHEN** the daemon is restarting while an agent calls the `report` tool
@@ -138,6 +152,14 @@ A stdio MCP server launched per agent SHALL expose the five operations as tools,
 #### Scenario: Report tool under daemon commits
 - **WHEN** the façade starts with `ORCH_COMMIT_POLICY=daemon`
 - **THEN** the `report` tool's description does not require a committed, clean worktree
+
+#### Scenario: Env file
+- **WHEN** the façade starts with `--orch-env-file` naming a file that holds the launch's variables, and none of them is in its environment
+- **THEN** a `heartbeat` call is forwarded with the token from the file
+
+#### Scenario: Env file missing
+- **WHEN** the façade starts with `--orch-env-file` naming a file that does not exist
+- **THEN** it exits 1 and stderr names the file
 
 ### Requirement: Brief validation and remediation
 The brief template SHALL declare slots with a source, a `required` flag, and a minimum length, and the orchestrator SHALL validate a task against them when it becomes ready, or at ingest in strict mode. When validation fails, the configured policy SHALL either block the task with reason `insufficientSpec` listing the missing slots, or invoke the remediation hook to produce the missing content stored as a payload overlay keyed by graph revision. In `review` mode (default) the candidate SHALL land as `blocked` with kind `needsDecision` for a human to accept, edit, or reject; in `auto` mode it SHALL launch directly. v1 SHALL ship the hook interface with a default that blocks.
@@ -244,7 +266,14 @@ The brief's definition of done SHALL name the effective check command at the tim
 - **THEN** T2's brief names the new command and T1's brief in its worktree is unchanged
 
 ### Requirement: Agent environment
-A launch the daemon spawns SHALL inherit the daemon's environment with `ORCH_HOME` replaced by a directory inside the run's data directory and with `ORCH_URL`, `ORCH_REPO`, and `ORCH_DATA_DIR` removed, in addition to the agent variables `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_API`, `ORCH_TASK_ID`, and `ORCH_WORKTREE`. An orchestrator client the agent runs therefore SHALL find no run under its `ORCH_HOME` and SHALL NOT be able to start, stop, or list a daemon of the user's. `ORCH_API` SHALL remain set so the shim reaches the agent's own daemon.
+A launch the daemon spawns SHALL inherit the daemon's environment with these changes:
+- `ORCH_HOME` replaced by a directory inside the run's data directory;
+- `ORCH_URL`, `ORCH_REPO`, and `ORCH_DATA_DIR` removed;
+- the agent variables `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_API`, `ORCH_RETRY_WINDOW_MS`, `ORCH_TASK_ID`, and `ORCH_WORKTREE` added.
+
+An orchestrator client the agent runs therefore SHALL find no run under its `ORCH_HOME` and SHALL NOT be able to start, stop, or list a daemon of the user's. `ORCH_API` SHALL remain set so the shim reaches the agent's own daemon.
+
+An MCP server that the agent's CLI spawns SHALL be assumed to receive only what the runner forwards to it explicitly. Codex passes the server a fixed set of variables plus its `env` entries. Both runners SHALL build the shim's variables through one `shimEnv` helper.
 
 #### Scenario: Agent sees an isolated home
 - **WHEN** a spawned agent's command writes `$ORCH_HOME` to a file
