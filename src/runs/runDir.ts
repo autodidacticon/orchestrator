@@ -90,11 +90,20 @@ export function readRepoFile(runDir: string): string | undefined {
 }
 
 /** Why a daemon last exited; absent after a crash. See specs/operator-control "Exit record". */
+/** Who asked for a `stop`: the operator MCP server's attachment id when present, the remote address, the user agent. See specs/operator-control "Shutdown". */
+export interface ShutdownCaller {
+  attachment?: string;
+  remote?: string;
+  userAgent?: string;
+}
+
 export interface ExitRecord {
   at: number;
   reason: 'idle' | 'stop' | 'signal';
   reap: boolean;
   digest: Record<string, unknown>;
+  /** Present for a `stop`: the caller the shutdown route recorded. */
+  by?: ShutdownCaller;
 }
 
 export interface DaemonInfo {

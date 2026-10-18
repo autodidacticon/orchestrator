@@ -10,6 +10,7 @@ import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
 import * as q from '../graph/query.js';
 import { trackerSchema } from '../import/mapping.js';
+import type { ShutdownCaller } from '../runs/runDir.js';
 import { logPath } from '../runner/subprocess.js';
 import { setTracker, trackerOf } from '../state/store.js';
 import { policyReport } from '../tracker/policy.js';
@@ -387,11 +388,19 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     });
     return { status: 200, body: { ok: true, effect } };
   });
-  server.addRoute('POST', /^\/v1\/shutdown$/, async (_req, body) => {
+  server.addRoute('POST', /^\/v1\/shutdown$/, async (req, body) => {
     const reap = body['reap'] === true || body['reap'] === 'true';
     if (!orch.requestShutdown) return { status: 409, body: { ok: false, reason: 'shutdown not available in this host' } };
-    setTimeout(() => orch.requestShutdown?.('stop', reap), 50);
-    return { status: 200, body: { ok: true, reap } };
+    // Who asked is recorded before anything stops, in the event log and in the exit record. See specs/operator-control "Shutdown".
+    const header = req.headers['x-orch-attachment'];
+    const by: ShutdownCaller = {
+      ...(typeof header === 'string' && header ? { attachment: header } : {}),
+      ...(req.socket.remoteAddress ? { remote: req.socket.remoteAddress } : {}),
+      ...(typeof req.headers['user-agent'] === 'string' ? { userAgent: req.headers['user-agent'] } : {}),
+    };
+    orch.store.appendEvent({ kind: 'operator.shutdown', payload: { reap, by } }, orch.now());
+    setTimeout(() => orch.requestShutdown?.('stop', reap, by), 50);
+    return { status: 200, body: { ok: true, reap, by } };
   });
   server.addRoute('POST', /^\/v1\/tick$/, async () => {
     await orch.tick();

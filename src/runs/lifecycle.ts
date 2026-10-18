@@ -295,7 +295,9 @@ export async function reviveDaemon(opts: StartOptions = {}): Promise<StartResult
   const state = await daemonState(paths.runDir);
   if (state.healthy) return undefined;
   if (state.exit && state.exit.reason !== 'idle') {
-    throw new Error(`the daemon for ${repo} was stopped at ${new Date(state.exit.at).toISOString()} (${state.exit.reason}); call start to run it again`);
+    const by = state.exit.by;
+    const who = by?.attachment ? ` by attachment ${by.attachment}` : by?.remote ? ` by a client at ${by.remote}` : '';
+    throw new Error(`the daemon for ${repo} was stopped at ${new Date(state.exit.at).toISOString()} (${state.exit.reason}${who}); call start to run it again`);
   }
   return startDaemon(opts);
 }

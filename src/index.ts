@@ -26,6 +26,7 @@ export { BASE_RULES, rulesFor, isSafeRule, composeAllowedTools } from './toolcha
 export { detectIntegrationBranch } from './toolchain/branch.js';
 export { resolveLayers, reportOf, mergeOverrides, overridesSchema, OVERRIDABLE_KEYS, START_ONLY_KEYS, type Resolved, type ResolveInputs, type Overrides, type ConfigReport, type Provenance, type Source } from './runs/resolve.js';
 export { InprocRunner } from './runner/inproc.js';
+export { childEnv, isolationEnv, stripEmpty, CHILD_HOME, CLIENT_VARS } from './runs/childEnv.js';
 export type { Workspace, SealResult, FallbackReport, BriefInput } from './workspace/workspace.js';
 export { GitWorkspace } from './workspace/git-workspace.js';
 export { FakeWorkspace } from './workspace/fake.js';

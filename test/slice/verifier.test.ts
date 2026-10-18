@@ -28,6 +28,21 @@ describe('slice: verifier and publication', () => {
     expect(h.orch.status().foreignCommits).toEqual([]);
   });
 
+  // See specs/integration-pipeline "Check environment".
+  it('the check runs with an isolated ORCH_HOME and no client-side daemon variables', async () => {
+    h = await makeSlice({ graph: single('commitAndSubmit'), realVerifier: true, config: { checkCommand: 'test "$ORCH_HOME" = "$EXPECTED_HOME" && test -z "$ORCH_URL" && test -z "$ORCH_REPO"' } });
+    process.env['EXPECTED_HOME'] = path.join(h.orch.config.dataDir, 'child-home');
+    process.env['ORCH_URL'] = 'http://127.0.0.1:1';
+    try {
+      await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done' || h!.orch.entry('T1').attempts >= 1);
+      expect(h.orch.entry('T1').status.kind).toBe('done');
+      expect(h.store.listJobs({ taskId: 'T1' })[0]).toMatchObject({ status: 'published' });
+    } finally {
+      delete process.env['EXPECTED_HOME'];
+      delete process.env['ORCH_URL'];
+    }
+  });
+
   it('red check fails with output attached to the next brief', async () => {
     h = await makeSlice({ graph: single('commitAndSubmit'), realVerifier: true, config: { checkCommand: 'echo FAIL test_x; exit 1' } });
     await h.waitFor(() => h!.orch.entry('T1').attempts >= 1);

@@ -19,7 +19,7 @@ import { registerOperatorRoutes } from './operator/routes.js';
 import { ClaudeCodeRunner } from './runner/claude-code.js';
 import { SqliteStore } from './state/sqlite.js';
 import { GitVerifierBackend } from './verify/verifier.js';
-import { DAEMON_PID, ensureRunDir, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
+import { DAEMON_PID, ensureRunDir, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
 import { configSummary, mergeOverrides, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved } from './runs/resolve.js';
 import { digestOf } from './operator/routes.js';
 import { runIdOf, setRunId } from './state/store.js';
@@ -203,7 +203,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   stderrLogger.info('listening', { url, pid: process.pid, dataDir: config.dataDir });
 
   let stopping = false;
-  const shutdown = async (cause: 'SIGTERM' | 'SIGINT' | 'route' | 'idle') => {
+  const shutdown = async (cause: 'SIGTERM' | 'SIGINT' | 'route' | 'idle', by?: ShutdownCaller) => {
     if (stopping) return;
     stopping = true;
     const reap = Boolean(values['reap-on-exit']);
@@ -211,12 +211,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const reason = cause === 'idle' ? 'idle' : cause === 'route' ? 'stop' : 'signal';
     const recordExit = () => {
       try {
-        writeExitRecord(config.dataDir, { at: Date.now(), reason, reap, digest: digestOf(orch) });
+        writeExitRecord(config.dataDir, { at: Date.now(), reason, reap, digest: digestOf(orch), ...(by ? { by } : {}) });
       } catch (err) {
         stderrLogger.warn('could not write the exit record', { err: String(err) });
       }
     };
-    stderrLogger.info('shutting down', { cause, reap });
+    stderrLogger.info('shutting down', { cause, reap, ...(by ? { by } : {}) });
     // A container runtime kills the process after its grace period; a check still running past ours is abandoned and restarts from queued on the next start. See specs/crash-recovery.
     setTimeout(() => {
       stderrLogger.warn('shutdown grace elapsed; exiting with work in flight', { graceMs: SHUTDOWN_GRACE_MS });
@@ -232,9 +232,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   };
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
-  orch.requestShutdown = (reason, reap) => {
+  orch.requestShutdown = (reason, reap, by) => {
     values['reap-on-exit'] = Boolean(reap) || Boolean(values['reap-on-exit']);
-    void shutdown(reason === 'idle' ? 'idle' : 'route');
+    void shutdown(reason === 'idle' ? 'idle' : 'route', by);
   };
 
   await orch.start();

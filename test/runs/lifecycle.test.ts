@@ -95,6 +95,31 @@ describe('run directory and daemon lifecycle', () => {
     expect(pidAlive(first.pid)).toBe(false);
   });
 
+  // See specs/operator-control "Shutdown" (caller recorded) and "Exit record".
+  it('a shutdown through the route records its caller in the event log and the exit record, and the revival refusal names it', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home };
+    const repo = realpathSync(makeRepo(fresh()));
+    configFor(repo);
+    const paths = runPaths(repo, env);
+    const first = await startDaemon({ repo, env });
+    const res = await fetch(`${first.url}/v1/shutdown`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-orch-attachment': 'a1', 'user-agent': 'lifecycle-test' }, body: JSON.stringify({ reap: false }) });
+    expect(await res.json()).toMatchObject({ ok: true, reap: false, by: { attachment: 'a1', userAgent: 'lifecycle-test' } });
+    await waitFor(async () => !pidAlive(first.pid));
+    const state = await daemonState(paths.runDir);
+    expect(state.exit).toMatchObject({ reason: 'stop', reap: false, by: { attachment: 'a1', userAgent: 'lifecycle-test' } });
+    expect(String(state.exit?.by?.remote)).toMatch(/127\.0\.0\.1|::1/);
+    const store = new SqliteStore(path.join(paths.runDir, 'store.sqlite'));
+    try {
+      const ev = store.listEvents({ kind: 'operator.shutdown' });
+      expect(ev).toHaveLength(1);
+      expect(ev[0]?.payload).toMatchObject({ reap: false, by: { attachment: 'a1' } });
+    } finally {
+      store.close();
+    }
+    await expect(reviveDaemon({ repo, env })).rejects.toThrow(/stop by attachment a1/);
+  });
+
   it('reuses its port across a graceful restart so a mid-task agent stays on the live channel', async () => {
     home = fresh();
     env = { ...process.env, ORCH_HOME: home };

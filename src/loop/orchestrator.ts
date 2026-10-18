@@ -45,6 +45,8 @@ import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { type ConfigReport, configSummary, mergeOverrides, type OverridableKey, overridesSchema, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
 import { type Effort, isEffort, isModelName } from '../runner/selection.js';
+import { isolationEnv } from '../runs/childEnv.js';
+import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 
 export const questionSchema = z.object({
@@ -210,7 +212,7 @@ export class Orchestrator implements OrchestratorCore {
   apiBaseUrl: string;
   foreignCommits: string[] = [];
   /** Set by the daemon entrypoint; the shutdown route calls it after responding. */
-  requestShutdown: ((reason: 'idle' | 'stop', reap?: boolean) => void) | undefined;
+  requestShutdown: ((reason: 'idle' | 'stop', reap?: boolean, by?: ShutdownCaller) => void) | undefined;
   /** Set by the daemon entrypoint: rewrites config.json after an accepted override. */
   onConfigChanged: ((report: ConfigReport) => void) | undefined;
   /** The boot-time resolution; `effective()` re-applies the durable overrides over its inputs. */
@@ -530,6 +532,8 @@ export class Orchestrator implements OrchestratorCore {
 
   agentEnv(launch: Launch): Record<string, string> {
     return {
+      // Isolation first: an isolated ORCH_HOME and no client-side daemon variables (empty values are deleted by the runner). See specs/agent-protocol "Agent environment".
+      ...isolationEnv(this.config.dataDir),
       ORCH_LAUNCH_ID: launch.launchId,
       ORCH_TOKEN: launch.token,
       ORCH_API: this.apiBaseUrl,

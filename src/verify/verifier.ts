@@ -5,6 +5,7 @@
  * Every step after a durable progress record has a crash point.
  */
 import { spawn } from 'node:child_process';
+import { childEnv } from '../runs/childEnv.js';
 import { mkdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { crashPoint } from '../crash.js';
@@ -29,6 +30,8 @@ export interface GitVerifierOptions {
   integrationBranch: string;
   /** Root for temporary verification worktrees. */
   tempRoot: string;
+  /** The run's data directory, the root of the isolated child environment; defaults to the parent of `tempRoot`. */
+  dataDir?: string;
   /** The check command, or a getter read once when a job starts checking and held for the job. See specs/integration-pipeline "Check and verified tree". */
   checkCommand: string | undefined | (() => string | undefined);
   checkTimeoutMs: number;
@@ -91,7 +94,7 @@ export class GitVerifierBackend implements VerifierBackend {
       if (checkCommand === undefined) {
         return { kind: 'failed', reason: { kind: 'checkFailed', message: 'no check command is configured for this repository', output: '' } };
       }
-      const check = await runCheck(checkCommand, temp, this.opts.checkTimeoutMs, this.maxOut);
+      const check = await runCheck(checkCommand, temp, this.opts.checkTimeoutMs, this.maxOut, this.opts.dataDir ?? path.dirname(this.opts.tempRoot));
       crashPoint('verify.afterCheck');
       if (check.timedOut) {
         return { kind: 'failed', reason: { kind: 'checkTimeout', message: `check exceeded ${this.opts.checkTimeoutMs}ms`, output: check.output } };
@@ -166,9 +169,10 @@ function tail(text: string, max: number): string {
   return text.length > max ? text.slice(text.length - max) : text;
 }
 
-export async function runCheck(command: string, cwd: string, timeoutMs: number, maxOut: number): Promise<{ code: number | null; timedOut: boolean; output: string }> {
+export async function runCheck(command: string, cwd: string, timeoutMs: number, maxOut: number, dataDir: string): Promise<{ code: number | null; timedOut: boolean; output: string }> {
   return new Promise((resolve) => {
-    const child = spawn('/bin/sh', ['-c', command], { cwd, env: { ...process.env, ...identity }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    // Repository code runs here: same isolation as a spawned agent. See specs/integration-pipeline "Check environment".
+    const child = spawn('/bin/sh', ['-c', command], { cwd, env: childEnv(dataDir, identity), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     let output = '';
     let timedOut = false;
     const collect = (chunk: Buffer) => {
