@@ -186,7 +186,8 @@ export function mapIssues(raw: unknown): { nodes: GraphFileNode[]; content: stri
       summary.unknownExternal.push(id);
       nodes.push({ id, kind: 'external', done: false, deps: [], title: id, trackerState: 'unknown', unknown: true });
     } else {
-      nodes.push({ id, kind: 'external', done: rec.state === 'done', deps: [], ...payloadOf(rec), externalCause: cause });
+      // Done and cancelled both mean nothing more will happen: neither holds a milestone or a dependant. See specs/graph-import "Mapping rules".
+      nodes.push({ id, kind: 'external', done: rec.state === 'done' || rec.state === 'cancelled', deps: [], ...payloadOf(rec), externalCause: cause });
     }
     summary.external++;
   };

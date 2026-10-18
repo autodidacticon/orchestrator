@@ -144,6 +144,8 @@ tracker tools in this session, acknowledging each one before the next:
   effect's `url` with `gh`, never on the `GH-` id):
   `done`: `gh issue close <url> --reason completed`;
   `cancelled`: `gh issue close <url> --reason "not planned"`;
+  both followed by `gh issue edit <url> --remove-label <policy.tracker.inProgressLabel>` when
+  the policy has a label (a no-op when the issue does not carry it);
   `inProgress`: `gh issue reopen <url>` when the issue is closed, then
   `gh issue edit <url> --add-label <policy.tracker.inProgressLabel>`; when the policy has no
   `inProgressLabel`, call `ack { id, result: { skipped: true } }` and change nothing.

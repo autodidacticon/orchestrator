@@ -70,7 +70,9 @@ One record per issue you fetched, including the root:
 ```
 
 - `id` is the tracker key (`ENG-123`, `PROJ-45`).
-- `state` is one of `open`, `inProgress`, `done`, `cancelled`. Map tracker states: anything
+- `state` is one of `open`, `inProgress`, `done`, `cancelled`. A `done` or `cancelled` child
+  becomes an external node that already counts as satisfied: it neither holds the milestone
+  nor blocks a dependant. Map tracker states: anything
   unstarted or backlog is `open`; started or in review is `inProgress`; completed is `done`;
   cancelled, duplicate, or won't-do is `cancelled`.
 - `parent` is the root id for each child.

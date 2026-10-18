@@ -137,6 +137,24 @@ describe('mapping rules', () => {
     expect('description' in bare.nodes.find((n) => n.id === 'ENG-1')!).toBe(false);
   });
 
+  // See specs/graph-import "Cancelled child does not hold the milestone" and "Cancelled blocker does not block".
+  it('a cancelled child is external and already satisfied, for the milestone and for dependants', () => {
+    const r = mapIssues({
+      root: 'E',
+      issues: [
+        { id: 'E', title: 'epic', state: 'open', blockedBy: [] },
+        { id: 'A', parent: 'E', state: 'open', description: 'A.\n\n## Acceptance criteria\n- a', blockedBy: ['K'] },
+        { id: 'K', parent: 'E', state: 'cancelled', description: 'dropped', blockedBy: [] },
+      ],
+    });
+    const byId = Object.fromEntries(r.nodes.map((n) => [n.id, n]));
+    expect(byId['K']).toMatchObject({ kind: 'external', done: true, trackerState: 'cancelled', externalCause: 'state' });
+    expect(byId['A']).toMatchObject({ kind: 'task', deps: ['K'] });
+    expect([...(byId['E']!.deps as string[])].sort()).toEqual(['A', 'K']);
+    const g = parseGraph(r.content);
+    expect(g.nodes.get('K')?.done).toBe(true);
+  });
+
   it('in-progress policy and ungated option', () => {
     const r = mapIssues({ ...epic, options: { inProgress: 'task', gated: false } });
     const byId = Object.fromEntries(r.nodes.map((n) => [n.id, n]));

@@ -246,7 +246,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     'import_issues',
     {
       description:
-        'Map normalized tracker issues to the run graph and import it. Children of root become tasks; blockedBy becomes deps; blockers outside the set, done, cancelled and in-progress issues become external nodes; root becomes a gated milestone. Acceptance criteria are parsed from the description under the configured heading. Records come from any tracker the session can read: Linear, Jira, or GitHub Issues (ids GH-<number>, urls on every record).',
+        'Map normalized tracker issues to the run graph and import it. Children of root become tasks; blockedBy becomes deps; blockers outside the set, done, cancelled and in-progress issues become external nodes (done and cancelled ones already satisfied); root becomes a gated milestone. Acceptance criteria are parsed from the description under the configured heading. Records come from any tracker the session can read: Linear, Jira, or GitHub Issues (ids GH-<number>, urls on every record).',
       inputSchema: {
         root: z.string(),
         issues: z.array(issueRecordSchema),
