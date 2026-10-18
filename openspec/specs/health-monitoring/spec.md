@@ -85,12 +85,14 @@ Config `budgets.maxLaunchMs` (default two hours) SHALL be disabled when 0. `elap
 - **THEN** its `elapsedMs` is forty minutes and it is not failed
 
 ### Requirement: Usage accounting
-When a launch is observed dead or is ended, the daemon SHALL ask the runner named on the launch row for the launch's usage. Each runner SHALL read its own log format:
+Usage SHALL have two sources, and the launch row and `launch.usage` SHALL name the source as `source`/`usageSource`. When a spawned launch is observed dead or is ended, the daemon SHALL ask the runner named on the launch row for the launch's usage. Each runner SHALL read its own log format:
 - The Claude Code runner SHALL parse the last JSON object in the launch log for `total_cost_usd`, `duration_ms`, `num_turns`, and the `usage` object's `input_tokens`, `output_tokens`, `cache_read_input_tokens`, and `cache_creation_input_tokens`.
 - The Codex runner SHALL sum the `usage` of every `turn.completed` line, as worker-runners "Codex usage parsing" states, and SHALL report no cost, turns, or duration.
 - The scripted and in-process runners SHALL yield no usage unless scripted.
 
 A log without usage SHALL yield no usage.
+
+A claimed launch has no pid and no log, so it SHALL yield no runner usage, and the daemon SHALL NOT ask the runner for it. Its usage SHALL come only from its worker through `POST /v1/launches/:id/usage` (pull-runner "Worker usage"), stored with `source: 'worker'` through the same path, guard, and pricing as runner usage. Because launches with a pid are refused there, the two sources never apply to the same launch. Self-reported usage is not authoritative.
 
 Usage SHALL carry `tokens` as `{ input, cachedInput?, cacheWriteInput?, output, reasoningOutput? }` in the same shape for every runner, and `source` naming the reader. `cachedInput` is counted inside `input`, so Claude's cache reads are added to its `input_tokens`.
 
@@ -142,6 +144,10 @@ Token accounting does not change these grace mechanics: in every observed run, C
 #### Scenario: Grace disabled
 - **WHEN** `health.reportGraceMs` is 0 and T1 submits
 - **THEN** the launch ends with reason `reported` on the next tick, as before
+
+#### Scenario: Claimed launch takes its usage from the worker
+- **WHEN** worker `w1` claims T1 and submits, and the runner would have usage for T1
+- **THEN** the launch ends with no usage and no `launch.usage`, and a later post by `w1` records it with `usageSource` `worker`
 
 ### Requirement: Run cost budget
 Config `budgets.maxRunCostUsd` (default 0) SHALL mean unlimited when 0. Config `budgets.prices` (default `{}`) SHALL map a model name (checked by the model-name pattern) to rates in USD per million tokens: `inputPerMTok`, `outputPerMTok`, and optional `cachedInputPerMTok`, `cacheWriteInputPerMTok`, and `reasoningOutputPerMTok`, each non-negative. When a runner reports a cost, the launch SHALL record it with `costSource: 'reported'` and SHALL NOT re-price it. When a runner reports tokens without a cost and `budgets.prices` has the launch's model, the daemon SHALL compute `costUsd` at record time with `costSource: 'priced'` as the sum of:

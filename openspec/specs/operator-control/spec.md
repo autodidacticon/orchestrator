@@ -273,7 +273,7 @@ The operator interface SHALL gain `proposals`, which lists proposals filtered by
 - **THEN** `status` and the digest list `T2-p1` with task T2 and its title, and an accepted or rejected proposal is not listed
 
 ### Requirement: Claims and releases
-The operator routes SHALL include `POST /v1/claims`, `POST /v1/launches/:id/release`, and `PUT /v1/runner` with `{ mode }`, with the semantics given in the pull-runner specification; a claim body MAY carry `attachment` and a release body MAY carry `keep`. Each SHALL be recorded as an event with its arguments before its effect. The CLI and the MCP server SHALL expose `claim`, `release` (with `--keep` on the CLI and `keep` on the tool), and the mode override through these routes. A reaping shutdown SHALL NOT fail claimed launches: the daemon cannot terminate a worker, and the lease governs them.
+The operator routes SHALL include `POST /v1/claims`, `POST /v1/launches/:id/release`, `POST /v1/launches/:id/usage`, and `PUT /v1/runner` with `{ mode }`, with the semantics given in the pull-runner specification; a claim body MAY carry `attachment` and a release body MAY carry `keep`. Each SHALL be recorded as an event with its arguments before its effect; a usage post SHALL be recorded as `operator.usage`. The CLI and the MCP server SHALL expose `claim`, `release` (with `--keep` on the CLI and `keep` on the tool), and the mode override through these routes; the usage route is for worker loops and SHALL be reachable over HTTP. A reaping shutdown SHALL NOT fail claimed launches: the daemon cannot terminate a worker, and the lease governs them.
 
 #### Scenario: Claim is auditable
 - **WHEN** a worker claims T1
@@ -290,6 +290,10 @@ The operator routes SHALL include `POST /v1/claims`, `POST /v1/launches/:id/rele
 #### Scenario: Kept release through the CLI
 - **WHEN** `orchestrator-ctl release <launchId> --keep --reason "session ending"` is run for a launch with commits
 - **THEN** the `operator.release` event carries `keep` true and the task is `unstarted` with `attempts` unchanged
+
+#### Scenario: Usage post is auditable
+- **WHEN** a worker posts usage for its ended claimed launch
+- **THEN** the event log contains `operator.usage` with the body, followed by `launch.usage` with `source: 'worker'`
 
 ### Requirement: Status report: workers
 `status` SHALL additionally report `runner` with the effective `mode` and `claimWindowMs`, `claimable` as the ids of tasks whose launch is claimable in claim order, and `workers` as `[{ id, launchId, taskId, claimedAt }]` for every live launch held by a worker. The `events` digest SHALL additionally include `claimable`, the number of claimable launches.
