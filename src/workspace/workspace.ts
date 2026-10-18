@@ -3,6 +3,7 @@
  * worktrees (git.ts); FakeWorkspace is for logic tests.
  */
 import type { Id } from '../graph/model.js';
+import type { RunnerKind } from '../runner/selection.js';
 import type { Launch, StoredReport } from '../state/store.js';
 
 export type SealResult = { ok: true; sealedSha: string } | { ok: false; dirty: string[] };
@@ -26,6 +27,8 @@ export interface BriefInput {
   integrationBranch: string;
   /** The Bash rules in force for a launch the daemon spawns; absent when the runner command carries its own list. */
   allowedTools?: string[];
+  /** The kind the launch was prepared for; the brief writes kind-specific text from it. See specs/worker-runners. */
+  runner: { kind: RunnerKind };
 }
 
 export interface Workspace {

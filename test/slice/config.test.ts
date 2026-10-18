@@ -118,7 +118,7 @@ describe('orchestrator-ctl config', () => {
     const effort = await runCli(['--url', url, 'config', '--effort', 'high', '--model', 'claude-sonnet-5-5']);
     expect(effort.status).toBe(200);
     expect(effort.body).toMatchObject({ config: { effort: { value: 'high', source: 'argument', applied: false }, model: { value: 'claude-sonnet-5-5', source: 'argument', applied: false } } });
-    expect(h.orch.selectionFor('T1')).toEqual({ model: 'claude-sonnet-5-5', effort: 'high' });
+    expect(h.orch.selectionFor('T1')).toEqual({ runner: 'claude-code', model: 'claude-sonnet-5-5', effort: 'high' });
     const huge = await http(url, 'PUT', '/v1/config', { effort: 'huge' });
     expect(huge.status).toBe(400);
     expect(huge.body).toMatchObject({ key: 'effort' });

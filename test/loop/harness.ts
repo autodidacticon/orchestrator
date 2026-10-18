@@ -7,6 +7,8 @@ import { type ConfigInput, defaultConfig } from '../../src/config.js';
 import { StaticGraphSource } from '../../src/graph/source.js';
 import { Orchestrator, type ApiResponse } from '../../src/loop/orchestrator.js';
 import { InprocRunner } from '../../src/runner/inproc.js';
+import { MultiRunner } from '../../src/runner/multi.js';
+import type { RunnerKind } from '../../src/runner/selection.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import type { Launch } from '../../src/state/store.js';
 import { FakeVerifierBackend } from '../../src/verify/fake.js';
@@ -16,7 +18,9 @@ import { fixtureText } from '../graph/helpers.js';
 export interface Harness {
   orch: Orchestrator;
   store: SqliteStore;
+  /** The claude-code fake; `runners` holds one per kind behind the orchestrator's MultiRunner. */
   runner: InprocRunner;
+  runners: Record<RunnerKind, InprocRunner>;
   workspace: FakeWorkspace;
   verifier: FakeVerifierBackend;
   source: StaticGraphSource;
@@ -40,7 +44,8 @@ export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: 
   // Fake processes never exit by themselves, so in-process scenarios reap on the tick after submit. See specs/health-monitoring "Usage accounting".
   const config = defaultConfig({ dataDir: dir, capacity: 4, maxWaiting: 4, checkCommand: 'true', health: { reportGraceMs: 0, ...(opts.config?.health ?? {}) }, ...opts.config });
   const store = new SqliteStore(path.join(dir, 'store.sqlite'));
-  const runner = new InprocRunner();
+  const runners: Record<RunnerKind, InprocRunner> = { 'claude-code': new InprocRunner(), codex: new InprocRunner() };
+  const runner = runners['claude-code'];
   const workspace = new FakeWorkspace();
   const verifier = new FakeVerifierBackend();
   const source = new StaticGraphSource(opts.graph ?? fixtureText('standard.yaml'));
@@ -49,7 +54,7 @@ export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: 
     store,
     config,
     graphSource: source,
-    runner,
+    runner: new MultiRunner(runners),
     workspace,
     verifier,
     clock: () => now.value,
@@ -68,6 +73,7 @@ export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: 
     orch,
     store,
     runner,
+    runners,
     workspace,
     verifier,
     source,

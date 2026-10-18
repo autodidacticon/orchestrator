@@ -8,7 +8,7 @@ import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema, tracker
 import { randomUUID } from 'node:crypto';
 import { ancestorPids } from '../runs/ancestry.js';
 import { daemonState, listRuns, remoteDaemonUrl, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
-import { EFFORT_LEVELS } from '../runner/selection.js';
+import { EFFORT_LEVELS, RUNNER_KINDS } from '../runner/selection.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 
 /** The cap keeps every tool call under Claude Code's two-minute foreground limit; ORCH_WAIT_CAP_MS shortens it for tests. */
@@ -359,13 +359,13 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   server.registerTool(
     'claim',
     {
-      description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, and pending when a question is open. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable or the run is paused.',
-      inputSchema: { workerId: z.string(), taskId: z.string().optional(), access: z.enum(['local', 'remote']).optional() },
+      description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner (the CLI the launch was prepared for), model, effort, and pending when a question is open. runner filters by the kinds this worker can run (one or a list); a named task of another kind is 409. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable (for the runner filter) or the run is paused.',
+      inputSchema: { workerId: z.string(), taskId: z.string().optional(), access: z.enum(['local', 'remote']).optional(), runner: z.union([z.enum(RUNNER_KINDS), z.array(z.enum(RUNNER_KINDS))]).optional() },
     },
     async (a) =>
       guarded(async () => {
         await client.register();
-        return client.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access, attachment: client.attachmentId });
+        return client.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access, runner: a.runner, attachment: client.attachmentId });
       }),
   );
   server.registerTool(

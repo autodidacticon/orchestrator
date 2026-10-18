@@ -4,7 +4,7 @@
 import type { Config } from '../config.js';
 import type { Graph, GraphNode, Id } from '../graph/model.js';
 import type { AgentRunner } from '../runner/runner.js';
-import type { Effort } from '../runner/selection.js';
+import type { Selection } from '../runner/selection.js';
 import type { Entry, StatusKind } from '../state/status.js';
 import type { Launch, RunnerMode, Store } from '../state/store.js';
 import type { Actor } from '../state/transitions.js';
@@ -40,6 +40,6 @@ export interface OrchestratorCore {
   recordTransition(id: Id, from: StatusKind, to: StatusKind, actor: Actor, trigger: string, extra?: Record<string, unknown>): number;
   briefInput(launch: Launch): BriefInput;
   agentEnv(launch: Launch): Record<string, string>;
-  /** The worker model and effort for a task: its payload selectors over the run default in force now. See specs/model-selection. */
-  selectionFor(taskId: Id): { model: string; effort: Effort };
+  /** The runner kind, worker model, and effort for a task: the kind in force now and its payload selectors over that kind's defaults. See specs/model-selection. */
+  selectionFor(taskId: Id): Selection;
 }

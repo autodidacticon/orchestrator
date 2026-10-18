@@ -27,7 +27,7 @@ import {
   type StatusKind,
   type InterruptedContext,
 } from '../state/status.js';
-import { type Attachment, type Launch, type RunnerMode, runIdOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
+import { type Attachment, type Launch, type RunnerMode, runIdOf, runnerOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CascadeStep } from '../graph/query.js';
@@ -44,7 +44,7 @@ import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, runCostUsd } from '
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
-import { type Effort, isEffort, isModelName } from '../runner/selection.js';
+import { EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelName, isRunnerKind, RUNNER_KINDS, type RunnerKind, type Selection } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
@@ -144,6 +144,7 @@ export interface StatusReport {
     /** Kept releases the task had absorbed when this launch was created. */
     interruptions: number;
     /** Fixed when the launch was prepared. See specs/model-selection. */
+    runner: RunnerKind;
     model?: string;
     effort?: Effort;
   }>;
@@ -163,6 +164,8 @@ export interface StatusReport {
   /** Pull runner: the mode in force, parked launches in claim order, and the workers holding launches. See specs/operator-control "Status report: workers". */
   runner: { mode: RunnerMode; claimWindowMs: number };
   claimable: Id[];
+  /** Parked launches per runner kind, so a worker can tell whether any of them is for a CLI it runs. */
+  claimableByKind: Record<RunnerKind, number>;
   workers: Array<{ id: string; launchId: string; taskId: Id; claimedAt: number }>;
   /** Tracker sync: the recorded tracker, pending effects, and effects that failed at the retry cap. */
   tracker: TrackerRecord | undefined;
@@ -487,13 +490,24 @@ export class Orchestrator implements OrchestratorCore {
     return overlay ? { ...node.payload, ...overlay } : { ...node.payload };
   }
 
-  /** Task selectors over the run default. The graph validated the selectors' shape at load. See specs/model-selection. */
-  selectionFor(taskId: Id): { model: string; effort: Effort } {
+  /**
+   * The runner kind in force, then task selectors over that kind's own defaults. The graph validated the
+   * selectors' shape at load; the effort is checked against the kind's set before its fallback applies
+   * (claude-code `ultra -> max`), and `effortRequested` records the value asked for when it differed. See specs/model-selection.
+   */
+  selectionFor(taskId: Id): Selection {
     const payload = this.payloadOf(this.requireNode(taskId));
     const eff = this.effective();
+    const runner = eff.kind.value;
+    const defaults = runner === 'codex' ? eff.config.runner.codex : eff.config.runner.claude;
+    const requested: Effort = isEffort(payload['effort']) ? payload['effort'] : defaults.effort;
+    const fallback = EFFORT_FALLBACK[runner]?.[requested];
+    const effort: Effort = isEffortFor(runner, requested) ? requested : fallback !== undefined && isEffortFor(runner, fallback) ? fallback : defaults.effort;
     return {
-      model: isModelName(payload['model']) ? payload['model'] : eff.model.value,
-      effort: isEffort(payload['effort']) ? payload['effort'] : eff.effort.value,
+      runner,
+      model: isModelName(payload['model']) ? payload['model'] : defaults.model,
+      effort,
+      ...(effort !== requested ? { effortRequested: requested } : {}),
     };
   }
 
@@ -524,7 +538,9 @@ export class Orchestrator implements OrchestratorCore {
       checkCommand: eff.config.checkCommand,
       integrationBranch: this.config.integrationBranch,
       // Only a launch the daemon spawns gets the list; in pull mode every launch is claimed and the worker runs under its own permissions.
-      allowedTools: eff.allowedTools.applied && this.effectiveMode() !== 'pull' ? eff.allowedTools.value : undefined,
+      // The list is a Claude Code permission flag, so a launch of another kind never gets it. See specs/worker-runners.
+      allowedTools: eff.allowedTools.applied && this.effectiveMode() !== 'pull' && runnerOf(launch) === 'claude-code' ? eff.allowedTools.value : undefined,
+      runner: { kind: runnerOf(launch) },
     };
   }
 
@@ -1139,12 +1155,17 @@ export class Orchestrator implements OrchestratorCore {
    * Hand a parked launch to a worker. Idempotent per worker id. See specs/pull-runner
    * "Claim", "Worker identity", and "Access modes".
    */
-  async claim(opts: { workerId: string; taskId?: Id; access?: string; attachment?: string }): Promise<ApiResponse> {
+  async claim(opts: { workerId: string; taskId?: Id; access?: string; attachment?: string; runner?: unknown }): Promise<ApiResponse> {
     const access = opts.access ?? 'local';
     if (access === 'remote') return { status: 501, body: { error: 'access remote is reserved for a later change; only local workers are supported', access } };
     if (access !== 'local') return { status: 400, body: { error: `unknown access ${access}` } };
     const workerId = String(opts.workerId ?? '').trim();
     if (!workerId) return { status: 400, body: { error: 'workerId is required' } };
+    // The kinds this worker can run; absent means any. A worker never takes a launch prepared for a CLI it does not run. See specs/pull-runner "Claim".
+    const kinds = opts.runner === undefined ? undefined : Array.isArray(opts.runner) ? opts.runner : [opts.runner];
+    const badKind = kinds?.find((k) => !isRunnerKind(k));
+    if (badKind !== undefined || kinds?.length === 0) return { status: 400, body: { error: `runner must be one of ${RUNNER_KINDS.join(', ')} or a list of them; got ${JSON.stringify(opts.runner)}` } };
+    const runs = (l: Launch) => kinds === undefined || kinds.includes(runnerOf(l));
     // A worker holds a launch only while its task still runs or waits on it; a submitted launch stays live until reconcile ends it.
     const held = this.store.listLaunches({ status: 'live' }).find((l) => {
       if (l.worker?.id !== workerId) return false;
@@ -1164,10 +1185,13 @@ export class Orchestrator implements OrchestratorCore {
       const latest = launches.at(-1);
       if (!latest) return { status: 404, body: { error: `task ${opts.taskId} has no launch`, paused: false } };
       if (latest.status !== 'claimable') return { status: 409, body: { ok: false, reason: `launch of ${opts.taskId} is ${latest.status}`, state: latest.status, launchId: latest.launchId } };
+      if (!runs(latest)) {
+        return { status: 409, body: { ok: false, reason: `launch of ${opts.taskId} is for runner ${runnerOf(latest)}; this worker runs ${kinds!.join(', ')}`, runner: runnerOf(latest), launchId: latest.launchId } };
+      }
       launch = latest;
     } else {
-      launch = [...this.store.listLaunches({ status: 'claimable' })].sort((a, b) => (a.claimableAt ?? a.createdAt) - (b.claimableAt ?? b.createdAt) || a.createdAt - b.createdAt).at(0);
-      if (!launch) return { status: 404, body: { error: 'nothing is claimable', paused: false } };
+      launch = [...this.store.listLaunches({ status: 'claimable' })].filter(runs).sort((a, b) => (a.claimableAt ?? a.createdAt) - (b.claimableAt ?? b.createdAt) || a.createdAt - b.createdAt).at(0);
+      if (!launch) return { status: 404, body: { error: kinds ? `nothing is claimable for runner ${kinds.join(', ')}` : 'nothing is claimable', paused: false } };
     }
     const entry = this.entry(launch.taskId);
     if (entry.status.kind !== 'running' || entry.lease?.launchId !== launch.launchId) {
@@ -1217,6 +1241,7 @@ export class Orchestrator implements OrchestratorCore {
       branch: launch.branch,
       apiUrl: this.apiBaseUrl,
       workerId: launch.worker?.id,
+      runner: runnerOf(launch),
       model: launch.model,
       effort: launch.effort,
       ...(pending ? { pending } : {}),
@@ -1400,9 +1425,11 @@ export class Orchestrator implements OrchestratorCore {
       stuck: l.stuckSince !== undefined,
       costUsd: l.costUsd,
       interruptions: l.interruptions ?? 0,
+      runner: runnerOf(l),
       model: l.model,
       effort: l.effort,
     }));
+    const claimable = [...this.store.listLaunches({ status: 'claimable' })].sort((a, b) => (a.claimableAt ?? a.createdAt) - (b.claimableAt ?? b.createdAt));
     return {
       finished: q.finished(g, o),
       stalled: q.stalled(g, o, live),
@@ -1432,7 +1459,8 @@ export class Orchestrator implements OrchestratorCore {
       latestSeq: this.store.latestEventSeq(),
       proposals: this.store.listProposals({ status: 'pending' }).map((p) => ({ id: p.id, taskId: p.taskId, title: p.payload.title })),
       runner: { mode: this.effectiveMode(), claimWindowMs: this.config.runner.claimWindowMs },
-      claimable: [...this.store.listLaunches({ status: 'claimable' })].sort((a, b) => (a.claimableAt ?? a.createdAt) - (b.claimableAt ?? b.createdAt)).map((l) => l.taskId),
+      claimable: claimable.map((l) => l.taskId),
+      claimableByKind: countByKind(claimable),
       workers: this.store.listLaunches({ status: 'live' }).filter((l) => l.worker).map((l) => ({ id: l.worker!.id, launchId: l.launchId, taskId: l.taskId, claimedAt: l.worker!.claimedAt })),
       tracker: trackerOf(this.store),
       outboxPending: this.store.countOutbox('pending'),
@@ -1626,4 +1654,11 @@ export class Orchestrator implements OrchestratorCore {
       }
     }
   }
+}
+
+/** Launches per runner kind, every kind present (zero when none). */
+function countByKind(launches: readonly Launch[]): Record<RunnerKind, number> {
+  const out = Object.fromEntries(RUNNER_KINDS.map((k) => [k, 0])) as Record<RunnerKind, number>;
+  for (const l of launches) out[runnerOf(l)] += 1;
+  return out;
 }

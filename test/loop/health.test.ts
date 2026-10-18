@@ -237,6 +237,28 @@ describe('health: budgets and usage', () => {
     expect(h.store.listLaunches({ taskId: 'T1' })[0]).toMatchObject({ costUsd: 1.25, turns: 3, durationMs: 1000 });
   });
 
+  // See specs/worker-runners "Runner dispatch by launch kind": the row's kind picks the usage parser, also for a launch observed dead.
+  it('launches of different kinds record usage through their own runner', async () => {
+    const h = harness({ capacity: 1 });
+    // Each fake also holds a wrong answer for the other kind's task, so a misrouted read shows.
+    h.runners['claude-code'].usageScript.set('T1', { costUsd: 1, turns: 1 });
+    h.runners['claude-code'].usageScript.set('T5', { costUsd: 99 });
+    h.runners.codex.usageScript.set('T5', { costUsd: 2, turns: 4 });
+    h.runners.codex.usageScript.set('T1', { costUsd: 99 });
+    await h.orch.tick();
+    expect(h.launchOf('T1').runner).toBe('claude-code');
+    h.orch.setConfig({ runnerKind: 'codex', capacity: 2 });
+    await h.orch.tick();
+    expect(h.launchOf('T5').runner).toBe('codex');
+    await h.submit('T1');
+    h.runners.codex.die(h.launchOf('T5').launchId);
+    await h.orch.settle();
+    await h.orch.tick();
+    expect(h.store.listLaunches({ taskId: 'T1' })[0]).toMatchObject({ runner: 'claude-code', costUsd: 1, turns: 1 });
+    expect(h.store.listLaunches({ taskId: 'T5' })[0]).toMatchObject({ runner: 'codex', costUsd: 2, turns: 4 });
+    expect(h.orch.status().cost.runUsd).toBe(3);
+  });
+
   // See specs/health-monitoring "Usage accounting": the report grace.
   it('a submitted launch is left alive for the report grace, ends reported with usage when its process exits, and is reaped when the grace elapses', async () => {
     const h = harness({ health: { reportGraceMs: 30_000 } });

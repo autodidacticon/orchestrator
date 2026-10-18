@@ -33,7 +33,7 @@ describe('claim and release over the real API', () => {
 
     const c1 = await http(h, 'POST', '/v1/claims', { workerId: 'w1' });
     expect(c1.status).toBe(200);
-    expect(c1.body).toMatchObject({ launchId: l1!.launchId, taskId: 'T1', token: l1!.token, worktree: l1!.worktree, baseSha: l1!.baseSha, apiUrl: h.orch.apiBaseUrl, branch: 'task/T1/l1', model: 'claude-opus-5-5', effort: 'medium' }); // specs/pull-runner "Claim carries the selection"
+    expect(c1.body).toMatchObject({ launchId: l1!.launchId, taskId: 'T1', token: l1!.token, worktree: l1!.worktree, baseSha: l1!.baseSha, apiUrl: h.orch.apiBaseUrl, branch: 'task/T1/l1', runner: 'claude-code', model: 'claude-opus-5-5', effort: 'medium' }); // specs/pull-runner "Claim carries the selection"
     expect(existsSync(String(c1.body['briefPath']))).toBe(true);
     expect((c1.body['brief'] as { taskId: string; task: Record<string, unknown> }).task['description']).toBe('d');
     const claimed = h.store.getLaunch(l1!.launchId)!;
@@ -99,6 +99,49 @@ describe('claim and release over the real API', () => {
     h.orch.pause();
     expect((await http(h, 'POST', '/v1/claims', { workerId: 'w9' })).body).toMatchObject({ paused: true });
   }, 60_000);
+
+  // See specs/pull-runner "Claim" (the runner filter) and specs/operator-control "Status report" (claimableByKind).
+  it('a runner filter skips launches of other kinds, a named task of another kind is 409, and status counts per kind', async () => {
+    h = await makeSlice({ graph: G, config: { capacity: 1, leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
+    await h.orch.tick();
+    expect(h.orch.setConfig({ runnerKind: 'codex', capacity: 2 })).toMatchObject({ ok: true });
+    await h.orch.tick();
+    const [l1] = h.store.listLaunches({ taskId: 'T1' });
+    const [l2] = h.store.listLaunches({ taskId: 'T2' });
+    expect(l1).toMatchObject({ status: 'claimable', runner: 'claude-code' });
+    expect(l2).toMatchObject({ status: 'claimable', runner: 'codex' });
+
+    const status = await http(h, 'GET', '/v1/status');
+    expect(status.body).toMatchObject({ claimable: ['T1', 'T2'], claimableByKind: { 'claude-code': 1, codex: 1 } });
+    const digest = (await http(h, 'GET', '/v1/events?after=0&limit=1')).body['digest'] as Record<string, unknown>;
+    expect(digest).toMatchObject({ claimable: 2, claimableByKind: { 'claude-code': 1, codex: 1 } });
+
+    expect((await http(h, 'POST', '/v1/claims', { workerId: 'w1', runner: 'gemini' })).status).toBe(400);
+    const named = await http(h, 'POST', '/v1/claims', { workerId: 'w1', taskId: 'T2', runner: 'claude-code' });
+    expect(named.status).toBe(409);
+    expect(named.body).toMatchObject({ ok: false, runner: 'codex', launchId: l2!.launchId });
+    expect(String(named.body['reason'])).toContain('codex');
+
+    const c1 = await http(h, 'POST', '/v1/claims', { workerId: 'w1', runner: 'claude-code' });
+    expect(c1.body).toMatchObject({ taskId: 'T1', runner: 'claude-code' });
+    expect(h.store.listEvents({ kind: 'operator.claim' }).at(-1)?.payload).toMatchObject({ runner: 'claude-code' });
+    // Only a codex launch is left: a claude-code worker finds nothing and T2 stays parked.
+    const none = await http(h, 'POST', '/v1/claims', { workerId: 'w2', runner: 'claude-code' });
+    expect(none.status).toBe(404);
+    expect(h.store.getLaunch(l2!.launchId)?.status).toBe('claimable');
+    expect(h.orch.status().claimableByKind).toEqual({ 'claude-code': 0, codex: 1 });
+    // A list names every kind the worker runs; no filter takes any kind.
+    expect((await http(h, 'POST', '/v1/claims', { workerId: 'w2', runner: ['claude-code', 'codex'] })).body).toMatchObject({ taskId: 'T2', runner: 'codex' });
+  });
+
+  it('a claim without a runner filter takes the oldest launch of any kind', async () => {
+    h = await makeSlice({ graph: G, config: { capacity: 1, leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000, kind: 'codex' } } });
+    await h.orch.tick();
+    h.orch.setConfig({ runnerKind: 'claude-code', capacity: 2 });
+    await h.orch.tick();
+    expect((await http(h, 'POST', '/v1/claims', { workerId: 'w1' })).body).toMatchObject({ taskId: 'T1', runner: 'codex' });
+    expect((await http(h, 'POST', '/v1/claims', { workerId: 'w2' })).body).toMatchObject({ taskId: 'T2', runner: 'claude-code' });
+  });
 
   it('a re-claim carries the admitted answer, and a worker collects it with the same seq', async () => {
     h = await makeSlice({ graph: G, config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });

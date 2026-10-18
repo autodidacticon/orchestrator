@@ -17,6 +17,7 @@ import type { Logger } from './loop/core.js';
 import { Orchestrator } from './loop/orchestrator.js';
 import { registerOperatorRoutes } from './operator/routes.js';
 import { ClaudeCodeRunner } from './runner/claude-code.js';
+import { MultiRunner } from './runner/multi.js';
 import { SqliteStore } from './state/sqlite.js';
 import { GitVerifierBackend } from './verify/verifier.js';
 import { DAEMON_PID, ensureRunDir, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
@@ -156,12 +157,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   stderrLogger.info('configuration resolved', configSummary(report));
 
   // The runner command, its allow list, and the check command are read from the effective configuration at every spawn and at every job start. See specs/toolchain-discovery "Runtime overrides and start-only keys".
+  // One runner per kind; each launch is dispatched by the kind fixed on its row. The codex slot stays empty until CodexRunner lands, and a codex launch then fails at spawn naming the kind. See specs/worker-runners "Runner dispatch by launch kind".
   let orch!: Orchestrator;
-  const runner = new ClaudeCodeRunner({
-    command: () => orch.effective().config.runnerCommand,
-    allowedTools: () => orch.effective().allowedTools.value,
-    logDir: path.join(config.dataDir, 'logs'),
-    retryWindowMs: config.retryWindowMs,
+  const runner = new MultiRunner({
+    'claude-code': new ClaudeCodeRunner({
+      command: () => orch.effective().config.runnerCommand,
+      allowedTools: () => orch.effective().allowedTools.value,
+      logDir: path.join(config.dataDir, 'logs'),
+      retryWindowMs: config.retryWindowMs,
+    }),
   });
   const workspace = new GitWorkspace(config.repoPath, config.integrationBranch, path.join(config.dataDir, 'worktrees'));
   const verifier = new GitVerifierBackend({

@@ -3,7 +3,7 @@
  * makes a claim, a dedup write, or a transition one transaction.
  */
 import type { Id } from '../graph/model.js';
-import type { Effort } from '../runner/selection.js';
+import type { Effort, RunnerKind } from '../runner/selection.js';
 import type { Entry } from './status.js';
 
 export type LaunchStatus = 'preparing' | 'claimable' | 'launching' | 'live' | 'ended' | 'revoked';
@@ -58,7 +58,8 @@ export interface Launch {
   /** Time spent waiting on questions, excluded from the launch time budget. */
   waitedMs?: number;
   waitingSince?: number;
-  /** The worker model and effort fixed when the launch was prepared. See specs/model-selection. */
+  /** The runner kind, worker model, and effort fixed when the launch was prepared; a row without a kind is claude-code (see `runnerOf`). See specs/model-selection. */
+  runner?: RunnerKind;
   model?: string;
   effort?: Effort;
   /** Usage read from the runner when the launch ended. */
@@ -245,6 +246,11 @@ export interface Store {
   lastSetState(taskId: Id): string | undefined;
 
   close(): void;
+}
+
+/** The runner kind a launch was prepared for; a row written before the kind was recorded is claude-code. See specs/worker-runners. */
+export function runnerOf(launch: Pick<Launch, 'runner'>): RunnerKind {
+  return launch.runner ?? 'claude-code';
 }
 
 /** Typed kv helpers shared by the daemon and its routes. */

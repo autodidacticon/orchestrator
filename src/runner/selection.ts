@@ -29,6 +29,14 @@ export const DEFAULT_EFFORT: Effort = 'medium';
 /** A level a kind lacks, mapped to the one it runs at instead; applied when a launch is prepared. */
 export const EFFORT_FALLBACK: Partial<Record<RunnerKind, Partial<Record<Effort, Effort>>>> = { 'claude-code': { ultra: 'max' } };
 
+/** What a launch is prepared with. `effortRequested` is the level asked for when the kind's fallback replaced it. See specs/model-selection. */
+export interface Selection {
+  runner: RunnerKind;
+  model: string;
+  effort: Effort;
+  effortRequested?: Effort;
+}
+
 /** Aliases and ids as the vendors publish them; nothing that could escape the shell template. */
 export const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
