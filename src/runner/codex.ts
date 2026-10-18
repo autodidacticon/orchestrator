@@ -176,9 +176,11 @@ export class CodexRunner extends SubprocessRunner {
 export type CodexFailureReason = 'unknownModel' | 'authFailed' | 'mcpStartupFailed' | 'mcpApprovalRefused' | 'sandboxDenied' | 'turnFailed' | 'exitBeforeTurn';
 
 const UNKNOWN_MODEL = /model metadata for .* not found|model\b.*\b(does not exist|not found|is not supported|unknown)|unknown model|model_not_found/i;
-const AUTH_FAILED = /\b401\b|unauthori[sz]ed|not logged in|codex login|authentication|invalid api key|api key\b.*\b(missing|invalid|not set)|token (has )?expired/i;
+// The bare word "authentication" is not a failure: Codex prints "Using authentication from CODEX_HOME" on a normal run.
+const AUTH_FAILED = /\b401\b|unauthori[sz]ed|not logged in|codex login|invalid api key|api key\b.*\b(missing|invalid|not set)|token (has )?expired|authentication (failed|error|required)/i;
 const MCP_STARTUP = /mcp server\b.*\b(failed to start|failed to initiali[sz]e)|mcp servers? failed to initiali[sz]e/i;
-const APPROVAL = /approv|reject|denied|declin|cancel/i;
+// The wording of the observed refusal: "MCP tool call requires approval, but approval policy is never".
+const APPROVAL = /requires approval|approval policy/i;
 const NOT_PERMITTED = /operation not permitted/i;
 
 function str(v: unknown): string | undefined {
@@ -201,9 +203,11 @@ function lineOf(text: string, re?: RegExp): string {
  * Why a Codex launch ended without a report, from its log (stdout JSONL and stderr in one file):
  * - an `error` event, an `error` item, or `turn.failed` naming an unknown model (`unknownModel`),
  *   a missing or rejected login (`authFailed`), or a required MCP server that did not start (`mcpStartupFailed`);
- * - a failed `mcp_tool_call` refused for approval (`mcpApprovalRefused`);
- * - the last `command_execution` failing with `Operation not permitted` (`sandboxDenied`);
+ * - a failed `mcp_tool_call` refused for approval, even when the turn completed afterwards (`mcpApprovalRefused`);
+ * - any failed `command_execution` whose output says `Operation not permitted` (`sandboxDenied`);
  * - any other `turn.failed` or `error` (`turnFailed`);
+ * - an `agent_message` that says `Operation not permitted` (`sandboxDenied`): the probes show Codex leaving the
+ *   denied `git add`/`git commit` out of the JSONL, with the error only in the agent's message;
  * - otherwise undefined once a turn completed, else stderr is matched the same way, else `exitBeforeTurn`
  *   when no turn ever started.
  * `detail` is the message or log line that shows it. See specs/task-lifecycle "Health failure reasons".
@@ -213,7 +217,8 @@ export function classifyCodexFailure(text: string): { reason: CodexFailureReason
   const errors: string[] = [];
   const stderr: string[] = [];
   let refused: string | undefined;
-  let lastCommand: { command: string; failed: boolean; output: string } | undefined;
+  let deniedCommand: { command: string; output: string } | undefined;
+  let deniedMessage: string | undefined;
   let started = false;
   let completed = false;
   for (const line of tail.split('\n')) {
@@ -252,11 +257,12 @@ export function classifyCodexFailure(text: string): { reason: CodexFailureReason
         if (APPROVAL.test(m)) refused = `${String(item['server'] ?? '')}.${String(item['tool'] ?? '')}: ${m}`;
       } else if (item['type'] === 'command_execution') {
         const code = item['exit_code'];
-        lastCommand = {
-          command: String(item['command'] ?? ''),
-          failed: item['status'] === 'failed' || (typeof code === 'number' && code !== 0),
-          output: String(item['aggregated_output'] ?? ''),
-        };
+        const failed = item['status'] === 'failed' || (typeof code === 'number' && code !== 0);
+        const output = String(item['aggregated_output'] ?? '');
+        if (failed && NOT_PERMITTED.test(output)) deniedCommand = { command: String(item['command'] ?? ''), output };
+      } else if (item['type'] === 'agent_message') {
+        const m = str(item['text']);
+        if (m && NOT_PERMITTED.test(m)) deniedMessage = lineOf(m, NOT_PERMITTED);
       }
     }
   }
@@ -270,17 +276,18 @@ export function classifyCodexFailure(text: string): { reason: CodexFailureReason
   const fromErrors = named(errors);
   if (fromErrors) return fromErrors;
   if (refused) return { reason: 'mcpApprovalRefused', detail: refused };
-  if (lastCommand?.failed && NOT_PERMITTED.test(lastCommand.output)) {
-    return { reason: 'sandboxDenied', detail: `${lastCommand.command}: ${lineOf(lastCommand.output, NOT_PERMITTED)}` };
+  if (deniedCommand) {
+    return { reason: 'sandboxDenied', detail: `${deniedCommand.command}: ${lineOf(deniedCommand.output, NOT_PERMITTED)}` };
   }
   if (errors.length) return { reason: 'turnFailed', detail: errors[errors.length - 1] };
+  if (deniedMessage) return { reason: 'sandboxDenied', detail: deniedMessage };
   if (completed) return undefined;
   const fromStderr = named(stderr);
   if (fromStderr) return fromStderr;
   const denied = stderr.find((l) => NOT_PERMITTED.test(l));
   if (denied) return { reason: 'sandboxDenied', detail: denied };
   if (!started) {
-    const last = [...stderr].reverse().find((l) => /error|fatal|failed/i.test(l)) ?? stderr[stderr.length - 1];
+    const last = [...stderr].reverse().find((l) => /error|fatal|failed/i.test(l));
     return { reason: 'exitBeforeTurn', ...(last ? { detail: last } : {}) };
   }
   return undefined;

@@ -1,1 +1,1 @@
-echo returned hello
+mcp__orchestrator__block, mcp__orchestrator__heartbeat, mcp__orchestrator__inbox, mcp__orchestrator__log, mcp__orchestrator__report

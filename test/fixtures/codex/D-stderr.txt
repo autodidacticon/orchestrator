@@ -1,1 +1,3 @@
-Error: MCP server `probe` is required but failed to start: No such file or directory (os error 2)
+Reading prompt from stdin...
+2026-10-18T07:53:23.148570Z ERROR codex_core::session: Failed to create session: required MCP servers failed to initialize: broken: No such file or directory (os error 2)
+Error: thread/start: thread/start failed: error creating thread: Fatal error: Failed to initialize session: required MCP servers failed to initialize: broken: No such file or directory (os error 2) (code -32603)

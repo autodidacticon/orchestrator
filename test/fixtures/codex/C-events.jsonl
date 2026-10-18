@@ -1,4 +1,5 @@
-{"type":"thread.started","thread_id":"00000000-0000-7000-8000-00000000000c"}
+{"type":"thread.started","thread_id":"01a14e00-39d5-7d81-9f6b-ef3972096e82"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Model metadata for `gpt-bogus-9` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
 {"type":"turn.started"}
-{"type":"error","message":"The model `no-such-model` does not exist or you do not have access to it."}
-{"type":"turn.failed","error":{"message":"The model `no-such-model` does not exist or you do not have access to it."}}
+{"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-bogus-9' model is not supported when using Codex with a ChatGPT account.\"}}"}
+{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-bogus-9' model is not supported when using Codex with a ChatGPT account.\"}}"}}

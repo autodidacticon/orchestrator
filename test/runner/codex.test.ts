@@ -191,7 +191,7 @@ describe('Codex runner readFailure', () => {
   it('names an unknown model with the model in the detail (C-events.jsonl)', async () => {
     const f = await readFailure(fixture('C-events.jsonl'));
     expect(f?.reason).toBe('unknownModel');
-    expect(f?.detail).toContain('no-such-model');
+    expect(f?.detail).toContain('gpt-bogus-9');
   });
 
   it("names the brief's 'Model metadata ... not found' error item as unknownModel", async () => {
@@ -203,35 +203,72 @@ describe('Codex runner readFailure', () => {
     expect(await readFailure(log)).toEqual({ reason: 'unknownModel', detail: 'Model metadata for `gpt-nope` not found.' });
   });
 
-  it('names a required MCP server that failed to start, with the stderr line (empty stdout plus D-stderr.txt)', async () => {
+  it('names a required MCP server that failed to start, with the ERROR stderr line (empty stdout plus D-stderr.txt)', async () => {
     const stderr = fixture('D-stderr.txt');
-    expect(await readFailure(stderr)).toEqual({ reason: 'mcpStartupFailed', detail: stderr.trim() });
+    const errorLine = stderr.split('\n').find((l) => l.includes('ERROR codex_core::session'))!;
+    expect(errorLine).toContain('required MCP servers failed to initialize');
+    expect(await readFailure(stderr)).toEqual({ reason: 'mcpStartupFailed', detail: errorLine.trim() });
   });
 
-  it('names an MCP tool call refused for approval (E-events.jsonl)', async () => {
+  it('names an MCP tool call refused for approval although the turn completed afterwards (E-events.jsonl)', async () => {
+    expect(fixture('E-events.jsonl')).toContain('"turn.completed"');
     const f = await readFailure(fixture('E-events.jsonl'));
     expect(f?.reason).toBe('mcpApprovalRefused');
-    expect(f?.detail).toContain('orchestrator.heartbeat');
+    expect(f?.detail).toContain('probe.probe_write');
+    expect(f?.detail).toContain('requires approval');
   });
 
-  it('names a sandbox denial when the last command_execution failed with .git Operation not permitted', async () => {
-    const f = await readFailure(fixture('git2-events.jsonl'));
+  it('names a sandbox denial that only the agent message reports (both real git probes)', async () => {
+    for (const name of ['git-events.jsonl', 'git2-events.jsonl']) {
+      const log = fixture(name);
+      expect(log).not.toMatch(/"command_execution".*"status":"failed"/);
+      const f = await readFailure(log);
+      expect(f?.reason).toBe('sandboxDenied');
+      expect(f?.detail).toMatch(/^fatal: Unable to create '.*\.git.*index\.lock': Operation not permitted$/);
+    }
+  });
+
+  it('names a sandbox denial from a failed command_execution even when a later command succeeded', async () => {
+    const log = [
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc \'git commit -m probe\'","aggregated_output":"fatal: Unable to create \'/r/.git/worktrees/w/index.lock\': Operation not permitted\\n","exit_code":128,"status":"failed"}}',
+      '{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/bin/zsh -lc \'git status --short\'","aggregated_output":"?? probe.txt\\n","exit_code":0,"status":"completed"}}',
+      '{"type":"item.completed","item":{"id":"item_3","type":"agent_message","text":"Could not commit."}}',
+      '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}',
+    ].join('\n');
+    const f = await readFailure(log);
     expect(f?.reason).toBe('sandboxDenied');
-    expect(f?.detail).toMatch(/^git commit -m probe: fatal: Unable to create '.*\.git.*': Operation not permitted$/);
+    expect(f?.detail).toBe("/bin/zsh -lc 'git commit -m probe': fatal: Unable to create '/r/.git/worktrees/w/index.lock': Operation not permitted");
   });
 
   it('names a missing login as authFailed', async () => {
     const log = ['{"type":"turn.started"}', '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Missing bearer authentication"}}'].join('\n');
     expect((await readFailure(log))?.reason).toBe('authFailed');
+    const notLoggedIn = ['Reading prompt from stdin...', 'Error: not logged in; run `codex login`'].join('\n');
+    expect((await readFailure(notLoggedIn))?.reason).toBe('authFailed');
   });
 
-  it('names an exit before any turn, with the last error line on stderr', async () => {
+  it('does not read the CODEX_HOME authentication line or an EACCES tool error as a failure', async () => {
+    const log = [
+      'Using authentication from CODEX_HOME',
+      '{"type":"turn.started"}',
+      '{"type":"item.completed","item":{"id":"item_1","type":"mcp_tool_call","server":"orchestrator","tool":"log","arguments":{},"result":null,"error":{"message":"EACCES: permission denied, open \'/x\'"},"status":"failed"}}',
+      '{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"done"}}',
+      '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":1,"reasoning_output_tokens":0}}',
+    ].join('\n');
+    expect(await readFailure(log)).toBeUndefined();
+    const deadMidTurn = ['Using authentication from CODEX_HOME', '{"type":"turn.started"}'].join('\n');
+    expect(await readFailure(deadMidTurn)).toBeUndefined();
+  });
+
+  it('names an exit before any turn, with the last error line on stderr and no detail otherwise', async () => {
     expect(await readFailure('OpenAI Codex v0.163.0 (research preview)\nError: something went wrong\n')).toEqual({ reason: 'exitBeforeTurn', detail: 'Error: something went wrong' });
     expect(await readFailure('')).toEqual({ reason: 'exitBeforeTurn' });
+    expect(await readFailure(fixture('mcp-last.txt'))).toEqual({ reason: 'exitBeforeTurn' });
+    expect(await readFailure(fixture('git-err.txt'))).toEqual({ reason: 'exitBeforeTurn' });
   });
 
   it('returns undefined for a complete run with turn.completed, and for a missing log', async () => {
-    expect(await readFailure(fixture('git-events.jsonl'))).toBeUndefined();
     expect(await readFailure(fixture('G-events.jsonl'))).toBeUndefined();
     expect(await readFailure(fixture('mcp-events.jsonl'))).toBeUndefined();
     expect(await readFailure(undefined)).toBeUndefined();

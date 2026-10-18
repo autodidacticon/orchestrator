@@ -164,7 +164,12 @@ describe('fake codex on its own', () => {
       expect(lines).toEqual(fixture);
       expect(JSON.parse(lines.at(-1)!)).toMatchObject({ type: 'turn.completed' });
       expect(res.stderr.split('\n').some((l) => l.trim() && !l.trim().startsWith('{'))).toBe(true);
-      expect(readFileSync(outFile, 'utf8')).toBe('Created probe.txt; git add failed under workspace-write.\n');
+      const lastMessage = fixture
+        .map((l) => JSON.parse(l) as { type?: string; item?: { type?: string; text?: string } })
+        .filter((e) => e.type === 'item.completed' && e.item?.type === 'agent_message')
+        .at(-1)!.item!.text!;
+      expect(lastMessage).toContain('Operation not permitted');
+      expect(readFileSync(outFile, 'utf8')).toBe(`${lastMessage}\n`);
 
       const args = JSON.parse(readFileSync(path.join(wt, '.orchestrator', 'fake-codex-args.json'), 'utf8')) as FakeArgs;
       expect(args.cwd).toBe(realpathSync(wt));
