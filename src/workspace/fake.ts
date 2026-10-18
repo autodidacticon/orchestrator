@@ -1,6 +1,6 @@
 import type { Id } from '../graph/model.js';
 import type { Launch } from '../state/store.js';
-import type { BriefInput, FallbackReport, SealResult, Workspace } from './workspace.js';
+import type { BriefInput, FallbackReport, SealOptions, SealResult, Workspace } from './workspace.js';
 
 /** In-memory workspace for logic tests. Scriptable seal results and fallback files. */
 export class FakeWorkspace implements Workspace {
@@ -14,6 +14,8 @@ export class FakeWorkspace implements Workspace {
   readonly fingerprints = new Map<string, string>();
   /** Launches with uncommitted changes, which `preserve` turns into a synthetic WIP commit. */
   readonly dirty = new Set<string>();
+  /** Commits made by `seal` with `autoCommit`. */
+  readonly autoCommits: Array<{ launchId: string; sha: string; message: string }> = [];
   private counter = 0;
 
   async integrationHead(): Promise<string> {
@@ -25,7 +27,15 @@ export class FakeWorkspace implements Workspace {
     this.briefs.set(launch.launchId, brief);
   }
 
-  async seal(launch: Launch): Promise<SealResult> {
+  async seal(launch: Launch, opts: SealOptions = {}): Promise<SealResult> {
+    if (opts.autoCommit && this.dirty.has(launch.launchId)) {
+      // The daemon commit policy: the uncommitted changes become a synthetic orchestrator commit.
+      this.dirty.delete(launch.launchId);
+      const sealedSha = `auto-${launch.launchId.slice(0, 8)}`;
+      this.autoCommits.push({ launchId: launch.launchId, sha: sealedSha, message: opts.autoCommit.message });
+      this.fingerprints.set(launch.launchId, `${sealedSha}:clean`);
+      return { ok: true, sealedSha, committed: true };
+    }
     const scripted = this.sealScript.get(launch.taskId);
     if (scripted) return scripted;
     return { ok: true, sealedSha: `sha-${launch.taskId}-${++this.counter}` };

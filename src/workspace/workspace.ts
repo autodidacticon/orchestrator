@@ -3,10 +3,16 @@
  * worktrees (git.ts); FakeWorkspace is for logic tests.
  */
 import type { Id } from '../graph/model.js';
-import type { RunnerKind } from '../runner/selection.js';
+import type { CodexSandbox, CommitPolicy, RunnerKind } from '../runner/selection.js';
 import type { Launch, StoredReport } from '../state/store.js';
 
-export type SealResult = { ok: true; sealedSha: string } | { ok: false; dirty: string[] };
+/** `committed` when the daemon committed a dirty worktree under the `daemon` commit policy. */
+export type SealResult = { ok: true; sealedSha: string; committed?: true } | { ok: false; dirty: string[] };
+
+export interface SealOptions {
+  /** Commit a dirty worktree (minus `.orchestrator/`) as the orchestrator instead of refusing it. See specs/agent-protocol "Submission sealing". */
+  autoCommit?: { message: string };
+}
 
 export interface FallbackReport {
   launchId: string;
@@ -28,15 +34,15 @@ export interface BriefInput {
   /** The Bash rules in force for a launch the daemon spawns; absent when the runner command carries its own list. */
   allowedTools?: string[];
   /** The kind the launch was prepared for; the brief writes kind-specific text from it. See specs/worker-runners. */
-  runner: { kind: RunnerKind };
+  runner: { kind: RunnerKind; commitPolicy: CommitPolicy; sandbox?: CodexSandbox };
 }
 
 export interface Workspace {
   integrationHead(): Promise<string>;
   /** Create the worktree for a launch at baseSha and write the brief. */
   prepare(launch: Launch, brief: BriefInput): Promise<void>;
-  /** Clean check plus head sha. */
-  seal(launch: Launch): Promise<SealResult>;
+  /** Clean check plus head sha; with `autoCommit`, a dirty worktree is committed first. */
+  seal(launch: Launch, opts?: SealOptions): Promise<SealResult>;
   /** Read and remove the fallback report file if present. */
   readFallback(launch: Launch): Promise<FallbackReport | undefined>;
   remove(launch: Launch): Promise<void>;

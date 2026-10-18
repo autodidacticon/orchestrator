@@ -7,7 +7,7 @@
 import { z } from 'zod';
 import { type Config, configSchema } from '../config.js';
 import { hasAllowedToolsSlot, hasEffortSlot, hasModelSlot } from '../runner/command.js';
-import { type Effort, effortSchema, effortSchemaFor, isRunnerKind, modelSchema, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
+import { CODEX_SANDBOXES, COMMIT_POLICIES, type CodexSandbox, type CommitPolicy, defaultCodexCommit, type Effort, effortSchema, effortSchemaFor, isRunnerKind, modelSchema, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { type AllowedToolsParts, composeAllowedTools, isSafeRule } from '../toolchain/tools.js';
 
@@ -19,7 +19,7 @@ export const START_ONLY_KEYS: readonly OverridableKey[] = ['integrationBranch'];
 const NAMESPACE_OF = { 'claude-code': 'claude', codex: 'codex' } as const satisfies Record<RunnerKind, string>;
 type Namespace = (typeof NAMESPACE_OF)[RunnerKind];
 const NAMESPACES: readonly Namespace[] = ['claude', 'codex'];
-const NAMESPACE_LEAVES: Record<Namespace, readonly string[]> = { claude: ['model', 'effort'], codex: ['model', 'effort', 'sandbox', 'commit', 'command'] };
+const NAMESPACE_LEAVES: Record<Namespace, readonly string[]> = { claude: ['model', 'effort', 'commit'], codex:['model', 'effort', 'sandbox', 'commit', 'command'] };
 
 const rule = z.string().refine(isSafeRule, (r) => ({ message: `rule ${JSON.stringify(r)} must not be empty or contain a double quote, backslash, dollar sign, or backtick` }));
 
@@ -27,6 +27,7 @@ const claudeOverridesSchema = z
   .object({
     model: modelSchema.nullable().optional(),
     effort: effortSchemaFor('claude-code').nullable().optional(),
+    commit: z.enum(COMMIT_POLICIES).nullable().optional(),
   })
   .strict();
 
@@ -34,8 +35,8 @@ const codexOverridesSchema = z
   .object({
     model: modelSchema.nullable().optional(),
     effort: effortSchemaFor('codex').nullable().optional(),
-    sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).nullable().optional(),
-    commit: z.enum(['agent', 'daemon']).nullable().optional(),
+    sandbox: z.enum(CODEX_SANDBOXES).nullable().optional(),
+    commit: z.enum(COMMIT_POLICIES).nullable().optional(),
     command: z.string().min(1).nullable().optional(),
   })
   .strict();
@@ -89,13 +90,19 @@ export interface ConfigLeaf<T> {
   source: Source;
 }
 
+/** The Claude Code runner's policy leaves, resolved whichever kind is in force. */
+export interface ClaudeLeaves {
+  commit: ConfigLeaf<CommitPolicy>;
+}
+
 /** The Codex runner's leaves, resolved whichever kind is in force. */
 export interface CodexLeaves {
   model: ConfigLeaf<string>;
   effort: ConfigLeaf<Effort>;
   command: ConfigLeaf<string | undefined>;
-  sandbox: ConfigLeaf<Config['runner']['codex']['sandbox']>;
-  commit: ConfigLeaf<Config['runner']['codex']['commit']>;
+  sandbox: ConfigLeaf<CodexSandbox>;
+  /** Unset in the file and the overrides, derived from the resolved sandbox (`defaultCodexCommit`). */
+  commit: ConfigLeaf<CommitPolicy>;
   networkAccess: ConfigLeaf<boolean | undefined>;
   ignoreUserConfig: ConfigLeaf<boolean>;
   ephemeral: ConfigLeaf<boolean>;
@@ -111,6 +118,7 @@ export interface Resolved {
   /** The run default model and effort of the kind in force; `applied` is whether that kind's template carries the slot. See specs/model-selection. */
   model: { value: string; applied: boolean };
   effort: { value: Effort; applied: boolean };
+  claude: ClaudeLeaves;
   codex: CodexLeaves;
   toolchain: ToolchainRecord | undefined;
   needsConfig: OverridableKey[];
@@ -278,12 +286,18 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
   const c = base.runner.codex;
   const d = DEFAULTS.runner.codex;
   const o = overrides.codex ?? {};
+  const claude: ClaudeLeaves = {
+    commit: leaf(overrides.claude?.commit, fileHas(claudeFile, 'commit'), base.runner.claude.commit, DEFAULTS.runner.claude.commit, noFile),
+  };
+  const sandbox = leaf(o.sandbox, fileHas(codexFile, 'sandbox'), c.sandbox, d.sandbox, noFile);
+  // Derived from the sandbox in force, so a sandbox override moves the default with it. See specs/worker-runners "Sandbox and commit policy".
+  const derivedCommit = defaultCodexCommit(sandbox.value);
   const codex: CodexLeaves = {
     model: leaf(flat('codex').model ?? o.model, fileHas(codexFile, 'model'), c.model, d.model, noFile),
     effort: leaf<Effort>(flat('codex').effort ?? o.effort, fileHas(codexFile, 'effort'), c.effort, d.effort, noFile),
     command: leaf(o.command, fileHas(codexFile, 'command'), c.command, d.command, noFile),
-    sandbox: leaf(o.sandbox, fileHas(codexFile, 'sandbox'), c.sandbox, d.sandbox, noFile),
-    commit: leaf(o.commit, fileHas(codexFile, 'commit'), c.commit, d.commit, noFile),
+    sandbox,
+    commit: leaf<CommitPolicy>(o.commit, fileHas(codexFile, 'commit'), c.commit ?? derivedCommit, derivedCommit, noFile),
     networkAccess: leaf(undefined, fileHas(codexFile, 'networkAccess'), c.networkAccess, d.networkAccess, noFile),
     ignoreUserConfig: leaf(undefined, fileHas(codexFile, 'ignoreUserConfig'), c.ignoreUserConfig, d.ignoreUserConfig, noFile),
     ephemeral: leaf(undefined, fileHas(codexFile, 'ephemeral'), c.ephemeral, d.ephemeral, noFile),
@@ -322,7 +336,7 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
       runner: {
         ...base.runner,
         kind: kind.value,
-        claude: { ...base.runner.claude, model: claudeModel.value, effort: claudeEffort.value },
+        claude: { ...base.runner.claude, model: claudeModel.value, effort: claudeEffort.value, commit: claude.commit.value },
         codex: { ...c, model: codex.model.value, effort: codex.effort.value, command: codex.command.value, sandbox: codex.sandbox.value, commit: codex.commit.value },
       },
     },
@@ -331,6 +345,7 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
     allowedTools,
     model: { value: model.value, applied: modelApplied },
     effort: { value: effort.value, applied: effortApplied },
+    claude,
     codex,
     toolchain: detected?.toolchain,
     needsConfig,
@@ -352,6 +367,7 @@ export interface ConfigReport {
     allowedTools: ConfigLeaf<string[]> & { parts: AllowedToolsParts; applied: boolean };
     model: ConfigLeaf<string> & { applied: boolean };
     effort: ConfigLeaf<Effort> & { applied: boolean };
+    claude: ClaudeLeaves;
     codex: CodexLeaves;
   };
   toolchain: ToolchainRecord | undefined;
@@ -474,6 +490,7 @@ export function reportOf(resolved: Resolved, now: number): ConfigReport {
       allowedTools: { value: resolved.allowedTools.value, source: 'composed', parts: resolved.allowedTools.parts, applied: resolved.allowedTools.applied },
       model: { value: resolved.model.value, source: resolved.provenance.model, applied: resolved.model.applied },
       effort: { value: resolved.effort.value, source: resolved.provenance.effort, applied: resolved.effort.applied },
+      claude: resolved.claude,
       codex: resolved.codex,
     },
     toolchain: resolved.toolchain,

@@ -48,7 +48,7 @@ describe('model and effort per launch', () => {
     await h.orch.tick();
     const l1 = h.launchOf('T1');
     expect(l1.runner).toBe('claude-code');
-    expect(h.orch.briefInput(l1).runner).toEqual({ kind: 'claude-code' });
+    expect(h.orch.briefInput(l1).runner).toEqual({ kind: 'claude-code', commitPolicy: 'agent' });
     expect(h.orch.setConfig({ runnerKind: 'codex' })).toMatchObject({ ok: true });
     expect(h.store.getLaunch(l1.launchId)?.runner).toBe('claude-code');
     await h.submit('T1', { acceptance: [{ criterion: 'a', evidence: 'done' }] });
@@ -73,7 +73,9 @@ describe('model and effort per launch', () => {
     expect(h.store.listEvents({ kind: 'launch.created', taskId: 'T1' })[0]?.payload).toMatchObject({ runner: 'codex', model: 'gpt-6-astra', effort: 'medium' });
     expect(h.orch.status().liveLaunches.find((l) => l.taskId === 'T1')).toMatchObject({ runner: 'codex', model: 'gpt-6-astra', effort: 'medium' });
     const brief = h.orch.briefInput(l1);
-    expect(brief.runner).toEqual({ kind: 'codex' });
+    // Codex's default sandbox cannot commit in a linked worktree, so its commit policy derives to daemon.
+    expect(l1.commitPolicy).toBe('daemon');
+    expect(brief.runner).toEqual({ kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write' });
     expect(brief.allowedTools).toBeUndefined();
     // A task selector still wins under codex.
     expect(h.launchOf('T2')).toMatchObject({ runner: 'codex', model: 'claude-sonnet-5-5', effort: 'high' });

@@ -9,6 +9,19 @@ import { z } from 'zod';
 export const RUNNER_KINDS = ['claude-code', 'codex'] as const;
 export type RunnerKind = (typeof RUNNER_KINDS)[number];
 
+/** Who commits a launch's work: the agent before it submits, or the daemon when it submits. See specs/worker-runners "Sandbox and commit policy". */
+export const COMMIT_POLICIES = ['agent', 'daemon'] as const;
+export type CommitPolicy = (typeof COMMIT_POLICIES)[number];
+
+/** The Codex sandbox modes (`codex -s`). */
+export const CODEX_SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'] as const;
+export type CodexSandbox = (typeof CODEX_SANDBOXES)[number];
+
+/** Codex's commit default: only danger-full-access can write a linked worktree's gitdir, so the other sandboxes need the daemon to commit. */
+export function defaultCodexCommit(sandbox: CodexSandbox): CommitPolicy {
+  return sandbox === 'danger-full-access' ? 'agent' : 'daemon';
+}
+
 /** The effort levels each kind's CLI accepts; a superset check, the CLI stays the final validator. See specs/worker-runners "Per-kind effort sets". */
 export const EFFORT_LEVELS_BY_KIND = {
   'claude-code': ['low', 'medium', 'high', 'xhigh', 'max'],

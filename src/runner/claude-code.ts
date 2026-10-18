@@ -47,6 +47,7 @@ export class ClaudeCodeRunner extends SubprocessRunner {
             ORCH_LAUNCH_ID: launch.launchId,
             ORCH_TOKEN: launch.token,
             ORCH_RETRY_WINDOW_MS: String(this.ccOpts.retryWindowMs),
+            ...(env['ORCH_COMMIT_POLICY'] ? { ORCH_COMMIT_POLICY: env['ORCH_COMMIT_POLICY'] } : {}),
           },
         },
       },

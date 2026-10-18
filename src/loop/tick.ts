@@ -180,10 +180,7 @@ async function handleDeadLaunch(o: Orchestrator, launch: Launch, entry: Entry): 
   await o.recordUsage(launch);
   const fb = await o.workspace.readFallback(launch);
   if (fb && entry.status.kind === 'running') {
-    if (fb.kind === 'submit') {
-      const seal = await o.workspace.seal(launch);
-      if (seal.ok) fb.body = { ...fb.body, __sealedSha: seal.sealedSha };
-    }
+    await o.sealFallback(launch, fb);
     o.applyFallback(launch, fb);
   } else if (entry.status.kind === 'waiting') {
     o.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');

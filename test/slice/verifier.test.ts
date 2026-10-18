@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { commitTrailers } from '../../src/workspace/git.js';
-import { GitVerifierBackend } from '../../src/verify/verifier.js';
+import { GitVerifierBackend, TRAILER_TASK } from '../../src/verify/verifier.js';
 import { gitIn, makeSlice, single, type SliceHarness } from './harness.js';
 
 let h: SliceHarness | undefined;
@@ -26,6 +26,20 @@ describe('slice: verifier and publication', () => {
     // primary clone's working tree follows the ref
     expect(gitIn(h.repo, 'status', '--porcelain')).toBe('');
     expect(h.orch.status().foreignCommits).toEqual([]);
+  });
+
+  // See specs/worker-runners "Sandbox and commit policy".
+  it('a daemon-authored commit publishes as one squash commit with the task trailer like any other', async () => {
+    h = await makeSlice({ graph: single('submitDirty'), realVerifier: true, config: { runner: { claude: { commit: 'daemon' } } } });
+    const before = gitIn(h.repo, 'rev-parse', 'main');
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');
+    const job = h.store.listJobs({ taskId: 'T1' })[0]!;
+    expect(gitIn(h.repo, 'log', '-1', '--format=%an', job.sealedSha)).toBe('orchestrator');
+    const head = gitIn(h.repo, 'rev-parse', 'main');
+    expect(head).toBe(job.publishedSha);
+    expect(gitIn(h.repo, 'rev-parse', `${head}^`)).toBe(before);
+    expect((await commitTrailers(h.repo, head))[TRAILER_TASK]).toBe('T1');
+    expect(gitIn(h.repo, 'show', `${head}:T1.txt`)).toBe('T1 uncommitted');
   });
 
   // See specs/integration-pipeline "Check environment".

@@ -3,7 +3,7 @@
  */
 import { z } from 'zod';
 import { DEFAULT_CLAUDE_COMMAND } from './runner/command.js';
-import { DEFAULT_EFFORT, DEFAULT_MODEL_BY_KIND, effortSchemaFor, modelSchema, RUNNER_KINDS } from './runner/selection.js';
+import { CODEX_SANDBOXES, COMMIT_POLICIES, DEFAULT_EFFORT, DEFAULT_MODEL_BY_KIND, effortSchemaFor, modelSchema, RUNNER_KINDS } from './runner/selection.js';
 import { isSafeRule } from './toolchain/tools.js';
 
 /** Admission ordering stages. See specs/scheduling-policy "Ordering chain". */
@@ -75,6 +75,8 @@ export const configSchema = z.object({
           /** The worker model and effort for launches prepared under this run. See specs/model-selection. */
           model: modelSchema.default(DEFAULT_MODEL_BY_KIND['claude-code']),
           effort: effortSchemaFor('claude-code').default(DEFAULT_EFFORT),
+          /** Who commits the work: the agent, or the daemon when the agent submits. See specs/worker-runners "Sandbox and commit policy". */
+          commit: z.enum(COMMIT_POLICIES).default('agent'),
         })
         .default({}),
       /** The Codex runner: model, effort, command template, and policies. The policies' semantics belong to the Codex runner and the sandbox and commit policy. */
@@ -84,9 +86,10 @@ export const configSchema = z.object({
           command: z.string().min(1).optional(),
           model: modelSchema.default(DEFAULT_MODEL_BY_KIND.codex),
           effort: effortSchemaFor('codex').default(DEFAULT_EFFORT),
-          sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).default('workspace-write'),
-          /** Who commits the work: the agent, or the daemon once the agent reports. */
-          commit: z.enum(['agent', 'daemon']).optional(),
+          /** The Codex sandbox; workspace-write cannot write a linked worktree's gitdir. See specs/worker-runners "Sandbox and commit policy". */
+          sandbox: z.enum(CODEX_SANDBOXES).default('workspace-write'),
+          /** Who commits the work; unset derives `daemon`, or `agent` under danger-full-access (see `defaultCodexCommit`). */
+          commit: z.enum(COMMIT_POLICIES).optional(),
           networkAccess: z.boolean().optional(),
           ignoreUserConfig: z.boolean().default(true),
           ephemeral: z.boolean().default(true),

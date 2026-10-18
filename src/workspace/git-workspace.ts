@@ -9,7 +9,7 @@ import type { Id } from '../graph/model.js';
 import type { Launch } from '../state/store.js';
 import { existsSync } from 'node:fs';
 import { dirtyFiles, git, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeRemove } from './git.js';
-import type { BriefInput, FallbackReport, SealResult, Workspace } from './workspace.js';
+import type { BriefInput, FallbackReport, SealOptions, SealResult, Workspace } from './workspace.js';
 
 export const ORCH_DIR = '.orchestrator';
 export const FALLBACK_FILE = 'report.json';
@@ -56,10 +56,23 @@ export class GitWorkspace implements Workspace {
     }
   }
 
-  async seal(launch: Launch): Promise<SealResult> {
+  async seal(launch: Launch, opts: SealOptions = {}): Promise<SealResult> {
     const dirty = (await dirtyFiles(launch.worktree)).filter((f) => !f.startsWith(`${ORCH_DIR}/`));
-    if (dirty.length) return { ok: false, dirty };
+    if (dirty.length && !opts.autoCommit) return { ok: false, dirty };
+    if (dirty.length && opts.autoCommit) {
+      // The daemon commit policy: commit what the agent left, as `preserve` does. A clean worktree commits nothing, so an empty submission stays empty.
+      await this.commitAll(launch, opts.autoCommit.message);
+      return { ok: true, sealedSha: await revParse(launch.worktree, 'HEAD'), committed: true };
+    }
     return { ok: true, sealedSha: await revParse(launch.worktree, 'HEAD') };
+  }
+
+  /** Commit every change outside `.orchestrator/` as the orchestrator, skipping hooks. */
+  private async commitAll(launch: Launch, message: string): Promise<void> {
+    // The brief directory is git-ignored in every worktree; `add -A` skips it, and the reset is a guard for a repository that tracks it.
+    await git(launch.worktree, ['add', '-A']);
+    await git(launch.worktree, ['rm', '-r', '-q', '--cached', '--ignore-unmatch', ORCH_DIR], { allowFail: true });
+    await git(launch.worktree, ['-c', 'user.name=orchestrator', '-c', 'user.email=orchestrator@localhost', 'commit', '-q', '--no-verify', '-m', message]);
   }
 
   async readFallback(launch: Launch): Promise<FallbackReport | undefined> {
@@ -118,10 +131,7 @@ export class GitWorkspace implements Workspace {
     const dirty = (await dirtyFiles(launch.worktree)).filter((f) => !f.startsWith(`${ORCH_DIR}/`));
     let wipCommit: string | undefined;
     if (dirty.length) {
-      // The brief directory is git-ignored in every worktree; `add -A` skips it, and the reset is a guard for a repository that tracks it.
-      await git(launch.worktree, ['add', '-A']);
-      await git(launch.worktree, ['rm', '-r', '-q', '--cached', '--ignore-unmatch', ORCH_DIR], { allowFail: true });
-      await git(launch.worktree, ['-c', 'user.name=orchestrator', '-c', 'user.email=orchestrator@localhost', 'commit', '-q', '--no-verify', '-m', 'WIP: uncommitted work preserved by the orchestrator at release']);
+      await this.commitAll(launch, 'WIP: uncommitted work preserved by the orchestrator at release');
       wipCommit = await revParse(launch.worktree, 'HEAD');
     }
     return { headSha: await revParse(launch.worktree, 'HEAD'), wipCommit };

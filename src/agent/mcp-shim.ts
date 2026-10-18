@@ -4,7 +4,8 @@
  * and forwarding them to the daemon's HTTP API with the launch token from the
  * environment. Retries through daemon restarts for the retry window.
  *
- * Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN, ORCH_RETRY_WINDOW_MS (default 120000).
+ * Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN, ORCH_RETRY_WINDOW_MS (default 120000),
+ * ORCH_COMMIT_POLICY (agent | daemon, default agent).
  */
 import { z } from 'zod';
 import { isEntrypoint } from '../entry.js';
@@ -14,6 +15,8 @@ export interface ShimEnv {
   launchId: string;
   token: string;
   retryWindowMs: number;
+  /** The launch's commit policy; absent means `agent`. See specs/worker-runners "Sandbox and commit policy". */
+  commitPolicy?: 'agent' | 'daemon';
 }
 
 export function envFromProcess(env = process.env): ShimEnv {
@@ -21,7 +24,14 @@ export function envFromProcess(env = process.env): ShimEnv {
   const launchId = env['ORCH_LAUNCH_ID'];
   const token = env['ORCH_TOKEN'];
   if (!api || !launchId || !token) throw new Error('ORCH_API, ORCH_LAUNCH_ID and ORCH_TOKEN are required');
-  return { api, launchId, token, retryWindowMs: Number(env['ORCH_RETRY_WINDOW_MS'] ?? 120_000) };
+  return { api, launchId, token, retryWindowMs: Number(env['ORCH_RETRY_WINDOW_MS'] ?? 120_000), commitPolicy: env['ORCH_COMMIT_POLICY'] === 'daemon' ? 'daemon' : 'agent' };
+}
+
+/** The report tool's description; the clean-worktree requirement holds only when the agent commits. */
+export function reportDescription(commitPolicy: ShimEnv['commitPolicy']): string {
+  return commitPolicy === 'daemon'
+    ? 'Final report. kind=submit hands in the worktree as it stands; the orchestrator commits uncommitted changes. kind=fail gives up. seq must increase per call.'
+    : 'Final report. kind=submit requires a committed, clean worktree; kind=fail gives up. seq must increase per call.';
 }
 
 /** Forward one operation, retrying connection failures with backoff for the retry window. */
@@ -60,7 +70,7 @@ export async function startShim(env: ShimEnv): Promise<void> {
   server.registerTool(
     'report',
     {
-      description: 'Final report. kind=submit requires a committed, clean worktree; kind=fail gives up. seq must increase per call.',
+      description: reportDescription(env.commitPolicy),
       inputSchema: {
         seq: z.number().int().nonnegative(),
         kind: z.enum(['submit', 'fail']),

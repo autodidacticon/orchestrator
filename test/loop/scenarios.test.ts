@@ -277,6 +277,28 @@ describe('inproc scenarios on the standard fixture', () => {
     expect(h.workspace.briefs.get(l2.launchId)?.carry).toMatchObject({ question: { message: 'which db?' }, answer: 'sqlite' });
   });
 
+  // See specs/worker-runners "Sandbox and commit policy" and specs/agent-protocol "Fallback file".
+  it('under codex the derived daemon policy commits a dirty worktree at submit and at a fallback submit', async () => {
+    h.cleanup();
+    h = makeHarness({ config: { runner: { kind: 'codex' } } });
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    expect(l1).toMatchObject({ runner: 'codex', commitPolicy: 'daemon' });
+    h.workspace.markProgress(l1.launchId, 'wip', true);
+    const res = await h.submit('T1');
+    expect(res).toMatchObject({ status: 200, body: { accepted: true, sealedSha: `auto-${l1.launchId.slice(0, 8)}` } });
+    expect(h.workspace.autoCommits).toMatchObject([{ launchId: l1.launchId }]);
+    expect(h.store.listEvents({ kind: 'agent.report', taskId: 'T1' })[0]?.payload).toMatchObject({ committedByOrchestrator: true });
+    const l5 = h.launchOf('T5');
+    h.workspace.markProgress(l5.launchId, 'wip', true);
+    h.workspace.fallbacks.set(l5.launchId, { launchId: l5.launchId, seq: 1, kind: 'submit', body: { summary: 'offline' } });
+    h.runners.codex.die(l5.launchId);
+    await h.orch.settle();
+    expect(h.statusOf('T5')).toBe('done');
+    expect(h.workspace.autoCommits.map((c) => c.message)).toEqual([expect.any(String), 'offline']);
+    expect(h.store.listEvents({ kind: 'agent.fallback', taskId: 'T5' })[0]?.payload).toMatchObject({ committedByOrchestrator: true });
+  });
+
   it('process death without a report fails the attempt; with a fallback file it is applied', async () => {
     await h.orch.tick();
     const l1 = h.launchOf('T1');

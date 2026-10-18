@@ -62,10 +62,7 @@ export async function recover(o: Orchestrator): Promise<void> {
     await o.recordUsage(launch);
     const fb = await workspace.readFallback(launch);
     if (fb && entry.status.kind === 'running') {
-      if (fb.kind === 'submit') {
-        const seal = await workspace.seal(launch);
-        if (seal.ok) fb.body = { ...fb.body, __sealedSha: seal.sealedSha };
-      }
+      await o.sealFallback(launch, fb);
       o.applyFallback(launch, fb);
     } else if (entry.status.kind === 'waiting') {
       o.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');

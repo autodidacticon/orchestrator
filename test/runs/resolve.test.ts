@@ -200,6 +200,17 @@ describe('runner kinds', () => {
     expect(resolveLayers({ base: defaultConfig({ runner: { kind: 'codex' } }) }).kind).toEqual({ value: 'codex', source: 'file' });
   });
 
+  // See specs/worker-runners "Sandbox and commit policy".
+  it('derives runner.codex.commit from the sandbox and defaults runner.claude.commit to agent', () => {
+    const commits = (r: ReturnType<typeof resolveLayers>) => ({ claude: r.config.runner.claude.commit, codex: r.config.runner.codex.commit });
+    expect(commits(resolveLayers(file({})))).toEqual({ claude: 'agent', codex: 'daemon' });
+    expect(commits(resolveLayers(file({ runner: { codex: { sandbox: 'danger-full-access' } } })))).toEqual({ claude: 'agent', codex: 'agent' });
+    // The derivation follows a runtime sandbox override; an explicit commit wins over it, and claude.commit is overridable too.
+    expect(resolveLayers(file({}), { codex: { sandbox: 'danger-full-access' } }).codex.commit).toEqual({ value: 'agent', source: 'default' });
+    expect(resolveLayers(file({ runner: { codex: { sandbox: 'danger-full-access', commit: 'daemon' } } })).codex.commit).toEqual({ value: 'daemon', source: 'file' });
+    expect(reportOf(resolveLayers(file({}), parseSetFlags(['claude.commit=daemon'])), 1).config.claude.commit).toEqual({ value: 'daemon', source: 'argument' });
+  });
+
   it('validates the kind and the per-kind effort in the file', () => {
     let error: unknown;
     try {

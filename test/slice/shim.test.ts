@@ -66,4 +66,25 @@ describe('MCP shim', () => {
     expect(h.orch.entry('T1').status.kind).toBe('submitted');
     await server2.close();
   }, 30_000);
+
+  // See specs/worker-runners "Sandbox and commit policy".
+  it('the report tool states the committed, clean worktree requirement only when the agent commits', async () => {
+    const descriptions: Record<string, string> = {};
+    for (const policy of ['unset', 'agent', 'daemon']) {
+      const c = new Client({ name: 'test', version: '0' });
+      const env: Record<string, string> = { ...(process.env as Record<string, string>), ORCH_API: 'http://127.0.0.1:1', ORCH_LAUNCH_ID: 'l', ORCH_TOKEN: 't' };
+      delete env['ORCH_COMMIT_POLICY'];
+      if (policy !== 'unset') env['ORCH_COMMIT_POLICY'] = policy;
+      await c.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, shim], env, stderr: 'pipe' }));
+      try {
+        descriptions[policy] = (await c.listTools()).tools.find((t) => t.name === 'report')?.description ?? '';
+      } finally {
+        await c.close().catch(() => undefined);
+      }
+    }
+    expect(descriptions['unset']).toContain('committed, clean worktree');
+    expect(descriptions['agent']).toContain('committed, clean worktree');
+    expect(descriptions['daemon']).not.toContain('committed, clean worktree');
+    expect(descriptions['daemon']).toContain('the orchestrator commits');
+  }, 30_000);
 });

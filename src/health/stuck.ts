@@ -54,7 +54,7 @@ export async function checkStuck(o: Orchestrator, launch: Launch): Promise<boole
     return true;
   }
   if (stuckAfterMs > 0 && idleMs > stuckAfterMs && cur.stuckSince === undefined) {
-    const message = `No progress observed for ${Math.round(idleMs / 1000)}s (last signal: ${cur.lastSignal ?? 'none'}). Commit what you have, report, or ask a question.`;
+    const message = `No progress observed for ${Math.round(idleMs / 1000)}s (last signal: ${cur.lastSignal ?? 'none'}). Commit or report what you have, or ask a question.`;
     o.store.transaction(() => {
       o.store.updateLaunch(cur.launchId, { stuckSince: now, notices: [...(cur.notices ?? []), { kind: 'stuck', idleMs, message }] });
       o.store.appendEvent({ kind: 'launch.stuck', taskId: cur.taskId, launchId: cur.launchId, payload: { idleMs, lastSignal: cur.lastSignal } }, now);

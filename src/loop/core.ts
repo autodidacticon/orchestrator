@@ -4,7 +4,7 @@
 import type { Config } from '../config.js';
 import type { Graph, GraphNode, Id } from '../graph/model.js';
 import type { AgentRunner } from '../runner/runner.js';
-import type { Selection } from '../runner/selection.js';
+import type { CommitPolicy, RunnerKind, Selection } from '../runner/selection.js';
 import type { Entry, StatusKind } from '../state/status.js';
 import type { Launch, RunnerMode, Store } from '../state/store.js';
 import type { Actor } from '../state/transitions.js';
@@ -42,4 +42,6 @@ export interface OrchestratorCore {
   agentEnv(launch: Launch): Record<string, string>;
   /** The runner kind, worker model, and effort for a task: the kind in force now and its payload selectors over that kind's defaults. See specs/model-selection. */
   selectionFor(taskId: Id): Selection;
+  /** The commit policy in force now for a kind: its `runner.<kind>.commit`. See specs/worker-runners "Sandbox and commit policy". */
+  commitPolicyFor(kind: RunnerKind): CommitPolicy;
 }

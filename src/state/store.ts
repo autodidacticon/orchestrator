@@ -4,7 +4,7 @@
  */
 import type { Id } from '../graph/model.js';
 import type { TokenUsage, UsageSource } from '../runner/runner.js';
-import type { Effort, RunnerKind } from '../runner/selection.js';
+import type { CommitPolicy, Effort, RunnerKind } from '../runner/selection.js';
 import type { Entry } from './status.js';
 
 export type LaunchStatus = 'preparing' | 'claimable' | 'launching' | 'live' | 'ended' | 'revoked';
@@ -63,6 +63,8 @@ export interface Launch {
   runner?: RunnerKind;
   model?: string;
   effort?: Effort;
+  /** Who commits the work, from the kind's `commit` key at preparation; a row without one is `agent` (see `commitPolicyOf`). See specs/worker-runners "Sandbox and commit policy". */
+  commitPolicy?: CommitPolicy;
   /** Usage read from the runner when the launch ended. */
   costUsd?: number;
   turns?: number;
@@ -256,6 +258,11 @@ export interface Store {
 /** The runner kind a launch was prepared for; a row written before the kind was recorded is claude-code. See specs/worker-runners. */
 export function runnerOf(launch: Pick<Launch, 'runner'>): RunnerKind {
   return launch.runner ?? 'claude-code';
+}
+
+/** The commit policy a launch was prepared with; a row written before the policy was recorded is `agent`. See specs/worker-runners. */
+export function commitPolicyOf(launch: Pick<Launch, 'commitPolicy'>): CommitPolicy {
+  return launch.commitPolicy ?? 'agent';
 }
 
 /** Typed kv helpers shared by the daemon and its routes. */

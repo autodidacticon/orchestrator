@@ -39,6 +39,7 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
   const token = randomBytes(24).toString('hex');
   // Fixed here for the life of the launch; a later override reaches launches prepared afterwards. See specs/model-selection "Resolution fixed at preparation".
   const { runner, model, effort, effortRequested } = core.selectionFor(taskId);
+  const commitPolicy = core.commitPolicyFor(runner);
 
   const launch = store.transaction((): Launch => {
     const entry = core.entry(taskId);
@@ -68,6 +69,7 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
       runner,
       model,
       effort,
+      commitPolicy,
     };
     store.createLaunch(row);
     if (opts.sameAttempt) {
@@ -84,7 +86,7 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
       store.setEntry(taskId, next);
       core.recordTransition(taskId, entry.status.kind, 'running', 'orchestrator', 'admitted');
     }
-    store.appendEvent({ kind: 'launch.created', taskId, launchId, payload: { attempt, launchNo, sameAttempt: Boolean(opts.sameAttempt), runner, model, effort, ...(effortRequested ? { effortRequested } : {}) } }, now);
+    store.appendEvent({ kind: 'launch.created', taskId, launchId, payload: { attempt, launchNo, sameAttempt: Boolean(opts.sameAttempt), runner, model, effort, commitPolicy, ...(effortRequested ? { effortRequested } : {}) } }, now);
     return row;
   });
   crashPoint('launch.afterRow');

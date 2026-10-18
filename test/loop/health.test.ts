@@ -112,6 +112,9 @@ describe('health: stuck detection', () => {
     // Reading the inbox is an API call, so it is progress: the notice arrives and the flag clears.
     const notices = await h.inbox('T1');
     expect(notices).toMatchObject([{ kind: 'stuck', idleMs: 1500 }]);
+    // Runner-neutral: an agent whose sandbox cannot commit is not told to commit.
+    expect((notices as Array<{ message?: string }>)[0]?.message).toContain('Commit or report what you have');
+    expect((notices as Array<{ message?: string }>)[0]?.message).not.toContain('Commit what you have');
     expect(await h.inbox('T1')).toEqual([]);
     expect(kinds(h, 'T1', 'launch.unstuck')).toHaveLength(1);
     expect(h.store.getLaunch(l1.launchId)).toMatchObject({ lastSignal: 'inbox' });

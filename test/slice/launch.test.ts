@@ -35,6 +35,34 @@ describe('slice: launch, API, recovery', () => {
     expect(h.store.listEvents({ kind: 'agent.report' })).toHaveLength(1);
   });
 
+  // See specs/worker-runners "Sandbox and commit policy".
+  it('under commit: daemon a dirty submit is committed by the orchestrator and reaches done', async () => {
+    h = await makeSlice({ graph: single('submitDirty'), config: { runner: { claude: { commit: 'daemon' } } } });
+    await h.orch.tick();
+    const l = h.launchOf('T1');
+    expect(l.commitPolicy).toBe('daemon');
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');
+    const job = h.store.listJobs({ taskId: 'T1' })[0]!;
+    expect(job.sealedSha).not.toBe(l.baseSha);
+    expect(gitIn(h.repo, 'rev-parse', l.branch)).toBe(job.sealedSha);
+    expect(gitIn(h.repo, 'log', '-1', '--format=%an', l.branch)).toBe('orchestrator');
+    expect(gitIn(h.repo, 'log', '-1', '--format=%s', l.branch)).toBe('T1: daemon-committed');
+    const reports = h.store.listEvents({ kind: 'agent.report', taskId: 'T1' });
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.payload).toMatchObject({ kind: 'submit', sealedSha: job.sealedSha, committedByOrchestrator: true });
+  });
+
+  it('under commit: daemon a clean worktree without noChanges still fails emptySubmission', async () => {
+    h = await makeSlice({ graph: single('hang'), config: { runner: { claude: { commit: 'daemon' } } } });
+    await h.orch.tick();
+    const l = h.launchOf('T1');
+    const res = await h.orch.agentCall(l.launchId, l.token, 'report', { seq: 1, kind: 'submit', summary: 's' });
+    expect(res.body).toMatchObject({ accepted: false, outcome: 'failed', reason: 'emptySubmission' });
+    expect(gitIn(l.worktree, 'rev-parse', 'HEAD')).toBe(l.baseSha);
+    const report = h.store.listEvents({ kind: 'agent.report', taskId: 'T1' })[0];
+    expect(report?.payload?.['committedByOrchestrator']).toBeUndefined();
+  });
+
   it('sealing ignores later commits', async () => {
     h = await makeSlice({ graph: single('hang') });
     await h.orch.tick();

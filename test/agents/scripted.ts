@@ -122,6 +122,13 @@ async function main(): Promise<void> {
       await api('report', { ...submitBody(), seq });
       break;
     }
+    case 'submitDirty': {
+      // The daemon commit policy: write a file and submit it uncommitted; the daemon commits at submit.
+      writeFileSync(path.join(cwd, `${brief.taskId}.txt`), `${brief.taskId} uncommitted\n`);
+      const res = await api('report', submitBody({ summary: `${brief.taskId}: daemon-committed` }));
+      if (res.status !== 200) throw new Error(`expected 200, got ${res.status}`);
+      break;
+    }
     case 'submitNoEvidence': {
       writeAndCommit();
       await api('report', submitBody({ acceptance: [] }));

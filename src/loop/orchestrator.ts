@@ -27,14 +27,14 @@ import {
   type StatusKind,
   type InterruptedContext,
 } from '../state/status.js';
-import { type Attachment, type Launch, type RunnerMode, runIdOf, runnerOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
+import { type Attachment, commitPolicyOf, type Launch, type RunnerMode, runIdOf, runnerOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CascadeStep } from '../graph/query.js';
 import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
-import type { BriefInput, FallbackReport, Workspace } from '../workspace/workspace.js';
+import type { BriefInput, FallbackReport, SealResult, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
 import { chainPolicy, type Deferral, type Policy } from './schedule.js';
 import { pidAlive } from '../runner/subprocess.js';
@@ -44,7 +44,7 @@ import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, priceFor, priceUsag
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
-import { EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelName, isRunnerKind, RUNNER_KINDS, type RunnerKind, type Selection } from '../runner/selection.js';
+import { type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelName, isRunnerKind, RUNNER_KINDS, type RunnerKind, type Selection } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
@@ -516,6 +516,29 @@ export class Orchestrator implements OrchestratorCore {
     };
   }
 
+  commitPolicyFor(kind: RunnerKind): CommitPolicy {
+    const eff = this.effective();
+    return kind === 'codex' ? eff.config.runner.codex.commit ?? defaultCodexCommit(eff.config.runner.codex.sandbox) : eff.config.runner.claude.commit;
+  }
+
+  /**
+   * Seal a submission under the launch's commit policy: `agent` refuses a dirty
+   * worktree, `daemon` commits it as the orchestrator with the report summary as
+   * the message. See specs/agent-protocol "Submission sealing".
+   */
+  async sealSubmission(launch: Launch, summary: unknown): Promise<SealResult> {
+    if (commitPolicyOf(launch) !== 'daemon') return this.workspace.seal(launch);
+    const message = typeof summary === 'string' && summary.trim() ? summary : `${launch.taskId}: work committed by the orchestrator at submit`;
+    return this.workspace.seal(launch, { autoCommit: { message } });
+  }
+
+  /** Seal a fallback submit into its body before `applyFallback`, which cannot await. */
+  async sealFallback(launch: Launch, fb: FallbackReport): Promise<void> {
+    if (fb.kind !== 'submit') return;
+    const seal = await this.sealSubmission(launch, fb.body['summary']);
+    if (seal.ok) fb.body = { ...fb.body, __sealedSha: seal.sealedSha, ...(seal.committed ? { __committedByOrchestrator: true } : {}) };
+  }
+
   briefInput(launch: Launch): BriefInput {
     const node = this.requireNode(launch.taskId);
     const entry = this.entry(launch.taskId);
@@ -545,7 +568,8 @@ export class Orchestrator implements OrchestratorCore {
       // Only a launch the daemon spawns gets the list; in pull mode every launch is claimed and the worker runs under its own permissions.
       // The list is a Claude Code permission flag, so a launch of another kind never gets it. See specs/worker-runners.
       allowedTools: eff.allowedTools.applied && this.effectiveMode() !== 'pull' && runnerOf(launch) === 'claude-code' ? eff.allowedTools.value : undefined,
-      runner: { kind: runnerOf(launch) },
+      // The brief's commit sentences key off the policy fixed on the row; the sandbox is the codex one in force. See specs/worker-runners "Sandbox and commit policy".
+      runner: { kind: runnerOf(launch), commitPolicy: commitPolicyOf(launch), ...(runnerOf(launch) === 'codex' ? { sandbox: eff.config.runner.codex.sandbox } : {}) },
     };
   }
 
@@ -558,6 +582,8 @@ export class Orchestrator implements OrchestratorCore {
       ORCH_API: this.apiBaseUrl,
       ORCH_TASK_ID: launch.taskId,
       ORCH_WORKTREE: launch.worktree,
+      // Read by the MCP shim to phrase the report tool; unset means `agent`. See specs/worker-runners "Sandbox and commit policy".
+      ...(commitPolicyOf(launch) === 'daemon' ? { ORCH_COMMIT_POLICY: 'daemon' } : {}),
     };
   }
 
@@ -812,13 +838,13 @@ export class Orchestrator implements OrchestratorCore {
       return { status: 400, body: { error: 'malformed', issues: [{ path: ['proposals', badDep.index, 'deps'], message: `proposal "${badDep.title}" depends on ${badDep.dep}, which is not in the graph` }] } };
     }
 
-    const seal = await this.workspace.seal(launch);
+    const seal = await this.sealSubmission(launch, parsed.data.summary);
     if (!seal.ok) return { status: 409, body: { error: 'dirtyWorktree', files: seal.dirty } };
 
     const res = this.store.transaction((): ApiResponse => {
       const cur = this.entry(launch.taskId);
       if (cur.status.kind !== 'running') return { status: 409, body: { error: 'notRunning', status: cur.status.kind } };
-      this.store.appendEvent({ kind: 'agent.report', taskId: launch.taskId, launchId: launch.launchId, payload: { kind: 'submit', seq, sealedSha: seal.sealedSha } }, this.now());
+      this.store.appendEvent({ kind: 'agent.report', taskId: launch.taskId, launchId: launch.launchId, payload: { kind: 'submit', seq, sealedSha: seal.sealedSha, ...(seal.committed ? { committedByOrchestrator: true } : {}) } }, this.now());
       const outcome = this.acceptSubmission(launch, parsed.data, seal.sealedSha);
       this.store.putDedup(launch.launchId, seq, outcome);
       return outcome;
@@ -951,7 +977,7 @@ export class Orchestrator implements OrchestratorCore {
     const entry = this.entry(launch.taskId);
     if (entry.lease?.launchId !== launch.launchId || (entry.status.kind !== 'running' && entry.status.kind !== 'waiting')) return;
     this.store.transaction(() => {
-      this.store.appendEvent({ kind: 'agent.fallback', taskId: launch.taskId, launchId: launch.launchId, payload: { kind: fb.kind, seq: fb.seq } }, this.now());
+      this.store.appendEvent({ kind: 'agent.fallback', taskId: launch.taskId, launchId: launch.launchId, payload: { kind: fb.kind, seq: fb.seq, ...(fb.body['__committedByOrchestrator'] ? { committedByOrchestrator: true } : {}) } }, this.now());
       if (entry.status.kind === 'waiting') {
         // Process died while waiting: degrade to blocked, keep question and answer.
         this.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');
