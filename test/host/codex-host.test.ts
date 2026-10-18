@@ -77,6 +77,9 @@ function liveRun(home: string, repo: string, url: string): void {
   writeFileSync(path.join(dir, 'daemon.json'), JSON.stringify({ pid: process.pid, url, port: 0, startedAt: 1, repo }));
 }
 
+// The two checks that run the installed codex CLI are opt-in, so the unit suite never depends on its version (README "Tests").
+const CODEX_HOST = process.env['ORCH_E2E_CODEX_HOST'] === '1';
+
 describe('codex host', () => {
   const template = readFileSync(path.join(host, 'config.toml'), 'utf8');
   const parsed = parseTomlSubset(template);
@@ -91,7 +94,7 @@ describe('codex host', () => {
   });
 
   // A real TOML parser confirms the template: Codex reads it from a scratch CODEX_HOME.
-  it('codex mcp get reads the template as written', async () => {
+  it.skipIf(!CODEX_HOST)('codex mcp get reads the template as written (ORCH_E2E_CODEX_HOST=1)', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-codex-home-'));
     try {
       writeFileSync(path.join(home, 'config.toml'), template.replaceAll('<hosts/codex>', host));
@@ -173,7 +176,7 @@ describe('codex host', () => {
   });
 
   // Codex itself runs the template's SessionEnd hook: its stdin and its ancestry (codex is the hook's parent) reach the daemon.
-  it('codex runs the template\'s SessionEnd hook, whose ancestry and reason end the attachment', async () => {
+  it.skipIf(!CODEX_HOST)('codex runs the template\'s SessionEnd hook, whose ancestry and reason end the attachment (ORCH_E2E_CODEX_HOST=1)', async () => {
     const h = await makeSlice({ graph: 'nodes:\n  - { id: T1, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }', config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
     const home = mkdtempSync(path.join(tmpdir(), 'orch-hook-home-'));
     const codexHome = mkdtempSync(path.join(tmpdir(), 'orch-codex-home-'));

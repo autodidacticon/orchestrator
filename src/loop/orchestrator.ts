@@ -44,7 +44,7 @@ import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, priceFor, priceUsag
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
-import { type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelName, isRunnerKind, RUNNER_KINDS, type RunnerKind, type Selection } from '../runner/selection.js';
+import { type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelName, isRunnerKind, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
@@ -1765,7 +1765,7 @@ export class Orchestrator implements OrchestratorCore {
 
 /** Launches per runner kind, every kind present (zero when none). */
 function countByKind(launches: readonly Launch[]): Record<RunnerKind, number> {
-  const out = Object.fromEntries(RUNNER_KINDS.map((k) => [k, 0])) as Record<RunnerKind, number>;
+  const out = zeroByKind();
   for (const l of launches) out[runnerOf(l)] += 1;
   return out;
 }

@@ -14,7 +14,7 @@ import { quoteRules } from './command.js';
 const execFileP = promisify(execFile);
 
 export interface SubprocessRunnerOptions {
-  /** Shell command, or a getter read at every spawn; {brief}, {briefJson}, {worktree}, {launchId}, {taskId}, {mcpConfig}, {allowedTools}, {model}, {effort}, and the `extraVars` slots are substituted. */
+  /** Shell command, or a getter read at every spawn; {brief}, {briefJson}, {worktree}, {launchId}, {taskId}, {mcpConfig}, {allowedTools}, {model}, and {effort} are substituted. A runner with its own slots composes the whole command through `compose`. */
   command: string | (() => string);
   /** The allow list filled into {allowedTools}, read at every spawn. See specs/toolchain-discovery "Runner command composition". */
   allowedTools?: () => string[];
@@ -22,8 +22,6 @@ export interface SubprocessRunnerOptions {
   /** Grace period between SIGTERM and SIGKILL. */
   graceMs?: number;
   extraEnv?: Record<string, string>;
-  /** Runner-specific slots read at every spawn, filled after the fixed ones (e.g. the Codex runner's {sandbox} and {codexOverrides}). */
-  extraVars?: (launch: Launch) => Record<string, string>;
   /** Composes the whole command for a launch in place of the template substitution (the Codex runner's `composeCodexCommand`). */
   compose?: (launch: Launch) => string;
 }
@@ -63,7 +61,6 @@ export class SubprocessRunner implements AgentRunner {
       substitute(template, {
         ...fixedSlots(launch),
         allowedTools: quoteRules(this.opts.allowedTools?.() ?? []),
-        ...this.opts.extraVars?.(launch),
       });
     const log = await open(logPath(this.opts.logDir, launch.launchId), 'a');
     try {

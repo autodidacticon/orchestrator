@@ -223,7 +223,11 @@ export function parseOverridePatch(patch: unknown, kind?: RunnerKind): PatchResu
 export function foldRunnerArgs(args: Record<string, unknown>, kind: RunnerKind): Record<string, unknown> {
   const { sandbox, commit, ...out } = args;
   const put = (ns: Namespace, leafKey: string, v: unknown) => {
-    if (v !== undefined) out[ns] = { ...(isObject(out[ns]) ? out[ns] : {}), [leafKey]: v };
+    if (v === undefined) return;
+    // A key cleared and set in one call is a conflict, not a fold: the daemon refuses the same patch shape.
+    if (out[ns] === null) throw new Error(`${ns} is cleared and ${ns}.${leafKey} is set in the same call; drop one of them`);
+    if (isObject(out[ns]) && out[ns][leafKey] === null) throw new Error(`${ns}.${leafKey} is both cleared and set in the same call; drop one of them`);
+    out[ns] = { ...(isObject(out[ns]) ? out[ns] : {}), [leafKey]: v };
   };
   put('codex', 'sandbox', sandbox);
   put(NAMESPACE_OF[isRunnerKind(out['runnerKind']) ? out['runnerKind'] : kind], 'commit', commit);

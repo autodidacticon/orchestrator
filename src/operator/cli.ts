@@ -193,7 +193,11 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       if (values.effort !== undefined) patch['effort'] = values.effort;
       if (values.sandbox !== undefined) patch['sandbox'] = values.sandbox;
       if (values.commit !== undefined) patch['commit'] = values.commit;
-      // The commit policy is per kind: it binds to --runner-kind, else to the kind in force.
+      // The commit policy is per kind: it binds to --runner-kind, else to the kind in force. Clearing runnerKind in the
+      // same call would bind it to the outgoing kind, so that combination needs --runner-kind to say which.
+      if (values.commit !== undefined && patch['runnerKind'] === null) {
+        throw new Error('--clear runnerKind with --commit: name the kind the commit policy binds to with --runner-kind, or clear in a separate call');
+      }
       const kind = values.commit === undefined || isRunnerKind(patch['runnerKind']) ? undefined : ((await call(base, 'GET', '/v1/config')).body as { config?: { runnerKind?: { value?: RunnerKind } } }).config?.runnerKind?.value;
       patch = foldRunnerArgs(patch, kind ?? 'claude-code');
       if (values.allow?.length) {

@@ -150,7 +150,7 @@ Each runner kind SHALL have one command template with its own slots.
 
 `DEFAULT_CODEX_COMMAND` SHALL carry `{model}`, `{effort}`, `{sandbox}`, `{ephemeral}`, `{ignoreUserConfig}`, and `{codexOverrides}` and no `{allowedTools}` (see worker-runners "Codex runner command composition"). The Codex runner SHALL fill these slots at every spawn alongside the common ones.
 
-A runner-specific slot SHALL reach the template through the subprocess runner's `extraVars`. Substitution SHALL be one pass over the template with `\{(\w+)\}`, so a substituted value, such as a TOML inline table, is never re-substituted.
+A runner with slots of its own SHALL compose the whole command through the subprocess runner's `compose` hook (the Codex runner's `composeCodexCommand`, shared with the Codex work loop); the subprocess runner itself substitutes only the common slots and the allow list. Substitution SHALL be one pass over the template with `\{(\w+)\}`, so a substituted value, such as a TOML inline table, is never re-substituted.
 
 A `runnerCommand` (or `runner.codex.command`) from the file or an argument that contains a slot SHALL be filled the same way. One without a slot SHALL run verbatim for that slot, and the configuration record SHALL mark the corresponding key as not applied.
 

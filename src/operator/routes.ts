@@ -10,6 +10,7 @@ import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
 import * as q from '../graph/query.js';
 import { trackerSchema } from '../import/mapping.js';
+import { zeroByKind } from '../runner/selection.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import { logPath } from '../runner/subprocess.js';
 import { setTracker, trackerOf } from '../state/store.js';
@@ -20,7 +21,7 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
   /** Keys still unresolved; `checkCommand` here means submitted work is held until it is set. See specs/operator-control "Status report: configuration". */
   const needsConfig = orch.effective().needsConfig;
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, claimableByKind: { 'claude-code': 0, codex: 0 }, deferred: 0, needsConfig, ...tracker };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, claimableByKind: zeroByKind(), deferred: 0, needsConfig, ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
@@ -205,7 +206,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           proposals: [],
           runner: { mode: orch.effectiveMode(), claimWindowMs: orch.config.runner.claimWindowMs },
           claimable: [],
-          claimableByKind: { 'claude-code': 0, codex: 0 },
+          claimableByKind: zeroByKind(),
           workers: [],
           foreignCommits: [],
           latestSeq: orch.store.latestEventSeq(),
@@ -253,8 +254,9 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
       taskId: typeof body['taskId'] === 'string' ? body['taskId'] : undefined,
       access: typeof body['access'] === 'string' ? body['access'] : undefined,
       attachment: typeof body['attachment'] === 'string' && body['attachment'] ? body['attachment'] : undefined,
-      // One kind or a list of the kinds the worker can run; claim() validates it. See specs/pull-runner "Claim".
-      runner: body['runner'] ?? undefined,
+      // One kind or a list of the kinds the worker can run, passed through as given so that claim() refuses
+      // anything outside the kinds, null included; only an absent key means no filter. See specs/pull-runner "Claim".
+      runner: body['runner'],
     };
     orch.store.appendEvent({ kind: 'operator.claim', taskId: args.taskId, payload: { ...args } }, orch.now());
     return orch.claim(args);

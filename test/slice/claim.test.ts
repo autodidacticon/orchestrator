@@ -117,6 +117,9 @@ describe('claim and release over the real API', () => {
     expect(digest).toMatchObject({ claimable: 2, claimableByKind: { 'claude-code': 1, codex: 1 } });
 
     expect((await http(h, 'POST', '/v1/claims', { workerId: 'w1', runner: 'gemini' })).status).toBe(400);
+    // null is a value outside the kinds, not "no filter": only an absent key means any kind. See specs/pull-runner "Claim".
+    expect((await http(h, 'POST', '/v1/claims', { workerId: 'w1', runner: null })).status).toBe(400);
+    expect((await http(h, 'POST', '/v1/claims', { workerId: 'w1', runner: [] })).status).toBe(400);
     const named = await http(h, 'POST', '/v1/claims', { workerId: 'w1', taskId: 'T2', runner: 'claude-code' });
     expect(named.status).toBe(409);
     expect(named.body).toMatchObject({ ok: false, runner: 'codex', launchId: l2!.launchId });

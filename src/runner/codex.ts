@@ -32,7 +32,7 @@ export interface CodexSettings {
   startupTimeoutSec?: number;
 }
 
-export interface CodexRunnerOptions extends Omit<SubprocessRunnerOptions, 'extraVars' | 'allowedTools'> {
+export interface CodexRunnerOptions extends Omit<SubprocessRunnerOptions, 'allowedTools'> {
   /** Read at every spawn, so a runtime override of `codex.sandbox` reaches the next launch. */
   settings: () => CodexSettings;
   /** The daemon's long-poll ceiling for `block`; the MCP tool timeout is sized above it. */

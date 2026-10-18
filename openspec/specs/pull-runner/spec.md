@@ -59,6 +59,10 @@ The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `m
 - **WHEN** a worker claims T2 with `runner: "claude-code"` while T2's launch is parked for `codex`
 - **THEN** the response is 409 with `runner: "codex"` and no launch changes
 
+#### Scenario: Null filter refused
+- **WHEN** a worker claims with `runner: null` or `runner: []`
+- **THEN** the response is 400 naming the kinds, because only an absent `runner` means any kind
+
 #### Scenario: No filter takes any kind
 - **WHEN** T1's launch is parked for `codex` and then T2's for `claude-code`, and a worker claims without `runner`
 - **THEN** it receives T1's launch, oldest first as before

@@ -53,6 +53,11 @@ export interface Selection {
 /** Aliases and ids as the vendors publish them; nothing that could escape the shell template. */
 export const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
+/** A count per runner kind, every kind present at zero; the one source for `claimableByKind`-shaped maps. */
+export function zeroByKind(): Record<RunnerKind, number> {
+  return Object.fromEntries(RUNNER_KINDS.map((k) => [k, 0])) as Record<RunnerKind, number>;
+}
+
 export function isRunnerKind(s: unknown): s is RunnerKind {
   return typeof s === 'string' && (RUNNER_KINDS as readonly string[]).includes(s);
 }
