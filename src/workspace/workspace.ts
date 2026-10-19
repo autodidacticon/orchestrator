@@ -3,7 +3,7 @@
  * worktrees (git.ts); FakeWorkspace is for logic tests.
  */
 import type { Id } from '../graph/model.js';
-import type { CodexSandbox, CommitPolicy, RunnerKind } from '../runner/selection.js';
+import type { CodexSandbox, CommitPolicy, OpenCodePermission, RunnerKind } from '../runner/selection.js';
 import type { Launch, StoredReport } from '../state/store.js';
 
 /** `committed` when the daemon committed a dirty worktree under the `daemon` commit policy. */
@@ -34,7 +34,15 @@ export interface BriefInput {
   /** The Bash rules in force for a launch the daemon spawns; absent when the runner command carries its own list. */
   allowedTools?: string[];
   /** The kind the launch was prepared for; the brief writes kind-specific text from it. Absent: the Claude Code text under the `agent` policy. See specs/worker-runners "Sandbox and commit policy". */
-  runner?: { kind: RunnerKind; commitPolicy: CommitPolicy; sandbox?: CodexSandbox };
+  runner?: BriefRunner;
+}
+
+/** The launch's runner kind and commit policy; `sandbox` only for codex, `permission` (with the derived bash patterns) only for opencode. */
+export interface BriefRunner {
+  kind: RunnerKind;
+  commitPolicy: CommitPolicy;
+  sandbox?: CodexSandbox;
+  permission?: { mode: OpenCodePermission; bashPatterns?: string[] };
 }
 
 export interface Workspace {

@@ -2,8 +2,7 @@
  * Brief composition. Produces brief.json (machine) and brief.md (human/agent).
  * The brief is standalone: a person could perform the task from it alone.
  */
-import type { BriefInput } from '../workspace/workspace.js';
-import type { CodexSandbox, CommitPolicy, RunnerKind } from '../runner/selection.js';
+import type { BriefInput, BriefRunner } from '../workspace/workspace.js';
 
 export interface ComposeOptions {
   fallbackPath: string;
@@ -21,8 +20,8 @@ export interface BriefJson {
   integrationBranch: string;
   checkCommand?: string;
   allowedTools?: string[];
-  /** The launch's runner kind, commit policy and (codex) sandbox; absent when the brief input had none. See specs/worker-runners. */
-  runner?: { kind: RunnerKind; commitPolicy?: CommitPolicy; sandbox?: CodexSandbox };
+  /** The launch's runner kind, commit policy, (codex) sandbox and (opencode) permission; absent when the brief input had none. See specs/worker-runners. */
+  runner?: BriefRunner;
   retryWindowMs: number;
   fallbackPath: string;
   attempt: number;
@@ -117,6 +116,17 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
       `- You run under ${sandbox} with approvals disabled: a command the sandbox refuses fails with 'Operation not permitted' and will not be approved at runtime. Do not retry it; ask with a \`needsAccess\` question naming the command. The operator can run it for you, or change \`runner.codex.sandbox\` for your next launch.`,
     );
   }
+  // OpenCode auto-rejects a headless `ask`, so a command no rule allows fails at once. See specs/agent-protocol "Check command and tool rules in the brief".
+  if (kind === 'opencode') {
+    const permission = input.runner?.permission;
+    const patterns = permission?.bashPatterns?.length ? permission.bashPatterns : ['git *'];
+    lines.push(
+      "- You run with OpenCode permission rules in force and nothing else confining your commands: a command a rule does not allow fails with 'The user rejected permission to use this specific tool call.' and will not be approved at runtime. Do not retry it; ask with a `needsAccess` question naming the command, then continue with what you can. The operator can run it for you, or set `runner.opencode.permission` to `allow` for your next launch.",
+      permission?.mode === 'allow'
+        ? '- If the orchestrator spawned you, the rules allow every command and every tool. A worker holding a claimed launch runs under its own permissions instead.'
+        : `- If the orchestrator spawned you, the rules allow the file tools (read, glob, grep, list, edit), the orchestrator tools, and these bash commands: ${patterns.map((p) => `\`${p}\``).join(', ')}; every other command is rejected. A worker holding a claimed launch runs under its own permissions instead.`,
+    );
+  }
   lines.push(
     '- Notices may arrive in your inbox (the `inbox` operation): `stuck` when no progress has been observed for a while, `nudge` with a message from the operator, `baseMoved` with the new integration `head` and the `files` that changed, and `payloadChanged` when your task\'s description was edited (re-read the brief file). Check the inbox after long steps.',
     '',
@@ -147,7 +157,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
       lines.push(`- Previous attempt failed: ${JSON.stringify(c['priorFailure'])}`);
       const rf = (c['priorFailure'] as { detail?: { runnerFailure?: { reason?: unknown; detail?: unknown } } }).detail?.runnerFailure;
       if (rf && typeof rf.reason === 'string') {
-        lines.push(`- The runner's diagnosis of the previous launch: \`${rf.reason}\`${typeof rf.detail === 'string' && rf.detail ? `: ${rf.detail}` : ''}. Fix or avoid that cause rather than retrying the same way; if it is outside the worktree (model, login, MCP setup, sandbox), ask with a question.`);
+        lines.push(`- The runner's diagnosis of the previous launch: \`${rf.reason}\`${typeof rf.detail === 'string' && rf.detail ? `: ${rf.detail}` : ''}. Fix or avoid that cause rather than retrying the same way; if it is outside the worktree (model, login, MCP setup, ${kind === 'opencode' ? 'permission rules' : 'sandbox'}), ask with a question.`);
       }
     }
     if (c['verifierOutput']) lines.push('- Verifier output:', '', '```', String(c['verifierOutput']).slice(0, 8000), '```');
@@ -202,6 +212,11 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   if (kind === 'codex')
     lines.push(
       '- Call these operations through the `orchestrator` MCP server\'s tools (`heartbeat`, `report`, `block`, `inbox`, `log`). Do not call the API from a command (curl, a script): the sandbox blocks its network access. Use the fallback file below only when an MCP tool call itself fails.',
+    );
+  // No sandbox stands between an OpenCode agent and loopback, so the API stays usable; the tools are still preferred.
+  if (kind === 'opencode')
+    lines.push(
+      "- Call these operations through the `orchestrator` MCP server's tools, which you see as `orchestrator_heartbeat`, `orchestrator_report`, `orchestrator_block`, `orchestrator_inbox` and `orchestrator_log`. Prefer them to calling the API below from a command; use the fallback file only when both fail.",
     );
   lines.push(
     `- API: \`${input.apiBaseUrl}/v1/launches/${launch.launchId}/...\` with header \`Authorization: Bearer <token from brief.json>\`.`,

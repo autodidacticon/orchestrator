@@ -44,8 +44,10 @@ import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, priceFor, priceUsag
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
-import { type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
+import { type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, type OpenCodePermission, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
+import { bashPatterns } from '../runner/opencode.js';
+import { composeAllowedTools } from '../toolchain/tools.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 
@@ -587,8 +589,26 @@ export class Orchestrator implements OrchestratorCore {
       // The list is a Claude Code permission flag, so a launch of another kind never gets it. See specs/worker-runners.
       allowedTools: eff.allowedTools.applied && this.effectiveMode() !== 'pull' && runnerOf(launch) === 'claude-code' ? eff.allowedTools.value : undefined,
       // The brief's commit sentences key off the policy fixed on the row; the sandbox is the codex one in force. See specs/worker-runners "Sandbox and commit policy".
-      runner: { kind: runnerOf(launch), commitPolicy: commitPolicyOf(launch), ...(runnerOf(launch) === 'codex' ? { sandbox: eff.config.runner.codex.sandbox } : {}) },
+      // The opencode permission names the bash patterns the runner's ruleset allows (`git *` first, as the runner writes it).
+      runner: {
+        kind: runnerOf(launch),
+        commitPolicy: commitPolicyOf(launch),
+        ...(runnerOf(launch) === 'codex' ? { sandbox: eff.config.runner.codex.sandbox } : {}),
+        ...(runnerOf(launch) === 'opencode' ? { permission: this.openCodePermissionFor() } : {}),
+      },
     };
+  }
+
+  /** The opencode permission mode and, under `derived`, the bash patterns allowed. The rules are the ones main.ts gives the OpenCode runner. */
+  private openCodePermissionFor(): { mode: OpenCodePermission; bashPatterns?: string[] } {
+    const eff = this.effective();
+    const mode = eff.config.runner.opencode.permission;
+    if (mode === 'allow') return { mode };
+    const claude = eff.config.runner.claude;
+    const rules = eff.allowedTools.value.length
+      ? eff.allowedTools.value
+      : composeAllowedTools({ record: eff.toolchain, deriveTools: claude.deriveTools, fileRules: claude.allowedTools, argumentRules: eff.overrides.allowedTools ?? [] }).value;
+    return { mode, bashPatterns: [...new Set(['git *', ...bashPatterns(rules)])] };
   }
 
   agentEnv(launch: Launch): Record<string, string> {

@@ -6,6 +6,11 @@ import { parseGraph } from '../../src/graph/load.js';
 import { makeHarness, type Harness } from './harness.js';
 import { Orchestrator } from '../../src/loop/orchestrator.js';
 import { BASE_RULES } from '../../src/toolchain/tools.js';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/brief');
 
 const graph = `nodes:
   - { id: A, deps: [], description: "do A" }
@@ -218,6 +223,108 @@ describe('runner-specific brief text', () => {
     expect(markdown).toContain('the orchestrator commits what is uncommitted when it accepts your report');
     expect(markdown).not.toContain('Codex sandbox');
     for (const s of gitWrites) expect(markdown, s).not.toContain(s);
+  });
+});
+
+// Golden briefs in test/fixtures/brief: the claude-code and codex files were written by the compose before opencode had a branch.
+// See specs/agent-protocol "Standalone brief" and "Check command and tool rules in the brief".
+describe('golden briefs per kind', () => {
+  const golden = (name: string) => readFileSync(path.join(fixtures, `${name}.md`), 'utf8');
+  const launch = { launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'live', token: 't', branch: 'task/T1/l1', worktree: '/w', baseSha: 'base1', graphRev: 'r', createdAt: 1 } as const;
+  const base = {
+    launch: launch as unknown as Parameters<typeof composeBrief>[0]['launch'],
+    node: { id: 'T1', kind: 'task' as const, payload: { title: 'Golden', description: 'Do the golden task.', acceptanceCriteria: ['it works'] }, deps: [] },
+    depReports: [],
+    apiBaseUrl: 'http://127.0.0.1:1',
+    retryWindowMs: 120000,
+    checkCommand: 'npm test',
+    integrationBranch: 'main',
+  };
+  const compose = (input: Partial<Parameters<typeof composeBrief>[0]>) => composeBrief({ ...base, ...input }, { fallbackPath: '/w/.orchestrator/report.json' }).markdown;
+  const tools = ['heartbeat', 'report', 'block', 'inbox', 'log'];
+
+  it('the claude-code and codex briefs are unchanged', () => {
+    expect(compose({ allowedTools: ['Bash(git:*)', 'Bash(npm test:*)', 'Bash(git status)'], runner: { kind: 'claude-code', commitPolicy: 'agent' } })).toBe(golden('claude-code'));
+    expect(compose({ runner: { kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write' } })).toBe(golden('codex'));
+  });
+
+  it('an opencode brief under derived names the orchestrator_ tools, the rejection wording and the derived patterns', () => {
+    const md = compose({ runner: { kind: 'opencode', commitPolicy: 'agent', permission: { mode: 'derived', bashPatterns: ['npm test *', 'git status'] } } });
+    expect(md).toBe(golden('opencode-derived'));
+    for (const t of tools) expect(md).toContain(`\`orchestrator_${t}\``);
+    expect(md).toContain("fails with 'The user rejected permission to use this specific tool call.' and will not be approved at runtime");
+    expect(md).toContain('`needsAccess` question naming the command');
+    expect(md).toContain('these bash commands: `npm test *`, `git status`');
+    expect(md).not.toMatch(/sandbox/i);
+    expect(md).not.toContain('mcp__orchestrator__');
+    expect(md).not.toContain('Do not call the API from a command');
+    expect(md).toContain('- API: `http://127.0.0.1:1/v1/launches/L1/...`');
+    expect(md).toContain('commit and resubmit');
+    // A retry brief after a runner failure names permission rules, not a sandbox.
+    const retry = compose({ carry: { priorFailure: { detail: { runnerFailure: { reason: 'permissionDenied' } } } }, runner: { kind: 'opencode', commitPolicy: 'agent', permission: { mode: 'derived' } } });
+    expect(retry).toContain('(model, login, MCP setup, permission rules)');
+    expect(retry).not.toMatch(/sandbox/i);
+  });
+
+  it('an opencode brief under allow says every command is allowed and lists no patterns', () => {
+    const md = compose({ runner: { kind: 'opencode', commitPolicy: 'agent', permission: { mode: 'allow' } } });
+    expect(md).toBe(golden('opencode-allow'));
+    expect(md).toContain('the rules allow every command and every tool.');
+    expect(md).not.toContain('these bash commands');
+    expect(md).not.toMatch(/sandbox/i);
+    expect(md).not.toContain('mcp__orchestrator__');
+  });
+});
+
+// See specs/worker-runners "Sandbox and commit policy".
+describe('opencode launches: permission in the brief input and commit policy', () => {
+  const graph = 'nodes:\n  - { id: O, deps: [], description: d, acceptanceCriteria: [a], runner: opencode }';
+  const done = { acceptance: [{ criterion: 'a', evidence: 'done' }] };
+
+  it('fills the derived bash patterns, git first, and no allowedTools or sandbox', async () => {
+    h = makeHarness({ graph, config: { runner: { claude: { allowedTools: ['Bash(npm test:*)', 'Bash(git status)'] } } } });
+    await h.orch.tick();
+    const brief = h.workspace.briefs.get(h.launchOf('O').launchId)!;
+    expect(brief.allowedTools).toBeUndefined();
+    expect(brief.runner).toEqual({ kind: 'opencode', commitPolicy: 'agent', permission: { mode: 'derived', bashPatterns: expect.arrayContaining(['git *', 'npm test *', 'git status']) } });
+    expect(brief.runner?.permission?.bashPatterns?.[0]).toBe('git *');
+    expect(new Set(brief.runner?.permission?.bashPatterns).size).toBe(brief.runner?.permission?.bashPatterns?.length);
+    const md = composeBrief(brief, { fallbackPath: '/x' }).markdown;
+    expect(md).toContain('`npm test *`');
+    expect(md).toContain('`git status`');
+  });
+
+  it('under permission: allow fills no patterns', async () => {
+    h = makeHarness({ graph, config: { runner: { opencode: { permission: 'allow' } } } });
+    await h.orch.tick();
+    expect(h.workspace.briefs.get(h.launchOf('O').launchId)!.runner).toEqual({ kind: 'opencode', commitPolicy: 'agent', permission: { mode: 'allow' } });
+  });
+
+  it('commits as the agent by default: no ORCH_COMMIT_POLICY and the daemon does not commit at submit', async () => {
+    h = makeHarness({ graph });
+    expect(h.orch.commitPolicyFor('opencode')).toBe('agent');
+    await h.orch.tick();
+    const l = h.launchOf('O');
+    expect(l).toMatchObject({ runner: 'opencode', commitPolicy: 'agent' });
+    expect(h.orch.agentEnv(l)).not.toHaveProperty('ORCH_COMMIT_POLICY');
+    expect(composeBrief(h.workspace.briefs.get(l.launchId)!, { fallbackPath: '/x' }).markdown).toContain('commit and resubmit');
+    expect(await h.submit('O', done)).toMatchObject({ status: 200, body: { accepted: true } });
+    expect(h.workspace.autoCommits).toEqual([]);
+  });
+
+  it('under runner.opencode.commit: daemon the shim gets the daemon variant and the daemon seals a dirty submit', async () => {
+    h = makeHarness({ graph, config: { runner: { opencode: { commit: 'daemon' } } } });
+    expect(h.orch.commitPolicyFor('opencode')).toBe('daemon');
+    await h.orch.tick();
+    const l = h.launchOf('O');
+    expect(l).toMatchObject({ runner: 'opencode', commitPolicy: 'daemon' });
+    // The shim phrases its report tool from this variable (test/slice/shim.test.ts covers the wording).
+    expect(h.orch.agentEnv(l)['ORCH_COMMIT_POLICY']).toBe('daemon');
+    expect(composeBrief(h.workspace.briefs.get(l.launchId)!, { fallbackPath: '/x' }).markdown).toContain('the orchestrator commits what is uncommitted when it accepts your report');
+    h.workspace.markProgress(l.launchId, 'wip', true);
+    expect(await h.submit('O', done)).toMatchObject({ status: 200, body: { accepted: true, sealedSha: `auto-${l.launchId.slice(0, 8)}` } });
+    expect(h.workspace.autoCommits).toMatchObject([{ launchId: l.launchId }]);
+    expect(h.store.listEvents({ kind: 'agent.report', taskId: 'O' })[0]?.payload).toMatchObject({ committedByOrchestrator: true });
   });
 });
 
