@@ -291,4 +291,39 @@ describe('the daemon resolves, records, and pins', () => {
     expect(readConfigJson(paths.runDir)?.overrides).toEqual({ runnerKind: 'codex', codex: { model: 'gpt-6-pro', effort: 'ultra' } });
     await stopDaemon({ repo, env });
   }, 60_000);
+
+  // See specs/worker-runners "Runner kinds and defaults" and "Sandbox and commit policy", and specs/model-selection "Run default model and effort".
+  it('selects opencode in the file, resolves its defaults, takes the dotted opencode keys at start and a provider/model through the route, and refuses one for claude-code', async () => {
+    env = { ...process.env, ORCH_HOME: fresh('orch-oc-home-') };
+    const repo = realpathSync(makeRepo(fresh('orch-oc-repo-')));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), `runnerCommand: "${scripted}"\ncheckCommand: "true"\nrunner:\n  kind: opencode\n`);
+    const paths = runPaths(repo, env);
+    const plain = await startDaemon({ repo, env });
+    expect(plain.config?.runnerKind).toEqual({ value: 'opencode', source: 'file' });
+    expect(plain.config?.model).toEqual({ value: 'anthropic/claude-opus-5-5', source: 'default', applied: true });
+    expect(plain.config?.allowedTools).toMatchObject({ value: [], applied: false });
+    expect(plain.config?.opencode).toMatchObject({
+      model: { value: 'anthropic/claude-opus-5-5', source: 'default' },
+      commit: { value: 'agent', source: 'default' },
+      permission: { value: 'derived', source: 'default' },
+      dataDir: { value: 'shared', source: 'default' },
+      ignoreUserConfig: { value: false, source: 'default' },
+      pure: { value: true, source: 'default' },
+      snapshots: { value: false, source: 'default' },
+    });
+    await stopDaemon({ repo, env, reap: true });
+
+    const set = await startDaemon({ repo, env, overrides: parseSetFlags(['opencode.model=opencode/big-pickle', 'opencode.dataDir=launch']) });
+    expect(set.config?.model).toEqual({ value: 'opencode/big-pickle', source: 'argument', applied: true });
+    expect(set.config?.opencode).toMatchObject({ dataDir: { value: 'launch', source: 'argument' }, permission: { value: 'derived', source: 'default' } });
+    const flat = await http(set.url, 'PUT', '/v1/config', { model: 'ollama/qwen3.6:35b-mlx', effort: 'ultra' });
+    expect(flat.body).toMatchObject({ key: 'effort', error: expect.stringContaining('opencode') });
+    expect((await http(set.url, 'PUT', '/v1/config', { model: 'ollama/qwen3.6:35b-mlx', effort: 'max' })).status).toBe(200);
+    expect(readConfigJson(paths.runDir)?.config.model).toEqual({ value: 'ollama/qwen3.6:35b-mlx', source: 'argument', applied: true });
+    const claude = await http(set.url, 'PUT', '/v1/config', { runnerKind: 'claude-code', model: 'opencode/big-pickle' });
+    expect(claude.status).toBe(400);
+    expect(claude.body).toMatchObject({ key: 'model' });
+    expect(readConfigJson(paths.runDir)?.overrides).toEqual({ opencode: { model: 'ollama/qwen3.6:35b-mlx', effort: 'max', dataDir: 'launch' } });
+    await stopDaemon({ repo, env });
+  }, 60_000);
 });

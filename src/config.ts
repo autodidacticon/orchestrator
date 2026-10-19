@@ -3,7 +3,7 @@
  */
 import { z } from 'zod';
 import { DEFAULT_CLAUDE_COMMAND } from './runner/command.js';
-import { CODEX_SANDBOXES, COMMIT_POLICIES, DEFAULT_EFFORT, DEFAULT_MODEL_BY_KIND, effortSchemaFor, modelSchema, RUNNER_KINDS } from './runner/selection.js';
+import { anyModelSchema, CODEX_SANDBOXES, COMMIT_POLICIES, DEFAULT_EFFORT, DEFAULT_MODEL_BY_KIND, effortSchemaFor, modelSchemaFor, OPENCODE_DATA_DIRS, OPENCODE_PERMISSIONS, RUNNER_KINDS } from './runner/selection.js';
 import { isSafeRule } from './toolchain/tools.js';
 
 /** Admission ordering stages. See specs/scheduling-policy "Ordering chain". */
@@ -73,7 +73,7 @@ export const configSchema = z.object({
           /** Derive rules from the toolchains found in the repository root. */
           deriveTools: z.boolean().default(true),
           /** The worker model and effort for launches prepared under this run. See specs/model-selection. */
-          model: modelSchema.default(DEFAULT_MODEL_BY_KIND['claude-code']),
+          model: modelSchemaFor('claude-code').default(DEFAULT_MODEL_BY_KIND['claude-code']),
           effort: effortSchemaFor('claude-code').default(DEFAULT_EFFORT),
           /** Who commits the work: the agent, or the daemon when the agent submits. See specs/worker-runners "Sandbox and commit policy". */
           commit: z.enum(COMMIT_POLICIES).default('agent'),
@@ -84,7 +84,7 @@ export const configSchema = z.object({
         .object({
           /** Command template; unset uses the runner's built-in one, which carries the model and effort slots. */
           command: z.string().min(1).optional(),
-          model: modelSchema.default(DEFAULT_MODEL_BY_KIND.codex),
+          model: modelSchemaFor('codex').default(DEFAULT_MODEL_BY_KIND.codex),
           effort: effortSchemaFor('codex').default(DEFAULT_EFFORT),
           /** The Codex sandbox; workspace-write cannot write a linked worktree's gitdir. See specs/worker-runners "Sandbox and commit policy". */
           sandbox: z.enum(CODEX_SANDBOXES).default('workspace-write'),
@@ -96,6 +96,24 @@ export const configSchema = z.object({
           mcpApproval: z.string().optional(),
           toolTimeoutSec: z.number().int().positive().optional(),
           startupTimeoutSec: z.number().int().positive().optional(),
+        })
+        .default({}),
+      /** The OpenCode runner: a `provider/model` model, effort as `--variant`, command template, and policies. The policies' semantics belong to the OpenCode runner. */
+      opencode: z
+        .object({
+          /** Command template; unset uses the runner's built-in one. */
+          command: z.string().min(1).optional(),
+          model: modelSchemaFor('opencode').default(DEFAULT_MODEL_BY_KIND.opencode),
+          effort: effortSchemaFor('opencode').default(DEFAULT_EFFORT),
+          /** Who commits the work; `agent` by default, since no sandbox stands between the agent and git. */
+          commit: z.enum(COMMIT_POLICIES).default('agent'),
+          /** The tool permission rules: derived from the launch, or allow every tool. */
+          permission: z.enum(OPENCODE_PERMISSIONS).default('derived'),
+          /** The user's shared data directory, or one per launch. */
+          dataDir: z.enum(OPENCODE_DATA_DIRS).default('shared'),
+          ignoreUserConfig: z.boolean().default(false),
+          pure: z.boolean().default(true),
+          snapshots: z.boolean().default(false),
         })
         .default({}),
     })
@@ -134,7 +152,7 @@ export const configSchema = z.object({
       /** 0 means unlimited. */
       maxRunCostUsd: z.number().nonnegative().default(0),
       /** USD per million tokens by model, for launches whose runner reports tokens but no cost. See specs/health-monitoring "Run cost budget". */
-      prices: z.record(modelSchema, priceSchema).default({}),
+      prices: z.record(anyModelSchema, priceSchema).default({}),
     })
     .default({}),
   /** Tracker mirroring policy. See specs/tracker-sync. */

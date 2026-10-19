@@ -135,7 +135,7 @@ describe('model and effort per launch', () => {
     const h = makeHarness({ graph: mixed, config: { capacity: 2, runner: { mode: 'pull' } } });
     open.push(h);
     await h.orch.tick();
-    expect(h.orch.status().claimableByKind).toEqual({ 'claude-code': 1, codex: 1 });
+    expect(h.orch.status().claimableByKind).toEqual({ 'claude-code': 1, codex: 1, opencode: 0 });
     const c = await h.orch.claim({ workerId: 'w1', runner: 'codex' });
     expect(c.status).toBe(200);
     expect(c.body).toMatchObject({ taskId: 'C', runner: 'codex', model: 'gpt-6-astra' });

@@ -7,25 +7,48 @@
 import { z } from 'zod';
 import { type Config, configSchema } from '../config.js';
 import { hasAllowedToolsSlot, hasEffortSlot, hasModelSlot } from '../runner/command.js';
-import { CODEX_SANDBOXES, COMMIT_POLICIES, type CodexSandbox, type CommitPolicy, defaultCodexCommit, type Effort, effortSchema, effortSchemaFor, isRunnerKind, modelSchema, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
+import {
+  anyModelSchema,
+  CODEX_SANDBOXES,
+  COMMIT_POLICIES,
+  type CodexSandbox,
+  type CommitPolicy,
+  defaultCodexCommit,
+  type Effort,
+  effortSchema,
+  effortSchemaFor,
+  isModelNameFor,
+  isRunnerKind,
+  modelSchemaFor,
+  OPENCODE_DATA_DIRS,
+  OPENCODE_PERMISSIONS,
+  type OpenCodeDataDir,
+  type OpenCodePermission,
+  RUNNER_KINDS,
+  type RunnerKind,
+} from '../runner/selection.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { type AllowedToolsParts, composeAllowedTools, isSafeRule } from '../toolchain/tools.js';
 
-export const OVERRIDABLE_KEYS = ['checkCommand', 'integrationBranch', 'capacity', 'allowedTools', 'runnerCommand', 'runnerKind', 'model', 'effort', 'claude', 'codex'] as const;
+export const OVERRIDABLE_KEYS = ['checkCommand', 'integrationBranch', 'capacity', 'allowedTools', 'runnerCommand', 'runnerKind', 'model', 'effort', 'claude', 'codex', 'opencode'] as const;
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number];
 export const START_ONLY_KEYS: readonly OverridableKey[] = ['integrationBranch'];
 
 /** The override namespace of each runner kind, and the leaves it holds. */
-const NAMESPACE_OF = { 'claude-code': 'claude', codex: 'codex' } as const satisfies Record<RunnerKind, string>;
+const NAMESPACE_OF = { 'claude-code': 'claude', codex: 'codex', opencode: 'opencode' } as const satisfies Record<RunnerKind, string>;
 type Namespace = (typeof NAMESPACE_OF)[RunnerKind];
-const NAMESPACES: readonly Namespace[] = ['claude', 'codex'];
-const NAMESPACE_LEAVES: Record<Namespace, readonly string[]> = { claude: ['model', 'effort', 'commit'], codex:['model', 'effort', 'sandbox', 'commit', 'command'] };
+const NAMESPACES: readonly Namespace[] = ['claude', 'codex', 'opencode'];
+const NAMESPACE_LEAVES: Record<Namespace, readonly string[]> = {
+  claude: ['model', 'effort', 'commit'],
+  codex: ['model', 'effort', 'sandbox', 'commit', 'command'],
+  opencode: ['model', 'effort', 'commit', 'command', 'permission', 'dataDir'],
+};
 
 const rule = z.string().refine(isSafeRule, (r) => ({ message: `rule ${JSON.stringify(r)} must not be empty or contain a double quote, backslash, dollar sign, or backtick` }));
 
 const claudeOverridesSchema = z
   .object({
-    model: modelSchema.nullable().optional(),
+    model: modelSchemaFor('claude-code').nullable().optional(),
     effort: effortSchemaFor('claude-code').nullable().optional(),
     commit: z.enum(COMMIT_POLICIES).nullable().optional(),
   })
@@ -33,7 +56,7 @@ const claudeOverridesSchema = z
 
 const codexOverridesSchema = z
   .object({
-    model: modelSchema.nullable().optional(),
+    model: modelSchemaFor('codex').nullable().optional(),
     effort: effortSchemaFor('codex').nullable().optional(),
     sandbox: z.enum(CODEX_SANDBOXES).nullable().optional(),
     commit: z.enum(COMMIT_POLICIES).nullable().optional(),
@@ -41,10 +64,23 @@ const codexOverridesSchema = z
   })
   .strict();
 
+const opencodeOverridesSchema = z
+  .object({
+    model: modelSchemaFor('opencode').nullable().optional(),
+    effort: effortSchemaFor('opencode').nullable().optional(),
+    commit: z.enum(COMMIT_POLICIES).nullable().optional(),
+    command: z.string().min(1).nullable().optional(),
+    permission: z.enum(OPENCODE_PERMISSIONS).nullable().optional(),
+    dataDir: z.enum(OPENCODE_DATA_DIRS).nullable().optional(),
+  })
+  .strict();
+
 /**
  * An override document: a value sets the key, null clears it. The stored document
- * keeps model and effort per kind under `claude` and `codex`; the flat `model` and
- * `effort` are accepted in a patch and bound to the kind in force when it is written.
+ * keeps model and effort per kind under `claude`, `codex` and `opencode`; the flat
+ * `model` and `effort` are accepted in a patch and bound to the kind in force when
+ * it is written. An unbound flat `model` takes any kind's shape and applies only to
+ * a kind whose shape it has.
  */
 export const overridesSchema = z
   .object({
@@ -54,10 +90,11 @@ export const overridesSchema = z
     allowedTools: z.array(rule).nullable().optional(),
     runnerCommand: z.string().min(1).nullable().optional(),
     runnerKind: z.enum(RUNNER_KINDS).nullable().optional(),
-    model: modelSchema.nullable().optional(),
+    model: anyModelSchema.nullable().optional(),
     effort: effortSchema.nullable().optional(),
     claude: claudeOverridesSchema.nullable().optional(),
     codex: codexOverridesSchema.nullable().optional(),
+    opencode: opencodeOverridesSchema.nullable().optional(),
   })
   .strict();
 export type Overrides = z.infer<typeof overridesSchema>;
@@ -108,18 +145,33 @@ export interface CodexLeaves {
   ephemeral: ConfigLeaf<boolean>;
 }
 
+/** The OpenCode runner's leaves, resolved whichever kind is in force. */
+export interface OpenCodeLeaves {
+  model: ConfigLeaf<string>;
+  effort: ConfigLeaf<Effort>;
+  command: ConfigLeaf<string | undefined>;
+  /** `agent` by default: no sandbox stands between the agent and git. */
+  commit: ConfigLeaf<CommitPolicy>;
+  permission: ConfigLeaf<OpenCodePermission>;
+  dataDir: ConfigLeaf<OpenCodeDataDir>;
+  ignoreUserConfig: ConfigLeaf<boolean>;
+  pure: ConfigLeaf<boolean>;
+  snapshots: ConfigLeaf<boolean>;
+}
+
 export interface Resolved {
   config: Config;
   provenance: Provenance;
   /** The runner kind in force. See specs/worker-runners. */
   kind: ConfigLeaf<RunnerKind>;
-  /** The allow list; composed for claude-code only, empty and not applied for codex. */
+  /** The allow list; composed for claude-code only, empty and not applied for the other kinds. */
   allowedTools: { value: string[]; parts: AllowedToolsParts; applied: boolean };
   /** The run default model and effort of the kind in force; `applied` is whether that kind's template carries the slot. See specs/model-selection. */
   model: { value: string; applied: boolean };
   effort: { value: Effort; applied: boolean };
   claude: ClaudeLeaves;
   codex: CodexLeaves;
+  opencode: OpenCodeLeaves;
   toolchain: ToolchainRecord | undefined;
   needsConfig: OverridableKey[];
   overrides: Overrides;
@@ -148,7 +200,7 @@ function fileRunner(raw: Record<string, unknown> | undefined, ns: Namespace): Re
   return isObject(block) ? block : {};
 }
 
-/** Merge a patch into an override document: a null clears the key; inside `claude` and `codex` a null clears one leaf. */
+/** Merge a patch into an override document: a null clears the key; inside a kind's namespace a null clears one leaf. */
 export function mergeOverrides(current: Overrides, patch: Overrides): Overrides {
   const out: Record<string, unknown> = { ...current };
   for (const [k, v] of Object.entries(patch)) {
@@ -215,13 +267,14 @@ export function parseOverridePatch(patch: unknown, kind?: RunnerKind): PatchResu
 }
 
 /**
- * Operator-surface arguments into an override patch: `sandbox` is codex's, and
- * `commit` lands under the namespace of the patch's own `runnerKind`, else of
- * `kind` (the kind in force). Used by `orchestrator-ctl config` and the MCP
- * `start` and `configure` tools. See specs/operator-control "Configuration route".
+ * Operator-surface arguments into an override patch: `sandbox` is codex's,
+ * `permission` and `dataDir` are opencode's, and `commit` lands under the
+ * namespace of the patch's own `runnerKind`, else of `kind` (the kind in force).
+ * Used by `orchestrator-ctl config` and the MCP `start` and `configure` tools.
+ * See specs/operator-control "Configuration route".
  */
 export function foldRunnerArgs(args: Record<string, unknown>, kind: RunnerKind): Record<string, unknown> {
-  const { sandbox, commit, ...out } = args;
+  const { sandbox, permission, dataDir, commit, ...out } = args;
   const put = (ns: Namespace, leafKey: string, v: unknown) => {
     if (v === undefined) return;
     // A key cleared and set in one call is a conflict, not a fold: the daemon refuses the same patch shape.
@@ -230,6 +283,8 @@ export function foldRunnerArgs(args: Record<string, unknown>, kind: RunnerKind):
     out[ns] = { ...(isObject(out[ns]) ? out[ns] : {}), [leafKey]: v };
   };
   put('codex', 'sandbox', sandbox);
+  put('opencode', 'permission', permission);
+  put('opencode', 'dataDir', dataDir);
   put(NAMESPACE_OF[isRunnerKind(out['runnerKind']) ? out['runnerKind'] : kind], 'commit', commit);
   return out;
 }
@@ -298,9 +353,11 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
   provenance.runnerKind = kind.source;
 
   // Model and effort per kind; a flat key in an unbound document stands for the kind in force.
-  const flat = (k: RunnerKind) => (k === kind.value ? { model: overrides.model, effort: overrides.effort } : {});
+  // A flat model of another kind's shape (an unbound `provider/model` under claude-code) does not apply.
+  const flat = (k: RunnerKind) => (k === kind.value ? { model: isModelNameFor(k, overrides.model) ? overrides.model : undefined, effort: overrides.effort } : {});
   const claudeFile = fileRunner(fileRaw, 'claude');
   const codexFile = fileRunner(fileRaw, 'codex');
+  const opencodeFile = fileRunner(fileRaw, 'opencode');
   const claudeModel = leaf(flat('claude-code').model ?? overrides.claude?.model, fileHas(claudeFile, 'model'), base.runner.claude.model, DEFAULTS.runner.claude.model, noFile);
   const claudeEffort = leaf<Effort>(flat('claude-code').effort ?? overrides.claude?.effort, fileHas(claudeFile, 'effort'), base.runner.claude.effort, DEFAULTS.runner.claude.effort, noFile);
   const c = base.runner.codex;
@@ -322,15 +379,30 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
     ignoreUserConfig: leaf(undefined, fileHas(codexFile, 'ignoreUserConfig'), c.ignoreUserConfig, d.ignoreUserConfig, noFile),
     ephemeral: leaf(undefined, fileHas(codexFile, 'ephemeral'), c.ephemeral, d.ephemeral, noFile),
   };
+  const oc = base.runner.opencode;
+  const od = DEFAULTS.runner.opencode;
+  const oo = overrides.opencode ?? {};
+  const opencode: OpenCodeLeaves = {
+    model: leaf(flat('opencode').model ?? oo.model, fileHas(opencodeFile, 'model'), oc.model, od.model, noFile),
+    effort: leaf<Effort>(flat('opencode').effort ?? oo.effort, fileHas(opencodeFile, 'effort'), oc.effort, od.effort, noFile),
+    command: leaf(oo.command, fileHas(opencodeFile, 'command'), oc.command, od.command, noFile),
+    commit: leaf<CommitPolicy>(oo.commit, fileHas(opencodeFile, 'commit'), oc.commit, od.commit, noFile),
+    permission: leaf<OpenCodePermission>(oo.permission, fileHas(opencodeFile, 'permission'), oc.permission, od.permission, noFile),
+    dataDir: leaf<OpenCodeDataDir>(oo.dataDir, fileHas(opencodeFile, 'dataDir'), oc.dataDir, od.dataDir, noFile),
+    ignoreUserConfig: leaf(undefined, fileHas(opencodeFile, 'ignoreUserConfig'), oc.ignoreUserConfig, od.ignoreUserConfig, noFile),
+    pure: leaf(undefined, fileHas(opencodeFile, 'pure'), oc.pure, od.pure, noFile),
+    snapshots: leaf(undefined, fileHas(opencodeFile, 'snapshots'), oc.snapshots, od.snapshots, noFile),
+  };
   const isCodex = kind.value === 'codex';
-  const model = isCodex ? codex.model : claudeModel;
-  const effort = isCodex ? codex.effort : claudeEffort;
+  const isOpenCode = kind.value === 'opencode';
+  const model = isCodex ? codex.model : isOpenCode ? opencode.model : claudeModel;
+  const effort = isCodex ? codex.effort : isOpenCode ? opencode.effort : claudeEffort;
   provenance.model = model.source;
   provenance.effort = effort.source;
 
-  // Allow-list composition is claude-code only. Codex's built-in template carries the model and effort slots; a template from the file or an argument is read for them.
-  const allowedTools = isCodex
-    ? { value: [], parts: EMPTY_PARTS, applied: false }
+  // Allow-list composition is claude-code only. The Codex and OpenCode built-in templates carry the model and effort slots; a template from the file or an argument is read for them.
+  const allowedTools = kind.value !== 'claude-code'
+    ?{ value: [], parts: EMPTY_PARTS, applied: false }
     : {
         ...composeAllowedTools({
           record: detected?.toolchain,
@@ -341,7 +413,7 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
         applied: hasAllowedToolsSlot(runnerCommand),
       };
   provenance.allowedTools = 'composed';
-  const template = isCodex ? codex.command.value : runnerCommand;
+  const template = isCodex ? codex.command.value : isOpenCode ? opencode.command.value : runnerCommand;
   const modelApplied = template === undefined ? true : hasModelSlot(template);
   const effortApplied = template === undefined ? true : hasEffortSlot(template);
 
@@ -358,6 +430,15 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
         kind: kind.value,
         claude: { ...base.runner.claude, model: claudeModel.value, effort: claudeEffort.value, commit: claude.commit.value },
         codex: { ...c, model: codex.model.value, effort: codex.effort.value, command: codex.command.value, sandbox: codex.sandbox.value, commit: codex.commit.value },
+        opencode: {
+          ...oc,
+          model: opencode.model.value,
+          effort: opencode.effort.value,
+          command: opencode.command.value,
+          commit: opencode.commit.value,
+          permission: opencode.permission.value,
+          dataDir: opencode.dataDir.value,
+        },
       },
     },
     provenance,
@@ -367,6 +448,7 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
     effort: { value: effort.value, applied: effortApplied },
     claude,
     codex,
+    opencode,
     toolchain: detected?.toolchain,
     needsConfig,
     overrides,
@@ -389,6 +471,7 @@ export interface ConfigReport {
     effort: ConfigLeaf<Effort> & { applied: boolean };
     claude: ClaudeLeaves;
     codex: CodexLeaves;
+    opencode: OpenCodeLeaves;
   };
   toolchain: ToolchainRecord | undefined;
   overrides: Overrides;
@@ -434,9 +517,9 @@ const DOTTED_KEYS = NAMESPACES.flatMap((ns) => NAMESPACE_LEAVES[ns].map((l) => `
 
 /**
  * `--set key=value` flags into an override document: `capacity` as an integer,
- * `allowedTools` as a JSON array or one rule per flag (appended), `claude.<leaf>`
- * and `codex.<leaf>` folded into their namespace (or `claude=`/`codex=` as a JSON
- * object), the rest as strings. With a `runnerKind` flag or a `kind`, the flat
+ * `allowedTools` as a JSON array or one rule per flag (appended), `claude.<leaf>`,
+ * `codex.<leaf>` and `opencode.<leaf>` folded into their namespace (or
+ * `claude=`/`codex=`/`opencode=` as a JSON object), the rest as strings. With a `runnerKind` flag or a `kind`, the flat
  * `model` and `effort` bind to that kind and `effort` is checked against its set.
  * Throws a usage error on an unknown key or a bad value.
  */
@@ -512,6 +595,7 @@ export function reportOf(resolved: Resolved, now: number): ConfigReport {
       effort: { value: resolved.effort.value, source: resolved.provenance.effort, applied: resolved.effort.applied },
       claude: resolved.claude,
       codex: resolved.codex,
+      opencode: resolved.opencode,
     },
     toolchain: resolved.toolchain,
     overrides: resolved.overrides,

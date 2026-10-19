@@ -5,7 +5,7 @@
 import { stringify as toYaml } from 'yaml';
 import { z } from 'zod';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
-import { isEffort, isModelName, isRunnerKind } from '../runner/selection.js';
+import { isAnyModelName, isEffort, isModelNameFor, isRunnerKind } from '../runner/selection.js';
 
 export const issueStateSchema = z.enum(['open', 'inProgress', 'done', 'cancelled']);
 
@@ -74,19 +74,27 @@ export interface ImportSummary {
   ignoredLabels: Array<{ id: string; label: string }>;
 }
 
-const SELECTOR_CHECKS = { model: isModelName, effort: isEffort, runner: isRunnerKind } as const;
+const SELECTOR_CHECKS = { model: isAnyModelName, effort: isEffort, runner: isRunnerKind } as const;
 type SelectorKey = keyof typeof SELECTOR_CHECKS;
 
 /** Selector labels: a case-insensitive `model:`, `effort:` or `runner:` prefix sets the payload key when the value has the right shape. */
 function selectorsOf(i: { id: string; labels?: string[] }, ignored: Array<{ id: string; label: string }>): Partial<Record<SelectorKey, string>> {
   const out: Partial<Record<SelectorKey, string>> = {};
+  let modelLabel: string | undefined;
   for (const label of i.labels ?? []) {
     const m = /^(model|effort|runner):(.*)$/i.exec(label);
     if (!m) continue;
     const key = m[1]!.toLowerCase() as SelectorKey;
     const value = m[2]!.trim();
-    if (SELECTOR_CHECKS[key](value)) out[key] = value;
-    else ignored.push({ id: i.id, label });
+    if (SELECTOR_CHECKS[key](value)) {
+      out[key] = value;
+      if (key === 'model') modelLabel = label;
+    } else ignored.push({ id: i.id, label });
+  }
+  // With the task's own kind known the model takes that kind's shape; otherwise any kind's, bound when the launch is prepared.
+  if (modelLabel !== undefined && isRunnerKind(out.runner) && !isModelNameFor(out.runner, out.model)) {
+    ignored.push({ id: i.id, label: modelLabel });
+    delete out.model;
   }
   return out;
 }

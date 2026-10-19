@@ -132,7 +132,7 @@ describe('claim and release over the real API', () => {
     const none = await http(h, 'POST', '/v1/claims', { workerId: 'w2', runner: 'claude-code' });
     expect(none.status).toBe(404);
     expect(h.store.getLaunch(l2!.launchId)?.status).toBe('claimable');
-    expect(h.orch.status().claimableByKind).toEqual({ 'claude-code': 0, codex: 1 });
+    expect(h.orch.status().claimableByKind).toEqual({ 'claude-code': 0, codex: 1, opencode: 0 });
     // A list names every kind the worker runs; no filter takes any kind.
     expect((await http(h, 'POST', '/v1/claims', { workerId: 'w2', runner: ['claude-code', 'codex'] })).body).toMatchObject({ taskId: 'T2', runner: 'codex' });
   });

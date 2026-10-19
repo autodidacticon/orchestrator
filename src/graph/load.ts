@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
-import { effortSchema, modelSchema, RUNNER_KINDS } from '../runner/selection.js';
+import { anyModelSchema, effortSchema, isModelNameFor, modelMessage, RUNNER_KINDS } from '../runner/selection.js';
 import { type Graph, type GraphNode, type Id, makeGraph } from './model.js';
 
 export class GraphValidationError extends Error {
@@ -35,12 +35,16 @@ const nodeSchema = z
     /** Path globs the task's work stays within; stays in the payload. See specs/scheduling-policy "Scope declaration". */
     scope: z.array(z.string().min(1)).optional(),
     /** The worker model and effort for this task's launches; stay in the payload. See specs/model-selection "Task selectors". */
-    model: modelSchema.optional(),
+    model: anyModelSchema.optional(),
     effort: effortSchema.optional(),
     /** The runner kind for this task's launches, over the run default; stays in the payload. See specs/model-selection "Task selectors". */
     runner: z.enum(RUNNER_KINDS).optional(),
   })
-  .passthrough();
+  .passthrough()
+  // With the task's own kind known the model takes that kind's shape; otherwise any kind's, bound when the launch is prepared.
+  .superRefine((n, ctx) => {
+    if (n.runner !== undefined && n.model !== undefined && !isModelNameFor(n.runner, n.model)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['model'], message: `${JSON.stringify(n.model)} is not a model for ${n.runner}: ${modelMessage(n.runner)}` });
+  });
 
 const fileSchema = z.object({ nodes: z.array(nodeSchema) });
 

@@ -175,6 +175,31 @@ describe('layered resolution', () => {
   });
 });
 
+// See specs/worker-runners "Runner kinds and defaults" and specs/operator-control "Configuration route".
+describe('the opencode namespace', () => {
+  it('resolves the file kind with its defaults, folds the dotted keys, binds a flat provider/model, and refuses one under another kind', () => {
+    const o = reportOf(resolveLayers(file({ runner: { kind: 'opencode' } })), 1);
+    expect(o.config.runnerKind).toEqual({ value: 'opencode', source: 'file' });
+    expect(o.config.model).toEqual({ value: 'anthropic/claude-opus-5-5', source: 'default', applied: true });
+    expect(o.config.opencode).toMatchObject({ model: { value: 'anthropic/claude-opus-5-5', source: 'default' }, commit: { value: 'agent', source: 'default' }, permission: { value: 'derived', source: 'default' }, dataDir: { value: 'shared', source: 'default' } });
+    expect(o.config.allowedTools.applied).toBe(false);
+    const set = parseSetFlags(['opencode.model=opencode/big-pickle', 'opencode.dataDir=launch']);
+    expect(set).toEqual({ opencode: { model: 'opencode/big-pickle', dataDir: 'launch' } });
+    const r = resolveLayers(file({ runner: { kind: 'opencode' } }), set);
+    expect(r.config.runner.opencode).toMatchObject({ model: 'opencode/big-pickle', dataDir: 'launch', permission: 'derived' });
+    expect(reportOf(r, 1).config.opencode.dataDir).toEqual({ value: 'launch', source: 'argument' });
+    expect(parseSetFlags(['model=ollama/qwen3.6:35b-mlx'], 'opencode')).toEqual({ opencode: { model: 'ollama/qwen3.6:35b-mlx' } });
+    expect(() => parseSetFlags(['model=opencode/big-pickle'], 'claude-code')).toThrow(/^--set model/);
+    expect(() => parseSetFlags(['opencode.model=big-pickle'])).toThrow(/^--set opencode\.model: .*provider\/model/);
+    expect(() => parseSetFlags(['opencode.effort=ultra'])).toThrow(/^--set opencode\.effort: .*opencode/);
+    expect(() => parseSetFlags(['opencode.permission=ask'])).toThrow(/^--set opencode\.permission/);
+    // Not a namespaced leaf: the file-only policies.
+    expect(() => parseSetFlags(['opencode.pure=false'])).toThrow(/unknown key "opencode.pure"/);
+    // An unbound flat provider/model does not reach a claude-code run.
+    expect(reportOf(resolveLayers({ base: defaultConfig() }, { model: 'opencode/big-pickle' }), 1).config.model).toEqual({ value: 'claude-opus-5-5', source: 'default', applied: true });
+  });
+});
+
 // See specs/worker-runners "Runner kinds and defaults" and "Per-kind effort sets".
 describe('runner kinds', () => {
   it('defaults to claude-code and resolves codex defaults, file values, and no allow list under codex', () => {

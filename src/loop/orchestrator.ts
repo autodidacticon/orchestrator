@@ -44,7 +44,7 @@ import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, priceFor, priceUsag
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
-import { type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelName, isRunnerKind, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
+import { type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
@@ -519,13 +519,14 @@ export class Orchestrator implements OrchestratorCore {
     const payload = this.payloadOf(this.requireNode(taskId));
     const eff = this.effective();
     const runner: RunnerKind = isRunnerKind(payload['runner']) ? payload['runner'] : eff.kind.value;
-    const defaults = runner === 'codex' ? eff.config.runner.codex : eff.config.runner.claude;
+    const defaults = runner === 'codex' ? eff.config.runner.codex : runner === 'opencode' ? eff.config.runner.opencode : eff.config.runner.claude;
     const requested: Effort = isEffort(payload['effort']) ? payload['effort'] : defaults.effort;
     const fallback = EFFORT_FALLBACK[runner]?.[requested];
     const effort: Effort = isEffortFor(runner, requested) ? requested : fallback !== undefined && isEffortFor(runner, fallback) ? fallback : defaults.effort;
     return {
       runner,
-      model: isModelName(payload['model']) ? payload['model'] : defaults.model,
+      // A model of another kind's shape (a `provider/model` under claude-code or codex) is not bound; the kind's default applies.
+      model: isModelNameFor(runner, payload['model']) ? payload['model'] : defaults.model,
       effort,
       ...(effort !== requested ? { effortRequested: requested } : {}),
     };
@@ -533,7 +534,9 @@ export class Orchestrator implements OrchestratorCore {
 
   commitPolicyFor(kind: RunnerKind): CommitPolicy {
     const eff = this.effective();
-    return kind === 'codex' ? eff.config.runner.codex.commit ?? defaultCodexCommit(eff.config.runner.codex.sandbox) : eff.config.runner.claude.commit;
+    // Only codex derives its policy (from the sandbox); the other kinds read their own `commit` leaf.
+    if (kind === 'codex') return eff.config.runner.codex.commit ?? defaultCodexCommit(eff.config.runner.codex.sandbox);
+    return kind === 'opencode' ? eff.config.runner.opencode.commit : eff.config.runner.claude.commit;
   }
 
   /**

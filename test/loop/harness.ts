@@ -44,7 +44,7 @@ export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: 
   // Fake processes never exit by themselves, so in-process scenarios reap on the tick after submit. See specs/health-monitoring "Usage accounting".
   const config = defaultConfig({ dataDir: dir, capacity: 4, maxWaiting: 4, checkCommand: 'true', health: { reportGraceMs: 0, ...(opts.config?.health ?? {}) }, ...opts.config });
   const store = new SqliteStore(path.join(dir, 'store.sqlite'));
-  const runners: Record<RunnerKind, InprocRunner> = { 'claude-code': new InprocRunner(), codex: new InprocRunner() };
+  const runners: Record<RunnerKind, InprocRunner> = { 'claude-code': new InprocRunner(), codex: new InprocRunner(), opencode: new InprocRunner() };
   const runner = runners['claude-code'];
   const workspace = new FakeWorkspace();
   const verifier = new FakeVerifierBackend();
