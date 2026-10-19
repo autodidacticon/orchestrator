@@ -48,7 +48,8 @@ describe('slice: verifier and publication', () => {
     process.env['EXPECTED_HOME'] = path.join(h.orch.config.dataDir, 'child-home');
     process.env['ORCH_URL'] = 'http://127.0.0.1:1';
     try {
-      await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done' || h!.orch.entry('T1').attempts >= 1);
+      // Wait for the first job to finish either way: a red check fails fast here instead of racing the retry.
+      await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done' || ['failed', 'conflict'].includes(h!.store.listJobs({ taskId: 'T1' })[0]?.status ?? ''));
       expect(h.orch.entry('T1').status.kind).toBe('done');
       expect(h.store.listJobs({ taskId: 'T1' })[0]).toMatchObject({ status: 'published' });
     } finally {
