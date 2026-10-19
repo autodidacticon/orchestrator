@@ -69,9 +69,10 @@ export async function recover(o: Orchestrator): Promise<void> {
       o.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');
       if (entry.status.answer !== undefined) o.unblock(launch.taskId, { answer: entry.status.answer });
     } else {
+      // Same path as a death seen by tick: recorded as launch.failed, contended deaths within the allowance uncharged.
       const reason = await o.exitedWithoutReport(launch, 'process gone at recovery');
       runnerFailure = reason.detail?.['runnerFailure'];
-      o.fail(launch.taskId, reason, 'orchestrator', 'deadOrExpired');
+      o.failExited(launch, reason, 'deadOrExpired');
     }
     o.endLaunch(launch, 'recovered-dead', runnerFailure ? { runnerFailure } : {});
     if (o.entry(launch.taskId).status.kind !== 'submitted') await workspace.remove(launch);

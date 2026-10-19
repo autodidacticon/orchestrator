@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ConfigInput } from '../../src/config.js';
+import { recover } from '../../src/launch/recovery.js';
+import { Orchestrator } from '../../src/loop/orchestrator.js';
 import { makeHarness, type Harness } from '../loop/harness.js';
 
 const open: Harness[] = [];
@@ -72,5 +74,51 @@ describe('startupContended relaunch', () => {
     await dieWith(h, undefined);
     expect(h.store.listEvents({ kind: 'launch.failed', taskId: 'T1' }).map((e) => e.payload)).toEqual([{ reason: 'exitBeforeTurn', charged: true }, { charged: true }]);
     expect(h.statusOf('T1')).toBe('blocked');
+  });
+});
+
+/** Kill T1's live launch with `failure` scripted while the daemon is down, then restart over the same store and recover. */
+async function dieAtRestart(h: Harness, failure: { reason: string; detail?: string } | undefined): Promise<{ launchId: string; o2: Orchestrator }> {
+  const l = h.launchOf('T1');
+  if (failure) h.runner.failureScript.set(l.launchId, failure);
+  h.runner.die(l.launchId);
+  const o2 = new Orchestrator({ store: h.store, config: h.orch.config, graphSource: h.source, runner: h.orch.runner, workspace: h.workspace, verifier: h.verifier, clock: () => h.now.value });
+  await o2.loadGraph();
+  await recover(o2);
+  return { launchId: l.launchId, o2 };
+}
+
+// See specs/crash-recovery "Recovery per boundary" and specs/task-lifecycle "Retry and exhaustion".
+describe('launch dead at daemon restart', () => {
+  it('a startupContended death is recorded uncharged and the task returns to unstarted with attempts unchanged', async () => {
+    const h = harness();
+    await h.orch.tick();
+    const { launchId, o2 } = await dieAtRestart(h, contended);
+    expect(o2.entry('T1')).toMatchObject({ attempts: 0, status: { kind: 'unstarted' } });
+    const failed = h.store.listEvents({ kind: 'launch.failed', taskId: 'T1' });
+    expect(failed.map((e) => [e.launchId, e.payload])).toEqual([[launchId, { reason: 'startupContended', detail: 'database is locked', charged: false }]]);
+    expect(h.store.getLaunch(launchId)).toMatchObject({ status: 'ended', endReason: 'recovered-dead' });
+    const released = h.store.listEvents({ kind: 'transition', taskId: 'T1' }).filter((e) => e.payload?.['trigger'] === 'released');
+    expect(released.map((e) => e.payload?.['reason'])).toEqual(['startupContended']);
+    await o2.tick();
+    expect(o2.entry('T1')).toMatchObject({ attempts: 0, launches: 2, status: { kind: 'running' } });
+  });
+
+  it('any other death at restart is recorded charged and fails as before', async () => {
+    const h = harness();
+    await h.orch.tick();
+    const { launchId, o2 } = await dieAtRestart(h, { reason: 'exitBeforeTurn' });
+    expect(o2.entry('T1')).toMatchObject({ attempts: 1, status: { kind: 'unstarted' } });
+    expect(h.store.listEvents({ kind: 'launch.failed', taskId: 'T1' }).map((e) => [e.launchId, e.payload])).toEqual([[launchId, { reason: 'exitBeforeTurn', charged: true }]]);
+    expect(h.store.listEvents({ kind: 'transition', taskId: 'T1' }).some((e) => e.payload?.['trigger'] === 'deadOrExpired')).toBe(true);
+  });
+
+  it('restart deaths share the allowance with deaths seen by tick', async () => {
+    const h = harness({ health: { stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true, contendedRetries: 1 } });
+    await h.orch.tick();
+    await dieWith(h, contended);
+    const { o2 } = await dieAtRestart(h, contended);
+    expect(o2.entry('T1')).toMatchObject({ attempts: 1 });
+    expect(h.store.listEvents({ kind: 'launch.failed', taskId: 'T1' }).map((e) => e.payload?.['charged'])).toEqual([false, true]);
   });
 });

@@ -809,10 +809,11 @@ export class Orchestrator implements OrchestratorCore {
   failExited(launch: Launch, reason: FailedReason, trigger: string): Entry {
     const failure = reason.detail?.['runnerFailure'] as RunnerFailure | undefined;
     const allowance = this.config.health.contendedRetries ?? DEFAULT_CONTENDED_RETRIES;
-    const uncharged =
-      failure?.reason === 'startupContended' &&
-      this.store.listEvents({ kind: 'launch.failed', taskId: launch.taskId }).filter((e) => e.payload?.['reason'] === 'startupContended' && e.payload['charged'] === false).length < allowance;
     return this.store.transaction(() => {
+      // Counted inside the transaction that appends the event, so the allowance bound is exact.
+      const uncharged =
+        failure?.reason === 'startupContended' &&
+        this.store.listEvents({ kind: 'launch.failed', taskId: launch.taskId }).filter((e) => e.payload?.['reason'] === 'startupContended' && e.payload['charged'] === false).length < allowance;
       const payload = { ...(failure ? { reason: failure.reason, ...(failure.detail ? { detail: failure.detail } : {}) } : {}), charged: !uncharged };
       this.store.appendEvent({ kind: 'launch.failed', taskId: launch.taskId, launchId: launch.launchId, payload }, this.now());
       if (!uncharged) return this.fail(launch.taskId, reason, 'orchestrator', trigger);
