@@ -232,6 +232,13 @@ The derived rules SHALL be the composed allow list when there is one. Under an o
 - **WHEN** `dataDir` is `launch` and `ignoreUserConfig` is true
 - **THEN** `XDG_DATA_HOME` is under `<worktree>/.orchestrator/` and `XDG_CONFIG_HOME` names an existing empty directory there
 
+#### Scenario: Real OpenCode run publishes three tasks
+- **WHEN** `ORCH_E2E_OPENCODE=1 npx vitest run test/e2e/opencode.test.ts` runs with `opencode` on PATH and no OpenCode login, at capacity 2 with model `opencode/big-pickle`, `permission: derived` and the check command `node --test` allowed through the file rule `Bash(node:*)`, which the derived ruleset turns into the pattern `node *`, on a graph where T1 commits a file, T2 asks a `needsDecision` question that is answered only after 75 s, and T3 depends on both
+- **THEN** the run finishes with every task `done` and one `Orchestrator-Task` trailer per task on the integration branch, every launch row has runner `opencode`, and no `needsAccess` question names `git commit`, because the agent commits under `commit: agent`
+- **AND** every launch that did not die at startup has `tokens.input` and `tokens.output` above 0, `costUsd` 0 and `usageSource` `opencode`, and a question answered after 75 s reaches the agent, because `mcp.orchestrator.timeout` is above 60 s
+- **AND** the second case, a `needsAccess` question for a command outside the patterns, is skipped: opencode 1.18.30 ends a headless run right after auto-rejecting an `ask` (test/fixtures/opencode/events/P-ask.jsonl), while under `deny` the model continues (P-deny.jsonl)
+- **AND** without the variable, or without `opencode` on PATH, the file is skipped; the latter warns naming the binary
+
 ### Requirement: OpenCode usage parsing
 `OpenCodeRunner.readUsage` SHALL read the launch log. The parser SHALL:
 - read at most the last 256 KiB, line by line;

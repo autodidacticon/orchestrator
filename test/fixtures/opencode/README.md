@@ -55,6 +55,23 @@ Feasibility probes for an `opencode` runner kind. Facts the orchestrator would r
   name and content, `git add`/`git commit` on the launch branch, heartbeat, `report` kind submit with three acceptance entries, exit 0 in 104-121 s.
   No curl or direct API use; no tool other than bash and the five shim tools.
 
+## A rejected `ask` ends the run (probed 2026-10-19, ORC-63; same CLI and model)
+- Found by the first real e2e run (test/e2e/opencode.test.ts): every derived-ruleset launch that hit an `ask` died right after that step,
+  so the brief's "ask with `needsAccess`" never happened. The same prompt ("run uname -s with bash; if rejected, reply FALLBACK-OK") was run
+  under `permission: { "*": "ask", read: "allow", bash: { "*": <mode>, "git *": "allow" } }` with `--pure --print-logs --log-level WARN`:
+- events/P-ask.jsonl, events/P-ask.err: bash `"*": "ask"`. stderr `permission requested: bash (uname -s); auto-rejecting`, the tool_use
+  error "The user rejected permission to use this specific tool call.", `step_finish` reason `tool-calls`, then nothing: exit 0, the model
+  never sees the error. F1-ask.jsonl ends the same way.
+- events/P-deny.jsonl: bash `"*": "deny"`. The tool_use error is "The user has specified a rule which prevents you from using this
+  specific tool call. ..." with the rule list, and a second step follows in which the model answers `FALLBACK-OK` (`reason: "stop"`).
+  Its stderr was empty and is not kept.
+- Not read by a test yet; the evidence for switching the derived ruleset's catch-alls to `deny` (ORC-65).
+
+## Real e2e run (recorded 2026-10-19, ORC-63)
+- e2e-T1.jsonl, e2e-T2.jsonl, e2e-T3.jsonl: the JSONL events of each task's first launch in a passing
+  `ORCH_E2E_OPENCODE=1 ORCH_E2E_OPENCODE_RECORD=1` run of test/e2e/opencode.test.ts (stderr dropped, redacted as below by the test).
+  T2 holds the `orchestrator_block` call answered after 75 s. Written only under ORCH_E2E_OPENCODE_RECORD=1; not read by a test yet.
+
 ## Redaction
 These files were redacted once, before they were saved, and are byte copies of the redacted output from then on: scratch paths are
 replaced by `<scratch>`, the home directory by `~`, and GitLab model ids by `duo-chat-<model>`. Tests read them in place and edit none of them.

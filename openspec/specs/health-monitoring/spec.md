@@ -126,6 +126,11 @@ Token accounting does not change these grace mechanics: in every observed run, C
 - **WHEN** an opencode launch's log holds `opencode run --format json` output with stderr lines between them
 - **THEN** the usage read has the summed `step_finish` tokens with cache reads inside `input`, the summed `cost` as `costUsd`, `source` `opencode`, and no duration
 
+#### Scenario: Cost read from the stream at zero
+- **WHEN** an opencode launch on the free model `opencode/big-pickle` exits and its `step_finish` events carry `cost: 0`
+- **THEN** the launch row has `tokens.input` and `tokens.output` above 0, `costUsd` 0 (present, not unset), and `usageSource` `opencode`, with exactly one `launch.usage` event
+- **AND** the launch is priced: `status.cost.unpricedLaunches` does not count it and `status.cost.runUsd` stays 0
+
 #### Scenario: Usage with only tokens
 - **WHEN** a runner reports `tokens: { input: 40361, output: 260 }` and no cost, turns, or duration for T1
 - **THEN** the launch row stores the tokens, exactly one `launch.usage` carrying them is appended, and `status.tokens.run` and `status.tokens.byTask.T1` sum them

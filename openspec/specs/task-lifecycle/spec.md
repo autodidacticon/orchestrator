@@ -299,6 +299,11 @@ A log whose turn completed with none of these, or a missing log, SHALL give no d
 - **WHEN** the OpenCode runner reads K2.err or SA-proj.err alone
 - **THEN** it returns `startupContended`; a log whose only stderr is `duplicate skill name` warnings and whose turn completed gives no diagnosis, and an empty log gives `exitBeforeTurn` without detail
 
+#### Scenario: Uncharged startupContended relaunch observed end to end
+- **WHEN** in the real OpenCode run (`ORCH_E2E_OPENCODE=1`) concurrent launches against the shared OpenCode database die at startup with `database is locked`
+- **THEN** each such death records `launch.failed` with reason `startupContended` and `charged: false`, the task is relaunched, and its `attempts` equals its launch count minus one minus its uncharged deaths
+- **AND** a run in which no start was contended asserts nothing about the rule
+
 #### Scenario: Runner without a diagnosis
 - **WHEN** the launch's runner does not implement `readFailure`
 - **THEN** the task fails with reason `exitedWithoutReport` and the message `process exited without a report`, as before
