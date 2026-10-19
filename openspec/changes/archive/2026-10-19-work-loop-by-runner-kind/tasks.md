@@ -1,0 +1,10 @@
+## 1. Implementation
+
+- [x] 1.1 hosts/codex/bin/work.mjs becomes kind-parameterized and keeps its path (the published bin stays `orchestrator-work`): `--runner <codex|opencode>` (default codex, so existing invocations are unchanged); `packageModules()` resolves `src/runner/<kind>.ts` / `dist/src/runner/<kind>.js`; the stop rule and the claim filter use the chosen kind; the preamble is per kind (tool names `orchestrator_<tool>` for opencode, the 401 rule shared); the per-launch step calls a small per-kind adapter: `compose(launch, claim)`, `prepare(launch, env)` (codex: `writeCodexShimEnv`; opencode: write `.orchestrator/opencode.json` 0600 and return the env additions `OPENCODE_CONFIG_CONTENT`, optional `XDG_DATA_HOME`/`XDG_CONFIG_HOME`), `parseUsage(log)`, `classifyFailure(log)`. Both adapters import from the package modules the runner issues export (`composeOpenCodeCommand`, `openCodeConfig`, `parseOpenCodeUsage`, `classifyOpenCodeFailure`).
+- [x] 1.2 The claim response carries `opencode: { settings, allowedTools, maxWaitMs, retryWindowMs }` for an opencode launch (beside the codex block), so the loop composes exactly what a spawned launch gets, including the derived permission ruleset.
+- [x] 1.3 hosts/opencode/README.md gets the pull-mode section (`orchestrator-work --runner opencode --workers 2`), and the OpenCode skills' start-mode rule drops the "until a work loop exists" wording, as the Codex work-loop change did for the Codex host.
+- [x] 1.4 test/e2e/opencode-work.test.ts behind `ORCH_E2E_OPENCODE_WORK=1`: a pull-mode run with the free model drained by `--runner opencode --workers 2`; every launch has `worker` and no `pid`, tokens with `source: worker`, three trailers on the integration branch. A fake-runner slice test (no model) drives the loop with a fake `opencode` on PATH that echoes stdin and prints a recorded JSONL, asserting the config env, the stdin redirect and the posted usage.
+
+## 2. Record
+
+- [x] 2.1 Spec edits landed in 072a663; change directory reconstructed at archive time
