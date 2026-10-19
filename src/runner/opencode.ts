@@ -6,6 +6,7 @@
  * agent environment, so the launch token is neither on argv nor in a config. See
  * specs/worker-runners "OpenCode runner command composition" and "OpenCode usage parsing".
  */
+import { createReadStream } from 'node:fs';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Launch } from '../state/store.js';
@@ -243,10 +244,9 @@ export class OpenCodeRunner extends SubprocessRunner {
     return super.spawn(launch, { ...env, ...shimEnv(launch, env, this.ocOpts.retryWindowMs), ...extra });
   }
 
-  /** `opencode run --format json` writes JSONL; see `parseOpenCodeUsage`. */
+  /** `opencode run --format json` writes JSONL; see `parseOpenCodeUsage`. The whole log, streamed. */
   async readUsage(launch: Launch): Promise<Usage | undefined> {
-    const text = await readFile(logPath(this.ocOpts.logDir, launch.launchId), 'utf8').catch(() => '');
-    return parseOpenCodeUsage(text);
+    return readOpenCodeUsage(logPath(this.ocOpts.logDir, launch.launchId)).catch(() => undefined);
   }
 
   /** Why the launch ended without a report, from the same log; see `classifyOpenCodeFailure`. */
@@ -373,50 +373,112 @@ export function classifyOpenCodeFailure(text: string): { reason: OpenCodeFailure
 }
 
 /**
- * The usage of an OpenCode log: every `step_finish` line summed, stderr and unparseable lines skipped.
- * OpenCode's `tokens.input` excludes cache reads (total = input + output + reasoning + cache.read), so
- * cache reads are added to `input` as for Claude. `cost` is summed into `costUsd`; `turns` counts the
- * steps that ended with `reason: "stop"`. No duration. Undefined when no `step_finish` carries input
- * and output counts. See specs/worker-runners "OpenCode usage parsing".
+ * Lines longer than this are skipped unparsed by the usage parser. A `step_finish` line is a few hundred
+ * bytes (434 at most in the probe logs); the long lines are tool output (`tool_use` parts carrying file contents).
  */
-export function parseOpenCodeUsage(text: string): Usage | undefined {
-  const tail = text.length > 256 * 1024 ? text.slice(text.length - 256 * 1024) : text;
-  let tokens: TokenUsage | undefined;
-  let costUsd: number | undefined;
-  let turns = 0;
-  for (const line of tail.split('\n')) {
+export const OPENCODE_USAGE_LINE_CAP = 64 * 1024;
+
+/** The running sum of `parseOpenCodeUsage`: `add` one log line at a time, `usage` at the end. */
+class OpenCodeUsageSum {
+  private tokens: TokenUsage | undefined;
+  private costUsd: number | undefined;
+  private turns = 0;
+
+  add(line: string): void {
     const trimmed = line.trim();
-    if (!trimmed.startsWith('{') || !trimmed.includes('step_finish')) continue;
+    if (!trimmed.startsWith('{') || !trimmed.includes('step_finish')) return;
     let parsed: unknown;
     try {
       parsed = JSON.parse(trimmed);
     } catch {
-      continue;
+      return;
     }
     const o = parsed as Record<string, unknown> | null;
-    if (!o || typeof o !== 'object' || o['type'] !== 'step_finish' || !o['part'] || typeof o['part'] !== 'object') continue;
+    if (!o || typeof o !== 'object' || o['type'] !== 'step_finish' || !o['part'] || typeof o['part'] !== 'object') return;
     const part = o['part'] as Record<string, unknown>;
     const t = part['tokens'];
-    if (!t || typeof t !== 'object') continue;
+    if (!t || typeof t !== 'object') return;
     const num = (src: unknown, k: string) => {
       const v = src && typeof src === 'object' ? (src as Record<string, unknown>)[k] : undefined;
       return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
     };
     const input = num(t, 'input');
     const output = num(t, 'output');
-    if (input === undefined || output === undefined) continue;
+    if (input === undefined || output === undefined) return;
     const cache = (t as Record<string, unknown>)['cache'];
     const cacheRead = num(cache, 'read') ?? 0;
-    const acc: TokenUsage = tokens ?? { input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0, reasoningOutput: 0 };
+    const acc: TokenUsage = this.tokens ?? { input: 0, cachedInput: 0, cacheWriteInput: 0, output: 0, reasoningOutput: 0 };
     acc.input += input + cacheRead;
     acc.cachedInput = (acc.cachedInput ?? 0) + cacheRead;
     acc.cacheWriteInput = (acc.cacheWriteInput ?? 0) + (num(cache, 'write') ?? 0);
     acc.output += output;
     acc.reasoningOutput = (acc.reasoningOutput ?? 0) + (num(t, 'reasoning') ?? 0);
-    tokens = acc;
+    this.tokens = acc;
     const cost = num(part, 'cost');
-    if (cost !== undefined) costUsd = (costUsd ?? 0) + cost;
-    if (part['reason'] === 'stop') turns++;
+    if (cost !== undefined) this.costUsd = (this.costUsd ?? 0) + cost;
+    if (part['reason'] === 'stop') this.turns++;
   }
-  return tokens ? { tokens, ...(costUsd !== undefined ? { costUsd } : {}), turns, source: 'opencode' } : undefined;
+
+  usage(): Usage | undefined {
+    const { tokens, costUsd, turns } = this;
+    return tokens ? { tokens, ...(costUsd !== undefined ? { costUsd } : {}), turns, source: 'opencode' } : undefined;
+  }
+}
+
+/**
+ * The usage of an OpenCode log: every `step_finish` line of the whole log summed, stderr and
+ * unparseable lines skipped, lines over `OPENCODE_USAGE_LINE_CAP` skipped unparsed. OpenCode reports
+ * usage per step, not as a running total, so no step may be dropped. OpenCode's `tokens.input`
+ * excludes cache reads (total = input + output + reasoning + cache.read), so cache reads are added to
+ * `input` as for Claude. `cost` is summed into `costUsd`; `turns` counts the steps that ended with
+ * `reason: "stop"`. No duration. Undefined when no `step_finish` carries input and output counts.
+ * See specs/worker-runners "OpenCode usage parsing".
+ */
+export function parseOpenCodeUsage(text: string): Usage | undefined {
+  const sum = new OpenCodeUsageSum();
+  for (let start = 0; start <= text.length; ) {
+    const nl = text.indexOf('\n', start);
+    const end = nl === -1 ? text.length : nl;
+    // Measure before slicing, so a long tool-output line is never copied.
+    if (end - start <= OPENCODE_USAGE_LINE_CAP) sum.add(text.slice(start, end));
+    if (nl === -1) break;
+    start = nl + 1;
+  }
+  return sum.usage();
+}
+
+/** `parseOpenCodeUsage` over a log file, streamed: memory stays bounded by the chunk size and the line cap. */
+export async function readOpenCodeUsage(file: string): Promise<Usage | undefined> {
+  const sum = new OpenCodeUsageSum();
+  for await (const line of cappedLines(file, OPENCODE_USAGE_LINE_CAP)) sum.add(line);
+  return sum.usage();
+}
+
+/** The lines of a file of at most `cap` bytes; a longer line is dropped while it streams past. */
+async function* cappedLines(file: string, cap: number): AsyncGenerator<string> {
+  let parts: Buffer[] = [];
+  let size = 0;
+  let over = false;
+  for await (const chunk of createReadStream(file) as AsyncIterable<Buffer>) {
+    for (let start = 0; ; ) {
+      const nl = chunk.indexOf(10, start);
+      const end = nl === -1 ? chunk.length : nl;
+      if (!over && size + end - start > cap) {
+        over = true;
+        parts = [];
+        size = 0;
+      }
+      if (!over && end > start) {
+        parts.push(chunk.subarray(start, end));
+        size += end - start;
+      }
+      if (nl === -1) break;
+      if (!over) yield Buffer.concat(parts, size).toString('utf8');
+      parts = [];
+      size = 0;
+      over = false;
+      start = nl + 1;
+    }
+  }
+  if (!over && size) yield Buffer.concat(parts, size).toString('utf8');
 }

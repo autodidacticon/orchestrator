@@ -136,6 +136,44 @@ describe('OpenCode usage parser', () => {
     expect(parseOpenCodeUsage('')).toBeUndefined();
   });
 
+  // ORC-67: usage is per step, so a step before the last 256 KiB must still count.
+  const step = (input: number, cost: number, reason = 'tool-calls') => JSON.stringify({ type: 'step_finish', part: { type: 'step-finish', reason, cost, tokens: { input, output: 2, reasoning: 1, cache: { read: 10, write: 0 } } } });
+  const toolLine = (bytes: number) => JSON.stringify({ type: 'tool_use', part: { tool: 'read', state: { status: 'completed', output: 'x'.repeat(bytes) } } });
+
+  it('counts a step before a 300 KiB tool-output line', () => {
+    const log = [step(1000, 1), toolLine(300 * 1024), step(5, 1, 'stop'), ''].join('\n');
+    expect(parseOpenCodeUsage(log)).toEqual({
+      tokens: { input: 1000 + 5 + 20, cachedInput: 20, cacheWriteInput: 0, output: 4, reasoningOutput: 2 },
+      costUsd: 2,
+      turns: 1,
+      source: 'opencode',
+    });
+  });
+
+  it('sums all 200 steps of a 5 MiB log, from a string and streamed from the file', async () => {
+    const lines: string[] = [];
+    for (let i = 1; i <= 200; i++) lines.push(step(i, 0.25, i === 200 ? 'stop' : 'tool-calls'), i % 2 ? toolLine(52 * 1024) : 'WARN some stderr line');
+    const log = lines.join('\n');
+    expect(log.length).toBeGreaterThan(5 * 1024 * 1024);
+    const expected = {
+      tokens: { input: (200 * 201) / 2 + 200 * 10, cachedInput: 2000, cacheWriteInput: 0, output: 400, reasoningOutput: 200 },
+      costUsd: 50,
+      turns: 1,
+      source: 'opencode',
+    };
+    expect(parseOpenCodeUsage(log)).toEqual(expected);
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-usage-'));
+    try {
+      const runner = new OpenCodeRunner({ command: 'true', logDir: dir, retryWindowMs: 1000, maxWaitMs: 60_000, settings: () => ({ permission: 'derived', dataDir: 'shared', ignoreUserConfig: false, pure: true, snapshots: false }) });
+      const launch = { launchId: 'L7', launchNo: 1, runner: 'opencode' } as Launch;
+      // A step after a 300 KiB line, with no trailing newline, still counts.
+      writeFileSync(logPath(dir, 'L7'), `${log}\n${toolLine(300 * 1024)}\n${step(0, 0)}`);
+      expect(await runner.readUsage(launch)).toEqual({ ...expected, tokens: { ...expected.tokens, input: expected.tokens.input + 10, cachedInput: 2010, output: 402, reasoningOutput: 201 } });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('OpenCodeRunner.readUsage reads the launch log', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'orch-usage-'));
     try {
