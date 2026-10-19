@@ -1,0 +1,1 @@
+{ "$schema": "https://opencode.ai/config.json", "snapshot": false, "mcp": { "orchestrator": { "type": "local", "command": ["node", "<scratch>/mcp-mini.mjs"], "enabled": true, "timeout": 900000 } }, "permission": { "*": "allow" } }

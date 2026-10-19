@@ -1,0 +1,1 @@
+timestamp=2026-10-19T01:43:49.333Z level=WARN run=a9840653 message="configuration compatibility diagnostic" source=<scratch>/cfg-slow-servers.json path="[\"mcp\",\"timeout\"]" kind=unsupported action="Omitted native setting that cannot be represented in V1"

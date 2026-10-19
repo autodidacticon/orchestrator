@@ -1,0 +1,5 @@
+plugin loaded
+event session.created
+hook chat.message; text part found=true
+hook system.transform; system entries=1
+hook system.transform; system entries=1

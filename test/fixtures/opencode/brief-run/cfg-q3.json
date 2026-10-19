@@ -1,0 +1,3 @@
+{ "$schema": "https://opencode.ai/config.json", "snapshot": false, "share": "disabled",
+  "mcp": { "orchestrator": { "type": "local", "command": ["node", "<scratch>/fake-shim.mjs", "<scratch>/q3-calls.jsonl", "70"], "enabled": true, "timeout": 900000 } },
+  "permission": { "*": "allow" } }
