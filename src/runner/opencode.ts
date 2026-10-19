@@ -12,7 +12,7 @@ import type { Launch } from '../state/store.js';
 import type { OpenCodeDataDir, OpenCodePermission } from './selection.js';
 import { DEFAULT_OPENCODE_COMMAND } from './command.js';
 import { fixedSlots, logPath, SubprocessRunner, substitute, type SubprocessRunnerOptions } from './subprocess.js';
-import type { SpawnResult, TokenUsage, Usage } from './runner.js';
+import type { RunnerFailure, SpawnResult, TokenUsage, Usage } from './runner.js';
 import { shimCommand, shimEnv } from './shim-command.js';
 
 export { DEFAULT_OPENCODE_COMMAND };
@@ -198,6 +198,126 @@ export class OpenCodeRunner extends SubprocessRunner {
     const text = await readFile(logPath(this.ocOpts.logDir, launch.launchId), 'utf8').catch(() => '');
     return parseOpenCodeUsage(text);
   }
+
+  /** Why the launch ended without a report, from the same log; see `classifyOpenCodeFailure`. */
+  async readFailure(launch: Launch): Promise<RunnerFailure | undefined> {
+    const text = await readFile(logPath(this.ocOpts.logDir, launch.launchId), 'utf8').catch(() => undefined);
+    return text === undefined ? undefined : classifyOpenCodeFailure(text);
+  }
+}
+
+/** The reasons `classifyOpenCodeFailure` names. Runner detail on `exitedWithoutReport`, not failure kinds. */
+export type OpenCodeFailureReason = 'mcpStartupFailed' | 'unknownModel' | 'authFailed' | 'startupContended' | 'permissionDenied' | 'turnFailed' | 'exitBeforeTurn';
+
+// Probe results of opencode 1.18.30 (test/fixtures/opencode/events); `--log-level WARN` is what puts them on stderr.
+const MCP_UNAVAILABLE = new RegExp(`server unavailable"?\\s+key=${OPENCODE_MCP_ID}\\b`);
+const ERROR_LINE = /\blevel=ERROR\b|^Error\b/;
+const UNKNOWN_MODEL = /ProviderModelNotFoundError|Model not found/i;
+// Carried over from the Codex classifier: no failed login was observed. The bare word "authentication" is not a failure.
+const AUTH_FAILED = /\b401\b|unauthori[sz]ed|invalid api key|api key\b.*\b(missing|not set)|token (has )?expired|authentication (failed|error|required)/i;
+const DB_LOCKED = /database is locked/i;
+const REJECTED = /rejected permission/i;
+const AUTO_REJECTING = /auto-rejecting/i;
+const SKILL_NOISE = /duplicate skill name/;
+const ANSI = /\x1b\[[0-9;]*m/g;
+
+function record(v: unknown): Record<string, unknown> | undefined {
+  return v && typeof v === 'object' ? (v as Record<string, unknown>) : undefined;
+}
+
+function nonEmpty(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
+/** The `error="..."` value of a log line, else the line. */
+function logError(line: string): string {
+  return /\berror="((?:[^"\\]|\\.)*)"/.exec(line)?.[1] ?? line;
+}
+
+/**
+ * Why an OpenCode launch ended without a report, from its log (stdout JSONL and stderr in one file,
+ * the tail only). Stderr lines lose their ANSI colours and the `duplicate skill name` warnings. In order:
+ * - a WARN `server unavailable key=orchestrator` (`mcpStartupFailed`), even after a completed turn: the agent worked without the shim;
+ * - an ERROR line or `error` event naming an unknown model (`unknownModel`), or a missing or rejected login (`authFailed`);
+ * - no event at all and a `database is locked` line: another opencode held the shared database at startup (`startupContended`);
+ * - a `tool_use` part rejected for permission or an `auto-rejecting` line (`permissionDenied`), with the command;
+ * - any other `error` event (`turnFailed`), detailed by the ERROR line carrying its `ref`, else its message;
+ * - undefined once a `step_finish` with `reason: "stop"` was seen;
+ * - `exitBeforeTurn` when no event was parsed, with the last stderr line that says error, fatal, or failed.
+ * See specs/task-lifecycle "Health failure reasons".
+ */
+export function classifyOpenCodeFailure(text: string): { reason: OpenCodeFailureReason; detail?: string } | undefined {
+  const tail = text.length > 256 * 1024 ? text.slice(text.length - 256 * 1024) : text;
+  const stderr: string[] = [];
+  const errors: Array<{ message?: string; ref?: string }> = [];
+  const rejected: string[] = [];
+  let events = 0;
+  let completed = false;
+  for (const line of tail.split('\n')) {
+    const trimmed = line.replace(ANSI, '').trim();
+    if (!trimmed) continue;
+    let o: Record<string, unknown> | undefined;
+    if (trimmed.startsWith('{')) {
+      try {
+        o = record(JSON.parse(trimmed));
+      } catch {
+        /* a stderr line that starts with a brace */
+      }
+    }
+    if (!o || typeof o['type'] !== 'string') {
+      if (!SKILL_NOISE.test(trimmed)) stderr.push(trimmed);
+      continue;
+    }
+    events++;
+    const part = record(o['part']);
+    if (o['type'] === 'error') {
+      const err = record(o['error']);
+      const data = record(err?.['data']);
+      const message = nonEmpty(data?.['message']) ?? nonEmpty(err?.['message']) ?? nonEmpty(o['error']) ?? nonEmpty(err?.['name']);
+      const ref = nonEmpty(data?.['ref']);
+      errors.push({ ...(message ? { message } : {}), ...(ref ? { ref } : {}) });
+    } else if (o['type'] === 'tool_use' && part) {
+      const state = record(part['state']);
+      const error = nonEmpty(state?.['error']);
+      if (state?.['status'] === 'error' && error && REJECTED.test(error)) {
+        const command = nonEmpty(record(state['input'])?.['command']);
+        rejected.push(`${String(part['tool'] ?? 'tool')}${command ? ` (${command})` : ''}: ${error}`);
+      }
+    } else if (o['type'] === 'step_finish' && part?.['reason'] === 'stop') {
+      completed = true;
+    }
+  }
+  const mcp = stderr.find((l) => MCP_UNAVAILABLE.test(l));
+  if (mcp) return { reason: 'mcpStartupFailed', detail: mcp };
+  const errorLines = stderr.filter((l) => ERROR_LINE.test(l));
+  const messages = errors.map((e) => e.message).filter((m): m is string => m !== undefined);
+  for (const [reason, re] of [['unknownModel', UNKNOWN_MODEL], ['authFailed', AUTH_FAILED]] as const) {
+    const line = errorLines.find((l) => re.test(l));
+    if (line) return { reason, detail: logError(line) };
+    const message = messages.find((m) => re.test(m));
+    if (message) return { reason, detail: message };
+  }
+  if (events === 0) {
+    const locked = stderr.find((l) => DB_LOCKED.test(l));
+    if (locked) return { reason: 'startupContended', detail: locked };
+  }
+  if (rejected.length) {
+    return { reason: 'permissionDenied', detail: rejected.length > 1 ? `${rejected[0]} (and ${rejected.length - 1} more)` : (rejected[0] as string) };
+  }
+  const autoRejected = stderr.find((l) => AUTO_REJECTING.test(l));
+  if (autoRejected) return { reason: 'permissionDenied', detail: autoRejected };
+  const last = errors[errors.length - 1];
+  if (last) {
+    const refLine = last.ref ? errorLines.find((l) => l.includes(last.ref as string)) : undefined;
+    const detail = refLine ? logError(refLine) : last.message;
+    return { reason: 'turnFailed', ...(detail ? { detail } : {}) };
+  }
+  if (completed) return undefined;
+  if (events === 0) {
+    const fatal = [...stderr].reverse().find((l) => /error|fatal|failed/i.test(l));
+    return { reason: 'exitBeforeTurn', ...(fatal ? { detail: fatal } : {}) };
+  }
+  return undefined;
 }
 
 /**

@@ -7,13 +7,13 @@ import { z } from 'zod';
 import { alwaysValid, type BriefValidator, noRemediation, type Remediator } from '../brief/validate.js';
 import { checkSubmission } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
-import type { Config } from '../config.js';
+import { type Config, DEFAULT_CONTENDED_RETRIES } from '../config.js';
 import { classifyReload, type ReloadReason } from '../graph/diff.js';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
 import type { Graph, GraphNode, Id } from '../graph/model.js';
 import * as q from '../graph/query.js';
 import type { GraphSource } from '../graph/source.js';
-import type { AgentRunner, TokenUsage, Usage } from '../runner/runner.js';
+import type { AgentRunner, RunnerFailure, TokenUsage, Usage } from '../runner/runner.js';
 import {
   type AttemptContext,
   type BlockedReason,
@@ -771,6 +771,28 @@ export class Orchestrator implements OrchestratorCore {
       message: `${message}: ${failure.reason}${failure.detail ? `: ${failure.detail}` : ''}`,
       detail: { runnerFailure: failure },
     };
+  }
+
+  /**
+   * Fail a running task whose launch died without a report, recording `launch.failed` with the runner's
+   * reason. A `startupContended` death is relaunched at once without charging a retry while the task has
+   * had fewer than `health.contendedRetries` uncharged ones (counted from those events); later ones count.
+   * See specs/task-lifecycle "Retry and exhaustion".
+   */
+  failExited(launch: Launch, reason: FailedReason, trigger: string): Entry {
+    const failure = reason.detail?.['runnerFailure'] as RunnerFailure | undefined;
+    const allowance = this.config.health.contendedRetries ?? DEFAULT_CONTENDED_RETRIES;
+    const uncharged =
+      failure?.reason === 'startupContended' &&
+      this.store.listEvents({ kind: 'launch.failed', taskId: launch.taskId }).filter((e) => e.payload?.['reason'] === 'startupContended' && e.payload['charged'] === false).length < allowance;
+    return this.store.transaction(() => {
+      const payload = { ...(failure ? { reason: failure.reason, ...(failure.detail ? { detail: failure.detail } : {}) } : {}), charged: !uncharged };
+      this.store.appendEvent({ kind: 'launch.failed', taskId: launch.taskId, launchId: launch.launchId, payload }, this.now());
+      if (!uncharged) return this.fail(launch.taskId, reason, 'orchestrator', trigger);
+      // The `released` row leaves attempts unchanged; the next brief still names the contended death.
+      const entry = this.entry(launch.taskId);
+      return this.transition(launch.taskId, { kind: 'unstarted' }, 'orchestrator', 'released', { carry: { ...(entry.carry ?? {}), priorFailure: reason } }, { reason: 'startupContended' });
+    });
   }
 
   /** Read a spawned launch's usage from its runner and store it once. A claimed launch has no log: its worker posts usage instead. */

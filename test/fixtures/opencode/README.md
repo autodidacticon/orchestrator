@@ -67,4 +67,18 @@ replaced by `<scratch>`, the home directory by `~`, and GitLab model ids by `duo
 - events/K2.err: test/health/usage.test.ts (stderr alone yields no usage).
 - events/T1-T4.jsonl, configs/cfg-slow-perserver.json: the source of the `mcp.orchestrator.timeout` decision tested in test/runner/opencode.test.ts
   (`maxWaitMs + 60000`, never `mcp.timeout`); not read by a test.
-- The other files are evidence only, for the facts above; the failure classifier's tests ship with the diagnosis issue.
+- The failure classifier (`classifyOpenCodeFailure`, `OpenCodeRunner.readFailure`) in test/runner/opencode.test.ts reads, each a real probe
+  output of 2026-10-18 committed in cc43c94:
+  - events/E-badmodel.jsonl: stdout of `-m opencode/gpt-bogus-9` (the opaque `error` event alone gives `turnFailed`; with an ERROR line
+    `unknownModel`).
+  - events/D4.err, events/D4.jsonl: stderr and stdout of a run whose `mcp.orchestrator` command could not start (`mcpStartupFailed` after a
+    completed turn; D4.err's `duplicate skill name` lines are the noise the classifier drops).
+  - events/F1-ask.jsonl, events/F1-ask.err: stdout and stderr of `permission.bash: ask` with `echo marker-7731` (`permissionDenied`).
+  - events/F2-deny.jsonl: stdout of `permission.bash: deny`, the tool removed and the turn completed (no diagnosis).
+  - events/K2.err: stderr of one of the 23 concurrent starts on the shared database; events/SA-proj.err: the same in the same-project run
+    (`startupContended`).
+  - events/C2.jsonl: stdout of a completed run that called `orchestrator_ping` (the completed turn behind the noise and contention cases).
+- Synthetic inputs: none of the files here. The ERROR lines for an unknown model (`ProviderModelNotFoundError: Model not found:
+  opencode/gpt-bogus-9`, seen on stderr with `--log-level ERROR` but not saved) and for a failed login (never observed) are inline strings
+  in test/runner/opencode.test.ts, marked there.
+- The other files are evidence only, for the facts above.

@@ -191,7 +191,7 @@ async function handleDeadLaunch(o: Orchestrator, launch: Launch, entry: Entry): 
     // The runner's diagnosis goes into the failure (and so the next brief) and the launch.ended event.
     const reason = await o.exitedWithoutReport(launch, 'process exited without a report');
     runnerFailure = reason.detail?.['runnerFailure'];
-    o.fail(launch.taskId, reason, 'orchestrator', 'deadOrExpired');
+    o.failExited(launch, reason, 'deadOrExpired');
   }
   o.endLaunch(launch, fb ? `fallback:${fb.kind}` : 'exited', runnerFailure ? { runnerFailure } : {});
   const after = o.entry(launch.taskId);

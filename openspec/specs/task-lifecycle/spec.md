@@ -137,6 +137,16 @@ A `running` or `waiting` task SHALL hold a lease recording `launchId`, `token`, 
 ### Requirement: Retry and exhaustion
 When a task becomes `failed` and `attempts` is below `maxAttempts` (default 2), the orchestrator SHALL return it to `unstarted` and the next launch's brief MUST include the prior failure report and any verifier output. When `attempts` reaches `maxAttempts`, the orchestrator SHALL move the task to `blocked` with the last reason.
 
+Every launch that dies without a report SHALL be recorded as a `launch.failed` event carrying the runner's `reason` and `detail` when it gave a diagnosis, and `charged`. A death the runner diagnoses as `startupContended` SHALL NOT be charged while the task has had fewer than `health.contendedRetries` (default 3) uncharged contended deaths, counted from those events and never reset: the task SHALL return to `unstarted` at once through the orchestrator's `running -> unstarted` (`released`) transition, with `attempts` unchanged, the transition event carrying `reason: startupContended`, and the next brief carrying the `exitedWithoutReport` failure as the prior failure. Later contended deaths SHALL be charged like any other failure. `0` charges every one.
+
+#### Scenario: Contended startups relaunch without charge
+- **WHEN** a task's first two launches die and the runner diagnoses each as `startupContended`, and the third launch submits and is published
+- **THEN** the task is `done` with `attempts` 0, and the two `launch.failed` events carry `reason: startupContended` and `charged: false`
+
+#### Scenario: The allowance runs out
+- **WHEN** a task's fourth launch dies `startupContended` with `health.contendedRetries` at 3
+- **THEN** the death is charged: `attempts` is one and its `launch.failed` event carries `charged: true`
+
 #### Scenario: One automatic retry with context
 - **WHEN** a task fails on its first attempt
 - **THEN** it is relaunched and the new brief contains the prior failure report
@@ -222,6 +232,19 @@ A task whose launch's process ended without a report SHALL fail with reason `exi
 - `sandboxDenied`, from stderr: a stderr line saying `Operation not permitted` before any turn completed;
 - `exitBeforeTurn`: no turn started and nothing above matched; the detail is the last stderr line that reads as an error (`error`, `fatal`, or `failed`), and there is no detail otherwise.
 
+The OpenCode runner reads the same kind of log (`opencode run --format json` JSONL and the `--print-logs --log-level WARN` stderr in one file, the last 256 KiB). It strips ANSI colours from stderr lines and drops the `duplicate skill name` warnings OpenCode prints about the user's skill directories. Its reasons, in the order they are tried, are:
+- `mcpStartupFailed`: a WARN line `message="server unavailable" key=orchestrator`, even when the turn completed afterwards: the agent worked without the shim, so no report could reach the daemon; the detail is that line;
+- `unknownModel`: an ERROR line (or `error` event message) matching `ProviderModelNotFoundError` or `Model not found`; the detail is the line's `error="..."` value, which names the model;
+- `authFailed`: an ERROR line (or `error` event message) naming a 401, an unauthorized request, an invalid or missing API key, an expired token, or an authentication failure, error, or requirement; the bare word `authentication` SHALL NOT match. No failed login was observed, so this pattern is carried over from the Codex runner;
+- `startupContended`: no JSONL event at all and a stderr line `database is locked`: another opencode held the shared database at startup;
+- `permissionDenied`: a `tool_use` part whose `state.error` says `rejected permission`, the detail naming the tool and the command; else a stderr line saying `auto-rejecting`, which is the detail;
+- `turnFailed`: any other `error` event; the detail is the `error="..."` value of the ERROR line that carries the event's `ref` when there is one, else the event's `error.data.message`;
+- `exitBeforeTurn`: no JSONL event and nothing above matched; the detail is the last stderr line that reads as an error (`error`, `fatal`, or `failed`), and there is no detail otherwise.
+
+When none of these matched, a log with a `step_finish` part whose `reason` is `stop` SHALL give no diagnosis, as SHALL a log with events but no completed turn.
+
+The probe facts of opencode 1.18.30 behind these (test/fixtures/opencode/events): an unknown model or provider gives only the opaque `error` event `Unexpected server error. Check server logs for details.` with a `ref` and exit 1, and the model is named only on the ERROR line; an MCP server that cannot start gives the WARN line, and the run completes without the tools and exits 0; an auto-rejected permission gives the stderr line `permission requested: bash (<command>); auto-rejecting` and a `tool_use` part with `state.status: "error"`, and the turn completes and exits 0; startup contention gives exit 1, no JSONL, and `Error: Unexpected error` then `database is locked` (4 of 23 concurrent starts, never after the first event).
+
 A log whose turn completed with none of these, or a missing log, SHALL give no diagnosis. A runner may give no diagnosis at all; the Claude Code runner gives none.
 
 #### Scenario: Stuck failure spends an attempt and retries with context
@@ -259,6 +282,22 @@ A log whose turn completed with none of these, or a missing log, SHALL give no d
 #### Scenario: Complete run gives no diagnosis
 - **WHEN** the Codex runner reads a log whose turn completed with no failed MCP call and no denied command
 - **THEN** it returns no diagnosis and the failure is recorded as without one
+
+#### Scenario: OpenCode unknown model
+- **WHEN** the OpenCode runner reads E-badmodel.jsonl alone
+- **THEN** it returns `turnFailed` with `Unexpected server error. Check server logs for details.`; with the ERROR line `ProviderModelNotFoundError: Model not found: opencode/gpt-bogus-9` added it returns `unknownModel` naming `opencode/gpt-bogus-9`
+
+#### Scenario: OpenCode shim unavailable after a completed turn
+- **WHEN** the OpenCode runner reads D4.err and D4.jsonl, whose turn completed
+- **THEN** it returns `mcpStartupFailed` with the `server unavailable` line
+
+#### Scenario: OpenCode permission rejected
+- **WHEN** the OpenCode runner reads F1-ask.jsonl and F1-ask.err
+- **THEN** it returns `permissionDenied` with `echo marker-7731` in the detail; F2-deny.jsonl, where the tool was removed and the turn completed, gives no diagnosis
+
+#### Scenario: OpenCode startup contention and noise
+- **WHEN** the OpenCode runner reads K2.err or SA-proj.err alone
+- **THEN** it returns `startupContended`; a log whose only stderr is `duplicate skill name` warnings and whose turn completed gives no diagnosis, and an empty log gives `exitBeforeTurn` without detail
 
 #### Scenario: Runner without a diagnosis
 - **WHEN** the launch's runner does not implement `readFailure`

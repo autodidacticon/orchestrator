@@ -2,9 +2,11 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_OPENCODE_COMMAND } from '../../src/runner/command.js';
-import { bashPatterns, composeOpenCodeCommand, openCodeConfig, OpenCodeRunner, type OpenCodeSettings } from '../../src/runner/opencode.js';
+import { bashPatterns, classifyOpenCodeFailure, composeOpenCodeCommand, openCodeConfig, OpenCodeRunner, type OpenCodeSettings } from '../../src/runner/opencode.js';
+import { logPath } from '../../src/runner/subprocess.js';
 import type { Launch } from '../../src/state/store.js';
 
 const TOKEN = 'tok-opencode-secret';
@@ -178,5 +180,73 @@ describe('OpenCode runner spawn', () => {
     expect(configHome).toBe(path.join(worktree, '.orchestrator', 'opencode-config'));
     expect(statSync(configHome).isDirectory()).toBe(true);
     expect(readdirSync(configHome)).toEqual([]);
+  });
+});
+
+const EVENTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/opencode/events');
+const fixture = (...files: string[]) => files.map((f) => readFileSync(path.join(EVENTS, f), 'utf8')).join('\n');
+// Synthetic: the probe saw this error on stderr with --log-level ERROR but did not save the line.
+const BAD_MODEL_LINE = 'timestamp=2026-10-19T00:20:01.000Z level=ERROR run=e1 message="process" error="ProviderModelNotFoundError: Model not found: opencode/gpt-bogus-9. Did you mean: opencode/gpt-5?"';
+const OPAQUE = 'Unexpected server error. Check server logs for details.';
+
+// See specs/task-lifecycle "Health failure reasons": the opencode reasons over the probe logs of 1.18.30.
+describe('classifyOpenCodeFailure', () => {
+  it('an unknown model alone is an opaque turnFailed; with its ERROR line it is unknownModel naming the model', () => {
+    expect(classifyOpenCodeFailure(fixture('E-badmodel.jsonl'))).toEqual({ reason: 'turnFailed', detail: OPAQUE });
+    const named = classifyOpenCodeFailure(fixture('E-badmodel.jsonl') + '\n' + BAD_MODEL_LINE);
+    expect(named?.reason).toBe('unknownModel');
+    expect(named?.detail).toContain('Model not found: opencode/gpt-bogus-9');
+  });
+
+  it('turnFailed takes the ERROR line carrying the event ref', () => {
+    const line = 'timestamp=t level=ERROR run=e1 ref=err_8135f5fd error="SomeProviderError: boom"';
+    expect(classifyOpenCodeFailure(fixture('E-badmodel.jsonl') + '\n' + line)).toEqual({ reason: 'turnFailed', detail: 'SomeProviderError: boom' });
+  });
+
+  it('a shim that never started is mcpStartupFailed although the turn completed', () => {
+    expect(classifyOpenCodeFailure(fixture('D4.jsonl'))).toBeUndefined();
+    const out = classifyOpenCodeFailure(fixture('D4.err', 'D4.jsonl'));
+    expect(out?.reason).toBe('mcpStartupFailed');
+    expect(out?.detail).toContain('message="server unavailable" key=orchestrator type=local status=failed');
+  });
+
+  it('a rejected command is permissionDenied naming it; a removed tool with a completed turn is not a failure', () => {
+    const out = classifyOpenCodeFailure(fixture('F1-ask.jsonl', 'F1-ask.err'));
+    expect(out?.reason).toBe('permissionDenied');
+    expect(out?.detail).toContain('echo marker-7731');
+    expect(classifyOpenCodeFailure(fixture('F1-ask.err'))).toEqual({ reason: 'permissionDenied', detail: '! permission requested: bash (echo marker-7731); auto-rejecting' });
+    expect(classifyOpenCodeFailure(fixture('F2-deny.jsonl'))).toBeUndefined();
+  });
+
+  it('a locked shared database at startup is startupContended', () => {
+    expect(classifyOpenCodeFailure(fixture('K2.err'))).toEqual({ reason: 'startupContended', detail: 'database is locked' });
+    expect(classifyOpenCodeFailure(fixture('SA-proj.err'))).toEqual({ reason: 'startupContended', detail: 'database is locked' });
+    // Never after the first event: then it is not a startup death.
+    expect(classifyOpenCodeFailure(fixture('C2.jsonl', 'K2.err'))).toBeUndefined();
+  });
+
+  it('duplicate skill warnings are noise; an empty log is exitBeforeTurn without detail', () => {
+    const skills = fixture('D4.err').split('\n').filter((l) => l.includes('duplicate skill name'));
+    expect(skills.length).toBeGreaterThan(10);
+    expect(classifyOpenCodeFailure([...skills, fixture('C2.jsonl')].join('\n'))).toBeUndefined();
+    expect(classifyOpenCodeFailure('')).toEqual({ reason: 'exitBeforeTurn' });
+    expect(classifyOpenCodeFailure(skills.join('\n'))).toEqual({ reason: 'exitBeforeTurn' });
+    expect(classifyOpenCodeFailure('level=INFO message=init\nError: spawn failed\nbye')).toEqual({ reason: 'exitBeforeTurn', detail: 'Error: spawn failed' });
+  });
+
+  it('an ERROR line about the login is authFailed; the bare word authentication is not', () => {
+    // Synthetic: no failed login was observed in the probes.
+    const line = 'timestamp=t level=ERROR run=a1 error="AuthError: 401 Unauthorized: invalid api key"';
+    expect(classifyOpenCodeFailure(line)).toEqual({ reason: 'authFailed', detail: 'AuthError: 401 Unauthorized: invalid api key' });
+    expect(classifyOpenCodeFailure('level=INFO message="using authentication from auth.json"\n' + fixture('C2.jsonl'))).toBeUndefined();
+  });
+
+  it('OpenCodeRunner.readFailure classifies the launch log; no log is no diagnosis', async () => {
+    const dir = tmp('orch-opencode-fail-');
+    const runner = new OpenCodeRunner({ command: () => DEFAULT_OPENCODE_COMMAND, settings: () => defaults, maxWaitMs: MAX_WAIT_MS, retryWindowMs: 5000, logDir: dir });
+    const launch = launchIn(dir);
+    expect(await runner.readFailure(launch)).toBeUndefined();
+    writeFileSync(logPath(dir, launch.launchId), fixture('K2.err'));
+    expect(await runner.readFailure(launch)).toEqual({ reason: 'startupContended', detail: 'database is locked' });
   });
 });

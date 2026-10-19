@@ -10,6 +10,9 @@ import { isSafeRule } from './toolchain/tools.js';
 export const stageNames = ['criticalPath', 'priority', 'fifo'] as const;
 export type StageName = (typeof stageNames)[number];
 
+/** `health.contendedRetries` when unset. */
+export const DEFAULT_CONTENDED_RETRIES = 3;
+
 /** One model's token rates in USD per million tokens; the optional rates fall back as `priceUsage` states. */
 const rate = z.number().nonnegative();
 export const priceSchema = z
@@ -142,6 +145,8 @@ export const configSchema = z.object({
       /** How long a submitted task's process may keep running so the runner can write its usage; 0 reaps at once. See specs/health-monitoring "Usage accounting". */
       reportGraceMs: z.number().int().nonnegative().default(30_000),
       baseMovedNotice: z.boolean().default(true),
+      /** Launches per task that died of `startupContended` and are relaunched without charging a retry; later ones count. Unset is DEFAULT_CONTENDED_RETRIES. See specs/task-lifecycle "Retry and exhaustion". */
+      contendedRetries: z.number().int().nonnegative().optional(),
     })
     .default({}),
   /** Wall time per launch and cost per run. */
