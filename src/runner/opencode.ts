@@ -74,22 +74,61 @@ export function bashPatterns(allowedTools: readonly string[]): string[] {
 }
 
 /**
- * The permission ruleset. `derived`: every tool asks (a headless ask is auto-rejected and surfaces to
- * the agent as a tool error), the file tools are allowed, bash allows `git *` and the derived patterns,
- * and the orchestrator tools are allowed. `allow`: every tool is allowed. The catch-all comes first:
- * OpenCode takes the last matching rule.
+ * The exact bash patterns that let a check command run: one per simple command, split at `&&`, `||`,
+ * `;`, `|` and newlines outside quotes. OpenCode 1.18.30 matches each command of a chain against the
+ * rules on its own, and a pattern holding a whole chain never matches (test/fixtures/opencode/events/X-*.jsonl).
  */
-export function openCodePermission(permission: OpenCodePermission, allowedTools: readonly string[]): Record<string, unknown> {
+export function checkCommandPatterns(checkCommand: string | undefined): string[] {
+  if (!checkCommand) return [];
+  const out: string[] = [];
+  let cur = '';
+  let quote: string | undefined;
+  const flush = () => {
+    const seg = cur.trim();
+    if (seg && !out.includes(seg)) out.push(seg);
+    cur = '';
+  };
+  for (let i = 0; i < checkCommand.length; i++) {
+    const c = checkCommand[i] as string;
+    if (quote) {
+      if (c === quote) quote = undefined;
+      cur += c;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      cur += c;
+    } else if ((c === '&' || c === '|') && checkCommand[i + 1] === c) {
+      flush();
+      i++;
+    } else if (c === ';' || c === '|' || c === '\n') {
+      flush();
+    } else {
+      cur += c;
+    }
+  }
+  flush();
+  return out;
+}
+
+/**
+ * The permission ruleset. `derived`: every tool is denied, the file tools (read, glob, grep, list, edit,
+ * write) are allowed, bash allows `git *`, the derived patterns and the check command's own patterns,
+ * and the orchestrator tools are allowed. No rule asks: a headless `ask` is auto-rejected and ends the
+ * run after that step, while a `deny` returns an error to the model and the run goes on
+ * (test/fixtures/opencode/events/P-ask.jsonl, P-deny.jsonl). `allow`: every tool is allowed. The
+ * catch-all comes first: OpenCode takes the last matching rule.
+ */
+export function openCodePermission(permission: OpenCodePermission, allowedTools: readonly string[], checkCommand?: string): Record<string, unknown> {
   if (permission === 'allow') return { '*': 'allow' };
-  const bash: Record<string, string> = { '*': 'ask', 'git *': 'allow' };
-  for (const p of bashPatterns(allowedTools)) bash[p] = 'allow';
+  const bash: Record<string, string> = { '*': 'deny', 'git *': 'allow' };
+  for (const p of [...bashPatterns(allowedTools), ...checkCommandPatterns(checkCommand)]) bash[p] = 'allow';
   return {
-    '*': 'ask',
+    '*': 'deny',
     read: 'allow',
     glob: 'allow',
     grep: 'allow',
     list: 'allow',
     edit: 'allow',
+    write: 'allow',
     bash,
     [`${OPENCODE_MCP_ID}_*`]: 'allow',
   };
@@ -98,9 +137,10 @@ export function openCodePermission(permission: OpenCodePermission, allowedTools:
 /**
  * The per-launch OpenCode config: the shim as a local MCP server with no `environment` block (it
  * inherits ORCH_* from the agent environment), the call timeout, snapshots off unless configured,
- * sharing disabled, and the permission ruleset. Never `mcp.timeout`, which 1.18.30 drops.
+ * sharing disabled, and the permission ruleset (with the check command's patterns under `derived`).
+ * Never `mcp.timeout`, which 1.18.30 drops.
  */
-export function openCodeConfig(settings: OpenCodeSettings, allowedTools: readonly string[], maxWaitMs: number, shim: { command: string; args: string[] } = shimCommand()): OpenCodeConfig {
+export function openCodeConfig(settings: OpenCodeSettings, allowedTools: readonly string[], maxWaitMs: number, shim: { command: string; args: string[] } = shimCommand(), checkCommand?: string): OpenCodeConfig {
   return {
     $schema: 'https://opencode.ai/config.json',
     mcp: {
@@ -108,7 +148,7 @@ export function openCodeConfig(settings: OpenCodeSettings, allowedTools: readonl
     },
     ...(settings.snapshots ? {} : { snapshots: false as const }),
     share: 'disabled',
-    permission: openCodePermission(settings.permission, allowedTools),
+    permission: openCodePermission(settings.permission, allowedTools, checkCommand),
   };
 }
 
@@ -174,6 +214,16 @@ export function composeOpenCodeCommand(launch: Pick<Launch, 'worktree' | 'launch
   });
 }
 
+/** The check command the launch's brief.json names, if any; the derived ruleset allows it. */
+export async function briefCheckCommand(worktree: string): Promise<string | undefined> {
+  try {
+    const v = (JSON.parse(await readFile(path.join(worktree, '.orchestrator', 'brief.json'), 'utf8')) as { checkCommand?: unknown }).checkCommand;
+    return typeof v === 'string' && v.trim() ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export class OpenCodeRunner extends SubprocessRunner {
   constructor(private readonly ocOpts: OpenCodeRunnerOptions) {
     super({
@@ -187,7 +237,7 @@ export class OpenCodeRunner extends SubprocessRunner {
 
   async spawn(launch: Launch, env: Record<string, string>): Promise<SpawnResult> {
     const settings = this.ocOpts.settings();
-    const config = openCodeConfig(settings, this.ocOpts.allowedTools?.() ?? [], this.ocOpts.maxWaitMs, this.ocOpts.shim);
+    const config = openCodeConfig(settings, this.ocOpts.allowedTools?.() ?? [], this.ocOpts.maxWaitMs, this.ocOpts.shim, await briefCheckCommand(launch.worktree));
     const extra = await prepareOpenCodeLaunch(launch, settings, config);
     // The shim reads its identity from the environment the MCP child inherits.
     return super.spawn(launch, { ...env, ...shimEnv(launch, env, this.ocOpts.retryWindowMs), ...extra });
@@ -240,7 +290,9 @@ function logError(line: string): string {
  * - a WARN `server unavailable key=orchestrator` (`mcpStartupFailed`), even after a completed turn: the agent worked without the shim;
  * - an ERROR line or `error` event naming an unknown model (`unknownModel`), or a missing or rejected login (`authFailed`);
  * - no event at all and a `database is locked` line: another opencode held the shared database at startup (`startupContended`);
- * - a `tool_use` part rejected for permission or an `auto-rejecting` line (`permissionDenied`), with the command;
+ * - a `tool_use` part rejected for permission or an `auto-rejecting` line (`permissionDenied`), with the command: an
+ *   auto-rejected `ask` ends the run after that step. A `deny` refusal ("The user has specified a rule which prevents
+ *   you...") returns an error to the model and the run goes on, so it is not a failure;
  * - any other `error` event (`turnFailed`), detailed by the ERROR line carrying its `ref`, else its message;
  * - undefined once a `step_finish` with `reason: "stop"` was seen;
  * - `exitBeforeTurn` when no event was parsed, with the last stderr line that says error, fatal, or failed.

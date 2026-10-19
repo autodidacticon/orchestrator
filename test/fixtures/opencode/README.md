@@ -65,7 +65,27 @@ Feasibility probes for an `opencode` runner kind. Facts the orchestrator would r
 - events/P-deny.jsonl: bash `"*": "deny"`. The tool_use error is "The user has specified a rule which prevents you from using this
   specific tool call. ..." with the rule list, and a second step follows in which the model answers `FALLBACK-OK` (`reason: "stop"`).
   Its stderr was empty and is not kept.
-- Not read by a test yet; the evidence for switching the derived ruleset's catch-alls to `deny` (ORC-65).
+- The evidence for the derived ruleset's `deny` catch-alls (ORC-65); read by test/runner/opencode.test.ts (P-ask with P-ask.err gives
+  `permissionDenied`, P-deny gives no diagnosis).
+
+## Chained commands under the bash rules (probed 2026-10-19, ORC-65; same CLI and model)
+- Each run asked the model to run one bash command verbatim under `permission: { "*": "deny", read/glob/grep/list/edit/write: "allow", bash: <rules> }`
+  in a scratch git repo (`<scratch>`), with `--pure --print-logs --log-level WARN --dir <scratch>`. configs/X-<name>.json holds each run's
+  permission and command; stderr held only `duplicate skill name` lines and is not kept. The rule: each simple command of a chain is matched
+  on its own.
+  - events/X-chain-allowed.jsonl: `git rev-parse --show-toplevel && git add a.txt && git commit -m probe && git status --short && true`
+    under `git *` and `true` ran, and the commit was made.
+  - events/X-chain-offpattern.jsonl: `git status --short && uname -s` under `git *` was denied: one off-pattern part denies the call, so
+    `git *` is not matched as a glob over the whole string.
+  - events/X-whole-string.jsonl: `true && true` under the single pattern `true && true` was denied: a whole-chain pattern never matches.
+  - events/X-pipe-offpattern.jsonl: `git log --oneline | head -1` under `git *` was denied: each command of a pipe is matched.
+  - events/X-semicolon-allowed.jsonl: `git status --short; true` under `git *` and `true` ran.
+  - events/X-redirect.jsonl: `git log --oneline > log.txt` under `git *` ran: a redirection is not a separate command.
+  - events/X-cd-chain.jsonl: `cd . && git status --short` under `git *` ran: `cd` is not matched against the bash rules.
+  - events/X-check-segments.jsonl: `node --version && true` under the exact patterns `node --version` and `true` ran: a multi-word exact
+    pattern matches its command. This is the check-command derivation.
+- A probe's lesson: opencode takes its directory from `$PWD`, not the spawn cwd, so a child given another cwd needs `PWD` or `--dir`.
+- Read by test/runner/opencode.test.ts (the off-pattern, pipe and whole-string runs: a deny refusal continued past gives no diagnosis).
 
 ## Real e2e run (recorded 2026-10-19, ORC-63)
 - e2e-T1.jsonl, e2e-T2.jsonl, e2e-T3.jsonl: the JSONL events of each task's first launch in a passing

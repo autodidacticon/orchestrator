@@ -3,9 +3,9 @@
  * Runs on the free model `opencode/big-pickle` (opencode 1.18.30 when written): no login, no key, cost 0
  * per step. Launches share the user's OpenCode database at capacity 2, so a `startupContended` death
  * may happen and must be relaunched uncharged. Case 1: three tasks, one of whose `block` is answered
- * only after 75 s (the MCP call timeout is 60 s unless the per-server timeout is sized). Case 2, skipped
- * until ORC-65 makes the derived catch-alls `deny`: a task needing a command outside the derived
- * permission patterns, which the agent must ask for.
+ * only after 75 s (the MCP call timeout is 60 s unless the per-server timeout is sized). Case 2: a task
+ * needing a command outside the derived permission patterns; the derived catch-alls are `deny`, so the
+ * agent sees the refusal, asks for the command with needsAccess, and finishes with the answer.
  * ORCH_E2E_OPENCODE_RECORD=1 copies each task's first launch's JSONL, redacted, to
  * test/fixtures/opencode/e2e-<task>.jsonl (e2e-access-<task>.jsonl for case 2); nothing is recorded otherwise.
  * See specs/worker-runners "OpenCode runner command composition", specs/health-monitoring "Usage accounting",
@@ -31,10 +31,10 @@ const fixtures = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const ANSWER = 'pineapple';
 const ANSWER_DELAY_MS = 75_000;
 
-// Under the agent commit policy every description asks for the commit. Under `derived` the file tools, git and node are allowed, and any
-// other command is an `ask` that opencode 1.18.30 auto-rejects and then ends the run on (fixtures/opencode/events/P-ask.jsonl), so
-// every description keeps the agent to those tools and git.
-const ONLY = 'Use only your file read, write and edit tools, git, and node; do not run any other shell command (no ls, pwd, cat or echo), and run each command alone, from the repository root, without cd, pipes, redirections or &&.';
+// Under the agent commit policy every description asks for the commit. Under `derived` the file tools (write included), git, node and
+// the check command are allowed, each command of a chain is matched on its own, and any other command is denied: the model gets the
+// error and goes on (fixtures/opencode/events/P-deny.jsonl, X-*.jsonl), so a stray ls costs a step, not the launch.
+const ONLY = 'Use your file read, write and edit tools, git, and node.';
 const graph = `nodes:
   - id: T1
     title: Create greeting file
@@ -122,7 +122,6 @@ async function startRun(name: string, g: string): Promise<Run> {
     realVerifier: true,
     config: {
       capacity: 2,
-      // One more attempt than the default: a launch that runs a command outside the patterns dies on the auto-rejected ask (ORC-65).
       maxAttempts: 3,
       leaseTtlMs: 10 * 60_000,
       // Above the answer delay, so one long poll carries the answer; the per-server MCP timeout is a minute above this.
@@ -308,9 +307,9 @@ describe.skipIf(!hasOpencode)('e2e with OpenCode on the free model', () => {
     }
   }, 10 * 60_000);
 
-  // Skipped: under opencode 1.18.30 an auto-rejected `ask` ends the run (fixtures/opencode/events/P-ask.jsonl), so needsAccess cannot
-  // surface until the derived ruleset's catch-alls are `deny`, which the model sees and continues past (P-deny.jsonl). ORC-65 un-skips it.
-  it.skip('a command outside the derived patterns is asked for with needsAccess and the task still finishes', async () => {
+  // An auto-rejected `ask` would end the run (fixtures/opencode/events/P-ask.jsonl); the derived `deny` returns an error the model
+  // sees and continues past (P-deny.jsonl), so needsAccess surfaces.
+  it.concurrent('a command outside the derived patterns is asked for with needsAccess and the task still finishes', async () => {
     const run = await startRun('access', accessGraph);
     const { h, repo } = run;
     let passed = false;
@@ -325,7 +324,7 @@ describe.skipIf(!hasOpencode)('e2e with OpenCode on the free model', () => {
       expect(s.stalled, JSON.stringify({ questions: run.questions, rejections: run.rejections, status: s })).toBe(false);
       expect(s.byStatus.done).toEqual(['P1']);
 
-      // The auto-rejected command surfaced as the brief instructs: a needsAccess question naming it.
+      // The denied command surfaced as the brief instructs: a needsAccess question naming it.
       const access = run.questions.filter((q) => q.kind === 'needsAccess' && /uname/.test(q.message));
       expect(access.length, JSON.stringify(run.questions)).toBeGreaterThanOrEqual(1);
       expect(gitIn(repo, 'show', 'main:platform.txt').trim()).toBe('denied');

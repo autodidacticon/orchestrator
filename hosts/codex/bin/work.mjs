@@ -154,7 +154,7 @@ export function makeAdapter(kind, mod) {
       label: 'opencode run',
       block: (c) => c.opencode,
       async prepare(launch, oc) {
-        const config = openCodeConfig(oc.settings, oc.allowedTools ?? [], oc.maxWaitMs);
+        const config = openCodeConfig(oc.settings, oc.allowedTools ?? [], oc.maxWaitMs, undefined, launch.checkCommand);
         // The MCP child inherits this environment, so the shim gets its identity from it; no env file.
         return { ORCH_RETRY_WINDOW_MS: String(oc.retryWindowMs ?? 60_000), ...(await prepareOpenCodeLaunch(launch, oc.settings, config)) };
       },
@@ -266,7 +266,7 @@ export async function runWork(opts, mods) {
       return 'startFailed';
     }
     const orchDir = path.join(c.worktree, '.orchestrator');
-    const launch = { worktree: c.worktree, launchId: c.launchId, taskId: c.taskId, token: c.token, model: c.model, effort: c.effort };
+    const launch = { worktree: c.worktree, launchId: c.launchId, taskId: c.taskId, token: c.token, model: c.model, effort: c.effort, checkCommand: c.brief?.checkCommand };
     const extraEnv = await adapter.prepare(launch, blk);
     const brief = await readFile(c.briefPath ?? path.join(orchDir, 'brief.md'), 'utf8').catch(() => '');
     const promptFile = path.join(orchDir, `${kind}-work-prompt.md`);

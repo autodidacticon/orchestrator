@@ -1,0 +1,17 @@
+{
+  "permission": {
+    "*": "deny",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "edit": "allow",
+    "write": "allow",
+    "bash": {
+      "*": "deny",
+      "git *": "allow",
+      "true": "allow"
+    }
+  },
+  "command": "git status --short; true"
+}

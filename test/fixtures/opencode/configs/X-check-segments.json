@@ -1,0 +1,18 @@
+{
+  "permission": {
+    "*": "deny",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "edit": "allow",
+    "write": "allow",
+    "bash": {
+      "*": "deny",
+      "git *": "allow",
+      "node --version": "allow",
+      "true": "allow"
+    }
+  },
+  "command": "node --version && true"
+}

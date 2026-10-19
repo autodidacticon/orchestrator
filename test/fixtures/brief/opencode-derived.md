@@ -21,8 +21,8 @@ Do the golden task.
 - Branch: `task/T1/l1`
 - Base commit: `base1`
 - Integration branch: `main`
-- You run with OpenCode permission rules in force and nothing else confining your commands: a command a rule does not allow fails with 'The user rejected permission to use this specific tool call.' and will not be approved at runtime. Do not retry it; ask with a `needsAccess` question naming the command, then continue with what you can. The operator can run it for you, or set `runner.opencode.permission` to `allow` for your next launch.
-- If the orchestrator spawned you, the rules allow the file tools (read, glob, grep, list, edit), the orchestrator tools, and these bash commands: `npm test *`, `git status`; every other command is rejected. A worker holding a claimed launch runs under its own permissions instead.
+- You run with OpenCode permission rules in force and nothing else confining your commands: a command a rule does not allow fails with 'The user has specified a rule which prevents you from using this specific tool call.' and will not be approved at runtime. Do not retry it; ask with a `needsAccess` question naming the command, then continue with what you can. The operator can run it for you, or set `runner.opencode.permission` to `allow` for your next launch.
+- If the orchestrator spawned you, the rules allow the file tools (read, glob, grep, list, edit, write), the orchestrator tools, and these bash commands: `npm test *`, `git status`, `npm test`; every other command is denied, and each command of a chain (`&&`, `;`, `|`) must match one of them on its own. A worker holding a claimed launch runs under its own permissions instead.
 - Notices may arrive in your inbox (the `inbox` operation): `stuck` when no progress has been observed for a while, `nudge` with a message from the operator, `baseMoved` with the new integration `head` and the `files` that changed, and `payloadChanged` when your task's description was edited (re-read the brief file). Check the inbox after long steps.
 
 ## Dependencies

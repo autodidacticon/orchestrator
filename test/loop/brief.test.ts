@@ -248,13 +248,17 @@ describe('golden briefs per kind', () => {
     expect(compose({ runner: { kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write' } })).toBe(golden('codex'));
   });
 
-  it('an opencode brief under derived names the orchestrator_ tools, the rejection wording and the derived patterns', () => {
+  it('an opencode brief under derived names the orchestrator_ tools, the deny wording, the derived patterns and the check command', () => {
     const md = compose({ runner: { kind: 'opencode', commitPolicy: 'agent', permission: { mode: 'derived', bashPatterns: ['npm test *', 'git status'] } } });
     expect(md).toBe(golden('opencode-derived'));
     for (const t of tools) expect(md).toContain(`\`orchestrator_${t}\``);
-    expect(md).toContain("fails with 'The user rejected permission to use this specific tool call.' and will not be approved at runtime");
+    expect(md).toContain("fails with 'The user has specified a rule which prevents you from using this specific tool call.' and will not be approved at runtime");
+    expect(md).not.toContain('rejected permission');
+    expect(md).toContain('each command of a chain (`&&`, `;`, `|`) must match one of them on its own.');
+    expect(md).toContain('the file tools (read, glob, grep, list, edit, write)');
     expect(md).toContain('`needsAccess` question naming the command');
-    expect(md).toContain('these bash commands: `npm test *`, `git status`');
+    // The check command's own pattern follows the derived ones.
+    expect(md).toContain('these bash commands: `npm test *`, `git status`, `npm test`; every other command is denied');
     expect(md).not.toMatch(/sandbox/i);
     expect(md).not.toContain('mcp__orchestrator__');
     expect(md).not.toContain('Do not call the API from a command');

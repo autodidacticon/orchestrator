@@ -1,0 +1,17 @@
+{
+  "permission": {
+    "*": "deny",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "edit": "allow",
+    "write": "allow",
+    "bash": {
+      "*": "deny",
+      "git *": "allow",
+      "true": "allow"
+    }
+  },
+  "command": "git rev-parse --show-toplevel && git add a.txt && git commit -m probe && git status --short && true"
+}

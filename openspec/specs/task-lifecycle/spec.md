@@ -237,13 +237,13 @@ The OpenCode runner reads the same kind of log (`opencode run --format json` JSO
 - `unknownModel`: an ERROR line (or `error` event message) matching `ProviderModelNotFoundError` or `Model not found`; the detail is the line's `error="..."` value, which names the model;
 - `authFailed`: an ERROR line (or `error` event message) naming a 401, an unauthorized request, an invalid or missing API key, an expired token, or an authentication failure, error, or requirement; the bare word `authentication` SHALL NOT match. No failed login was observed, so this pattern is carried over from the Codex runner;
 - `startupContended`: no JSONL event at all and a stderr line `database is locked`: another opencode held the shared database at startup;
-- `permissionDenied`: a `tool_use` part whose `state.error` says `rejected permission`, the detail naming the tool and the command; else a stderr line saying `auto-rejecting`, which is the detail;
+- `permissionDenied`: a `tool_use` part whose `state.error` says `rejected permission`, the detail naming the tool and the command; else a stderr line saying `auto-rejecting`, which is the detail. Only an `ask` gives this, which happens only when an operator overrides the ruleset with one. A `deny` refusal ("The user has specified a rule which prevents you...") goes back to the model and the run goes on, so it SHALL NOT be a diagnosis;
 - `turnFailed`: any other `error` event; the detail is the `error="..."` value of the ERROR line that carries the event's `ref` when there is one, else the event's `error.data.message`;
 - `exitBeforeTurn`: no JSONL event and nothing above matched; the detail is the last stderr line that reads as an error (`error`, `fatal`, or `failed`), and there is no detail otherwise.
 
 When none of these matched, a log with a `step_finish` part whose `reason` is `stop` SHALL give no diagnosis, as SHALL a log with events but no completed turn.
 
-The probe facts of opencode 1.18.30 behind these (test/fixtures/opencode/events): an unknown model or provider gives only the opaque `error` event `Unexpected server error. Check server logs for details.` with a `ref` and exit 1, and the model is named only on the ERROR line; an MCP server that cannot start gives the WARN line, and the run completes without the tools and exits 0; an auto-rejected permission gives the stderr line `permission requested: bash (<command>); auto-rejecting` and a `tool_use` part with `state.status: "error"`, and the turn completes and exits 0; startup contention gives exit 1, no JSONL, and `Error: Unexpected error` then `database is locked` (4 of 23 concurrent starts, never after the first event).
+The probe facts of opencode 1.18.30 behind these (test/fixtures/opencode/events): an unknown model or provider gives only the opaque `error` event `Unexpected server error. Check server logs for details.` with a `ref` and exit 1, and the model is named only on the ERROR line; an MCP server that cannot start gives the WARN line, and the run completes without the tools and exits 0; an auto-rejected `ask` gives the stderr line `permission requested: bash (<command>); auto-rejecting` and a `tool_use` part with `state.status: "error"`. The step then ends with `reason: "tool-calls"`, no further step starts, and the run exits 0, so the model never sees the refusal (F1-ask.jsonl, P-ask.jsonl). A `deny` gives the `tool_use` error, then a further step in which the model goes on (P-deny.jsonl); startup contention gives exit 1, no JSONL, and `Error: Unexpected error` then `database is locked` (4 of 23 concurrent starts, never after the first event).
 
 A log whose turn completed with none of these, or a missing log, SHALL give no diagnosis. A runner may give no diagnosis at all; the Claude Code runner gives none.
 
@@ -293,7 +293,11 @@ A log whose turn completed with none of these, or a missing log, SHALL give no d
 
 #### Scenario: OpenCode permission rejected
 - **WHEN** the OpenCode runner reads F1-ask.jsonl and F1-ask.err
-- **THEN** it returns `permissionDenied` with `echo marker-7731` in the detail; F2-deny.jsonl, where the tool was removed and the turn completed, gives no diagnosis
+- **THEN** it returns `permissionDenied` with `echo marker-7731` in the detail, and P-ask.jsonl with P-ask.err gives `permissionDenied` naming `uname -s`; F2-deny.jsonl, where the tool was removed and the turn completed, gives no diagnosis
+
+#### Scenario: OpenCode deny refusal continued past
+- **WHEN** the OpenCode runner reads P-deny.jsonl or X-chain-offpattern.jsonl, where a bash call got the deny error and the model went on to a `reason: "stop"` step
+- **THEN** it gives no diagnosis
 
 #### Scenario: OpenCode startup contention and noise
 - **WHEN** the OpenCode runner reads K2.err or SA-proj.err alone

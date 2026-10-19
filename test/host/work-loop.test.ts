@@ -156,7 +156,7 @@ describe('work loop --runner opencode (work.mjs, fake opencode on PATH)', () => 
     expect(config.snapshots).toBe(false);
     // The ruleset is the one the runner derives from the rules the claim carries.
     const allowedTools = h.orch.openCodeAllowedTools();
-    expect(config.permission).toEqual(openCodePermission('derived', allowedTools));
+    expect(config.permission).toEqual(openCodePermission('derived', allowedTools, h.config.checkCommand));
     expect(JSON.parse(cap.configFile!)).toEqual(config);
     expect(cap.configMode).toBe(0o600);
   }, 90_000);

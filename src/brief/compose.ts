@@ -3,6 +3,7 @@
  * The brief is standalone: a person could perform the task from it alone.
  */
 import type { BriefInput, BriefRunner } from '../workspace/workspace.js';
+import { checkCommandPatterns } from '../runner/opencode.js';
 
 export interface ComposeOptions {
   fallbackPath: string;
@@ -116,15 +117,15 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
       `- You run under ${sandbox} with approvals disabled: a command the sandbox refuses fails with 'Operation not permitted' and will not be approved at runtime. Do not retry it; ask with a \`needsAccess\` question naming the command. The operator can run it for you, or change \`runner.codex.sandbox\` for your next launch.`,
     );
   }
-  // OpenCode auto-rejects a headless `ask`, so a command no rule allows fails at once. See specs/agent-protocol "Check command and tool rules in the brief".
+  // The derived ruleset denies what it does not allow; a denied call returns an error and the run goes on. See specs/agent-protocol "Check command and tool rules in the brief".
   if (kind === 'opencode') {
     const permission = input.runner?.permission;
-    const patterns = permission?.bashPatterns?.length ? permission.bashPatterns : ['git *'];
+    const patterns = [...new Set([...(permission?.bashPatterns?.length ? permission.bashPatterns : ['git *']), ...checkCommandPatterns(input.checkCommand)])];
     lines.push(
-      "- You run with OpenCode permission rules in force and nothing else confining your commands: a command a rule does not allow fails with 'The user rejected permission to use this specific tool call.' and will not be approved at runtime. Do not retry it; ask with a `needsAccess` question naming the command, then continue with what you can. The operator can run it for you, or set `runner.opencode.permission` to `allow` for your next launch.",
+      "- You run with OpenCode permission rules in force and nothing else confining your commands: a command a rule does not allow fails with 'The user has specified a rule which prevents you from using this specific tool call.' and will not be approved at runtime. Do not retry it; ask with a `needsAccess` question naming the command, then continue with what you can. The operator can run it for you, or set `runner.opencode.permission` to `allow` for your next launch.",
       permission?.mode === 'allow'
         ? '- If the orchestrator spawned you, the rules allow every command and every tool. A worker holding a claimed launch runs under its own permissions instead.'
-        : `- If the orchestrator spawned you, the rules allow the file tools (read, glob, grep, list, edit), the orchestrator tools, and these bash commands: ${patterns.map((p) => `\`${p}\``).join(', ')}; every other command is rejected. A worker holding a claimed launch runs under its own permissions instead.`,
+        : `- If the orchestrator spawned you, the rules allow the file tools (read, glob, grep, list, edit, write), the orchestrator tools, and these bash commands: ${patterns.map((p) => `\`${p}\``).join(', ')}; every other command is denied, and each command of a chain (\`&&\`, \`;\`, \`|\`) must match one of them on its own. A worker holding a claimed launch runs under its own permissions instead.`,
     );
   }
   lines.push(

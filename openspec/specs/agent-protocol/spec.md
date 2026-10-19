@@ -16,7 +16,7 @@ Before launching, the orchestrator SHALL write `<worktree>/.orchestrator/brief.m
 
 The agent sees the shim's tools under a name that depends on its CLI: `mcp__orchestrator__<tool>` under Claude Code and Codex, `orchestrator_<tool>` under OpenCode. The `claude-code` and `codex` briefs keep their Reporting text (the `codex` one is in "Codex brief reports through the MCP server"). An `opencode` brief's Reporting section SHALL name `orchestrator_heartbeat`, `orchestrator_report`, `orchestrator_block`, `orchestrator_inbox` and `orchestrator_log` and tell the agent to prefer them to calling the API from a command. It SHALL keep the API and the fallback file, because no sandbox blocks loopback. It SHALL NOT name `mcp__orchestrator__` tools.
 
-An `opencode` brief's workspace section SHALL say that OpenCode permission rules are in force with nothing else confining the agent's commands. It SHALL say that a command a rule does not allow fails with "The user rejected permission to use this specific tool call." and is not approved at runtime. It SHALL tell the agent not to retry it but to ask with a `needsAccess` question naming the command and continue with what it can, and say that the operator can run it or set `runner.opencode.permission` to `allow` for the next launch. It SHALL NOT mention a sandbox.
+An `opencode` brief's workspace section SHALL say that OpenCode permission rules are in force with nothing else confining the agent's commands. It SHALL say that a command a rule does not allow fails with "The user has specified a rule which prevents you from using this specific tool call." and is not approved at runtime. That is the `deny` error, which the model sees and continues past. It SHALL tell the agent not to retry it but to ask with a `needsAccess` question naming the command and continue with what it can, and say that the operator can run it or set `runner.opencode.permission` to `allow` for the next launch. Under `derived` it SHALL list the file tools (read, glob, grep, list, edit, write), then the `bashPatterns` followed by the check command's patterns. It SHALL say that every other command is denied and that each command of a chain (`&&`, `;`, `|`) must match one of them on its own. It SHALL NOT mention a sandbox.
 
 `brief.json` SHALL carry the launch's `runner` (`kind`, `commitPolicy`, `sandbox` for a `codex` launch, and `permission` for an `opencode` launch). The `permission` holds `mode` (`derived` or `allow`) and, under `derived`, the `bashPatterns` the runner's ruleset allows, `git *` first. A brief composed without a runner SHALL be the `claude-code` text under the `agent` policy. The brief MUST be sufficient for a person to perform the task without any other channel.
 
@@ -32,9 +32,9 @@ An `opencode` brief's workspace section SHALL say that OpenCode permission rules
 - **WHEN** a brief is composed for a `codex` launch with `commitPolicy: daemon`, carrying interruption (with a work-in-progress commit), conflict, and revision context
 - **THEN** it says the orchestrator commits uncommitted changes, tells the agent to reapply the prior branch's changes as file edits, does not contain "commit and resubmit", "squash the work-in-progress commit", or "commit the delta", and `brief.json` carries `runner.kind: codex`
 
-#### Scenario: OpenCode brief names its tools and the rejection
+#### Scenario: OpenCode brief names its tools and the deny error
 - **WHEN** a brief is composed for an `opencode` launch
-- **THEN** it names `orchestrator_report` and the other four tools, contains "The user rejected permission", keeps the API line, and contains neither "sandbox" nor `mcp__orchestrator__`
+- **THEN** it names `orchestrator_report` and the other four tools, contains "The user has specified a rule which prevents you" and not "The user rejected permission", keeps the API line, and contains neither "sandbox" nor `mcp__orchestrator__`
 
 #### Scenario: Claude Code and Codex briefs unchanged by the third kind
 - **WHEN** the briefs of a `claude-code` and a `codex` launch are composed from the inputs of the goldens in `test/fixtures/brief`
@@ -297,7 +297,7 @@ The brief's definition of done SHALL name the effective check command at the tim
 
 #### Scenario: OpenCode derived patterns in the brief
 - **WHEN** an `opencode` launch is prepared under `permission: derived` with the rules `Bash(npm test:*)` and `Bash(git status)`
-- **THEN** `brief.json` carries `runner.permission` `{ mode: derived, bashPatterns }` starting with `git *`, and the workspace section lists `npm test *` and `git status`
+- **THEN** `brief.json` carries `runner.permission` `{ mode: derived, bashPatterns }` starting with `git *`, and the workspace section lists `npm test *`, `git status`, and the check command's own pattern
 
 #### Scenario: OpenCode allow in the brief
 - **WHEN** an `opencode` launch is prepared under `permission: allow`

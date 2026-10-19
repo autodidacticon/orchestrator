@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_OPENCODE_COMMAND } from '../../src/runner/command.js';
-import { bashPatterns, classifyOpenCodeFailure, composeOpenCodeCommand, openCodeConfig, OpenCodeRunner, type OpenCodeSettings } from '../../src/runner/opencode.js';
+import { bashPatterns, checkCommandPatterns, classifyOpenCodeFailure, composeOpenCodeCommand, openCodeConfig, OpenCodeRunner, type OpenCodeSettings } from '../../src/runner/opencode.js';
 import { logPath } from '../../src/runner/subprocess.js';
 import type { Launch } from '../../src/state/store.js';
 
@@ -77,19 +77,34 @@ describe('OpenCode per-launch config', () => {
     expect(bashPatterns(RULES)).toEqual(['git *', 'npm test *', 'git status']);
   });
 
+  // test/fixtures/opencode/events/X-*.jsonl: 1.18.30 matches each command of an `&&`, `;` or `|` chain on its own.
+  it('splits a check command into one exact pattern per command of the chain', () => {
+    expect(checkCommandPatterns(undefined)).toEqual([]);
+    expect(checkCommandPatterns('true')).toEqual(['true']);
+    expect(checkCommandPatterns('npm ci --ignore-scripts && npm run build && npx vitest run --retry 2')).toEqual(['npm ci --ignore-scripts', 'npm run build', 'npx vitest run --retry 2']);
+    expect(checkCommandPatterns('make lint; make test || true\ncargo test | tee out.txt')).toEqual(['make lint', 'make test', 'true', 'cargo test', 'tee out.txt']);
+    // Separators inside quotes stay in the command; a repeated command is listed once.
+    expect(checkCommandPatterns(`node -e "a && b; c | d" && node -e 'x || y' && true && true`)).toEqual(['node -e "a && b; c | d"', "node -e 'x || y'", 'true']);
+  });
+
   it('carries the shim, the timeout, snapshots off, sharing off, and the derived ruleset', () => {
-    const cfg = openCodeConfig(defaults, ['Bash(npm test:*)', 'Bash(git status)'], MAX_WAIT_MS, SHIM);
+    const cfg = openCodeConfig(defaults, ['Bash(npm test:*)', 'Bash(git status)'], MAX_WAIT_MS, SHIM, 'npm ci && npm test');
     expect(cfg.mcp['orchestrator']).toEqual({ type: 'local', command: ['node', '/opt/orch/dist/agent/mcp-shim.js'], enabled: true, timeout: 3_660_000 });
+    // No rule asks: a headless ask ends the run (events/P-ask.jsonl), a deny returns an error and the run goes on (events/P-deny.jsonl).
     expect(cfg.permission).toEqual({
-      '*': 'ask',
+      '*': 'deny',
       read: 'allow',
       glob: 'allow',
       grep: 'allow',
       list: 'allow',
       edit: 'allow',
-      bash: { '*': 'ask', 'git *': 'allow', 'npm test *': 'allow', 'git status': 'allow' },
+      write: 'allow',
+      bash: { '*': 'deny', 'git *': 'allow', 'npm test *': 'allow', 'git status': 'allow', 'npm ci': 'allow', 'npm test': 'allow' },
       'orchestrator_*': 'allow',
     });
+    expect(JSON.stringify(cfg.permission)).not.toContain('ask');
+    // `git add <f> && git commit -m <m>`: both commands match `git *` (events/X-chain-allowed.jsonl).
+    expect(openCodeConfig(defaults, [], MAX_WAIT_MS, SHIM).permission['bash']).toEqual({ '*': 'deny', 'git *': 'allow' });
     // The catch-alls come first: OpenCode takes the last matching rule.
     expect(Object.keys(cfg.permission)[0]).toBe('*');
     expect(Object.keys(cfg.permission['bash'] as object)[0]).toBe('*');
@@ -129,6 +144,7 @@ async function spawnFake(settings: Partial<OpenCodeSettings>, rules = ['Bash(npm
   const worktree = path.join(dir, 'wt');
   mkdirSync(path.join(worktree, '.orchestrator'), { recursive: true });
   writeFileSync(path.join(worktree, '.orchestrator', 'brief.md'), 'do the task\n');
+  writeFileSync(path.join(worktree, '.orchestrator', 'brief.json'), JSON.stringify({ checkCommand: 'node --test' }));
   const logDir = path.join(dir, 'logs');
   const runner = new OpenCodeRunner({
     command: () => DEFAULT_OPENCODE_COMMAND,
@@ -157,7 +173,9 @@ describe('OpenCode runner spawn', () => {
     expect(cfg['mcp']).not.toHaveProperty('timeout');
     expect(cfg['snapshots']).toBe(false);
     expect(cfg['share']).toBe('disabled');
-    expect(cfg['permission']['bash']).toEqual({ '*': 'ask', 'git *': 'allow', 'npm test *': 'allow', 'git status': 'allow' });
+    // The check command comes from the launch's brief.json.
+    expect(cfg['permission']['bash']).toEqual({ '*': 'deny', 'git *': 'allow', 'npm test *': 'allow', 'git status': 'allow', 'node --test': 'allow' });
+    expect(cfg['permission']['write']).toBe('allow');
     expect(cfg['permission']['orchestrator_*']).toBe('allow');
     expect(JSON.stringify(cfg)).not.toContain(TOKEN);
     expect(fake('token')).toBe(TOKEN);
@@ -208,6 +226,20 @@ describe('classifyOpenCodeFailure', () => {
     const out = classifyOpenCodeFailure(fixture('D4.err', 'D4.jsonl'));
     expect(out?.reason).toBe('mcpStartupFailed');
     expect(out?.detail).toContain('message="server unavailable" key=orchestrator type=local status=failed');
+  });
+
+  it('an auto-rejected ask ends the run and is permissionDenied naming the command', () => {
+    // events/P-ask.jsonl: the step ends with reason tool-calls and no further step follows.
+    const out = classifyOpenCodeFailure(fixture('P-ask.jsonl', 'P-ask.err'));
+    expect(out?.reason).toBe('permissionDenied');
+    expect(out?.detail).toContain('bash (uname -s): The user rejected permission to use this specific tool call.');
+  });
+
+  it('a deny refusal the agent continued past is not a failure', () => {
+    for (const f of ['P-deny.jsonl', 'X-chain-offpattern.jsonl', 'X-pipe-offpattern.jsonl', 'X-whole-string.jsonl']) {
+      expect(fixture(f)).toContain('The user has specified a rule which prevents you');
+      expect(classifyOpenCodeFailure(fixture(f))).toBeUndefined();
+    }
   });
 
   it('a rejected command is permissionDenied naming it; a removed tool with a completed turn is not a failure', () => {

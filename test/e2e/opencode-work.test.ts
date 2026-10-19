@@ -18,6 +18,12 @@ const enabled = process.env['ORCH_E2E_OPENCODE_WORK'] === '1';
 const MODEL = process.env['ORCH_E2E_OPENCODE_MODEL'] ?? 'opencode/big-pickle';
 const workMjs = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../hosts/codex/bin/work.mjs');
 
+// Under derived, T2's chmod and ./shout.sh are denied and the agent asks for them with needsAccess, as the brief says; the test answers
+// as an operator would: git can set the executable bit, and what cannot run is left out of the report.
+const ACCESS_ANSWER =
+  'That command is not allowed here. Set the executable bit with `git update-index --chmod=+x <file>` after `git add`, do without running the script, say so in your report, and submit.';
+const OTHER_ANSWER = 'Decide yourself, keep it minimal, and proceed.';
+
 // Under the agent commit policy (the opencode default) the brief tells the agent to commit.
 const graph = `nodes:
   - id: T1
@@ -61,14 +67,14 @@ describe.skipIf(!enabled)('e2e: OpenCode work loop', () => {
       repo,
       realVerifier: true,
       // ignoreUserConfig keeps the user's plugins and config out of the run; the shared data dir keeps auth available.
-      // permission allow: under derived, opencode 1.18.30 rejects its `write` tool and chained `git add && git commit` commands,
-      // which the derived ruleset does not cover (a runner follow-up). ORCH_E2E_OPENCODE_PERMISSION=derived exercises it.
+      // permission derived, the default: write, `git add && git commit` chains and the check command `true` are allowed, and a
+      // denied command returns an error the agent continues past (ORC-65). ORCH_E2E_OPENCODE_PERMISSION=allow runs under allow.
       config: {
         capacity: 2,
         leaseTtlMs: 10 * 60_000,
         maxWaitMs: 2 * 60_000,
         checkCommand: 'true',
-        runner: { mode: 'pull', kind: 'opencode', opencode: { model: MODEL, ignoreUserConfig: true, permission: process.env['ORCH_E2E_OPENCODE_PERMISSION'] === 'derived' ? 'derived' : 'allow' } },
+        runner: { mode: 'pull', kind: 'opencode', opencode: { model: MODEL, ignoreUserConfig: true, permission: process.env['ORCH_E2E_OPENCODE_PERMISSION'] === 'allow' ? 'allow' : 'derived' } },
       },
     });
     let stderr = '';
@@ -77,13 +83,31 @@ describe.skipIf(!enabled)('e2e: OpenCode work loop', () => {
     });
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
     const exited = new Promise<number | null>((r) => child.on('close', r));
+    const questions: Array<{ id: string; kind: string; message: string }> = [];
+    const answered = new Set<string>();
     try {
       await h.waitFor(() => {
         const s = h.orch.status();
-        return s.finished || s.stalled;
+        const before = answered.size;
+        for (const id of s.openQuestions) {
+          const e = h.orch.entry(id);
+          const q = e.status.kind === 'waiting' ? e.status.question : e.status.kind === 'blocked' ? e.status.reason : undefined;
+          if (!q) continue;
+          // A relaunched task asks again, so a question is keyed by when it was asked.
+          const key = `${id}:${e.status.kind === 'waiting' ? e.status.askedAt : q.message}`;
+          if (answered.has(key)) continue;
+          answered.add(key);
+          questions.push({ id, kind: q.kind, message: q.message });
+          const text = q.kind === 'needsAccess' ? ACCESS_ANSWER : OTHER_ANSWER;
+          if (e.status.kind === 'waiting') h.orch.answer(id, text);
+          else h.orch.unblock(id, { answer: text });
+        }
+        // A stall that an answer just resolved is not the end.
+        return answered.size === before && (s.finished || s.stalled);
       }, 20 * 60_000);
       const s = h.orch.status();
-      expect(s.stalled, JSON.stringify({ status: s, stderr: stderr.slice(-4000) })).toBe(false);
+      expect(s.stalled, JSON.stringify({ status: s, questions, stderr: stderr.slice(-4000) })).toBe(false);
+      console.info('opencode work e2e questions:', JSON.stringify(questions));
       expect(s.byStatus.done.sort()).toEqual(['T1', 'T2', 'T3']);
 
       const trailers = gitIn(repo, 'log', '--first-parent', '--format=%(trailers:key=Orchestrator-Task,valueonly)', 'main').split('\n').filter(Boolean).sort();
