@@ -1,4 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -154,6 +156,71 @@ describe('orchestrator-ctl config', () => {
     const usage = ((await runCli(['--help'])).body as { usage: string }).usage;
     for (const word of ['--runner-kind', '--sandbox', '--commit', 'runnerKind=claude-code|codex', 'codex.{model,effort,sandbox,commit,command}', 'claude-opus-5-5 at medium', 'gpt-6-astra at medium', 'ultra is codex-only']) expect(usage, word).toContain(word);
   });
+
+  it('selects opencode with --permission and --data-dir, clears an opencode leaf, binds --commit to opencode, and names three kinds in the usage', async () => {
+    // The exact bodies the CLI sends, from a stand-in daemon that records each PUT.
+    const puts: unknown[] = [];
+    const stub = createServer((req, res) => {
+      let raw = '';
+      req.on('data', (c: Buffer) => (raw += c.toString()));
+      req.on('end', () => {
+        if (req.method === 'PUT') puts.push(JSON.parse(raw));
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ config: { runnerKind: { value: 'claude-code', source: 'default' } } }));
+      });
+    });
+    await new Promise<void>((r) => stub.listen(0, '127.0.0.1', r));
+    const stubUrl = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
+    try {
+      await runCli(['--url', stubUrl, 'config', '--runner-kind', 'opencode', '--permission', 'allow', '--data-dir', 'launch']);
+      await runCli(['--url', stubUrl, 'config', '--clear', 'opencode.permission']);
+      await runCli(['--url', stubUrl, 'config', '--commit', 'daemon', '--runner-kind', 'opencode']);
+    } finally {
+      stub.close();
+    }
+    expect(puts).toEqual([
+      { runnerKind: 'opencode', opencode: { permission: 'allow', dataDir: 'launch' } },
+      { opencode: { permission: null } },
+      { runnerKind: 'opencode', opencode: { commit: 'daemon' } },
+    ]);
+
+    h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000 } });
+    const url = h.orch.apiBaseUrl;
+    const set = await runCli(['--url', url, 'config', '--runner-kind', 'opencode', '--permission', 'allow', '--data-dir', 'launch']);
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ ok: true, overrides: { runnerKind: 'opencode', opencode: { permission: 'allow', dataDir: 'launch' } } });
+    const shown = await runCli(['--url', url, 'config']);
+    expect(shown.body).toMatchObject({
+      config: {
+        runnerKind: { value: 'opencode', source: 'argument' },
+        model: { value: 'anthropic/claude-opus-5-5', source: 'default' },
+        opencode: { permission: { value: 'allow', source: 'argument' }, dataDir: { value: 'launch', source: 'argument' }, commit: { value: 'agent', source: 'default' } },
+      },
+    });
+    // --commit binds to the kind in force (opencode here); the other kinds keep theirs.
+    const commit = await runCli(['--url', url, 'config', '--commit', 'daemon']);
+    expect(commit.body).toMatchObject({ config: { opencode: { commit: { value: 'daemon', source: 'argument' } }, claude: { commit: { value: 'agent', source: 'default' } }, codex: { commit: { source: 'default' } } } });
+    const cleared = await runCli(['--url', url, 'config', '--clear', 'opencode.permission']);
+    expect(cleared.body).toMatchObject({ config: { opencode: { permission: { value: 'derived', source: 'default' }, dataDir: { value: 'launch', source: 'argument' } } } });
+    const bad = await runCli(['--url', url, 'config', '--permission', 'ask']);
+    expect(bad.status).toBe(400);
+    expect(bad.body).toMatchObject({ key: 'opencode.permission' });
+    const usage = ((await runCli(['--help'])).body as { usage: string }).usage;
+    for (const word of ['--permission', '--data-dir <shared|launch>', 'runnerKind=claude-code|codex|opencode', 'opencode.{model,effort,commit,command,permission,dataDir}', 'anthropic/claude-opus-5-5 at medium', 'opencode.permission']) expect(usage, word).toContain(word);
+  });
+
+  it('start accepts --set runnerKind=opencode and reports the opencode leaves with their sources', async () => {
+    env = { ...process.env, ORCH_HOME: fresh('orch-kind-home-') };
+    const repo = realpathSync(makeRepo(fresh('orch-kind-repo-')));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), `runnerCommand: "${scripted}"\ncheckCommand: "true"\n`);
+    const started = await startDaemon({ repo, env, overrides: parseSetFlags(['runnerKind=opencode']) });
+    const status = await http(started.url, 'GET', '/v1/status');
+    expect(status.body['config']).toMatchObject({
+      runnerKind: { value: 'opencode', source: 'argument' },
+      opencode: { model: { value: 'anthropic/claude-opus-5-5', source: 'default' }, effort: { value: 'medium', source: 'default' }, permission: { value: 'derived', source: 'default' }, dataDir: { value: 'shared', source: 'default' }, commit: { value: 'agent', source: 'default' } },
+    });
+    await stopDaemon({ repo, env });
+  }, 60_000);
 
   it('start accepts --set runnerKind=codex and the dotted codex keys', async () => {
     env = { ...process.env, ORCH_HOME: fresh('orch-kind-home-') };

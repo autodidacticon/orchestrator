@@ -2,7 +2,7 @@
 /**
  * Operator CLI over the daemon's HTTP API.
  *   orchestrator-ctl status
- *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>] [--model <name>] [--effort <level>] [--sandbox <mode>] [--commit <agent|daemon>] [--clear <key>]...
+ *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>] [--model <name>] [--effort <level>] [--sandbox <mode>] [--permission <derived|allow>] [--data-dir <shared|launch>] [--commit <agent|daemon>] [--clear <key>]...
  *   orchestrator-ctl answer <task> <text>
  *   orchestrator-ctl cancel <task> [--release] [--reason <text>]
  *   orchestrator-ctl reopen <task> [--cascade]
@@ -20,13 +20,14 @@
  *   orchestrator-ctl logs <task> [--launch <n>]
  *   orchestrator-ctl outbox [--after <id>] [--limit <n>]
  *   orchestrator-ctl ack <id> [--result <json>] [--error <text>]
- * The daemon URL comes from --url, ORCH_URL, or the store under --data-dir.
+ * The daemon URL comes from --url, ORCH_URL, or the store under --data-dir. For `config`, --data-dir shared|launch
+ * is the opencode.dataDir leaf, not a store location.
  */
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { foldRunnerArgs, parseSetFlags } from '../runs/resolve.js';
-import { isRunnerKind, type RunnerKind } from '../runner/selection.js';
+import { isRunnerKind, OPENCODE_DATA_DIRS, type RunnerKind } from '../runner/selection.js';
 import { resolveRepoPath, runPaths } from '../runs/runDir.js';
 import { SqliteStore } from '../state/sqlite.js';
 import { isEntrypoint } from '../entry.js';
@@ -80,19 +81,24 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
 
   orchestrator-ctl start [--repo <path>] [--set key=value]...   start the daemon for a repository (idempotent);
                                                --set checkCommand=..., integrationBranch=..., capacity=..., allowedTools=..., runnerCommand=...,
-                                               runnerKind=claude-code|codex, model=..., effort=..., claude.{model,effort,commit}=...,
-                                               codex.{model,effort,sandbox,commit,command}=...
+                                               runnerKind=claude-code|codex|opencode, model=..., effort=..., claude.{model,effort,commit}=...,
+                                               codex.{model,effort,sandbox,commit,command}=...,
+                                               opencode.{model,effort,commit,command,permission,dataDir}=...
   orchestrator-ctl stop [--reap] [--repo <path>]
   orchestrator-ctl runs                         list runs under ORCH_HOME
   orchestrator-ctl status
   orchestrator-ctl config                       the resolved configuration: every key with its value and source, the toolchain, needsConfig
   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>]
-                          [--model <name>] [--effort <level>] [--sandbox <mode>] [--commit <agent|daemon>] [--clear <key>]...
-                                               the runner kind is claude-code (default) or codex; model and effort are the worker defaults of
-                                               the kind in force (claude-code: claude-opus-5-5 at medium; codex: gpt-6-astra at medium);
-                                               effort is low, medium, high, xhigh, or max, and ultra is codex-only; --sandbox sets
-                                               codex.sandbox (read-only, workspace-write, danger-full-access); --commit sets the commit policy
-                                               of --runner-kind, else of the kind in force; --clear takes a key or one such as codex.sandbox
+                          [--model <name>] [--effort <level>] [--sandbox <mode>] [--permission <derived|allow>]
+                          [--data-dir <shared|launch>] [--commit <agent|daemon>] [--clear <key>]...
+                                               the runner kind is claude-code (default), codex, or opencode; model and effort are the worker
+                                               defaults of the kind in force (claude-code: claude-opus-5-5 at medium;
+                                               codex: gpt-6-astra at medium; opencode: anthropic/claude-opus-5-5 at medium, a provider/model id);
+                                               effort is low, medium, high, xhigh, or max, and ultra is codex-only; --sandbox sets codex.sandbox (read-only,
+                                               workspace-write, danger-full-access); --permission sets opencode.permission (derived, allow);
+                                               --data-dir shared|launch sets opencode.dataDir here, not the store location; --commit sets the
+                                               commit policy of --runner-kind, else of the kind in force; --clear takes a key or one such as
+                                               codex.sandbox or opencode.permission
   orchestrator-ctl answer <task> <text>
   orchestrator-ctl cancel <task> [--release] [--reason <text>]
   orchestrator-ctl reopen <task> [--cascade]       cascade resets started dependents and returns the plan
@@ -154,6 +160,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       'runner-command': { type: 'string' },
       'runner-kind': { type: 'string' },
       sandbox: { type: 'string' },
+      permission: { type: 'string' },
       commit: { type: 'string' },
       model: { type: 'string' },
       effort: { type: 'string' },
@@ -172,7 +179,9 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   if (cmd === 'runs') {
     return { status: 200, body: { runs: await listRuns() } };
   }
-  const base = await resolveUrl({ url: values.url, dataDir: values['data-dir'], repo: values.repo });
+  // `config --data-dir shared|launch` is the opencode.dataDir leaf; any other value keeps naming the store.
+  const dataDirLeaf = cmd === 'config' && (OPENCODE_DATA_DIRS as readonly string[]).includes(values['data-dir'] ?? '') ? values['data-dir'] : undefined;
+  const base = await resolveUrl({ url: values.url, dataDir: dataDirLeaf === undefined ? values['data-dir'] : undefined, repo: values.repo });
   switch (cmd) {
     case 'status':
       return call(base, 'GET', '/v1/status');
@@ -192,6 +201,8 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       if (values.model !== undefined) patch['model'] = values.model;
       if (values.effort !== undefined) patch['effort'] = values.effort;
       if (values.sandbox !== undefined) patch['sandbox'] = values.sandbox;
+      if (values.permission !== undefined) patch['permission'] = values.permission;
+      if (dataDirLeaf !== undefined) patch['dataDir'] = dataDirLeaf;
       if (values.commit !== undefined) patch['commit'] = values.commit;
       // The commit policy is per kind: it binds to --runner-kind, else to the kind in force. Clearing runnerKind in the
       // same call would bind it to the outgoing kind, so that combination needs --runner-kind to say which.

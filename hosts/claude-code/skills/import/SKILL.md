@@ -23,11 +23,13 @@ session and hand over normalized records.
   idempotent and returns the run directory, the graph path, and the resolved configuration.
   Report the toolchain in one line: the check command and the integration branch with the
   source of each (for example "detected: npm test on main"), and for a run whose
-  `config.runnerKind` is `codex` also the kind, its model and effort, the sandbox, and the
-  commit policy (for example "detected: npm test on main; workers codex gpt-6-astra at medium
-  (file); sandbox workspace-write, daemon commits"). Codex launches are worked only in `spawn`
-  or `mixed` mode, because pull-mode workers are this session's Claude subagents; the run
-  skill explains it. When `needsConfig` names
+  `config.runnerKind` is `codex` or `opencode` also the kind, its model and effort, and the
+  commit policy, with the sandbox for `codex` (for example "detected: npm test on main; workers
+  codex gpt-6-astra at medium (file); sandbox workspace-write, daemon commits") and the
+  permission for `opencode` (for example "detected: npm test on main; workers opencode
+  anthropic/claude-opus-5-5 at medium (default); permission derived, agent commits"). Codex and
+  OpenCode launches are worked here only in `spawn` or `mixed` mode, because pull-mode workers
+  are this session's Claude subagents; the run skill explains it. When `needsConfig` names
   `checkCommand`, follow the run skill's section 1b (read `CLAUDE.md`, the README, and the
   root manifests; set it with `configure` when it is stated unambiguously, otherwise ask) before
   continuing, so that the first submission is not held.
@@ -104,9 +106,10 @@ One record per issue you fetched, including the root:
   label when one is configured, `done` for a closed issue whose `stateReason` is `COMPLETED`,
   and `cancelled` for `NOT_PLANNED` or `DUPLICATE`. `parent` is the root's id for every child.
 - `labels` are passed through. Three label shapes choose the worker for the task:
-  `runner:<kind>` (`claude-code` or `codex`), `model:<name>` (for example
-  `model:claude-sonnet-5-5`), and `effort:<level>` (`low`, `medium`, `high`, `xhigh`, `max`,
-  or `ultra`, which Claude Code runs as `max`). Without them a task runs with the run's
+  `runner:<kind>` (`claude-code`, `codex`, or `opencode`), `model:<name>` (for example
+  `model:claude-sonnet-5-5`, or a `provider/model` id such as `model:opencode/big-pickle` for
+  opencode), and `effort:<level>` (`low`, `medium`, `high`, `xhigh`, `max`, or `ultra`, which
+  Claude Code and OpenCode run as `max`). Without them a task runs with the run's
   defaults (the run's runner kind, and that kind's default model at `medium`, changeable with
   `configure`). A label whose value is not recognised is left as a plain label and reported
   under `ignoredLabels`.

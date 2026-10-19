@@ -21,20 +21,22 @@ and this session's own subagents do the work (section 1a), so the user sees ever
 choices: `start` with `mode`, or `runner.mode` in `orchestrator.yaml`, which wins.
 
 The runner kind (`config.runnerKind`, from `runner.kind` in `orchestrator.yaml`, `start` or
-`configure` with `runnerKind`, or `--set runnerKind=codex`) is `claude-code` by default or
-`codex`. Codex launches are worked only in `spawn` or `mixed` mode, because pull-mode workers
-are this session's Claude subagents and claim only `claude-code` launches. So a `start`
-without `mode` whose runner kind is `codex` (the `runnerKind` argument, or already in force
-for the run) starts the daemon in `spawn` instead of `pull`, and the result's `modeNote` says
-so; tell the user the daemon runs the Codex agents headless and you only monitor. When
-`modeNote` warns that a codex run is in `pull` mode, offer `start` with `mode: "spawn"` or
-`"mixed"`. A task can also choose its kind (`runner` in its payload, or a `runner:<kind>`
-label), so one run can hold both kinds; `status.claimableByKind` counts parked launches per kind.
+`configure` with `runnerKind`, or `--set runnerKind=codex`) is `claude-code` by default,
+`codex`, or `opencode`. Codex launches are worked only in `spawn` or `mixed` mode, because pull-mode workers
+are this session's Claude subagents and claim only `claude-code` launches; so are OpenCode
+launches (pull-mode workers for those kinds come from `orchestrator-work --runner <kind>`). So a `start` without `mode` whose runner kind is `codex`
+or `opencode` (the `runnerKind` argument, or already in force for the run) starts the daemon in
+`spawn` instead of `pull`, and the result's `modeNote` says so; tell the user the daemon runs
+the Codex or OpenCode agents headless and you only monitor. When `modeNote` warns that a codex
+or opencode run is in `pull` mode, offer `start` with `mode: "spawn"` or `"mixed"`. A task can
+also choose its kind (`runner` in its payload, or a `runner:<kind>` label), so one run can hold
+several kinds; `status.claimableByKind` counts parked launches per kind.
 
 Tell the user who is executing the work, and report the toolchain in one line: the check
 command, the integration branch, and the worker kind, model and effort (`config.runnerKind`,
 `config.model` and `config.effort`; the defaults are `claude-opus-5-5` at `medium` for
-`claude-code` and `gpt-6-astra` at `medium` for `codex`) with the source of each and, when the
+`claude-code`, `gpt-6-astra` at `medium` for `codex`, and `anthropic/claude-opus-5-5` at
+`medium` for `opencode`) with the source of each and, when the
 daemon spawns Claude Code agents (`spawn`, or `mixed` after the claim window), the toolchains
 whose commands agents may run, for example
 "detected: npm test on main; workers claude-opus-5-5 at medium (default); agents may run npm and node".
@@ -42,6 +44,9 @@ For a `claude-code` run you may leave the kind out of the line, as above. For a 
 the kind, the sandbox, and the commit policy (`config.codex.sandbox`, `config.codex.commit`) and
 omit the allow-list part, since Codex runs under its sandbox instead of an allow list, for example
 "detected: npm test on main; workers codex gpt-6-astra at medium (file); sandbox workspace-write, daemon commits".
+For an `opencode` run name the kind, the permission, and the commit policy
+(`config.opencode.permission`, `config.opencode.commit`) and omit the allow-list part, for example
+"detected: npm test on main; workers opencode anthropic/claude-opus-5-5 at medium (default); permission derived, agent commits".
 When this session's subagents work the launches (`pull`), omit the allow-list part: workers
 run under this session's own permissions.
 When `config.model.applied` is false (a `runnerCommand` without the `{model}` slot), omit the
@@ -52,10 +57,12 @@ it now (section 1b). Then call `status`. If no graph is loaded, say so and sugge
 `import` skill.
 
 The configuration keys for the runner kinds, in `orchestrator.yaml`: `runner.kind`
-(`claude-code` or `codex`); `runner.claude.*` (`model`, `effort`, `commit`, `allowedTools`,
+(`claude-code`, `codex`, or `opencode`); `runner.claude.*` (`model`, `effort`, `commit`, `allowedTools`,
 `deriveTools`); `runner.codex.*` (`model`, `effort` up to `ultra`, `sandbox`: `read-only`,
 `workspace-write` (the default), or `danger-full-access`, and `commit`: `daemon` by default,
-`agent` under `danger-full-access`); and `budgets.prices`, the per-model token prices
+`agent` under `danger-full-access`); `runner.opencode.*` (`model` as a `provider/model` id,
+`effort` up to `max`, `commit`: `agent` by default, `permission`: `derived` (the default) or
+`allow`, and `dataDir`: `shared` (the default) or `launch`); and `budgets.prices`, the per-model token prices
 (`{ <model>: { inputPerMTok, outputPerMTok, cachedInputPerMTok? } }`, USD per million tokens) that turn Codex token
 counts into cost. A Codex launch without a price for its model counts in
 `cost.unpricedLaunches` and its cost stays unknown, so `budgets.maxRunCostUsd` cannot stop it;
@@ -73,19 +80,19 @@ and tell the user the command and where you found it ("set checkCommand to `make
 CLAUDE.md"). Otherwise propose your best reading, or say you found none, and call `configure`
 only with what the user confirms. `configure` also takes `capacity`, `allowedTools` (rules
 appended to the derived list for spawned Claude Code agents, such as `Bash(docker:*)`),
-`runnerCommand`, `runnerKind` (`claude-code` or `codex`), `model` and `effort` (the worker
+`runnerCommand`, `runnerKind` (`claude-code`, `codex`, or `opencode`), `model` and `effort` (the worker
 defaults of the kind in force, or of `runnerKind` in the same call, for launches prepared from
 then on; effort is `low`, `medium`, `high`, `xhigh`, or `max`, and `ultra` is codex-only),
-`codex` (`{ model, effort }` for codex whichever kind is in force), `sandbox` (the codex
-sandbox), and `commit` (`agent` or `daemon`, the commit policy of the kind in force); a null clears an override so the value falls back
+`codex` and `opencode` (`{ model, effort }` for that kind whichever kind is in force), `sandbox` (the codex
+sandbox), `permission` and `dataDir` (the opencode leaves), and `commit` (`agent` or `daemon`, the commit policy of the kind in force); a null clears an override so the value falls back
 to the file, detection, or the default. The integration branch is start-only: pass `integrationBranch` to `start` before
 the run holds any launch; a running daemon refuses it.
 
 ## 1a. Work the run with session subagents
 
 When the mode in force is `pull` or `mixed` and the run can hold `claude-code` launches, run
-the bundled workflow before the first `wait`. Do not start it for a codex-default run
-(`config.runnerKind` is `codex`) unless the graph has tasks with `runner: claude-code` or
+the bundled workflow before the first `wait`. Do not start it for a codex-default run or an opencode-default run
+(`config.runnerKind` is `codex` or `opencode`) unless the graph has tasks with `runner: claude-code` or
 `status.claimableByKind["claude-code"]` is above 0: the workers claim only `claude-code`
 launches, so they would find nothing and stop. Use a worker count no larger than the run's
 `capacity` (from `status`), usually 2 to 4, and a run tag such as `work-1`:
@@ -119,11 +126,16 @@ answers (section 2b), then act on the digest:
   context, then present the question to the user verbatim and wait for their reply. Send the
   reply with `answer`. Do not invent answers to questions that need a human decision. When the
   question's kind is `needsAccess` and it names a command (from `status`, under the task's
-  blocked or waiting reason), offer three things: adding a rule through `configure`
-  (`allowedTools: ["Bash(<command>:*)"]`) so launches spawned afterwards can run it, saying
-  that the live agent cannot gain the rule; running the command yourself on the agent's behalf
-  in its worktree and sending the result with `answer`, which is what unblocks the live agent
-  now; or answering with an alternative. Do what the user picks.
+  blocked or waiting reason), offer three things: changing the configuration so launches
+  prepared afterwards can run it, saying that the live agent cannot gain the change; running
+  the command yourself on the agent's behalf in its worktree and sending the result with
+  `answer`, which is what unblocks the live agent now; or answering with an alternative. The
+  configuration change depends on the launch's kind (its `runner` in `status.liveLaunches`):
+  for `claude-code`, a rule through `configure` (`allowedTools: ["Bash(<command>:*)"]`); for
+  `codex`, a wider `sandbox` through `configure` (`workspace-write` from `read-only`, else
+  `danger-full-access`, only when the user accepts it); for `opencode`, whose `permission: derived` rejects a command
+  outside the derived rules automatically, `configure` with `permission: "allow"`, which lets
+  every later opencode launch run any command. Do what the user picks.
 - **needsConfig** names `checkCommand`: submitted tasks are held under `verifying` until a
   check command is set. Follow section 1b now; do not call the run slow or stalled.
 - **awaitingReview** non-empty: invoke the `review` skill for each milestone.

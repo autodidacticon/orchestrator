@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { clampWait, digestSatisfies, kindOfRun, TOOL_NAMES, WAIT_CAP_MS, WAIT_DEFAULT_MS } from '../../src/operator/mcp-server.js';
+import { clampWait, defaultModeFor, digestSatisfies, kindOfRun, modeNoteFor, TOOL_NAMES, WAIT_CAP_MS, WAIT_DEFAULT_MS } from '../../src/operator/mcp-server.js';
 import { listRuns, stopDaemon } from '../../src/runs/lifecycle.js';
 import { pidAlive } from '../../src/runner/subprocess.js';
 import { gitIn, makeRepo, scriptedAgent, tsxLoader } from './harness.js';
@@ -65,14 +65,14 @@ describe('operator MCP server', () => {
     // The wait description quotes the cap in force, which a Codex registration sizes tool_timeout_sec against. See specs/operator-mcp "Wait tool".
     expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain(`cap ${WAIT_CAP_MS}`);
     const configure = tools.tools.find((t) => t.name === 'configure');
-    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'codex', 'commit', 'effort', 'model', 'runnerCommand', 'runnerKind', 'sandbox']);
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'codex', 'commit', 'dataDir', 'effort', 'model', 'opencode', 'permission', 'runnerCommand', 'runnerKind', 'sandbox']);
     const codexArg = (configure?.inputSchema as { properties: Record<string, { anyOf?: Array<{ properties?: Record<string, unknown> }>; properties?: Record<string, unknown> }> }).properties['codex'];
     expect(JSON.stringify(codexArg)).toContain('"model"');
     expect(JSON.stringify(codexArg)).toContain('"ultra"');
     const statusTool = tools.tools.find((t) => t.name === 'status');
     for (const word of ['runnerKind', 'runner', 'codex.sandbox', 'claimableByKind']) expect(statusTool?.description, word).toContain(word);
     const startTool = tools.tools.find((t) => t.name === 'start');
-    for (const word of ['claude-opus-5-5', 'gpt-6-astra', 'ultra', 'spawn when the runner kind is codex']) expect(JSON.stringify(startTool), word).toContain(word);
+    for (const word of ['claude-opus-5-5', 'gpt-6-astra', 'anthropic/claude-opus-5-5', 'ultra', 'spawn when the runner kind is codex or opencode', 'orchestrator-work --runner', 'permission', 'dataDir']) expect(JSON.stringify(startTool), word).toContain(word);
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);
@@ -254,6 +254,49 @@ describe('operator MCP server', () => {
     const pulled = await tool('start', { mode: 'pull' });
     expect(pulled).toMatchObject({ started: false, mode: 'pull' });
     expect(pulled['modeNote']).toMatch(/pull mode/);
+  }, 120_000);
+
+  // See specs/operator-control "Start arguments" and "Configuration route" (opencode). No graph is loaded: an opencode daemon in spawn would exec opencode.
+  it('defaults a plugin-started opencode run to spawn naming the opencode work loop, and takes the opencode leaves on configure', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    const started = await tool('start', { runnerKind: 'opencode', permission: 'allow', dataDir: 'launch' });
+    expect(started).toMatchObject({
+      status: 200,
+      started: true,
+      mode: 'spawn',
+      config: {
+        runnerKind: { value: 'opencode', source: 'argument' },
+        model: { value: 'anthropic/claude-opus-5-5', source: 'default' },
+        opencode: { permission: { value: 'allow', source: 'argument' }, dataDir: { value: 'launch', source: 'argument' }, commit: { value: 'agent', source: 'default' } },
+      },
+    });
+    expect(started['modeNote']).toMatch(/opencode.*spawn/);
+    expect(started['modeNote']).toContain('orchestrator-work --runner opencode');
+    // The opencode block sets its leaves whichever kind is in force; commit binds to the kind in force.
+    expect(await tool('configure', { opencode: { model: 'opencode/big-pickle' }, commit: 'daemon' })).toMatchObject({
+      status: 200,
+      config: { model: { value: 'opencode/big-pickle', source: 'argument' }, opencode: { model: { value: 'opencode/big-pickle', source: 'argument' }, commit: { value: 'daemon', source: 'argument' } }, claude: { commit: { value: 'agent', source: 'default' } } },
+    });
+    expect(await tool('configure', { permission: null })).toMatchObject({ status: 200, config: { opencode: { permission: { value: 'derived', source: 'default' } } } });
+    // ultra is codex-only: refused for an opencode effort with the kind named.
+    const refused = await client.callTool({ name: 'configure', arguments: { runnerKind: 'opencode', effort: 'ultra' } });
+    expect(refused.isError).toBe(true);
+    expect(parse(refused)).toMatchObject({ status: 400, key: 'effort', error: expect.stringContaining('opencode') });
+    // An opencode run switched to pull is warned about, naming the kind and its work loop.
+    const pulled = await tool('start', { mode: 'pull' });
+    expect(pulled).toMatchObject({ started: false, mode: 'pull' });
+    expect(pulled['modeNote']).toMatch(/runner kind opencode in pull mode/);
+    expect(pulled['modeNote']).toContain('orchestrator-work --runner opencode');
+    expect(modeNoteFor('claude-code', { mode: 'pull', started: true }, false)).toBeUndefined();
+    expect(defaultModeFor('opencode')).toBe('spawn');
+    expect(defaultModeFor('claude-code')).toBe('pull');
   }, 120_000);
 
   it('revives the daemon after an idle exit and refuses after a stop', async () => {

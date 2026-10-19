@@ -16,13 +16,15 @@ the workflow hands back: questions, reviews, and the end.
 - A graph must be loaded: call `start` and then `status`; if no graph is loaded, use the
   `import` skill first. `start` also returns the resolved configuration: report the check
   command, the integration branch, and the worker kind, model and effort (`config.runnerKind`,
-  `config.model`, `config.effort`; defaults `claude-opus-5-5` at `medium` for `claude-code`
-  and `gpt-6-astra` at `medium` for `codex`, changeable with `configure`, and overridable per
+  `config.model`, `config.effort`; defaults `claude-opus-5-5` at `medium` for `claude-code`,
+  `gpt-6-astra` at `medium` for `codex`, and `anthropic/claude-opus-5-5` at `medium` for
+  `opencode`, changeable with `configure`, and overridable per
   task by `runner`/`model`/`effort` in its payload or `runner:`/`model:`/`effort:` labels) with
   their sources in one line, for example "detected: npm test on main; workers claude-opus-5-5
   at medium (default)", or for a codex run "detected: npm test on main; workers codex
-  gpt-6-astra at medium (file); sandbox workspace-write, daemon commits" (no allow-list part
-  for codex), and when `needsConfig`
+  gpt-6-astra at medium (file); sandbox workspace-write, daemon commits", or for an opencode run
+  "detected: npm test on main; workers opencode anthropic/claude-opus-5-5 at medium (default);
+  permission derived, agent commits" (no allow-list part for codex or opencode), and when `needsConfig`
   names `checkCommand`, follow the run skill's section 1b (find the test command in
   `CLAUDE.md`, the README, or the root manifests and set it with `configure`, or ask the user)
   before running workers, since submitted work is held until it is set.
@@ -34,8 +36,9 @@ the workflow hands back: questions, reviews, and the end.
   `claude-code` launches (`runner: "claude-code"` on every claim). Codex launches (a run whose
   `config.runnerKind` is `codex`, or tasks with `runner: codex` or a `runner:codex` label) are
   worked only in `spawn` or `mixed` mode, where the daemon runs the Codex agents; in `pull`
-  they stay parked. When `status.claimableByKind["claude-code"]` is 0 and only codex launches
-  are parked, do not run the workflow; offer `start` with `mode: "spawn"` or `"mixed"` instead.
+  they stay parked. OpenCode launches are the same (their pull-mode workers come from
+  `orchestrator-work --runner opencode`). When `status.claimableByKind["claude-code"]` is 0 and
+  only codex or opencode launches are parked, do not run the workflow; offer `start` with `mode: "spawn"` or `"mixed"` instead.
 
 ## 2. Run the workflow
 
