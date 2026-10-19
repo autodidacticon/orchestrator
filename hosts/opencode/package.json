@@ -1,0 +1,7 @@
+{
+  "name": "orchestrator-opencode-host",
+  "private": true,
+  "dependencies": {
+    "@autodidacticon/orchestrator": "0.4.0"
+  }
+}

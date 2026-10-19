@@ -424,6 +424,10 @@ The daemon SHALL expose `POST /v1/attachments` with `{ id, pids }`, where `pids`
 - **WHEN** an attachment that holds no launch ends
 - **THEN** nothing is released and the attachment is removed
 
+#### Scenario: OpenCode session end by stdio close
+- **WHEN** an OpenCode session ends whose operator server holds an attachment with a claimed launch; OpenCode has no session end event, so no hook posts to `POST /v1/attachments/ended`
+- **THEN** OpenCode closes the server's stdio, the server posts the end of its own attachment with reason `sessionEnded`, and the next reconcile releases the launch with `keep` and `attempts` unchanged; were the server killed instead, its dead first pid ends the attachment at the next reconcile
+
 #### Scenario: Codex session end by ancestry
 - **WHEN** a Codex SessionEnd hook posts `{ pids, reason: "other" }`, where its second pid is the codex process and an attachment's chain is the operator server, its launcher, and that codex process
 - **THEN** the attachment is recorded as ended with reason `other`, and the next reconcile releases its launch with `keep` and `attempts` unchanged
