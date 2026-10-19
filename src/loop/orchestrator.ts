@@ -604,11 +604,18 @@ export class Orchestrator implements OrchestratorCore {
     const eff = this.effective();
     const mode = eff.config.runner.opencode.permission;
     if (mode === 'allow') return { mode };
+    return { mode, bashPatterns: [...new Set(['git *', ...bashPatterns(this.openCodeAllowedTools())])] };
+  }
+
+  /**
+   * The rules the OpenCode permission ruleset is derived from: the composed allow list, else (an opencode run composes none)
+   * the detected toolchain and the claude file rules. main.ts gives the OpenCode runner the same list, and a claim carries it.
+   */
+  openCodeAllowedTools(): string[] {
+    const eff = this.effective();
+    if (eff.allowedTools.value.length) return eff.allowedTools.value;
     const claude = eff.config.runner.claude;
-    const rules = eff.allowedTools.value.length
-      ? eff.allowedTools.value
-      : composeAllowedTools({ record: eff.toolchain, deriveTools: claude.deriveTools, fileRules: claude.allowedTools, argumentRules: eff.overrides.allowedTools ?? [] }).value;
-    return { mode, bashPatterns: [...new Set(['git *', ...bashPatterns(rules)])] };
+    return composeAllowedTools({ record: eff.toolchain, deriveTools: claude.deriveTools, fileRules: claude.allowedTools, argumentRules: eff.overrides.allowedTools ?? [] }).value;
   }
 
   agentEnv(launch: Launch): Record<string, string> {
@@ -1394,6 +1401,10 @@ export class Orchestrator implements OrchestratorCore {
       effort: launch.effort,
       // A codex worker loop composes the same `codex exec` as a spawned launch: the effective runner.codex keys, the long-poll ceiling, and the agent environment. See specs/pull-runner "Claim".
       ...(runnerOf(launch) === 'codex' ? { codex: { settings: this.effective().config.runner.codex, maxWaitMs: this.config.maxWaitMs, retryWindowMs: this.config.retryWindowMs, env: this.agentEnv(launch) } } : {}),
+      // An opencode loop likewise composes the same `opencode run` and per-launch config; `allowedTools` are the rules the derived permission ruleset comes from.
+      ...(runnerOf(launch) === 'opencode'
+        ? { opencode: { settings: this.effective().config.runner.opencode, allowedTools: this.openCodeAllowedTools(), maxWaitMs: this.config.maxWaitMs, retryWindowMs: this.config.retryWindowMs, env: this.agentEnv(launch) } }
+        : {}),
       ...(pending ? { pending } : {}),
     };
   }

@@ -41,8 +41,8 @@ const SUBSTITUTIONS: Array<[string, string]> = [
 /**
  * The blocks allowed to differ, each named by a phrase only the OpenCode block holds:
  * permissions instead of Codex approvals, the OpenCode tracker tool names, the opencode
- * toolchain line and kind lists, the per-server `timeout`, and the pull-mode offer (no
- * OpenCode work loop yet). The Codex edition does not name the opencode kind yet.
+ * toolchain line and kind lists, the per-server `timeout`, and the pull-mode offer (the work
+ * loop with `--runner opencode`). The Codex edition does not name the opencode kind yet.
  */
 const EDITION_BLOCKS: Record<string, string[]> = {
   import: [
@@ -52,9 +52,10 @@ const EDITION_BLOCKS: Record<string, string[]> = {
   ],
   run: [
     'OpenCode runs the operator tools without asking unless the `permission` block',
-    "`spawn` is the OpenCode host's default. There is no OpenCode work loop yet",
-    'the `orchestrator-work --runner opencode` loop a `modeNote` names is not available yet',
-    'and `opencode` launches need `spawn`',
+    "`spawn` is the OpenCode host's default. In pull mode the work loop (`orchestrator-work --runner opencode`",
+    'When the run holds `opencode` launches, also offer the work loop the `modeNote` names',
+    'work.mjs --runner opencode --workers <n>',
+    '(`--runner codex`, the default, for `codex` launches;',
     '`codex`, or `opencode`. All three kinds run headless under `spawn`',
     'For an `opencode` run name the permission and the commit policy',
     '`runner.opencode.*` (`model` as a `provider/model` id',

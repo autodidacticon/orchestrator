@@ -1,16 +1,17 @@
 #!/usr/bin/env node
-// Codex work loop: the Codex host's pull-mode worker, the counterpart of the Claude Code
-// work workflow. N loops in one process claim prepared codex launches over HTTP
-// (workerId <runTag>-<n>, runner "codex"), run `codex exec` in the claimed worktree with the
-// command a spawned launch gets (composeCodexCommand), post the summed usage after codex
-// exits, and claim again until the stop rule holds. See specs/host-integration "Codex work loop".
+// Work loop by runner kind: the pull-mode worker of the Codex and OpenCode hosts, the counterpart
+// of the Claude Code work workflow. N loops in one process claim prepared launches of one kind
+// over HTTP (workerId <runTag>-<n>, runner "codex" or "opencode"), run the agent CLI in the claimed
+// worktree with the command a spawned launch gets (composeCodexCommand or composeOpenCodeCommand),
+// post the summed usage after it exits, and claim again until the stop rule holds. A small adapter
+// per kind (ADAPTERS) holds everything that differs. See specs/host-integration "Work loop by runner kind".
 //
-//   orchestrator-work [--workers N] [--run-tag T] [--capacity C] [--url URL] [--repo DIR]
-//                     [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N]
+//   orchestrator-work [--runner codex|opencode] [--workers N] [--run-tag T] [--capacity C] [--url URL]
+//                     [--repo DIR] [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N]
 //
 // Dependency-light: node built-ins plus the orchestrator package this file ships in, found the
 // way bin/orchestrator.mjs finds it (a checkout, the host-local install, else npx at the pinned
-// version). Start it from a shell; a background process outliving a Codex turn is unverified.
+// version). Start it from a shell; a background process outliving an agent turn is unverified.
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -19,7 +20,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 
 export const PACKAGE_NAME = '@autodidacticon/orchestrator';
-const RUNNER = 'codex';
+export const RUNNER_KINDS = ['codex', 'opencode'];
+const DEFAULT_RUNNER = 'codex';
 const WAKE_KINDS = 'launch.claimable,launch.ended,launch.released';
 const hostDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -32,22 +34,24 @@ function readJson(file) {
 }
 
 /**
- * The package modules the loop needs, from the first source that applies: (a) a checkout or an
- * installed package (hosts/codex sits two levels below the package root): the built dist, or the
- * TypeScript source when this process runs under the tsx loader; (b) the host-local install.
+ * The package modules the loop needs for `kind`, from the first source that applies: (a) a checkout
+ * or an installed package (hosts/codex sits two levels below the package root): the built dist, or
+ * the TypeScript source when this process runs under the tsx loader; (b) the host-local install.
+ * `runner` is the kind's module (src/runner/<kind>); `codex` names it too for a codex loop.
  * Undefined when neither has them; the caller then re-runs itself through npx.
  */
-export function packageModules() {
+export function packageModules(kind = DEFAULT_RUNNER) {
   const roots = [];
   const root = path.resolve(hostDir, '..', '..');
   if (readJson(path.join(root, 'package.json'))?.name === PACKAGE_NAME) roots.push({ root, checkout: true });
   roots.push({ root: path.join(hostDir, 'node_modules', ...PACKAGE_NAME.split('/')), checkout: false });
   const underTsx = process.execArgv.some((a) => a.includes('tsx'));
+  const named = (runner, cli) => ({ runner, cli, ...(kind === 'codex' ? { codex: runner } : {}) });
   for (const { root: r, checkout } of roots) {
-    const ts = path.join(r, 'src', 'runner', 'codex.ts');
-    if (checkout && underTsx && existsSync(ts)) return { codex: ts, cli: path.join(r, 'src', 'operator', 'cli.ts') };
-    const js = path.join(r, 'dist', 'src', 'runner', 'codex.js');
-    if (existsSync(js)) return { codex: js, cli: path.join(r, 'dist', 'src', 'operator', 'cli.js') };
+    const ts = path.join(r, 'src', 'runner', `${kind}.ts`);
+    if (checkout && underTsx && existsSync(ts)) return named(ts, path.join(r, 'src', 'operator', 'cli.ts'));
+    const js = path.join(r, 'dist', 'src', 'runner', `${kind}.js`);
+    if (existsSync(js)) return named(js, path.join(r, 'dist', 'src', 'operator', 'cli.js'));
     const loader = path.join(r, 'node_modules', 'tsx', 'dist', 'loader.mjs');
     if (checkout && existsSync(ts) && existsSync(loader)) return { reexec: ['--import', loader] };
   }
@@ -65,6 +69,7 @@ export function parseWorkArgs(argv) {
   const { values } = parseArgs({
     args: argv,
     options: {
+      runner: { type: 'string', default: DEFAULT_RUNNER },
       workers: { type: 'string', default: '1' },
       'run-tag': { type: 'string' },
       capacity: { type: 'string' },
@@ -77,6 +82,7 @@ export function parseWorkArgs(argv) {
     },
     strict: true,
   });
+  if (!RUNNER_KINDS.includes(values.runner)) throw new Error(`--runner must be one of ${RUNNER_KINDS.join(', ')}; got ${values.runner}`);
   const requested = Math.max(1, Math.min(16, Number.parseInt(values.workers, 10) || 1));
   const capacity = values.capacity === undefined ? undefined : Number.parseInt(values.capacity, 10);
   // A loop beyond the daemon's capacity would only poll for a slot that is never filled.
@@ -84,8 +90,9 @@ export function parseWorkArgs(argv) {
   if (workers !== requested) log(`workers clamped from ${requested} to the run's capacity ${workers}`);
   return {
     help: values.help === true,
+    runner: values.runner,
     workers,
-    runTag: values['run-tag'] || `codex-${process.pid.toString(36)}`,
+    runTag: values['run-tag'] || `${values.runner}-${process.pid.toString(36)}`,
     url: values.url,
     repo: values.repo,
     idleExitMs: Math.max(0, Number(values['idle-exit-ms']) || 0),
@@ -96,28 +103,32 @@ export function parseWorkArgs(argv) {
 
 /**
  * The stop rule, read from GET /v1/status: the run finished or stalled; or nothing is claimable
- * for codex and no codex launch is live while questions or reviews wait on a human; or that
+ * for the kind and no launch of it is live while questions or reviews wait on a human; or that
  * quiet has lasted `idleExitMs` (a run whose remaining work is for another kind, or not yet
  * prepared). A paused run is never quiet.
  */
-export function stopVerdict(s, quietSinceMs, now, idleExitMs) {
+export function stopVerdict(s, quietSinceMs, now, idleExitMs, kind = DEFAULT_RUNNER) {
   if (s.finished === true) return { stop: true, why: 'the run is finished' };
   if (s.stalled === true) return { stop: true, why: 'the run is stalled' };
-  const claimable = Number(s.claimableByKind?.[RUNNER] ?? 0);
-  const live = (s.liveLaunches ?? []).some((l) => (l.runner ?? 'claude-code') === RUNNER);
+  const claimable = Number(s.claimableByKind?.[kind] ?? 0);
+  const live = (s.liveLaunches ?? []).some((l) => (l.runner ?? 'claude-code') === kind);
   const quiet = claimable === 0 && !live && s.paused !== true;
   if (!quiet) return { stop: false, quiet: false };
-  if ((s.openQuestions ?? []).length || (s.awaitingReview ?? []).length) return { stop: true, why: 'nothing is claimable for codex and the run waits on a human' };
-  if (quietSinceMs !== undefined && now - quietSinceMs >= idleExitMs) return { stop: true, why: `nothing claimable for codex for ${idleExitMs}ms` };
+  if ((s.openQuestions ?? []).length || (s.awaitingReview ?? []).length) return { stop: true, why: `nothing is claimable for ${kind} and the run waits on a human` };
+  if (quietSinceMs !== undefined && now - quietSinceMs >= idleExitMs) return { stop: true, why: `nothing claimable for ${kind} for ${idleExitMs}ms` };
   return { stop: false, quiet: true };
 }
 
-/** The text fed to codex on stdin: a short preamble (credentials, the 401 rule), then the brief. */
-export function workerPreamble(c, workerId) {
+/** The text fed to the agent on stdin: a short preamble (credentials, the 401 rule), then the brief. */
+export function workerPreamble(c, workerId, kind = DEFAULT_RUNNER) {
   const pending = c.pending;
+  const [who, tools] =
+    kind === 'opencode'
+      ? ['an OpenCode worker started by the orchestrator\'s work loop', 'the orchestrator MCP server\'s tools (orchestrator_heartbeat, orchestrator_report, orchestrator_block, orchestrator_inbox, orchestrator_log)']
+      : ["a Codex worker started by the orchestrator's Codex work loop", "the orchestrator MCP server's tools (heartbeat, report, block, inbox, log)"];
   return [
-    `You are a Codex worker started by the orchestrator's Codex work loop (worker ${workerId}). You hold claimed launch ${c.launchId} for task ${c.taskId}; work only in ${c.worktree}.`,
-    "Credentials: the orchestrator MCP server's tools (heartbeat, report, block, inbox, log) already carry this launch's identity and token. Use them for every report and question; do not call the HTTP API from a command.",
+    `You are ${who} (worker ${workerId}). You hold claimed launch ${c.launchId} for task ${c.taskId}; work only in ${c.worktree}.`,
+    `Credentials: ${tools} already carry this launch's identity and token. Use them for every report and question; do not call the HTTP API from a command.`,
     'If any orchestrator tool returns 401, your launch has been revoked: stop immediately.',
     'Never write a fallback report file, whatever the brief says about one: this launch has no process the orchestrator watches, so the file is never read. If a tool call fails because the orchestrator cannot be reached, retry it.',
     ...(pending
@@ -127,6 +138,47 @@ export function workerPreamble(c, workerId) {
     'The brief:',
     '',
   ].join('\n');
+}
+
+/**
+ * The per-kind adapter: `block(claim)` is the claim's settings block (undefined from an older daemon);
+ * `prepare(launch, block)` writes what the shim needs and returns the env additions for the CLI;
+ * `compose(launch, block, promptFile)` is the shell command; `started(text, failure)` says whether a
+ * turn began; `parseUsage` and `classifyFailure` read the combined output. Built from the kind's module.
+ */
+export function makeAdapter(kind, mod) {
+  if (kind === 'opencode') {
+    const { composeOpenCodeCommand, openCodeConfig, prepareOpenCodeLaunch, parseOpenCodeUsage, classifyOpenCodeFailure } = mod;
+    return {
+      kind,
+      label: 'opencode run',
+      block: (c) => c.opencode,
+      async prepare(launch, oc) {
+        const config = openCodeConfig(oc.settings, oc.allowedTools ?? [], oc.maxWaitMs);
+        // The MCP child inherits this environment, so the shim gets its identity from it; no env file.
+        return { ORCH_RETRY_WINDOW_MS: String(oc.retryWindowMs ?? 60_000), ...(await prepareOpenCodeLaunch(launch, oc.settings, config)) };
+      },
+      compose: (launch, oc, brief) => composeOpenCodeCommand(launch, { template: oc.settings.command, settings: oc.settings, brief }),
+      // No JSONL event at all means opencode never began a session (exitBeforeTurn, startupContended).
+      started: (_text, failure) => !failure || (failure.reason !== 'exitBeforeTurn' && failure.reason !== 'startupContended'),
+      parseUsage: parseOpenCodeUsage,
+      classifyFailure: classifyOpenCodeFailure,
+    };
+  }
+  const { composeCodexCommand, writeCodexShimEnv, parseCodexUsage, classifyCodexFailure } = mod;
+  return {
+    kind,
+    label: 'codex exec',
+    block: (c) => c.codex,
+    async prepare(launch, cx) {
+      await writeCodexShimEnv(launch, cx.env ?? {}, cx.retryWindowMs ?? 60_000);
+      return {};
+    },
+    compose: (launch, cx, brief) => composeCodexCommand(launch, { template: cx.settings.command, settings: cx.settings, maxWaitMs: cx.maxWaitMs, brief }),
+    started: (text) => text.includes('"turn.started"'),
+    parseUsage: parseCodexUsage,
+    classifyFailure: classifyCodexFailure,
+  };
 }
 
 export function makeClient(base, retryWindowMs = 60_000) {
@@ -166,7 +218,8 @@ function agentProcessEnv(agentEnv) {
 }
 
 export async function runWork(opts, mods) {
-  const { composeCodexCommand, writeCodexShimEnv, parseCodexUsage, classifyCodexFailure } = await import(pathToFileURL(mods.codex).href);
+  const kind = opts.runner ?? DEFAULT_RUNNER;
+  const adapter = makeAdapter(kind, await import(pathToFileURL(mods.runner ?? mods.codex).href));
   let base = opts.url ?? process.env.ORCH_URL;
   if (!base) {
     const { resolveUrl } = await import(pathToFileURL(mods.cli).href);
@@ -181,7 +234,7 @@ export async function runWork(opts, mods) {
   const onSignal = (sig) => {
     if (stopping) return;
     stopping = true;
-    log(`${sig}: stopping; live codex processes are terminated and their launches released with keep`);
+    log(`${sig}: stopping; live ${kind} processes are terminated and their launches released with keep`);
     for (const { child } of active.values()) {
       try {
         process.kill(-child.pid, 'SIGTERM');
@@ -205,31 +258,29 @@ export async function runWork(opts, mods) {
     log(`${c.taskId}: released (${reason}; keep ${keep}) -> ${r.status} ${r.body.outcome ?? r.body.reason ?? ''}`);
   }
 
-  /** One claimed launch: compose, run, post usage, hand back what codex did not report. 'started' | 'startFailed' | 'noReport'. */
+  /** One claimed launch: compose, run, post usage, hand back what the agent did not report. 'started' | 'startFailed' | 'contended' | 'noReport'. */
   async function work(workerId, c) {
-    const cx = c.codex;
-    if (!cx) {
-      await release(c, 'the daemon sent no codex settings with the claim (an older daemon)', false);
+    const blk = adapter.block(c);
+    if (!blk) {
+      await release(c, `the daemon sent no ${kind} settings with the claim (an older daemon)`, false);
       return 'startFailed';
     }
     const orchDir = path.join(c.worktree, '.orchestrator');
-    await writeCodexShimEnv({ worktree: c.worktree, launchId: c.launchId, token: c.token }, cx.env ?? {}, cx.retryWindowMs ?? 60_000);
+    const launch = { worktree: c.worktree, launchId: c.launchId, taskId: c.taskId, token: c.token, model: c.model, effort: c.effort };
+    const extraEnv = await adapter.prepare(launch, blk);
     const brief = await readFile(c.briefPath ?? path.join(orchDir, 'brief.md'), 'utf8').catch(() => '');
-    const promptFile = path.join(orchDir, 'codex-work-prompt.md');
-    await writeFile(promptFile, workerPreamble(c, workerId) + brief, 'utf8');
-    const cmd = composeCodexCommand(
-      { worktree: c.worktree, launchId: c.launchId, taskId: c.taskId, model: c.model, effort: c.effort },
-      { template: cx.settings.command, settings: cx.settings, maxWaitMs: cx.maxWaitMs, brief: promptFile },
-    );
-    const logFile = path.join(orchDir, 'codex-work.log');
+    const promptFile = path.join(orchDir, `${kind}-work-prompt.md`);
+    await writeFile(promptFile, workerPreamble(c, workerId, kind) + brief, 'utf8');
+    const cmd = adapter.compose(launch, blk, promptFile);
+    const logFile = path.join(orchDir, `${kind}-work.log`);
     const out = createWriteStream(logFile, { flags: 'a' });
     let text = '';
     let spawnError;
-    log(`${workerId}: ${c.taskId} (launch ${c.launchId.slice(0, 8)}) codex exec -m ${c.model ?? '(default)'}; log ${logFile}`);
+    log(`${workerId}: ${c.taskId} (launch ${c.launchId.slice(0, 8)}) ${adapter.label} -m ${c.model ?? '(default)'}; log ${logFile}`);
     const exit = await new Promise((resolve) => {
       let child;
       try {
-        child = spawn('/bin/sh', ['-c', `${cmd}\n# orch-launch:${c.launchId}`], { cwd: c.worktree, env: agentProcessEnv(cx.env), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+        child = spawn('/bin/sh', ['-c', `${cmd}\n# orch-launch:${c.launchId}`], { cwd: c.worktree, env: agentProcessEnv({ ...blk.env, ...extraEnv }), detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
       } catch (err) {
         spawnError = err;
         resolve({ code: null, signal: null });
@@ -251,31 +302,36 @@ export async function runWork(opts, mods) {
     active.delete(workerId);
     await new Promise((r) => out.end(r));
 
-    const usage = parseCodexUsage(text);
-    if (usage) {
-      const r = await http('POST', `/v1/launches/${c.launchId}/usage`, { workerId, usage: { tokens: usage.tokens, ...(c.model ? { model: c.model } : {}) } });
+    const usage = adapter.parseUsage(text);
+    if (usage?.tokens) {
+      // opencode reports a cost per step; codex reports none, and the daemon prices the tokens.
+      const cost = typeof usage.costUsd === 'number' && usage.costUsd > 0 ? { costUsd: usage.costUsd } : {};
+      const r = await http('POST', `/v1/launches/${c.launchId}/usage`, { workerId, usage: { tokens: usage.tokens, ...(c.model ? { model: c.model } : {}), ...cost } });
       if (r.status !== 200) log(`${c.taskId}: usage post -> ${r.status} ${r.body.reason ?? r.body.error ?? ''}`);
     }
-    const failure = spawnError ? { reason: 'exitBeforeTurn', detail: String(spawnError) } : classifyCodexFailure(text);
-    const startFailed = Boolean(spawnError) || exit.code === 127 || !text.includes('"turn.started"');
+    const failure = spawnError ? { reason: 'exitBeforeTurn', detail: String(spawnError) } : adapter.classifyFailure(text);
+    const startFailed = Boolean(spawnError) || exit.code === 127 || !adapter.started(text, failure);
     const held = await stillHeld(workerId, c);
-    log(`${workerId}: ${c.taskId} codex exited (code ${exit.code}${exit.signal ? `, ${exit.signal}` : ''})${failure ? ` ${failure.reason}${failure.detail ? `: ${failure.detail}` : ''}` : ''}${held ? '; no report' : ''}`);
+    log(`${workerId}: ${c.taskId} ${kind} exited (code ${exit.code}${exit.signal ? `, ${exit.signal}` : ''})${failure ? ` ${failure.reason}${failure.detail ? `: ${failure.detail}` : ''}` : ''}${held ? '; no report' : ''}`);
     if (!held) return 'started';
     if (stopping) {
-      await release(c, 'the Codex work loop was stopped', true);
+      await release(c, `the ${kind} work loop was stopped`, true);
       return 'started';
     }
     if (startFailed) {
       // Nothing ran: hand the launch back with whatever is on the branch so the next claim starts from it.
-      await release(c, `codex failed to start${failure ? `: ${failure.reason}${failure.detail ? ` (${failure.detail})` : ''}` : ''}`, true);
-      return 'startFailed';
+      // A startupContended death (another opencode held the shared database) is released the same way, for a relaunch at no cost.
+      await release(c, `${kind} failed to start${failure ? `: ${failure.reason}${failure.detail ? ` (${failure.detail})` : ''}` : ''}`, true);
+      return failure?.reason === 'startupContended' ? 'contended' : 'startFailed';
     }
-    await release(c, `codex exited without a report${failure ? `: ${failure.reason}` : ''}`, false);
+    await release(c, `${kind} exited without a report${failure ? `: ${failure.reason}` : ''}`, false);
     return 'noReport';
   }
 
   async function loop(n) {
     const workerId = `${opts.runTag}-${n}`;
+    // Stagger the loops' first claims, so that agents sharing one data directory do not all start in the same instant.
+    if (n > 1) await sleep((n - 1) * 300);
     let errors = 0;
     while (!stopping) {
       try {
@@ -298,23 +354,26 @@ export async function runWork(opts, mods) {
   async function cycle(workerId) {
     const st = loopState.get(workerId) ?? { failures: 0, quietSince: undefined };
     loopState.set(workerId, st);
-    const c = await http('POST', '/v1/claims', { workerId, access: 'local', runner: RUNNER });
+    const c = await http('POST', '/v1/claims', { workerId, access: 'local', runner: kind });
     if (c.status === 200) {
       st.quietSince = undefined;
       const result = await work(workerId, c.body);
       outcomes.push({ worker: workerId, taskId: c.body.taskId, launchId: c.body.launchId, result });
+      // A contended start still counts, so a database that stays locked cannot spin the loop forever.
       st.failures = result === 'started' ? 0 : st.failures + 1;
       if (st.failures >= opts.maxFailures) {
-        log(`${workerId}: ${st.failures} launches in a row ended without codex running or reporting; this loop stops`);
+        log(`${workerId}: ${st.failures} launches in a row ended without ${kind} running or reporting; this loop stops`);
         return 'stop';
       }
+      // Back off a little after a contended start so the other agent's startup can finish.
+      if (result === 'contended') await sleep(500 + Math.floor(Math.random() * 1000));
       return 'continue';
     }
     if (c.status !== 404 && c.status !== 409) log(`${workerId}: claim -> ${c.status} ${JSON.stringify(c.body).slice(0, 200)}`);
     const s = await http('GET', '/v1/status');
     if (s.status === 200) {
       const now = Date.now();
-      const v = stopVerdict(s.body, st.quietSince, now, opts.idleExitMs);
+      const v = stopVerdict(s.body, st.quietSince, now, opts.idleExitMs, kind);
       if (v.stop) {
         log(`${workerId}: stops: ${v.why}`);
         return 'stop';
@@ -327,23 +386,30 @@ export async function runWork(opts, mods) {
     return 'continue';
   }
 
-  log(`${opts.workers} loop(s) as ${opts.runTag}-1..${opts.workers} against ${base}`);
+  log(`${opts.workers} ${kind} loop(s) as ${opts.runTag}-1..${opts.workers} against ${base}`);
   await Promise.all(Array.from({ length: opts.workers }, (_, i) => loop(i + 1)));
-  return { runTag: opts.runTag, workers: opts.workers, outcomes };
+  return { runTag: opts.runTag, runner: kind, workers: opts.workers, outcomes };
 }
 
-const USAGE = `usage: orchestrator-work [--workers N] [--run-tag T] [--capacity C] [--url URL] [--repo DIR]
-                         [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N]
-Claims codex launches from the orchestrator daemon and runs codex exec for each. The daemon is
+const USAGE = `usage: orchestrator-work [--runner <codex|opencode>] [--workers N] [--run-tag T] [--capacity C]
+                         [--url URL] [--repo DIR] [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N]
+Claims launches of one runner kind from the orchestrator daemon and runs the agent CLI for each:
+codex exec for --runner codex (the default), opencode run for --runner opencode. The daemon is
 found by --url, ORCH_URL, or the run directory of --repo (default: the current directory).\n`;
 
 async function main() {
-  const opts = parseWorkArgs(process.argv.slice(2));
+  let opts;
+  try {
+    opts = parseWorkArgs(process.argv.slice(2));
+  } catch (err) {
+    process.stderr.write(`orchestrator-work: ${err?.message ?? err}\n${USAGE}`);
+    process.exit(2);
+  }
   if (opts.help) {
     process.stdout.write(USAGE);
     return;
   }
-  const mods = packageModules();
+  const mods = packageModules(opts.runner);
   if (!mods || mods.reexec) {
     // No package modules beside this file: run the same executable from the pinned package, or this file under tsx.
     const version = readJson(path.join(hostDir, 'package.json'))?.dependencies?.[PACKAGE_NAME] ?? 'latest';

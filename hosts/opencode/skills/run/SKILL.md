@@ -21,9 +21,8 @@ user instead. If a call comes back rejected, tell the user to set `"orchestrator
 ## 1. Start
 
 This session has no subagents to work launches, so by default the daemon spawns the agents
-headless and you only monitor; `spawn` is the OpenCode host's default. There is no OpenCode
-work loop yet: in pull mode only the Codex work loop (`orchestrator-work`, below) works
-launches from a shell, and only `codex` ones. An
+headless and you only monitor; `spawn` is the OpenCode host's default. In pull mode the work
+loop (`orchestrator-work --runner opencode`, below) works `opencode` launches from a shell. An
 explicit `mode` overrides `runner.mode` in `orchestrator.yaml` and is applied to a daemon
 that is already running, so choose it before calling `start`:
 
@@ -43,20 +42,19 @@ no layer supplied), and `modeNote`. It is safe to repeat.
 When the mode in force is `pull` (or `mixed`), launches are parked for workers, and nothing
 progresses until a worker claims them or a `mixed` claim window ends. Say so and show
 `modeNote` when it is set. Then offer `start` with `mode: "spawn"`, unless another session is
-working the run. `opencode` launches are worked only under `spawn` (or once a `mixed` claim
-window ends): the `orchestrator-work --runner opencode` loop a `modeNote` names is not
-available yet. When the run holds `codex` launches, also offer the Codex work loop, which the
-user starts from a shell in the repository:
+working the run. When the run holds `opencode` launches, also offer the work loop the
+`modeNote` names, which the user starts from a shell in the repository:
 
-    node <hosts/codex>/bin/work.mjs --workers <n> --run-tag <tag> --capacity <config.capacity>
+    node <hosts/codex>/bin/work.mjs --runner opencode --workers <n> --run-tag <tag> --capacity <config.capacity>
 
-(`npx orchestrator-work ...` from an install of the package.) The loop claims only `codex`
-launches (`status.claimableByKind.codex`). For each one it runs `codex exec` with the command
-a spawned launch gets, then posts the usage. It stops when the run is finished or stalled, or
-when nothing is claimable for codex while a question or review waits. Do not start it from
-this session as a background command: nobody has verified that such a process outlives the
-turn. `claude-code` launches still need `spawn` or a Claude Code session, and `opencode`
-launches need `spawn`. While the loop
+(`--runner codex`, the default, for `codex` launches; `npx orchestrator-work ...` from an
+install of a package release that has `--runner`.) Each loop claims only launches of its kind
+(`status.claimableByKind.opencode` or `.codex`). For each one it runs `opencode run` (or
+`codex exec`) with the command and per-launch config a spawned launch gets, then posts the
+usage. It stops when the run is finished or stalled, or when nothing is claimable for its kind
+while a question or review waits. Do not start it from this session as a background command:
+nobody has verified that such a process outlives the turn. `claude-code` launches still need
+`spawn` or a Claude Code session. While the loop
 runs, monitor as usual; its workers show in `status.workers` as `<tag>-<n>`. After you answer
 a question, the user restarts the loop if it stopped.
 

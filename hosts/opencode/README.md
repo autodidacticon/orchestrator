@@ -90,12 +90,37 @@ the two editions to exactly those differences.
 An OpenCode session has no subagents the orchestrator can drive, so there is no work workflow
 and no `work` skill. A fresh run is started with `mode: "spawn"` (unless `orchestrator.yaml`
 sets `runner.mode`), and the daemon runs the agents headless while the session monitors. A
-running daemon is started without `mode`, which leaves its mode alone. There is no OpenCode
-work loop yet: a `pull` or `mixed` run's `opencode` launches are worked only after `start`
-with `mode: "spawn"`, though the Codex work loop (`hosts/codex/README.md`) still works its
-`codex` launches. The test command is looked up in `AGENTS.md`, with `CLAUDE.md` as the
-fallback when a repository has no `AGENTS.md`. The toolchain line always names the runner
-kind.
+running daemon is started without `mode`, which leaves its mode alone. A `pull` or `mixed`
+run's `opencode` launches are worked by the work loop (below). The test command is looked up
+in `AGENTS.md`, with `CLAUDE.md` as the fallback when a repository has no `AGENTS.md`. The
+toolchain line always names the runner kind.
+
+### Pull mode: the work loop
+
+`hosts/codex/bin/work.mjs` (the package executable `orchestrator-work`) is the work loop of
+both hosts. With `--runner opencode` it claims only `opencode` launches. Start it from a shell
+in the repository:
+
+```sh
+node /path/to/orchestrator/hosts/codex/bin/work.mjs --runner opencode --workers 2 --run-tag oc --capacity <config.capacity>
+```
+
+From an install of a package release that has `--runner`:
+`npx orchestrator-work --runner opencode --workers 2`. Release 0.4.0 has no `--runner`; it
+rejects the flag. Each loop claims a launch (`runner: "opencode"`), writes
+`.orchestrator/opencode.json`, and runs the same `opencode run ... < <prompt>` a spawned launch
+gets, with the claim's per-launch config in `OPENCODE_CONFIG_CONTENT`. That config holds the
+shim and the permission ruleset derived from the claim's `allowedTools`. The prompt is a short
+preamble and then the brief. The shim reads the launch's identity from the environment
+(`ORCH_API`, `ORCH_LAUNCH_ID`, `ORCH_TOKEN`), so no env file is written. After opencode exits,
+the loop posts the usage summed over `step_finish` events as worker usage.
+
+When `runner.opencode.dataDir` is `shared`, concurrent starts can find the database locked.
+The loop names such a start `startupContended`, releases it with `keep: true` (the task goes
+back to `unstarted` at no cost), backs off briefly, and claims again. It also staggers its
+loops' first claims by 300 ms. `dataDir: launch` removes the lock, but each launch then needs
+its own login. Like the Codex loop, starting it as a background command of an OpenCode
+session is unverified.
 
 ## 3. Session plugin (optional)
 
