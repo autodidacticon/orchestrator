@@ -3,11 +3,19 @@
  * The brief is standalone: a person could perform the task from it alone.
  */
 import type { BriefInput, BriefRunner } from '../workspace/workspace.js';
+import { existsSync } from 'node:fs';
+import path from 'node:path';
 import { checkCommandPatterns } from '../runner/opencode.js';
 
 export interface ComposeOptions {
   fallbackPath: string;
+  /** Whether the repository has an `openspec/` root; absent: whether `<worktree>/openspec` exists. See specs/agent-protocol "Standalone brief". */
+  openspec?: boolean;
 }
+
+/** The definition-of-done item of a brief for a repository with an `openspec/` root. */
+export const OPENSPEC_CHANGE_RULE =
+  '- Record any spec change as an OpenSpec change directory `openspec/changes/<name>/` named after the task (use the name the task gives, if any): `proposal.md`, `tasks.md`, and `specs/<capability>/spec.md` delta files with `## ADDED|MODIFIED|REMOVED Requirements` sections holding full `### Requirement:` blocks, validated with `openspec validate <name>`. Do not edit `openspec/specs/` directly; the operator archives the change after review.';
 
 export interface BriefJson {
   launchId: string;
@@ -97,6 +105,8 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     input.checkCommand
       ? `- Run the check command before submitting: \`${input.checkCommand}\`.`
       : '- No check command is configured for this repository yet; the operator is being asked. Run the project\'s documented test suite before submitting.',
+    // Workers that edited openspec/specs directly lost the per-change record and collided on the main spec files (ORC-74).
+    ...((opts.openspec ?? existsSync(path.join(launch.worktree, 'openspec'))) ? [OPENSPEC_CHANGE_RULE] : []),
     '- If the task needs no changes, say so explicitly with `noChanges: { justification }` in your report.',
     '- Your report must give evidence for every acceptance criterion above: one `acceptance` entry per criterion, whose `criterion` quotes the criterion text (markdown and case do not matter) or gives its number.',
     '- Terminate as soon as your report is accepted.',

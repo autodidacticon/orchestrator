@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { StaticRemediator } from '../../src/brief/remediate.js';
 import { SlotValidator, slotValue } from '../../src/brief/template.js';
-import { composeBrief } from '../../src/brief/compose.js';
+import { composeBrief, OPENSPEC_CHANGE_RULE } from '../../src/brief/compose.js';
 import { parseGraph } from '../../src/graph/load.js';
 import { makeHarness, type Harness } from './harness.js';
 import { Orchestrator } from '../../src/loop/orchestrator.js';
 import { BASE_RULES } from '../../src/toolchain/tools.js';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -268,6 +269,33 @@ describe('golden briefs per kind', () => {
     const retry = compose({ carry: { priorFailure: { detail: { runnerFailure: { reason: 'permissionDenied' } } } }, runner: { kind: 'opencode', commitPolicy: 'agent', permission: { mode: 'derived' } } });
     expect(retry).toContain('(model, login, MCP setup, permission rules)');
     expect(retry).not.toMatch(/sandbox/i);
+  });
+
+  // Detected from `<worktree>/openspec` unless the option says; `/w` has none, so the other goldens carry no rule.
+  it('a brief for a repository with an openspec root carries the change-directory rule in its Definition of done', () => {
+    const claude = { allowedTools: ['Bash(git:*)', 'Bash(npm test:*)', 'Bash(git status)'], runner: { kind: 'claude-code' as const, commitPolicy: 'agent' as const } };
+    const md = composeBrief({ ...base, ...claude }, { fallbackPath: '/w/.orchestrator/report.json', openspec: true }).markdown;
+    expect(md).toBe(golden('claude-code-openspec'));
+    const done = md.split('## Definition of done\n')[1]!.split('\n## ')[0]!;
+    expect(done).toContain(OPENSPEC_CHANGE_RULE);
+    expect(done).toContain('`openspec validate <name>`');
+    expect(done).toContain('Do not edit `openspec/specs/` directly');
+    expect(composeBrief({ ...base, ...claude }, { fallbackPath: '/w/.orchestrator/report.json', openspec: false }).markdown).toBe(golden('claude-code'));
+    for (const runner of [{ kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write' }, { kind: 'opencode', commitPolicy: 'agent', permission: { mode: 'allow' } }] as const)
+      expect(composeBrief({ ...base, runner }, { fallbackPath: '/x', openspec: true }).markdown, runner.kind).toContain(OPENSPEC_CHANGE_RULE);
+    for (const g of ['claude-code', 'codex', 'opencode-derived', 'opencode-allow']) expect(golden(g), g).not.toContain('openspec');
+  });
+
+  it('detects the openspec root in the worktree', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'brief-openspec-'));
+    try {
+      const at = (worktree: string) => composeBrief({ ...base, launch: { ...base.launch, worktree } }, { fallbackPath: '/x' }).markdown;
+      expect(at(dir)).not.toContain(OPENSPEC_CHANGE_RULE);
+      mkdirSync(path.join(dir, 'openspec'));
+      expect(at(dir)).toContain(OPENSPEC_CHANGE_RULE);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('an opencode brief under allow says every command is allowed and lists no patterns', () => {

@@ -91,7 +91,12 @@ One record per issue you fetched, including the root:
   "Scope" (configurable with `options.scopeHeading`) lists the path globs the task's work
   stays within, one per bullet, such as `src/api/**` or `package.json`; the orchestrator
   never runs two tasks with overlapping scopes at the same time. Leave it out when the
-  issue does not say.
+  issue does not say. In a repository with an `openspec/` root, a task that changes a spec
+  records it in an OpenSpec change directory named after the task, never in
+  `openspec/specs` (the brief tells the worker so), so its Scope lists
+  `openspec/changes/<name>/**`, not `openspec/specs/<capability>/spec.md`. When you write
+  or suggest an issue's Scope, use the change directory; when an issue's Scope lists a file
+  under `openspec/specs/`, tell the user and suggest the change directory instead.
 - `priority` is a number where a lower number is more urgent; the orchestrator uses it to
   break ties between ready tasks with equally long chains behind them. Linear: send the
   issue's `priority` field as is (its 0, meaning none, is dropped). Jira: send the position
