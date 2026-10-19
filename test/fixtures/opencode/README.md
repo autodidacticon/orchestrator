@@ -94,7 +94,9 @@ Feasibility probes for an `opencode` runner kind. Facts the orchestrator would r
 
 ## Redaction
 These files were redacted once, before they were saved, and are byte copies of the redacted output from then on: scratch paths are
-replaced by `<scratch>`, the home directory by `~`, and GitLab model ids by `duo-chat-<model>`. Tests read them in place and edit none of them.
+replaced by `<scratch>`, the home directory by `~`, and GitLab model ids by `duo-chat-<model>`. The e2e recorder (`redactFixture` in
+test/e2e/opencode.test.ts) also replaces the name of a git `Author:` line by `Fixture Author` and every email address by
+`author@example.invalid`; e2e-T1.jsonl was given that redaction after it was recorded (ORC-69). Tests read them in place and edit none of them.
 
 ## Files and the tests that read them
 - events/F1-ask.jsonl: test/health/usage.test.ts (`parseOpenCodeUsage`: cache reads folded into input; `OpenCodeRunner.readUsage`).

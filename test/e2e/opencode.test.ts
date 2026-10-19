@@ -195,16 +195,25 @@ function responder(run: Run, opts: { delayed?: { id: string; text: string; delay
   };
 }
 
-/** Each task's first launch's events, with scratch paths and the home directory redacted the way the fixtures README describes. */
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g;
+// The name of a git `Author: <name> <<email>>` line (git show, git log), up to the address or the end of the JSON-escaped line.
+const AUTHOR_NAME = /Author: (?:[^<"\\\n]*[^<"\\\n ])?/g;
+
+/** The redaction the fixtures README describes: scratch paths, the home directory, git author names and every email address. */
+function redactFixture(text: string, scratch: string[], home: string): string {
+  for (const s of [...scratch].sort((a, b) => b.length - a.length)) text = text.split(s).join('<scratch>');
+  text = text.split(home).join('~');
+  return text.replace(AUTHOR_NAME, 'Author: Fixture Author').replace(EMAIL, 'author@example.invalid');
+}
+
+/** Each task's first launch's events, redacted by `redactFixture`. */
 function recordFixtures(run: Run, name: string): void {
-  const scratch = [run.dir, run.dir.replace(/^\/private\//, '/')].sort((a, b) => b.length - a.length);
+  const scratch = [run.dir, run.dir.replace(/^\/private\//, '/')];
   const seen = new Set<string>();
   for (const l of run.h.store.listLaunches()) {
     if (seen.has(l.taskId)) continue;
     seen.add(l.taskId);
-    let text = run.logOf(l).split('\n').filter((line) => line.trim().startsWith('{')).join('\n');
-    for (const s of scratch) text = text.split(s).join('<scratch>');
-    text = text.split(homedir()).join('~');
+    const text = redactFixture(run.logOf(l).split('\n').filter((line) => line.trim().startsWith('{')).join('\n'), scratch, homedir());
     const file = path.join(fixtures, name === 'graph' ? `e2e-${l.taskId}.jsonl` : `e2e-${name}-${l.taskId}.jsonl`);
     writeFileSync(file, text + '\n');
     console.log('recorded', file);
@@ -259,6 +268,16 @@ async function finish(run: Run, name: string, passed: boolean): Promise<void> {
   await h.cleanup();
   rmSync(run.dir, { recursive: true, force: true });
 }
+
+// Runs without opencode: the recorder's redaction on a `git show --stat HEAD` result the way e2e-T1.jsonl holds one (JSON-escaped).
+describe('e2e fixture redaction', () => {
+  it('replaces scratch paths, the home directory, the git author name and every email address', () => {
+    const line = JSON.stringify({ output: 'commit 0a1b\nAuthor: Jane Q. Doe <jane.doe+git@mail.example.com>\nDate:   Sun Oct 18\n\n    Add hello\n\n    Co-Authored-By: Bot <noreply@anthropic.com>\n', workdir: '/private/tmp/orch-x/repo', home: '/Users/jane/.config' });
+    const out = redactFixture(line, ['/tmp/orch-x', '/private/tmp/orch-x'], '/Users/jane');
+    expect(JSON.parse(out)).toEqual({ output: 'commit 0a1b\nAuthor: Fixture Author <author@example.invalid>\nDate:   Sun Oct 18\n\n    Add hello\n\n    Co-Authored-By: Bot <author@example.invalid>\n', workdir: '<scratch>/repo', home: '~/.config' });
+    expect(out).not.toMatch(/Jane|jane|mail\.example\.com|anthropic/);
+  });
+});
 
 describe.skipIf(!hasOpencode)('e2e with OpenCode on the free model', () => {
   it.concurrent('three tasks and a long-blocking question at capacity 2 are published by opencode workers with tokens and cost recorded', async () => {
