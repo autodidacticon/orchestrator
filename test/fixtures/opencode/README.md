@@ -54,3 +54,17 @@ Feasibility probes for an `opencode` runner kind. Facts the orchestrator would r
   same thing: heartbeat with progress, one `block` of kind needsDecision asking for the file name (waited the 70 s), file created with the answered
   name and content, `git add`/`git commit` on the launch branch, heartbeat, `report` kind submit with three acceptance entries, exit 0 in 104-121 s.
   No curl or direct API use; no tool other than bash and the five shim tools.
+
+## Redaction
+These files were redacted once, before they were saved, and are byte copies of the redacted output from then on: scratch paths are
+replaced by `<scratch>`, the home directory by `~`, and GitLab model ids by `duo-chat-<model>`. Tests read them in place and edit none of them.
+
+## Files and the tests that read them
+- events/F1-ask.jsonl: test/health/usage.test.ts (`parseOpenCodeUsage`: cache reads folded into input; `OpenCodeRunner.readUsage`).
+- events/F1-ask.err: test/health/usage.test.ts (stderr interleaved with the events is skipped).
+- events/SA-proj2.jsonl: test/health/usage.test.ts (every step summed, `turns` = the `reason: "stop"` steps; the log cut before the first
+  `step_finish` yields no usage).
+- events/K2.err: test/health/usage.test.ts (stderr alone yields no usage).
+- events/T1-T4.jsonl, configs/cfg-slow-perserver.json: the source of the `mcp.orchestrator.timeout` decision tested in test/runner/opencode.test.ts
+  (`maxWaitMs + 60000`, never `mcp.timeout`); not read by a test.
+- The other files are evidence only, for the facts above; the failure classifier's tests ship with the diagnosis issue.

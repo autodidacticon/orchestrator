@@ -18,8 +18,10 @@ import { Orchestrator } from './loop/orchestrator.js';
 import { registerOperatorRoutes } from './operator/routes.js';
 import { ClaudeCodeRunner } from './runner/claude-code.js';
 import { CodexRunner } from './runner/codex.js';
-import { DEFAULT_CODEX_COMMAND } from './runner/command.js';
+import { DEFAULT_CODEX_COMMAND, DEFAULT_OPENCODE_COMMAND } from './runner/command.js';
 import { MultiRunner } from './runner/multi.js';
+import { OpenCodeRunner } from './runner/opencode.js';
+import { composeAllowedTools } from './toolchain/tools.js';
 import { SqliteStore } from './state/sqlite.js';
 import { GitVerifierBackend } from './verify/verifier.js';
 import { DAEMON_PID, ensureRunDir, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
@@ -174,6 +176,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     codex: new CodexRunner({
       command: () => orch.effective().config.runner.codex.command ?? DEFAULT_CODEX_COMMAND,
       settings: () => orch.effective().config.runner.codex,
+      maxWaitMs: config.maxWaitMs,
+      logDir: path.join(config.dataDir, 'logs'),
+      retryWindowMs: config.retryWindowMs,
+    }),
+    // The permission ruleset is derived from the composed allow list; under an opencode run, where none is composed, from the detected toolchain and the claude file rules. See specs/toolchain-discovery "Derived allowed tools".
+    opencode: new OpenCodeRunner({
+      command: () => orch.effective().config.runner.opencode.command ?? DEFAULT_OPENCODE_COMMAND,
+      settings: () => orch.effective().config.runner.opencode,
+      allowedTools: () => {
+        const eff = orch.effective();
+        if (eff.allowedTools.value.length) return eff.allowedTools.value;
+        const claude = eff.config.runner.claude;
+        return composeAllowedTools({ record: eff.toolchain, deriveTools: claude.deriveTools, fileRules: claude.allowedTools, argumentRules: eff.overrides.allowedTools ?? [] }).value;
+      },
       maxWaitMs: config.maxWaitMs,
       logDir: path.join(config.dataDir, 'logs'),
       retryWindowMs: config.retryWindowMs,

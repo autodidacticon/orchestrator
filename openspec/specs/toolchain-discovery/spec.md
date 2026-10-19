@@ -110,7 +110,7 @@ When neither an argument nor the file sets `integrationBranch`, the daemon SHALL
 - **THEN** the daemon starts on `develop` with source `file`, and the pin and `baselineHead` are re-recorded from `develop`
 
 ### Requirement: Derived allowed tools
-When the runner kind in force is `claude-code`, the daemon SHALL derive the allow list for the agents it spawns from the toolchains found in the repository root: the base rules `Bash(git:*)`, `mcp__orchestrator__heartbeat`, `mcp__orchestrator__report`, `mcp__orchestrator__block`, `mcp__orchestrator__inbox`, and `mcp__orchestrator__log` always; for a `node` toolchain with package manager `<pm>`, `Bash(<pm> test:*)`, `Bash(<pm> run:*)`, `Bash(<pm> install:*)`, `Bash(<pm> exec:*)`, `Bash(node:*)`, plus `Bash(npm ci:*)` and `Bash(npx:*)` for npm, `Bash(npx:*)` for pnpm and yarn, and `Bash(bunx:*)` for bun; for `rust`, `Bash(cargo:*)`; for `go`, `Bash(go:*)`; for `python`, `Bash(pytest:*)`, `Bash(python:*)`, `Bash(python3:*)`, `Bash(pip:*)`, plus `Bash(uv:*)` when `uv.lock` exists and `Bash(poetry:*)` when `poetry.lock` exists; for `make`, `Bash(make:*)`; for `ruby`, `Bash(bundle:*)`, `Bash(rake:*)`, `Bash(rspec:*)`, `Bash(ruby:*)`; for `gradle`, `Bash(./gradlew:*)` and `Bash(gradle:*)`; for `maven`, `Bash(mvn:*)` and `Bash(./mvnw:*)`; for `elixir`, `Bash(mix:*)` and `Bash(elixir:*)`; for `dotnet`, `Bash(dotnet:*)`. Rules from `runner.claude.allowedTools` in the file and from arguments SHALL be appended. `runner.claude.deriveTools: false` SHALL drop the toolchain rules and keep the base rules and the added ones. A rule containing a double quote, backslash, dollar sign, or backtick SHALL be rejected at configuration time. The list SHALL be passed as `--allowedTools`, which adds a source of approval beside the repository's own `.claude/settings.json` and `.claude/settings.local.json` rules and never replaces them; a deny rule in those files wins over the list, as Claude Code evaluates deny before allow at every level. The derived list SHALL apply only to launches the daemon spawns (`spawn` mode, and `mixed` mode once the claim window elapses); a launch a worker claims runs under the worker's own permissions and SHALL NOT be given the list. Allow-list composition is specific to `claude-code`: when the kind in force is `codex`, `config.allowedTools` SHALL be `{ value: [], source: "composed", applied: false }` with empty parts, and the Codex runner's own policies apply instead (see worker-runners). The plugin's default mode and the work workflow are decided by the sibling change `add-daemon-lifecycle`, not here.
+When the runner kind in force is `claude-code`, the daemon SHALL derive the allow list for the agents it spawns from the toolchains found in the repository root: the base rules `Bash(git:*)`, `mcp__orchestrator__heartbeat`, `mcp__orchestrator__report`, `mcp__orchestrator__block`, `mcp__orchestrator__inbox`, and `mcp__orchestrator__log` always; for a `node` toolchain with package manager `<pm>`, `Bash(<pm> test:*)`, `Bash(<pm> run:*)`, `Bash(<pm> install:*)`, `Bash(<pm> exec:*)`, `Bash(node:*)`, plus `Bash(npm ci:*)` and `Bash(npx:*)` for npm, `Bash(npx:*)` for pnpm and yarn, and `Bash(bunx:*)` for bun; for `rust`, `Bash(cargo:*)`; for `go`, `Bash(go:*)`; for `python`, `Bash(pytest:*)`, `Bash(python:*)`, `Bash(python3:*)`, `Bash(pip:*)`, plus `Bash(uv:*)` when `uv.lock` exists and `Bash(poetry:*)` when `poetry.lock` exists; for `make`, `Bash(make:*)`; for `ruby`, `Bash(bundle:*)`, `Bash(rake:*)`, `Bash(rspec:*)`, `Bash(ruby:*)`; for `gradle`, `Bash(./gradlew:*)` and `Bash(gradle:*)`; for `maven`, `Bash(mvn:*)` and `Bash(./mvnw:*)`; for `elixir`, `Bash(mix:*)` and `Bash(elixir:*)`; for `dotnet`, `Bash(dotnet:*)`. Rules from `runner.claude.allowedTools` in the file and from arguments SHALL be appended. `runner.claude.deriveTools: false` SHALL drop the toolchain rules and keep the base rules and the added ones. A rule containing a double quote, backslash, dollar sign, or backtick SHALL be rejected at configuration time. The list SHALL be passed as `--allowedTools`, which adds a source of approval beside the repository's own `.claude/settings.json` and `.claude/settings.local.json` rules and never replaces them; a deny rule in those files wins over the list, as Claude Code evaluates deny before allow at every level. The derived list SHALL apply only to launches the daemon spawns (`spawn` mode, and `mixed` mode once the claim window elapses); a launch a worker claims runs under the worker's own permissions and SHALL NOT be given the list. Allow-list composition is specific to `claude-code`: when the kind in force is `codex` or `opencode`, `config.allowedTools` SHALL be `{ value: [], source: "composed", applied: false }` with empty parts, and the runner's own policies apply instead (see worker-runners). The derived `Bash(...)` rules SHALL also feed the OpenCode permission ruleset under `runner.opencode.permission: derived`: `Bash(x:*)` becomes the bash pattern `"x *"` and `Bash(x)` becomes `"x"` (see worker-runners "OpenCode runner command composition"). The plugin's default mode and the work workflow are decided by the sibling change `add-daemon-lifecycle`, not here.
 
 #### Scenario: Node rules derived
 - **WHEN** the repository has `package.json` with a test script and no lockfile
@@ -140,6 +140,10 @@ When the runner kind in force is `claude-code`, the daemon SHALL derive the allo
 - **WHEN** the file sets `runner.kind: codex` in a Node repository
 - **THEN** `config.allowedTools` has `value: []`, empty parts, and `applied: false`
 
+#### Scenario: Derived rules as OpenCode bash patterns
+- **WHEN** an opencode launch is spawned with the derived rules `Bash(git:*)`, `Bash(npm test:*)`, and `Bash(git status)` under `permission: derived`
+- **THEN** its permission ruleset allows the bash patterns `git *`, `npm test *`, and `git status`
+
 ### Requirement: Runner command composition
 Each runner kind SHALL have one command template with its own slots.
 
@@ -149,6 +153,8 @@ Each runner kind SHALL have one command template with its own slots.
 - the existing `{brief}`, `{worktree}`, `{launchId}`, and `{mcpConfig}`.
 
 `DEFAULT_CODEX_COMMAND` SHALL carry `{model}`, `{effort}`, `{sandbox}`, `{ephemeral}`, `{ignoreUserConfig}`, and `{codexOverrides}` and no `{allowedTools}` (see worker-runners "Codex runner command composition"). The Codex runner SHALL fill these slots at every spawn alongside the common ones.
+
+`DEFAULT_OPENCODE_COMMAND` SHALL carry `{pure}`, `{model}`, and `{variant}` (which carries the effort as `--variant <effort>`) and no `{allowedTools}`; its permissions travel in the per-launch config instead (see worker-runners "OpenCode runner command composition"). `hasEffortSlot` SHALL recognise `{effort}` or `{variant}`.
 
 A runner with slots of its own SHALL compose the whole command through the subprocess runner's `compose` hook (the Codex runner's `composeCodexCommand`, shared with the Codex work loop); the subprocess runner itself substitutes only the common slots and the allow list. Substitution SHALL be one pass over the template with `\{(\w+)\}`, so a substituted value, such as a TOML inline table, is never re-substituted.
 
@@ -162,6 +168,10 @@ The composed command SHALL be read at spawn time, so a change to the list or the
 
 #### Scenario: Codex template filled
 - **WHEN** `DEFAULT_CODEX_COMMAND` is filled for a launch
+- **THEN** no `{…}` slot remains, and `hasModelSlot` and `hasEffortSlot` are true while `hasAllowedToolsSlot` is false
+
+#### Scenario: OpenCode template filled
+- **WHEN** `DEFAULT_OPENCODE_COMMAND` is filled for a launch
 - **THEN** no `{…}` slot remains, and `hasModelSlot` and `hasEffortSlot` are true while `hasAllowedToolsSlot` is false
 
 #### Scenario: Verbatim command without the slot

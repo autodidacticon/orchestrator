@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeCodeRunner, parseUsage } from '../../src/runner/claude-code.js';
 import { CodexRunner, parseCodexUsage } from '../../src/runner/codex.js';
+import { OpenCodeRunner, parseOpenCodeUsage } from '../../src/runner/opencode.js';
 import { logPath } from '../../src/runner/subprocess.js';
 import type { Launch } from '../../src/state/store.js';
 
@@ -88,6 +89,61 @@ describe('Codex usage parser', () => {
       expect(await runner.readUsage(launch)).toBeUndefined();
       writeFileSync(logPath(dir, 'L9'), `${fixture('git-err.txt')}${fixture('git-events.jsonl')}`);
       expect(await runner.readUsage(launch)).toEqual(expected);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+const opencodeEvents = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/opencode/events');
+const opencodeFixture = (f: string) => readFileSync(path.join(opencodeEvents, f), 'utf8');
+
+// See specs/worker-runners "OpenCode usage parsing". The fixtures are the probe evidence, read in place.
+describe('OpenCode usage parser', () => {
+  it('folds cache reads into input over F1-ask.jsonl', () => {
+    expect(parseOpenCodeUsage(opencodeFixture('F1-ask.jsonl'))).toEqual({
+      tokens: { input: 14533, cachedInput: 10240, cacheWriteInput: 0, output: 25, reasoningOutput: 17 },
+      costUsd: 0,
+      turns: 0,
+      source: 'opencode',
+    });
+  });
+
+  it('sums every step of SA-proj2.jsonl and counts the reason "stop" steps as turns', () => {
+    const usage = parseOpenCodeUsage(opencodeFixture('SA-proj2.jsonl'));
+    // Six steps: input 8481+77+123+158+62+156, cache reads 6144+3*14592+2*14720; one ends with reason "stop".
+    expect(usage).toEqual({
+      tokens: { input: 9057 + 79360, cachedInput: 79360, cacheWriteInput: 0, output: 76, reasoningOutput: 66 },
+      costUsd: 0,
+      turns: 1,
+      source: 'opencode',
+    });
+    expect(usage).not.toHaveProperty('durationMs');
+  });
+
+  it('skips stderr lines interleaved with the events', () => {
+    const log = `${opencodeFixture('F1-ask.err')}${opencodeFixture('F1-ask.jsonl')}`;
+    expect(parseOpenCodeUsage(log)?.tokens?.input).toBe(14533);
+  });
+
+  it('yields nothing for a Codex log, a log cut before any step_finish, or stderr alone', () => {
+    expect(parseOpenCodeUsage(fixture('git-events.jsonl'))).toBeUndefined();
+    const lines = opencodeFixture('SA-proj2.jsonl').split('\n');
+    const cut = lines.slice(0, lines.findIndex((l) => l.includes('"step_finish"'))).join('\n');
+    expect(cut).toContain('step_start');
+    expect(parseOpenCodeUsage(cut)).toBeUndefined();
+    expect(parseOpenCodeUsage(opencodeFixture('K2.err'))).toBeUndefined();
+    expect(parseOpenCodeUsage('')).toBeUndefined();
+  });
+
+  it('OpenCodeRunner.readUsage reads the launch log', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-usage-'));
+    try {
+      const runner = new OpenCodeRunner({ command: 'true', logDir: dir, retryWindowMs: 1000, maxWaitMs: 60_000, settings: () => ({ permission: 'derived', dataDir: 'shared', ignoreUserConfig: false, pure: true, snapshots: false }) });
+      const launch = { launchId: 'L8', taskId: 'T1', attempt: 1, launchNo: 1, status: 'ended', token: 't', branch: 'b', worktree: dir, baseSha: 's', graphRev: 'r', createdAt: 1, runner: 'opencode' } as Launch;
+      expect(await runner.readUsage(launch)).toBeUndefined();
+      writeFileSync(logPath(dir, 'L8'), opencodeFixture('F1-ask.jsonl'));
+      expect((await runner.readUsage(launch))?.source).toBe('opencode');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

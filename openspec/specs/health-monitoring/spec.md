@@ -88,13 +88,14 @@ Config `budgets.maxLaunchMs` (default two hours) SHALL be disabled when 0. `elap
 Usage SHALL have two sources, and the launch row and `launch.usage` SHALL name the source as `source`/`usageSource`. When a spawned launch is observed dead or is ended, the daemon SHALL ask the runner named on the launch row for the launch's usage. Each runner SHALL read its own log format:
 - The Claude Code runner SHALL parse the last JSON object in the launch log for `total_cost_usd`, `duration_ms`, `num_turns`, and the `usage` object's `input_tokens`, `output_tokens`, `cache_read_input_tokens`, and `cache_creation_input_tokens`.
 - The Codex runner SHALL sum the `usage` of every `turn.completed` line, as worker-runners "Codex usage parsing" states, and SHALL report no cost, turns, or duration.
+- The OpenCode runner SHALL sum every `step_finish` line, as worker-runners "OpenCode usage parsing" states: cache reads folded into `input` as for Claude, the cost read from the stream as `costUsd`, `turns` the steps that ended with `reason: "stop"`, and no duration.
 - The scripted and in-process runners SHALL yield no usage unless scripted.
 
 A log without usage SHALL yield no usage.
 
 A claimed launch has no pid and no log, so it SHALL yield no runner usage, and the daemon SHALL NOT ask the runner for it. Its usage SHALL come only from its worker through `POST /v1/launches/:id/usage` (pull-runner "Worker usage"), stored with `source: 'worker'` through the same path, guard, and pricing as runner usage. Because launches with a pid are refused there, the two sources never apply to the same launch. Self-reported usage is not authoritative.
 
-Usage SHALL carry `tokens` as `{ input, cachedInput?, cacheWriteInput?, output, reasoningOutput? }` in the same shape for every runner, and `source` naming the reader. `cachedInput` is counted inside `input`, so Claude's cache reads are added to its `input_tokens`.
+Usage SHALL carry `tokens` as `{ input, cachedInput?, cacheWriteInput?, output, reasoningOutput? }` in the same shape for every runner, and `source` naming the reader. `cachedInput` is counted inside `input`, so Claude's cache reads are added to its `input_tokens`, and OpenCode's `cache.read` to its `tokens.input`. The sources are `claude-code`, `codex`, `opencode`, `scripted`, and `worker`.
 
 A usage with any of a cost, turns, a duration, or tokens SHALL be recorded, so a usage with only tokens is recorded. A usage with tokens and no cost SHALL be priced as "Run cost budget" states, per million tokens and rounded to 1e-6:
 - billable input `input - cachedInput` at `inputPerMTok`;
@@ -120,6 +121,10 @@ Token accounting does not change these grace mechanics: in every observed run, C
 #### Scenario: Codex log parsed
 - **WHEN** a codex launch's log holds `codex exec --json` output with stderr lines between them
 - **THEN** the usage read has the summed `turn.completed` tokens, `source` `codex`, and no cost, turns, or duration
+
+#### Scenario: OpenCode log parsed
+- **WHEN** an opencode launch's log holds `opencode run --format json` output with stderr lines between them
+- **THEN** the usage read has the summed `step_finish` tokens with cache reads inside `input`, the summed `cost` as `costUsd`, `source` `opencode`, and no duration
 
 #### Scenario: Usage with only tokens
 - **WHEN** a runner reports `tokens: { input: 40361, output: 260 }` and no cost, turns, or duration for T1

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ALLOWED_TOOLS_SLOT, DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND, hasAllowedToolsSlot, hasEffortSlot, hasModelSlot, quoteRules } from '../../src/runner/command.js';
+import { ALLOWED_TOOLS_SLOT, DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND, DEFAULT_OPENCODE_COMMAND, hasAllowedToolsSlot, hasEffortSlot, hasModelSlot, quoteRules } from '../../src/runner/command.js';
 import { SubprocessRunner, substitute } from '../../src/runner/subprocess.js';
 import type { Launch } from '../../src/state/store.js';
 import { detectToolchain } from '../../src/toolchain/detect.js';
@@ -75,5 +75,21 @@ describe('runner command composition', () => {
     const cmd = substitute(DEFAULT_CODEX_COMMAND, { worktree: '/wt', brief: '/wt/b.md', model: 'gpt-6-astra', effort: 'high', sandbox: 'workspace-write', ephemeral: '--ephemeral', ignoreUserConfig: '--ignore-user-config', codexOverrides: '-c x=1' });
     expect(cmd).toBe(`codex exec --json --ephemeral --ignore-user-config -C /wt -m gpt-6-astra -c model_reasoning_effort='"high"' -s workspace-write -c x=1 -o /wt/.orchestrator/last-message.txt - < /wt/b.md`);
     expect(cmd).not.toMatch(/\{\w+\}/);
+  });
+
+  // The third template: the effort travels in {variant}, the permissions in the per-launch config. See specs/worker-runners "OpenCode runner command composition".
+  it('fills the OpenCode template slots and has no allow-list slot', () => {
+    expect(hasAllowedToolsSlot(DEFAULT_OPENCODE_COMMAND)).toBe(false);
+    expect(DEFAULT_OPENCODE_COMMAND).not.toContain(ALLOWED_TOOLS_SLOT);
+    expect(hasModelSlot(DEFAULT_OPENCODE_COMMAND)).toBe(true);
+    expect(hasEffortSlot(DEFAULT_OPENCODE_COMMAND)).toBe(true);
+    const cmd = substitute(DEFAULT_OPENCODE_COMMAND, { brief: '/wt/b.md', model: 'opencode/big-pickle', pure: '--pure', variant: '--variant high' });
+    expect(cmd).toBe('opencode run --format json --pure --print-logs --log-level WARN -m opencode/big-pickle --variant high < /wt/b.md');
+    expect(cmd).not.toMatch(/\{\w+\}/);
+  });
+
+  it('every kind has its own template: only the Claude one carries the allow list', () => {
+    expect([DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND, DEFAULT_OPENCODE_COMMAND].map(hasAllowedToolsSlot)).toEqual([true, false, false]);
+    expect([DEFAULT_CLAUDE_COMMAND, DEFAULT_CODEX_COMMAND, DEFAULT_OPENCODE_COMMAND].every((t) => hasModelSlot(t) && hasEffortSlot(t))).toBe(true);
   });
 });

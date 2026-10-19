@@ -19,6 +19,17 @@ export const DEFAULT_CLAUDE_COMMAND = `claude -p --output-format json --mcp-conf
  */
 export const DEFAULT_CODEX_COMMAND = `codex exec --json {ephemeral} {ignoreUserConfig} -C {worktree} -m ${MODEL_SLOT} -c model_reasoning_effort='"${EFFORT_SLOT}"' -s {sandbox} {codexOverrides} -o {worktree}/.orchestrator/last-message.txt - < {brief}`;
 
+/**
+ * The OpenCode runner command: JSONL on stdout, the structured log on stderr at WARN, and the brief
+ * on stdin as the whole message (a run whose stdin stays open hangs, so it is always redirected).
+ * {pure} is `--pure` under `runner.opencode.pure`; {variant} is `--variant <effort>`, empty when the
+ * launch has no effort, so it carries the effort. The orchestrator MCP server, the permission
+ * ruleset, and snapshots are in the per-launch OPENCODE_CONFIG_CONTENT, never on argv. See
+ * specs/worker-runners "OpenCode runner command composition".
+ */
+export const VARIANT_SLOT = '{variant}';
+export const DEFAULT_OPENCODE_COMMAND = `opencode run --format json {pure} --print-logs --log-level WARN -m ${MODEL_SLOT} ${VARIANT_SLOT} < {brief}`;
+
 export function hasAllowedToolsSlot(template: string): boolean {
   return template.includes(ALLOWED_TOOLS_SLOT);
 }
@@ -28,7 +39,7 @@ export function hasModelSlot(template: string): boolean {
 }
 
 export function hasEffortSlot(template: string): boolean {
-  return template.includes(EFFORT_SLOT);
+  return template.includes(EFFORT_SLOT) || template.includes(VARIANT_SLOT);
 }
 
 /** Each rule double-quoted, space-separated; rules are validated as safe before they get here. */

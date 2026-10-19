@@ -30,7 +30,7 @@ export interface TokenUsage {
   reasoningOutput?: number;
 }
 
-export type UsageSource = 'claude-code' | 'codex' | 'scripted' | 'worker';
+export type UsageSource = 'claude-code' | 'codex' | 'opencode' | 'scripted' | 'worker';
 
 /**
  * Why a launch's process ended without a report, when the runner can tell. Runner-provided detail
