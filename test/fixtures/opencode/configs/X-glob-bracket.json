@@ -1,0 +1,20 @@
+{
+  "permission": {
+    "*": "deny",
+    "read": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "edit": "allow",
+    "write": "allow",
+    "bash": {
+      "*": "deny",
+      "git *": "allow",
+      "cat probe-[ab].txt": "allow"
+    }
+  },
+  "command": "cat probe-a.txt",
+  "files": {
+    "probe-a.txt": "a\n"
+  }
+}

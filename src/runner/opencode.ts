@@ -75,32 +75,59 @@ export function bashPatterns(allowedTools: readonly string[]): string[] {
 }
 
 /**
- * The exact bash patterns that let a check command run: one per simple command, split at `&&`, `||`,
- * `;`, `|` and newlines outside quotes. OpenCode 1.18.30 matches each command of a chain against the
- * rules on its own, and a pattern holding a whole chain never matches (test/fixtures/opencode/events/X-*.jsonl).
+ * The bash patterns that let a check command run: one per simple command, split outside quotes at
+ * `&&`, `||`, `;`, `|`, `|&`, a lone `&`, newlines and grouping parentheses, with a brace group's `{`
+ * and `}` dropped. A backslash escapes the next character outside quotes and inside double quotes. The
+ * `&` of a redirection (`2>&1`, `&>`, `<&`) and the `|` of `>|` stay in the command, as does a `$(...)`
+ * substitution. OpenCode 1.18.30 matches each command node, with its redirections, against the rules on
+ * its own, and a pattern holding a whole chain never matches (test/fixtures/opencode/events/X-*.jsonl).
+ * A pattern is the command verbatim: OpenCode has no escape for `*` and `?`, so a check command holding
+ * them yields a wildcard pattern (X-glob-*.jsonl); `[` is literal.
  */
 export function checkCommandPatterns(checkCommand: string | undefined): string[] {
   if (!checkCommand) return [];
+  const s = checkCommand;
   const out: string[] = [];
   let cur = '';
   let quote: string | undefined;
+  let subst = 0;
   const flush = () => {
-    const seg = cur.trim();
-    if (seg && !out.includes(seg)) out.push(seg);
+    let seg = cur.trim();
+    if (/^\{\s/.test(seg)) seg = seg.slice(1).trim();
+    if (seg && seg !== '}' && !out.includes(seg)) out.push(seg);
     cur = '';
   };
-  for (let i = 0; i < checkCommand.length; i++) {
-    const c = checkCommand[i] as string;
-    if (quote) {
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i] as string;
+    const next = s[i + 1];
+    if (c === '\\' && quote !== "'") {
+      cur += c + (next ?? '');
+      i++;
+    } else if (quote) {
       if (c === quote) quote = undefined;
       cur += c;
     } else if (c === '"' || c === "'") {
       quote = c;
       cur += c;
-    } else if ((c === '&' || c === '|') && checkCommand[i + 1] === c) {
+    } else if (c === '$' && next === '(') {
+      subst++;
+      cur += '$(';
+      i++;
+    } else if (subst > 0) {
+      if (c === '(') subst++;
+      else if (c === ')') subst--;
+      cur += c;
+    } else if (c === '&' && next === '&') {
       flush();
       i++;
-    } else if (c === ';' || c === '|' || c === '\n') {
+    } else if (c === '&' && (next === '>' || /[<>]$/.test(cur))) {
+      cur += c;
+    } else if (c === '|' && cur.endsWith('>')) {
+      cur += c;
+    } else if (c === '|') {
+      flush();
+      if (next === '|' || next === '&') i++;
+    } else if (c === '&' || c === ';' || c === '\n' || c === '(' || c === ')') {
       flush();
     } else {
       cur += c;

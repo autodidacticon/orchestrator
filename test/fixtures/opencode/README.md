@@ -87,6 +87,26 @@ Feasibility probes for an `opencode` runner kind. Facts the orchestrator would r
 - A probe's lesson: opencode takes its directory from `$PWD`, not the spawn cwd, so a child given another cwd needs `PWD` or `--dir`.
 - Read by test/runner/opencode.test.ts (the off-pattern, pipe and whole-string runs: a deny refusal continued past gives no diagnosis).
 
+## Subshells, a lone `&`, escaped quotes and glob characters (probed 2026-10-19, ORC-68; same CLI and model)
+- The matcher, read from the 1.18.30 binary (`Wildcard.match`): every `\` in both the pattern and the command becomes `/`, the pattern's
+  regex characters (`[` and `]` among them) are escaped, `*` becomes `.*`, `?` becomes `.`, and a trailing ` .*` becomes `( .*)?`. The bash
+  tool matches the text of each tree-sitter `command` node, or of its parent `redirected_statement`. So no escape for `*` or `?` exists.
+- Each run is `node configs/probe-bash-rule.mjs configs/X-<name>.json events/X-<name>.jsonl`: the same setup as the chained-command runs
+  (a scratch git repo, the config's permission, `--pure --print-logs --log-level WARN --dir <scratch>`, model opencode/big-pickle), asking
+  the model to run the config's `command` verbatim; the config's `files` are written into the scratch repo first. Stderr is not kept.
+  - events/X-glob-star.jsonl: `cat probe-other.txt` under the pattern `cat probe-*.txt` ran: `*` in a pattern is a wildcard.
+  - events/X-glob-escape.jsonl: `cat probe-*.txt` under `cat probe-\*.txt` was denied: a backslash does not escape `*`.
+  - events/X-glob-bracket.jsonl: `cat probe-a.txt` under `cat probe-[ab].txt` was denied; events/X-glob-bracket-literal.jsonl:
+    `cat probe-[ab].txt` under the same pattern ran (the shell's own `no matches found` is its output): `[` is literal.
+  - events/X-subshell.jsonl: `(cd . && true)` under `cd .` and `true` ran; events/X-subshell-missplit.jsonl: the same under the old
+    patterns `(cd .` and `true)` was denied.
+  - events/X-ampersand.jsonl: `sleep 0 & echo amp` under `sleep 0` and `echo amp` ran; events/X-ampersand-whole.jsonl: the same under
+    the single pattern `sleep 0 & echo amp` was denied.
+  - events/X-escaped-quote.jsonl: `echo "a \" && b"` under that exact pattern ran: one command, matched whole.
+  - events/X-redirect-text.jsonl: `echo hi 2>&1` under that exact pattern ran: the redirection is part of the matched text.
+- The evidence for `checkCommandPatterns` (src/runner/opencode.ts); the cases are mirrored as unit tests in test/runner/opencode.test.ts,
+  which does not read these files.
+
 ## Real e2e run (recorded 2026-10-19, ORC-63)
 - e2e-T1.jsonl, e2e-T2.jsonl, e2e-T3.jsonl: the JSONL events of each task's first launch in a passing
   `ORCH_E2E_OPENCODE=1 ORCH_E2E_OPENCODE_RECORD=1` run of test/e2e/opencode.test.ts (stderr dropped, redacted as below by the test).

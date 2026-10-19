@@ -87,6 +87,35 @@ describe('OpenCode per-launch config', () => {
     expect(checkCommandPatterns(`node -e "a && b; c | d" && node -e 'x || y' && true && true`)).toEqual(['node -e "a && b; c | d"', "node -e 'x || y'", 'true']);
   });
 
+  // Each expected list is the command nodes OpenCode 1.18.30 matches: a subshell's commands, both sides of a lone `&`,
+  // a quoted string holding an escaped quote kept whole, a redirection kept with its command
+  // (test/fixtures/opencode/events/X-subshell, X-ampersand, X-escaped-quote, X-redirect-text; the old patterns are
+  // denied in X-subshell-missplit and X-ampersand-whole).
+  it('splits subshells, a lone ampersand and escaped quotes the way OpenCode sees the commands', () => {
+    expect(checkCommandPatterns('(cd pkg && npm test)')).toEqual(['cd pkg', 'npm test']);
+    expect(checkCommandPatterns('npm run lint & npm test')).toEqual(['npm run lint', 'npm test']);
+    expect(checkCommandPatterns('echo "a \\" && b"')).toEqual(['echo "a \\" && b"']);
+    expect(checkCommandPatterns('(cd a && make) && (cd b; make check)')).toEqual(['cd a', 'make', 'cd b', 'make check']);
+    expect(checkCommandPatterns('npm test & wait')).toEqual(['npm test', 'wait']);
+    expect(checkCommandPatterns('echo a\\;b && echo \\&')).toEqual(['echo a\\;b', 'echo \\&']);
+    expect(checkCommandPatterns("echo 'a\\' && true")).toEqual(["echo 'a\\'", 'true']);
+  });
+
+  it('keeps redirections, substitutions and brace groups whole', () => {
+    expect(checkCommandPatterns('npm test 2>&1 | tee out.txt')).toEqual(['npm test 2>&1', 'tee out.txt']);
+    expect(checkCommandPatterns('make &> log.txt && make <&3 && echo a >| f')).toEqual(['make &> log.txt', 'make <&3', 'echo a >| f']);
+    expect(checkCommandPatterns('make 2>&1 |& cat')).toEqual(['make 2>&1', 'cat']);
+    expect(checkCommandPatterns('test -n "$(git status --porcelain && true)" || true')).toEqual(['test -n "$(git status --porcelain && true)"', 'true']);
+    expect(checkCommandPatterns('echo $(date; true) && true')).toEqual(['echo $(date; true)', 'true']);
+    expect(checkCommandPatterns('{ npm run lint; npm test; }')).toEqual(['npm run lint', 'npm test']);
+  });
+
+  // OpenCode 1.18.30 has no escape for `*` and `?` (X-glob-escape: `cat probe-\*.txt` does not allow `cat probe-*.txt`), so a
+  // glob character in the check command is kept and its pattern is a wildcard (X-glob-star); `[` is literal (X-glob-bracket*).
+  it('copies glob characters verbatim, giving a wildcard pattern', () => {
+    expect(checkCommandPatterns('node --test test/*.test.js && ls a?.txt [ab].txt')).toEqual(['node --test test/*.test.js', 'ls a?.txt [ab].txt']);
+  });
+
   it('carries the shim, the timeout, snapshots off, sharing off, and the derived ruleset', () => {
     const cfg = openCodeConfig(defaults, ['Bash(npm test:*)', 'Bash(git status)'], MAX_WAIT_MS, SHIM, 'npm ci && npm test');
     expect(cfg.mcp['orchestrator']).toEqual({ type: 'local', command: ['node', '/opt/orch/dist/agent/mcp-shim.js'], enabled: true, timeout: 3_660_000 });
