@@ -1,8 +1,10 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { recover } from '../../src/launch/recovery.js';
+import { DEFAULT_OPENCODE_COMMAND, OpenCodeRunner } from '../../src/runner/opencode.js';
 import { pidAlive } from '../../src/runner/subprocess.js';
+import { commitTrailers } from '../../src/workspace/git.js';
 import { gitIn, makeSlice, scriptedAgent, single, tsxLoader, type SliceHarness } from './harness.js';
 
 let h: SliceHarness | undefined;
@@ -47,6 +49,44 @@ describe('slice: launch, API, recovery', () => {
     expect(gitIn(h.repo, 'rev-parse', l.branch)).toBe(job.sealedSha);
     expect(gitIn(h.repo, 'log', '-1', '--format=%an', l.branch)).toBe('orchestrator');
     expect(gitIn(h.repo, 'log', '-1', '--format=%s', l.branch)).toBe('T1: daemon-committed');
+    const reports = h.store.listEvents({ kind: 'agent.report', taskId: 'T1' });
+    expect(reports).toHaveLength(1);
+    expect(reports[0]!.payload).toMatchObject({ kind: 'submit', sealedSha: job.sealedSha, committedByOrchestrator: true });
+  });
+
+  // The opencode kind through the real OpenCodeRunner and its default template, with a fake `opencode` on PATH running the scripted agent.
+  it('under runner.opencode.commit: daemon a dirty opencode submit is committed by the orchestrator and reaches done', async () => {
+    h = await makeSlice({ graph: single('submitDirty'), config: { runner: { kind: 'opencode', opencode: { commit: 'daemon' } } } });
+    const bin = path.join(h.dir, 'bin');
+    const argvLog = path.join(h.dir, 'opencode-argv.txt');
+    mkdirSync(bin);
+    writeFileSync(path.join(bin, 'opencode'), `#!/bin/sh\necho "$@" > ${argvLog}\n[ -n "$OPENCODE_CONFIG_CONTENT" ] || exit 3\nexec ${process.execPath} --import ${tsxLoader} ${scriptedAgent}\n`, { mode: 0o755 });
+    const orch = h.orch;
+    const runner = new OpenCodeRunner({
+      command: () => orch.effective().config.runner.opencode.command ?? DEFAULT_OPENCODE_COMMAND,
+      settings: () => orch.effective().config.runner.opencode,
+      allowedTools: () => orch.effective().allowedTools.value,
+      maxWaitMs: h.config.maxWaitMs,
+      logDir: path.join(h.config.dataDir, 'logs'),
+      retryWindowMs: h.config.retryWindowMs,
+      graceMs: 500,
+      extraEnv: { PATH: `${bin}:${process.env['PATH']}`, ORCH_PIDLOG: h.pidlog },
+    });
+    (orch as unknown as { runner: unknown }).runner = runner;
+    await orch.tick();
+    const l = h.launchOf('T1');
+    expect(l).toMatchObject({ runner: 'opencode', commitPolicy: 'daemon' });
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');
+    expect(readFileSync(argvLog, 'utf8')).toMatch(/^run --format json /);
+    const job = h.store.listJobs({ taskId: 'T1' })[0]!;
+    expect(job.sealedSha).not.toBe(l.baseSha);
+    expect(gitIn(h.repo, 'rev-parse', l.branch)).toBe(job.sealedSha);
+    // The daemon's commit: the orchestrator identity and the summary as the whole message; it adds no git trailer.
+    expect(gitIn(h.repo, 'log', '-1', '--format=%an <%ae> %cn <%ce>', l.branch)).toBe('orchestrator <orchestrator@localhost> orchestrator <orchestrator@localhost>');
+    expect(gitIn(h.repo, 'log', '-1', '--format=%B', l.branch)).toBe('T1: daemon-committed');
+    expect(await commitTrailers(h.repo, job.sealedSha!)).toEqual({});
+    expect(gitIn(h.repo, 'show', `${l.branch}:T1.txt`)).toBe('T1 uncommitted');
+    expect(gitIn(h.repo, 'show', '--name-only', '--format=', l.branch)).toBe('T1.txt');
     const reports = h.store.listEvents({ kind: 'agent.report', taskId: 'T1' });
     expect(reports).toHaveLength(1);
     expect(reports[0]!.payload).toMatchObject({ kind: 'submit', sealedSha: job.sealedSha, committedByOrchestrator: true });

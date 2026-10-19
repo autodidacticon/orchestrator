@@ -3,6 +3,7 @@
  * skill edition, and session plugin. See specs/host-integration "OpenCode host".
  */
 import { execFile, execFileSync, spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -43,28 +44,32 @@ const SUBSTITUTIONS: Array<[string, string]> = [
  * permissions instead of Codex approvals, the OpenCode tracker tool names, the opencode
  * toolchain line and kind lists, the per-server `timeout`, and the pull-mode offer (the work
  * loop with `--runner opencode`). The Codex edition does not name the opencode kind yet.
+ * Each anchor maps to the first 16 hex digits of the sha256 of its whole block (as `blocks` normalises
+ * it), so a change anywhere in a rewritten block fails until the hash here is updated.
  */
-const EDITION_BLOCKS: Record<string, string[]> = {
-  import: [
-    'which in OpenCode is an `mcp.linear` or `mcp.atlassian` entry in `opencode.json`',
-    'for an `opencode` run also the permission and the commit policy',
-    '`runner:<kind>` (`claude-code`, `codex`, or `opencode`)',
-  ],
-  run: [
-    'OpenCode runs the operator tools without asking unless the `permission` block',
-    "`spawn` is the OpenCode host's default. In pull mode the work loop (`orchestrator-work --runner opencode`",
-    'When the run holds `opencode` launches, also offer the work loop the `modeNote` names',
-    'work.mjs --runner opencode --workers <n>',
-    '(`--runner codex`, the default, for `codex` launches;',
-    '`codex`, or `opencode`. All three kinds run headless under `spawn`',
-    'For an `opencode` run name the permission and the commit policy',
-    '`runner.opencode.*` (`model` as a `provider/model` id',
-    '`permission` and `dataDir` (the opencode leaves)',
-    "below the server's `timeout` in `opencode.json`",
-    'for an `opencode` launch, whose `permission: derived` rejects',
-  ],
-  review: ["when this session's `permission` rejects the command"],
+const EDITION_BLOCKS: Record<string, Record<string, string>> = {
+  import: {
+    'which in OpenCode is an `mcp.linear` or `mcp.atlassian` entry in `opencode.json`': 'fd9e1e3e865adb31',
+    'for an `opencode` run also the permission and the commit policy': 'e7d53877b792523e',
+    '`runner:<kind>` (`claude-code`, `codex`, or `opencode`)': '65ad61fb7c4633d1',
+  },
+  run: {
+    'OpenCode runs the operator tools without asking unless the `permission` block': '8be101265e0b3cbb',
+    "`spawn` is the OpenCode host's default. In pull mode the work loop (`orchestrator-work --runner opencode`": '24ddb5d0b33a95db',
+    'When the run holds `opencode` launches, also offer the work loop the `modeNote` names': '5ef6baa4c8cdd998',
+    'work.mjs --runner opencode --workers <n>': 'f43ddb954e8c1d06',
+    '(`--runner codex`, the default, for `codex` launches;': '8a61030e5bda8f22',
+    '`codex`, or `opencode`. All three kinds run headless under `spawn`': '35aaf4b54dbca71a',
+    'For an `opencode` run name the permission and the commit policy': 'd16a063501b6d383',
+    '`runner.opencode.*` (`model` as a `provider/model` id': '9ed9fdfeccffe3b7',
+    '`permission` and `dataDir` (the opencode leaves)': 'ba90099048fa2fec',
+    "below the server's `timeout` in `opencode.json`": '799349ea4bcdcf5f',
+    'for an `opencode` launch, whose `permission: derived` rejects': '3d450fb87ad5a46a',
+  },
+  review: { "when this session's `permission` rejects the command": 'ae86c3f9912bcb88' },
 };
+
+const blockHash = (block: string) => createHash('sha256').update(block).digest('hex').slice(0, 16);
 
 /** A skill split at blank lines, list items, and headings; whitespace inside a block is normalised. */
 function blocks(text: string): string[] {
@@ -241,9 +246,14 @@ describe('opencode host', () => {
       const b = blocks(opencode);
       expect(b.length, name).toBe(a.length);
       const differ = b.filter((block, i) => block !== a[i]);
-      const anchors = EDITION_BLOCKS[name]!;
-      // Every differing block holds exactly one anchor, and every anchor names a differing block.
-      for (const block of differ) expect(anchors.filter((x) => block.includes(x)), `${name}: ${block.slice(0, 120)}`).toHaveLength(1);
+      const pinned = EDITION_BLOCKS[name]!;
+      const anchors = Object.keys(pinned);
+      // Every differing block holds exactly one anchor and has that anchor's pinned hash, and every anchor names a differing block.
+      for (const block of differ) {
+        const held = anchors.filter((x) => block.includes(x));
+        expect(held, `${name}: ${block.slice(0, 120)}`).toHaveLength(1);
+        expect(blockHash(block), `${name}: the block anchored by ${held[0]} changed; if intended, pin its new hash. Block: ${block}`).toBe(pinned[held[0]!]);
+      }
       for (const anchor of anchors) expect(differ.some((block) => block.includes(anchor)), `${name}: ${anchor}`).toBe(true);
       expect(opencode, name).not.toContain('mcp__orchestrator_operator__');
       expect(opencode, name).toContain('orchestrator_operator_');

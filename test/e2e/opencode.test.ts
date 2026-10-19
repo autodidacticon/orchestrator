@@ -17,6 +17,7 @@ import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_CONTENDED_RETRIES } from '../../src/config.js';
 import { commitTrailers } from '../../src/workspace/git.js';
 import { DEFAULT_OPENCODE_COMMAND, OpenCodeRunner } from '../../src/runner/opencode.js';
 import type { Launch } from '../../src/state/store.js';
@@ -220,6 +221,25 @@ function recordFixtures(run: Run, name: string): void {
   }
 }
 
+type FailedEvent = { taskId?: string; payload?: Record<string, unknown> };
+
+/**
+ * The counter rule of specs/task-lifecycle "Retry and exhaustion" over the `launch.failed` events in order: a task's first `allowance`
+ * startupContended deaths record `charged: false` and later ones `charged: true`, and every launch but the last of a task charged one
+ * attempt except those uncharged deaths. The expectation comes from the allowance, not the events' own flags. Returns the contended deaths.
+ */
+function checkContended(failed: FailedEvent[], opts: { allowance: number; launches: (taskId: string) => number; attempts: (taskId: string) => number }): FailedEvent[] {
+  const contended = failed.filter((e) => e.payload?.['reason'] === 'startupContended');
+  const diag = JSON.stringify(failed.map((f) => [f.taskId, f.payload]));
+  for (const taskId of new Set(contended.map((e) => e.taskId!))) {
+    const own = contended.filter((e) => e.taskId === taskId);
+    own.forEach((e, i) => expect(e.payload?.['charged'], `${taskId} startupContended #${i + 1} of allowance ${opts.allowance}: ${diag}`).toBe(i >= opts.allowance));
+    const uncharged = Math.min(own.length, opts.allowance);
+    expect(opts.attempts(taskId), diag).toBe(opts.launches(taskId) - 1 - uncharged);
+  }
+  return contended;
+}
+
 /** Common to both cases: every launch ran opencode on the free model, and the counter rule held for the contended deaths that happened. */
 function checkLaunches(run: Run): Launch[] {
   const { h } = run;
@@ -243,13 +263,11 @@ function checkLaunches(run: Run): Launch[] {
   expect(h.orch.status().cost.unpricedLaunches).toBe(0);
   expect(h.orch.status().cost.runUsd).toBe(0);
 
-  // Every launch but the last of a task charged one attempt, except the uncharged startupContended deaths.
-  const contended = failed.filter((e) => e.payload?.['reason'] === 'startupContended');
-  for (const e of contended) {
-    const uncharged = contended.filter((c) => c.taskId === e.taskId && c.payload?.['charged'] === false).length;
-    const own = launches.filter((l) => l.taskId === e.taskId).length;
-    expect(h.orch.entry(e.taskId!).attempts, JSON.stringify(failed.map((f) => [f.taskId, f.payload]))).toBe(own - 1 - uncharged);
-  }
+  const contended = checkContended(failed, {
+    allowance: h.config.health.contendedRetries ?? DEFAULT_CONTENDED_RETRIES,
+    launches: (taskId) => launches.filter((l) => l.taskId === taskId).length,
+    attempts: (taskId) => h.orch.entry(taskId).attempts,
+  });
   console.log(`e2e opencode launches: ${launches.length}; launch.failed: ${JSON.stringify(failed.map((f) => [f.taskId, f.payload]))}; startupContended: ${contended.length}`);
   console.log('e2e opencode tokens by launch:', JSON.stringify(launches.map((l) => ({ task: l.taskId, tokens: h.store.getLaunch(l.launchId)!.tokens, costUsd: h.store.getLaunch(l.launchId)!.costUsd, source: h.store.getLaunch(l.launchId)!.usageSource }))));
   return launches;
@@ -276,6 +294,26 @@ describe('e2e fixture redaction', () => {
     const out = redactFixture(line, ['/tmp/orch-x', '/private/tmp/orch-x'], '/Users/jane');
     expect(JSON.parse(out)).toEqual({ output: 'commit 0a1b\nAuthor: Fixture Author <author@example.invalid>\nDate:   Sun Oct 18\n\n    Add hello\n\n    Co-Authored-By: Bot <author@example.invalid>\n', workdir: '<scratch>/repo', home: '~/.config' });
     expect(out).not.toMatch(/Jane|jane|mail\.example\.com|anthropic/);
+  });
+});
+
+// Runs without opencode: the counter rule fails on a contended death within the allowance that was charged.
+describe('e2e contended-death counter rule', () => {
+  const death = (taskId: string, charged: boolean): FailedEvent => ({ taskId, payload: { reason: 'startupContended', charged } });
+  const counts = (launches: number, attempts: number) => ({ allowance: 2, launches: () => launches, attempts: () => attempts });
+
+  it('passes when the deaths within the allowance are uncharged and later ones charged', () => {
+    expect(checkContended([death('T1', false), death('T1', false), death('T1', true)], counts(4, 1))).toHaveLength(3);
+    expect(checkContended([{ taskId: 'T1', payload: { reason: 'turnFailed' } }], counts(2, 1))).toEqual([]);
+  });
+
+  it('fails when a death within the allowance is charged, even with attempts consistent with its own flag', () => {
+    expect(() => checkContended([death('T1', true)], counts(2, 1))).toThrow();
+    expect(() => checkContended([death('T1', false), death('T1', true)], counts(3, 1))).toThrow();
+  });
+
+  it('fails when a death past the allowance is uncharged', () => {
+    expect(() => checkContended([death('T1', false), death('T1', false), death('T1', false)], counts(4, 0))).toThrow();
   });
 });
 
