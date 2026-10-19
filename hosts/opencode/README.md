@@ -145,7 +145,10 @@ project can use `.opencode/plugins/` instead.
   as a toast in the TUI. When the script prints nothing, the message is left as it was. The
   notice therefore appears inside your first message in the transcript.
 - `opencode run --pure` does not load plugins. The orchestrator's own opencode launches pass
-  `--pure`, so the plugin only ever runs in operator sessions.
+  `--pure` by default (`runner.opencode.pure: true`), so the plugin only runs in operator
+  sessions. With `runner.opencode.pure: false` worker launches drop `--pure` and load every
+  installed plugin, this one included: a worker started while a run needs attention gets the
+  start line appended to its brief message.
 
 OpenCode has no session end event (`session.idle` fires after every turn), so nothing runs
 `hooks/session-end.mjs`; the copy is kept so the three hosts ship the same scripts. Nothing is

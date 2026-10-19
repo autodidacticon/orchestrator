@@ -74,8 +74,8 @@ export function defaultModeFor(kind: RunnerKind): 'spawn' | 'pull' {
 /** What start says about the mode: that the spawn default applied for a non-Claude kind, or that such a run is in pull mode. */
 export function modeNoteFor(kind: RunnerKind, r: { mode?: string; started?: boolean }, modeGiven: boolean): string | undefined {
   if (kind === 'claude-code') return undefined;
-  // The codex work loop runs codex only; opencode's names its kind with --runner.
-  const workLoop = kind === 'codex' ? 'orchestrator-work' : `orchestrator-work --runner ${kind}`;
+  // Named with --runner for every kind, codex too, though codex is the loop's default.
+  const workLoop = `orchestrator-work --runner ${kind}`;
   if (r.mode === 'pull') {
     return `runner kind ${kind} in pull mode: ${kind} launches park until a ${kind} worker claims them (pull-mode workers for ${kind} come from \`${workLoop}\`), and this session's workers claim only claude-code launches; call start with mode spawn or mixed to have the daemon run them`;
   }

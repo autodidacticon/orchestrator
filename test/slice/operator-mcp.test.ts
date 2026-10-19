@@ -229,6 +229,7 @@ describe('operator MCP server', () => {
       config: { runnerKind: { value: 'codex', source: 'argument' }, effort: { value: 'ultra', source: 'argument' }, codex: { sandbox: { value: 'read-only', source: 'argument' }, commit: { value: 'daemon', source: 'default' } } },
     });
     expect(started['modeNote']).toMatch(/codex.*spawn/);
+    expect(started['modeNote']).toContain('pull-mode workers for codex come from `orchestrator-work --runner codex`');
     expect((await tool('status'))['runner']).toMatchObject({ mode: 'spawn' });
     // commit binds to the kind in force on the daemon.
     expect(await tool('configure', { commit: 'agent' })).toMatchObject({ status: 200, config: { codex: { commit: { value: 'agent', source: 'argument' } }, claude: { commit: { value: 'agent', source: 'default' } } } });
@@ -253,7 +254,8 @@ describe('operator MCP server', () => {
     // A codex run switched to pull is warned about.
     const pulled = await tool('start', { mode: 'pull' });
     expect(pulled).toMatchObject({ started: false, mode: 'pull' });
-    expect(pulled['modeNote']).toMatch(/pull mode/);
+    expect(pulled['modeNote']).toMatch(/runner kind codex in pull mode/);
+    expect(pulled['modeNote']).toContain('`orchestrator-work --runner codex`');
   }, 120_000);
 
   // See specs/operator-control "Start arguments" and "Configuration route" (opencode). No graph is loaded: an opencode daemon in spawn would exec opencode.
