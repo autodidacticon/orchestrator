@@ -1,3 +1,6 @@
+import { createServer } from 'node:http';
+import path from 'node:path';
+import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runCli } from '../../src/operator/cli.js';
 import { pidAlive } from '../../src/runner/subprocess.js';
@@ -126,5 +129,40 @@ describe('operator CLI and routes', () => {
     const failed = h.store.listEvents({ kind: 'transition', taskId: 'T1' }).find((e) => e.payload?.['to'] === 'failed');
     expect(failed).toBeDefined();
     expect(h.orch.entry('T1').carry?.priorFailure?.kind).toBe('reaped');
+  });
+
+  it('config --data-dir refuses a mistyped leaf when the daemon is addressed by url, and still names the store without one', async () => {
+    const seen: string[] = [];
+    const stub = createServer((req, res) => {
+      seen.push(`${req.method} ${req.url}`);
+      req.resume();
+      req.on('end', () => {
+        res.setHeader('content-type', 'application/json');
+        res.end(JSON.stringify({ config: {} }));
+      });
+    });
+    await new Promise<void>((r) => stub.listen(0, '127.0.0.1', r));
+    const stubUrl = `http://127.0.0.1:${(stub.address() as AddressInfo).port}`;
+    const prior = process.env['ORCH_URL'];
+    try {
+      await expect(runCli(['--url', stubUrl, 'config', '--data-dir', 'lanch'])).rejects.toThrow(/--data-dir lanch.*opencode\.dataDir \(shared or launch\).*store location/);
+      process.env['ORCH_URL'] = stubUrl;
+      await expect(runCli(['config', '--data-dir', 'lanch'])).rejects.toThrow(/shared or launch/);
+      expect(seen).toEqual([]);
+      await runCli(['config', '--data-dir', 'launch']);
+      expect(seen).toEqual(['PUT /v1/config']);
+
+      // Without a url, any other value still names the store whose recorded daemon url is used.
+      delete process.env['ORCH_URL'];
+      h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000 } });
+      h.store.setKv('apiBaseUrl', h.orch.apiBaseUrl);
+      const viaStore = await runCli(['config', '--data-dir', path.dirname(h.graphPath)]);
+      expect(viaStore.status).toBe(200);
+      expect(viaStore.body).toMatchObject({ config: { runnerKind: { value: 'claude-code' } } });
+    } finally {
+      if (prior === undefined) delete process.env['ORCH_URL'];
+      else process.env['ORCH_URL'] = prior;
+      stub.close();
+    }
   });
 });

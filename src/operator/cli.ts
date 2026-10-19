@@ -21,7 +21,7 @@
  *   orchestrator-ctl outbox [--after <id>] [--limit <n>]
  *   orchestrator-ctl ack <id> [--result <json>] [--error <text>]
  * The daemon URL comes from --url, ORCH_URL, or the store under --data-dir. For `config`, --data-dir shared|launch
- * is the opencode.dataDir leaf, not a store location.
+ * is the opencode.dataDir leaf, not a store location; with --url or ORCH_URL any other value is refused.
  */
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -96,9 +96,10 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
                                                codex: gpt-6-astra at medium; opencode: anthropic/claude-opus-5-5 at medium, a provider/model id);
                                                effort is low, medium, high, xhigh, or max, and ultra is codex-only; --sandbox sets codex.sandbox (read-only,
                                                workspace-write, danger-full-access); --permission sets opencode.permission (derived, allow);
-                                               --data-dir shared|launch sets opencode.dataDir here, not the store location; --commit sets the
-                                               commit policy of --runner-kind, else of the kind in force; --clear takes a key or one such as
-                                               codex.sandbox or opencode.permission
+                                               --data-dir shared|launch sets opencode.dataDir here, not the store location (with --url or
+                                               ORCH_URL any other value is refused); --commit sets the commit policy of --runner-kind,
+                                               else of the kind in force; --clear takes a key or one such as codex.sandbox or
+                                               opencode.permission
   orchestrator-ctl answer <task> <text>
   orchestrator-ctl cancel <task> [--release] [--reason <text>]
   orchestrator-ctl reopen <task> [--cascade]       cascade resets started dependents and returns the plan
@@ -181,6 +182,13 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   }
   // `config --data-dir shared|launch` is the opencode.dataDir leaf; any other value keeps naming the store.
   const dataDirLeaf = cmd === 'config' && (OPENCODE_DATA_DIRS as readonly string[]).includes(values['data-dir'] ?? '') ? values['data-dir'] : undefined;
+  // With the daemon addressed by URL the store location is unused, so a mistyped leaf would vanish into a plain GET.
+  if (cmd === 'config' && values['data-dir'] !== undefined && dataDirLeaf === undefined && (values.url || process.env['ORCH_URL'])) {
+    throw new Error(
+      `config --data-dir ${values['data-dir']}: with --url or ORCH_URL, --data-dir can only set opencode.dataDir (shared or launch); ` +
+        'it names the store location only when no url is given',
+    );
+  }
   const base = await resolveUrl({ url: values.url, dataDir: dataDirLeaf === undefined ? values['data-dir'] : undefined, repo: values.repo });
   switch (cmd) {
     case 'status':
