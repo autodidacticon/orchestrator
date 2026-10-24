@@ -499,7 +499,7 @@ export function classifyOpenCodeFailure(text: string): { reason: OpenCodeFailure
 }
 
 /**
- * Lines longer than this are skipped unparsed by the usage parser. A `step_finish` line is a few hundred
+ * Lines of more UTF-8 bytes than this are skipped unparsed by the usage parser. A `step_finish` line is a few hundred
  * bytes (434 at most in the probe logs); the long lines are tool output (`tool_use` parts carrying file contents).
  */
 export const OPENCODE_USAGE_LINE_CAP = 64 * 1024;
@@ -565,8 +565,12 @@ export function parseOpenCodeUsage(text: string): Usage | undefined {
   for (let start = 0; start <= text.length; ) {
     const nl = text.indexOf('\n', start);
     const end = nl === -1 ? text.length : nl;
-    // Measure before slicing, so a long tool-output line is never copied.
-    if (end - start <= OPENCODE_USAGE_LINE_CAP) sum.add(text.slice(start, end));
+    // The cap is in UTF-8 bytes, as on the streamed path. A line of more UTF-16 units than the cap has more bytes too,
+    // so it is skipped before slicing and a long tool-output line is never copied.
+    if (end - start <= OPENCODE_USAGE_LINE_CAP) {
+      const line = text.slice(start, end);
+      if (Buffer.byteLength(line) <= OPENCODE_USAGE_LINE_CAP) sum.add(line);
+    }
     if (nl === -1) break;
     start = nl + 1;
   }

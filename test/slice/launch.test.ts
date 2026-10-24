@@ -1,11 +1,13 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { OPENSPEC_CHANGE_RULE } from '../../src/brief/compose.js';
 import { recover } from '../../src/launch/recovery.js';
 import { DEFAULT_OPENCODE_COMMAND, OpenCodeRunner } from '../../src/runner/opencode.js';
 import { pidAlive } from '../../src/runner/subprocess.js';
 import { commitTrailers } from '../../src/workspace/git.js';
-import { gitIn, makeSlice, scriptedAgent, single, tsxLoader, type SliceHarness } from './harness.js';
+import { gitIn, makeRepo, makeSlice, scriptedAgent, single, tsxLoader, type SliceHarness } from './harness.js';
 
 let h: SliceHarness | undefined;
 afterEach(async () => {
@@ -263,6 +265,30 @@ describe('slice: launch, API, recovery', () => {
     expect(readFileSync(path.join(l2.worktree, '.orchestrator', 'selection.txt'), 'utf8').trim()).toBe('claude-opus-5-5 medium');
     expect(readFileSync(path.join(l2.worktree, '.orchestrator', 'brief.md'), 'utf8')).toContain('`Bash(docker:*)`');
     await h.runner.reap(l2);
+  });
+
+  // ORC-74's rule reaches a real launch: GitWorkspace.prepare composes the brief in the worktree, which holds what the repository committed.
+  it('a launch in a repository with an openspec/ root gets the change-directory rule in its brief; one without does not', async () => {
+    const briefOf = async (openspec: boolean) => {
+      const dir = mkdtempSync(path.join(tmpdir(), 'orch-slice-'));
+      const repo = makeRepo(dir);
+      if (openspec) {
+        mkdirSync(path.join(repo, 'openspec', 'specs'), { recursive: true });
+        writeFileSync(path.join(repo, 'openspec', 'project.md'), '# toy\n');
+        gitIn(repo, 'add', '.');
+        gitIn(repo, 'commit', '-q', '-m', 'openspec');
+      }
+      h = await makeSlice({ graph: single('hang'), dir, repo, config: { leaseTtlMs: 60_000, runner: { mode: 'pull', claimWindowMs: 60_000 } } });
+      await h.orch.tick();
+      const [l] = h.store.listLaunches({ taskId: 'T1' });
+      expect(existsSync(path.join(l!.worktree, 'openspec'))).toBe(openspec);
+      const md = readFileSync(path.join(l!.worktree, '.orchestrator', 'brief.md'), 'utf8');
+      await h.cleanup();
+      h = undefined;
+      return md;
+    };
+    expect(await briefOf(true)).toContain(OPENSPEC_CHANGE_RULE);
+    expect(await briefOf(false)).not.toContain(OPENSPEC_CHANGE_RULE);
   });
 
   it('pull mode parks the launch as claimable with its brief; a claim makes it live with a worker and no pid', async () => {

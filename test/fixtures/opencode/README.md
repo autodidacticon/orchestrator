@@ -125,8 +125,11 @@ Feasibility probes for an `opencode` runner kind. Facts the orchestrator would r
 ## Redaction
 These files were redacted once, before they were saved, and are byte copies of the redacted output from then on: scratch paths are
 replaced by `<scratch>`, the home directory by `~`, and GitLab model ids by `duo-chat-<model>`. The e2e recorder (`redactFixture` in
-test/e2e/opencode.test.ts) also replaces the name of a git `Author:` line by `Fixture Author` and every email address by
-`author@example.invalid`; e2e-T1.jsonl was given that redaction after it was recorded (ORC-69). Tests read them in place and edit none of them.
+test/e2e/opencode.test.ts) also replaces the name on every git identity line (`Author:`, `Commit:`, `Committer:`, `Signed-off-by:`,
+`Co-Authored-By:`) by `Fixture Author` and every email address, whatever the case of its domain, by `author@example.invalid`. It
+redacts each JSON line's decoded strings and writes the line back with `JSON.stringify`, so a pattern never eats part of an escape
+such as `\n`; files recorded since ORC-82 may therefore differ from OpenCode's raw bytes in how they escape, not in what they hold.
+e2e-T1.jsonl was given the `Author:` redaction after it was recorded (ORC-69). Tests read them in place and edit none of them.
 
 ## Files and the tests that read them
 - events/F1-ask.jsonl: test/health/usage.test.ts (`parseOpenCodeUsage`: cache reads folded into input; `OpenCodeRunner.readUsage`).

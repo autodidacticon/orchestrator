@@ -196,15 +196,38 @@ function responder(run: Run, opts: { delayed?: { id: string; text: string; delay
   };
 }
 
-const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}/g;
-// The name of a git `Author: <name> <<email>>` line (git show, git log), up to the address or the end of the JSON-escaped line.
-const AUTHOR_NAME = /Author: (?:[^<"\\\n]*[^<"\\\n ])?/g;
+const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+// The name on a git identity line (git show, git log, trailers), up to the address or the end of the line.
+const IDENTITY_NAME = /^([ \t]*(?:Author|Commit|Committer|Signed-off-by|Co-[Aa]uthored-[Bb]y):[ \t]+)[^<\n]*[^<\s]/gm;
 
-/** The redaction the fixtures README describes: scratch paths, the home directory, git author names and every email address. */
+/** The redaction of one decoded string. */
+function redactString(s: string, scratch: string[], home: string): string {
+  for (const p of [...scratch].sort((a, b) => b.length - a.length)) s = s.split(p).join('<scratch>');
+  return s.split(home).join('~').replace(IDENTITY_NAME, '$1Fixture Author').replace(EMAIL, 'author@example.invalid');
+}
+
+/**
+ * The redaction the fixtures README describes: scratch paths, the home directory, the names on git identity lines and every
+ * email address. Each JSON line is redacted on its decoded strings, so a pattern never eats part of an escape such as `\n`.
+ */
 function redactFixture(text: string, scratch: string[], home: string): string {
-  for (const s of [...scratch].sort((a, b) => b.length - a.length)) text = text.split(s).join('<scratch>');
-  text = text.split(home).join('~');
-  return text.replace(AUTHOR_NAME, 'Author: Fixture Author').replace(EMAIL, 'author@example.invalid');
+  const walk = (v: unknown): unknown =>
+    typeof v === 'string' ? redactString(v, scratch, home)
+    : Array.isArray(v) ? v.map(walk)
+    : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [redactString(k, scratch, home), walk(x)]))
+    : v;
+  return text
+    .split('\n')
+    .map((line) => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        return redactString(line, scratch, home);
+      }
+      return JSON.stringify(walk(parsed));
+    })
+    .join('\n');
 }
 
 /** Each task's first launch's events, redacted by `redactFixture`. */
@@ -292,8 +315,24 @@ describe('e2e fixture redaction', () => {
   it('replaces scratch paths, the home directory, the git author name and every email address', () => {
     const line = JSON.stringify({ output: 'commit 0a1b\nAuthor: Jane Q. Doe <jane.doe+git@mail.example.com>\nDate:   Sun Oct 18\n\n    Add hello\n\n    Co-Authored-By: Bot <noreply@anthropic.com>\n', workdir: '/private/tmp/orch-x/repo', home: '/Users/jane/.config' });
     const out = redactFixture(line, ['/tmp/orch-x', '/private/tmp/orch-x'], '/Users/jane');
-    expect(JSON.parse(out)).toEqual({ output: 'commit 0a1b\nAuthor: Fixture Author <author@example.invalid>\nDate:   Sun Oct 18\n\n    Add hello\n\n    Co-Authored-By: Bot <author@example.invalid>\n', workdir: '<scratch>/repo', home: '~/.config' });
-    expect(out).not.toMatch(/Jane|jane|mail\.example\.com|anthropic/);
+    expect(JSON.parse(out)).toEqual({ output: 'commit 0a1b\nAuthor: Fixture Author <author@example.invalid>\nDate:   Sun Oct 18\n\n    Add hello\n\n    Co-Authored-By: Fixture Author <author@example.invalid>\n', workdir: '<scratch>/repo', home: '~/.config' });
+    expect(out).not.toMatch(/Jane|jane|mail\.example\.com|anthropic|Bot/);
+  });
+
+  it('leaves valid JSON when an address follows an escape, and redacts an upper-case domain', () => {
+    const lines = [JSON.stringify({ a: 'x\njane@mail.com', b: 'x\tjane@mail.com', c: 'x<jane@mail.com>', d: 'jane@X.COM' }), '{"e":"x\\u003cjane@mail.com\\u003e"}'];
+    const out = redactFixture(lines.join('\n'), [], '/Users/nobody').split('\n');
+    expect(JSON.parse(out[0]!)).toEqual({ a: 'x\nauthor@example.invalid', b: 'x\tauthor@example.invalid', c: 'x<author@example.invalid>', d: 'author@example.invalid' });
+    expect(JSON.parse(out[1]!)).toEqual({ e: 'x<author@example.invalid>' });
+    expect(out.join('\n')).not.toMatch(/jane|mail\.com|X\.COM/);
+  });
+
+  it('replaces the name on every git identity line', () => {
+    const output = 'commit 0a1b\nAuthor:     Jane Doe <jane@mail.com>\nAuthorDate: Sun Oct 18\nCommit:     Joe Roe <joe@mail.com>\nCommitDate: Sun Oct 18\n\n    Fix\n\n    Signed-off-by: Ann Lee <ann@mail.com>\n    Co-authored-by: Bob Ray <bob@mail.com>\nCommitter: Cy Fox\n';
+    const out = JSON.parse(redactFixture(JSON.stringify({ output }), [], '/Users/nobody')) as { output: string };
+    expect(out.output).toBe(
+      'commit 0a1b\nAuthor:     Fixture Author <author@example.invalid>\nAuthorDate: Sun Oct 18\nCommit:     Fixture Author <author@example.invalid>\nCommitDate: Sun Oct 18\n\n    Fix\n\n    Signed-off-by: Fixture Author <author@example.invalid>\n    Co-authored-by: Fixture Author <author@example.invalid>\nCommitter: Fixture Author\n',
+    );
   });
 });
 

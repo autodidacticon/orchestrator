@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeCodeRunner, parseUsage } from '../../src/runner/claude-code.js';
 import { CodexRunner, parseCodexUsage } from '../../src/runner/codex.js';
-import { OpenCodeRunner, parseOpenCodeUsage } from '../../src/runner/opencode.js';
+import { OPENCODE_USAGE_LINE_CAP, OpenCodeRunner, parseOpenCodeUsage, readOpenCodeUsage } from '../../src/runner/opencode.js';
 import { logPath } from '../../src/runner/subprocess.js';
 import type { Launch } from '../../src/state/store.js';
 
@@ -169,6 +169,38 @@ describe('OpenCode usage parser', () => {
       // A step after a 300 KiB line, with no trailing newline, still counts.
       writeFileSync(logPath(dir, 'L7'), `${log}\n${toolLine(300 * 1024)}\n${step(0, 0)}`);
       expect(await runner.readUsage(launch)).toEqual({ ...expected, tokens: { ...expected.tokens, input: expected.tokens.input + 10, cachedInput: 2010, output: 402, reasoningOutput: 201 } });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // A step_finish line padded to `bytes` UTF-8 bytes; `char` is the padding, an ASCII tail makes up the rest.
+  const paddedStep = (bytes: number, char: string) => {
+    const bare = (pad: string) => JSON.stringify({ type: 'step_finish', pad, part: { type: 'step-finish', reason: 'stop', cost: 1, tokens: { input: 7, output: 2, reasoning: 1, cache: { read: 0, write: 0 } } } });
+    const room = bytes - Buffer.byteLength(bare(''));
+    const n = Math.floor(room / Buffer.byteLength(char));
+    const line = bare(char.repeat(n) + 'x'.repeat(room - n * Buffer.byteLength(char)));
+    expect(Buffer.byteLength(line)).toBe(bytes);
+    return line;
+  };
+
+  it('counts a step_finish line of exactly the cap in bytes and skips one a byte over, from a string and streamed', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-usage-'));
+    try {
+      const runner = new OpenCodeRunner({ command: 'true', logDir: dir, retryWindowMs: 1000, maxWaitMs: 60_000, settings: () => ({ permission: 'derived', dataDir: 'shared', ignoreUserConfig: false, pure: true, snapshots: false }) });
+      for (const char of ['x', 'é', '€']) {
+        const at = paddedStep(OPENCODE_USAGE_LINE_CAP, char);
+        const over = paddedStep(OPENCODE_USAGE_LINE_CAP + 1, char);
+        // A non-ASCII line over the cap in bytes is well under it in UTF-16 units.
+        if (char !== 'x') expect(over.length).toBeLessThan(OPENCODE_USAGE_LINE_CAP);
+        const launch = { launchId: `L-${char}`, launchNo: 1, runner: 'opencode' } as Launch;
+        for (const [log, input] of [[`${at}\n`, 7], [`${over}\n`, undefined], [`${over}\n${at}`, 7], [`${at}\n${over}\n${at}\n`, 14]] as const) {
+          expect(parseOpenCodeUsage(log)?.tokens?.input, `${char} string`).toBe(input);
+          writeFileSync(logPath(dir, launch.launchId), log);
+          expect((await runner.readUsage(launch))?.tokens?.input, `${char} streamed`).toBe(input);
+          expect(await readOpenCodeUsage(logPath(dir, launch.launchId))).toEqual(parseOpenCodeUsage(log));
+        }
+      }
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

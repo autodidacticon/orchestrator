@@ -96,8 +96,9 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
                                                codex: gpt-6-astra at medium; opencode: anthropic/claude-opus-5-5 at medium, a provider/model id);
                                                effort is low, medium, high, xhigh, or max, and ultra is codex-only; --sandbox sets codex.sandbox (read-only,
                                                workspace-write, danger-full-access); --permission sets opencode.permission (derived, allow);
-                                               --data-dir shared|launch sets opencode.dataDir here, not the store location (with --url or
-                                               ORCH_URL any other value is refused); --commit sets the commit policy of --runner-kind,
+                                               --data-dir shared|launch sets opencode.dataDir here, not the store location; with neither
+                                               --url nor ORCH_URL any other value names the store location, as on every command, and
+                                               with --url or ORCH_URL it is refused; --commit sets the commit policy of --runner-kind,
                                                else of the kind in force; --clear takes a key or one such as codex.sandbox or
                                                opencode.permission
   orchestrator-ctl answer <task> <text>

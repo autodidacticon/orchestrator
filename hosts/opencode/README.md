@@ -146,9 +146,12 @@ project can use `.opencode/plugins/` instead.
   notice therefore appears inside your first message in the transcript.
 - `opencode run --pure` does not load plugins. The orchestrator's own opencode launches pass
   `--pure` by default (`runner.opencode.pure: true`), so the plugin only runs in operator
-  sessions. With `runner.opencode.pure: false` worker launches drop `--pure` and load every
-  installed plugin, this one included: a worker started while a run needs attention gets the
-  start line appended to its brief message.
+  sessions. With `runner.opencode.pure: false` worker launches drop `--pure` and load the
+  project's `.opencode/plugins/` and, unless `runner.opencode.ignoreUserConfig` is `true`, every
+  plugin installed under `~/.config/opencode/plugins/`, this one included: a worker started while
+  a run needs attention gets the start line appended to its brief message. `ignoreUserConfig: true`
+  (default `false`) points `XDG_CONFIG_HOME` at an empty directory, so a globally installed plugin
+  does not load.
 
 OpenCode has no session end event (`session.idle` fires after every turn), so nothing runs
 `hooks/session-end.mjs`; the copy is kept so the three hosts ship the same scripts. Nothing is
