@@ -10,6 +10,12 @@ operator server's `import_issues` tool (`orchestrator_operator_import_issues`); 
 is to fetch the issues with the tracker tools already in this session and hand over
 normalized records.
 
+Pass `repo`, set to the absolute path of this session's working directory, on every
+operator tool call. A plugin install starts the operator server in the plugin's own
+directory, so the server cannot tell which project this session is in: without `repo` (and
+before any call has passed it) a call is refused with an error naming the argument. Passing it
+on every call keeps the right project even after the server restarts.
+
 ## 1. Check the prerequisites
 
 - A tracker connector must be available: a Linear or Atlassian (Jira) MCP server, which in

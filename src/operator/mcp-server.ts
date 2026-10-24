@@ -6,11 +6,12 @@ import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { mapIssues, ImportError, importOptionsSchema, issueRecordSchema, trackerSchema } from '../import/mapping.js';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { ancestorPids } from '../runs/ancestry.js';
 import { daemonState, listRuns, remoteDaemonUrl, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { CODEX_SANDBOXES, COMMIT_POLICIES, EFFORT_LEVELS_ALL, EFFORT_LEVELS_BY_KIND, isRunnerKind, OPENCODE_DATA_DIRS, OPENCODE_PERMISSIONS, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
 import { foldRunnerArgs, type Overrides } from '../runs/resolve.js';
-import { readConfigJson, readRepoConfigRaw, resolveRepoPath, runPaths } from '../runs/runDir.js';
+import { gitTopLevel, readConfigJson, readRepoConfigRaw, resolveRepoPath, runPaths } from '../runs/runDir.js';
 
 /**
  * The cap keeps every tool call under the host's tool-call timeout: Claude Code's two-minute
@@ -66,6 +67,10 @@ const RUNNER_ARG_TEXT = {
   commit: 'The commit policy of runnerKind in the same call, else of the kind in force: agent (the agent commits) or daemon (the orchestrator commits at submit). Defaults: claude-code agent; codex daemon, or agent under danger-full-access; opencode agent.',
 };
 
+/** The repo argument every tool takes. See specs/operator-mcp "Operator MCP server". */
+export const REPO_ARG_TEXT =
+  "The absolute path of the session's project (any directory inside its git repository). Optional: without it the call uses the repo this session last passed, else the server's --repo, ORCH_REPO, or the git top level of the server's working directory. A server whose working directory is not inside a git repository (a Codex or OpenCode plugin install runs it in the plugin root) refuses a call naming this argument until a repo is passed; pass it on every call.";
+
 /** The plugin's start-mode default: pull-mode workers are this session's Claude subagents, so a codex or opencode run starts in spawn. */
 export function defaultModeFor(kind: RunnerKind): 'spawn' | 'pull' {
   return kind === 'claude-code' ? 'pull' : 'spawn';
@@ -102,12 +107,33 @@ export class OperatorClient {
   /** This session's attachment: registered with the daemon on first contact, carried on claims, ended on close. See specs/operator-mcp "Operator MCP server". */
   readonly attachmentId = randomUUID();
   private pids: number[] | undefined;
-  private attachedToPid: number | undefined;
+  /** The daemons this attachment is registered with, by URL, each with the pid it was registered under; a session that passes several repos holds one per daemon. */
+  private readonly attachedToPid = new Map<string, number | undefined>();
+
+  /** The repository the session last passed as a tool's `repo`; it wins over --repo, ORCH_REPO, and the working directory. */
+  private sessionRepo: string | undefined;
 
   constructor(private readonly ctx: OperatorContext) {}
 
+  /** Record a call's `repo`: an absolute path inside a git repository, kept as that repository's real top level. */
+  async useRepo(repo: string | undefined): Promise<void> {
+    if (repo === undefined) return;
+    if (!path.isAbsolute(repo)) throw new Error(`repo must be an absolute path, got ${repo}`);
+    try {
+      this.sessionRepo = await gitTopLevel(repo);
+    } catch {
+      throw new Error(`repo ${repo} is not inside a git repository`);
+    }
+  }
+
   async repo(): Promise<string> {
-    return resolveRepoPath({ repo: this.ctx.repo, env: this.ctx.env });
+    if (this.sessionRepo) return this.sessionRepo;
+    try {
+      return await resolveRepoPath({ repo: this.ctx.repo, env: this.ctx.env });
+    } catch (err) {
+      // A plugin-installed server runs in the plugin root, so its working directory says nothing about the session's project.
+      throw new Error(`${err instanceof Error ? err.message : String(err)}; pass repo, the absolute path of the session's project, as a tool argument`);
+    }
   }
 
   /** The daemon's URL, reviving it after an idle exit or a crash; refused after an explicit stop or for a repository with no run directory. */
@@ -135,9 +161,9 @@ export class OperatorClient {
 
   /** Register the attachment once per daemon process (the pid changes on every restart). */
   private async ensureAttached(base: string, daemonPid: number | undefined): Promise<void> {
-    if (daemonPid !== undefined && this.attachedToPid === daemonPid) return;
+    if (daemonPid !== undefined && this.attachedToPid.get(base) === daemonPid) return;
     await this.register(base);
-    this.attachedToPid = daemonPid;
+    this.attachedToPid.set(base, daemonPid);
   }
 
   async register(base?: string): Promise<void> {
@@ -153,20 +179,16 @@ export class OperatorClient {
 
   /** Tell the daemon this session is gone; best effort, half a second at most. */
   async detach(reason = 'sessionEnded'): Promise<void> {
-    if (this.attachedToPid === undefined) return;
-    try {
-      const repo = await this.repo();
-      const state = await daemonState(runPaths(repo, this.ctx.env).runDir);
-      if (!state.healthy || !state.url) return;
-      await fetch(`${state.url}/v1/attachments/${encodeURIComponent(this.attachmentId)}/end`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ reason }),
-        signal: AbortSignal.timeout(500),
-      });
-    } catch {
-      /* best effort */
-    }
+    await Promise.all(
+      [...this.attachedToPid.keys()].map((base) =>
+        fetch(`${base}/v1/attachments/${encodeURIComponent(this.attachmentId)}/end`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ reason }),
+          signal: AbortSignal.timeout(500),
+        }).catch(() => undefined /* best effort */),
+      ),
+    );
   }
 
   async call(method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>, timeoutMs = 30_000, headers: Record<string, string> = {}): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -233,14 +255,25 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const server = new McpServer({ name: 'orchestrator-operator', version: '0.5.0' });
+  // Every tool takes the optional repo; it is recorded for the session and never forwarded. See specs/operator-mcp "Operator MCP server".
+  const tool = <S extends z.ZodRawShape>(name: string, config: { description: string; inputSchema: S }, cb: (a: z.objectOutputType<S, z.ZodTypeAny>) => Promise<ReturnType<typeof text>>) =>
+    server.registerTool(name, { ...config, inputSchema: { ...config.inputSchema, repo: z.string().optional().describe(REPO_ARG_TEXT) } }, (async (args: Record<string, unknown>) => {
+      const { repo, ...rest } = args;
+      try {
+        await client.useRepo(repo as string | undefined);
+      } catch (err) {
+        return failure(err);
+      }
+      return cb(rest as z.objectOutputType<S, z.ZodTypeAny>);
+    }) as never);
   const task = { task: z.string().describe('Task id as it appears in the graph, e.g. ENG-123') };
   const milestone = { milestone: z.string().describe('Milestone id') };
 
-  server.registerTool(
+  tool(
     'start',
     {
       description:
-        'Start the daemon for this repository (idempotent). Returns url, pid, run directory, graph path, the runner mode in force, and the resolved configuration: config (every key as { value, source }: argument, file, pinned, detected, default, or unresolved; runnerKind and the claude, codex, and opencode leaves included), toolchain (what detection found in the repository root), needsConfig (keys no layer supplied; checkCommand there means submitted work is held until it is set), and applied / rejected for the configuration arguments. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull, or to spawn when the runner kind is codex or opencode (runnerKind here, or already in force for the run), because pull-mode workers are this session\'s Claude subagents and never claim codex or opencode launches (pull-mode workers for those kinds come from orchestrator-work --runner <kind>); orchestrator.yaml runner.mode, or a mode the run chose before, wins, and a running daemon keeps its mode. modeNote in the result says when the spawn default applied, or warns that a codex or opencode run is in pull mode, naming the kind. Configuration arguments become durable overrides for the run: passed to a daemon this call spawns, applied through the configuration route to one already running; integrationBranch is start-only and lands under rejected on a running daemon. After an idle exit or a crash every other tool revives the daemon by itself.',
+        'Start the daemon for this repository (idempotent): the repository named by repo, else the one this session last passed, else the server\'s --repo, ORCH_REPO, or working directory. Returns url, pid, run directory, graph path, the runner mode in force, and the resolved configuration: config (every key as { value, source }: argument, file, pinned, detected, default, or unresolved; runnerKind and the claude, codex, and opencode leaves included), toolchain (what detection found in the repository root), needsConfig (keys no layer supplied; checkCommand there means submitted work is held until it is set), and applied / rejected for the configuration arguments. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull, or to spawn when the runner kind is codex or opencode (runnerKind here, or already in force for the run), because pull-mode workers are this session\'s Claude subagents and never claim codex or opencode launches (pull-mode workers for those kinds come from orchestrator-work --runner <kind>); orchestrator.yaml runner.mode, or a mode the run chose before, wins, and a running daemon keeps its mode. modeNote in the result says when the spawn default applied, or warns that a codex or opencode run is in pull mode, naming the kind. Configuration arguments become durable overrides for the run: passed to a daemon this call spawns, applied through the configuration route to one already running; integrationBranch is start-only and lands under rejected on a running daemon. After an idle exit or a crash every other tool revives the daemon by itself.',
       inputSchema: {
         mode: z.enum(['spawn', 'pull', 'mixed']).optional(),
         checkCommand: z.string().optional().describe('The command the verifier runs on every rebased submission, e.g. "npm test".'),
@@ -267,14 +300,14 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         const kind = rest.runnerKind ?? kindOfRun(repo, env);
         const defaultMode = defaultModeFor(kind);
         const overrides = foldRunnerArgs(Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined)), kind) as Overrides;
-        const r = await startDaemon({ repo: values.repo, env, mode, ...(mode ? {} : { defaultMode }), ...(Object.keys(overrides).length ? { overrides } : {}) });
+        const r = await startDaemon({ repo, env, mode, ...(mode ? {} : { defaultMode }), ...(Object.keys(overrides).length ? { overrides } : {}) });
         const kindNow = r.config?.runnerKind.value ?? kind;
         // A pull run is judged by the kind the daemon resolved; the spawn default by the kind that chose it.
         const modeNote = modeNoteFor(r.mode === 'pull' ? kindNow : kind, r, mode !== undefined);
         return { status: 200, body: { ...r, ...(modeNote ? { modeNote } : {}) } };
       }),
   );
-  server.registerTool(
+  tool(
     'configure',
     {
       description:
@@ -303,19 +336,19 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         return client.call('PUT', '/v1/config', foldRunnerArgs(patch, kind));
       }),
   );
-  server.registerTool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a) =>
+  tool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a) =>
     guarded(async () => {
-      const r = await stopDaemon({ repo: values.repo, env, reap: a.reap });
+      const r = await stopDaemon({ repo: await client.repo(), env, reap: a.reap });
       return { status: r.stopped ? 200 : 409, body: r };
     }),
   );
-  server.registerTool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (runnerKind, the kind in force; allowedTools with its parts and whether the runner command applies it, claude-code only; model and effort of the kind in force likewise; the claude, codex, and opencode leaves such as codex.sandbox, codex.commit, and opencode.permission; each live launch also listing its own runner, model, and effort), claimableByKind: parked launches per runner kind, toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async () =>
+  tool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (runnerKind, the kind in force; allowedTools with its parts and whether the runner command applies it, claude-code only; model and effort of the kind in force likewise; the claude, codex, and opencode leaves such as codex.sandbox, codex.commit, and opencode.permission; each live launch also listing its own runner, model, and effort), claimableByKind: parked launches per runner kind, toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async () =>
     guarded(() => client.call('GET', '/v1/status')),
   );
-  server.registerTool('runs', { description: 'List every run under ORCH_HOME with its repository, daemon liveness, and, for a daemon that is gone, its exit record (idle, stop, or signal with the last digest) or none after a crash.', inputSchema: {} }, async () =>
+  tool('runs', { description: 'List every run under ORCH_HOME with its repository, daemon liveness, and, for a daemon that is gone, its exit record (idle, stop, or signal with the last digest) or none after a crash.', inputSchema: {} }, async () =>
     guarded(async () => ({ status: 200, body: { runs: await listRuns(env) } })),
   );
-  server.registerTool(
+  tool(
     'import_issues',
     {
       description:
@@ -340,10 +373,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         return { status: r.status, body: { ...r.body, summary: mapped.summary } };
       }),
   );
-  server.registerTool('import_graph', { description: 'Import a graph file verbatim (YAML or JSON content) or as a node list.', inputSchema: { content: z.string().optional(), nodes: z.array(z.record(z.unknown())).optional() } }, async (a) =>
+  tool('import_graph', { description: 'Import a graph file verbatim (YAML or JSON content) or as a node list.', inputSchema: { content: z.string().optional(), nodes: z.array(z.record(z.unknown())).optional() } }, async (a) =>
     guarded(() => client.call('PUT', '/v1/graph', a)),
   );
-  server.registerTool(
+  tool(
     'wait',
     {
       description: `Block until something happens. Returns events after afterSeq (default: now), the latest seq, and a digest (openQuestions, awaitingReview, finished, stalled, stuck, pausedReason, deferred: the count of ready tasks held back by scope overlap, needsConfig: configuration keys still unresolved, with checkCommand meaning submitted work is held until configure sets it, outboxPending, trackerErrors). until: question | review | finished | stalled | any; any also returns on launch.stuck, launch.unstuck, and budget.exceeded. timeoutMs default ${WAIT_DEFAULT_MS}, cap ${WAIT_CAP_MS}. Loop on this instead of polling status.`,
@@ -351,16 +384,16 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     },
     async (a) => guarded(() => client.wait(a)),
   );
-  server.registerTool('review', { description: 'Review bundle for a submitted gated milestone: pinned sha, version, tag, diff stat, closure task summaries, acceptance criteria.', inputSchema: milestone }, async (a) =>
+  tool('review', { description: 'Review bundle for a submitted gated milestone: pinned sha, version, tag, diff stat, closure task summaries, acceptance criteria.', inputSchema: milestone }, async (a) =>
     guarded(() => client.call('GET', `/v1/milestones/${encodeURIComponent(a.milestone)}/review`)),
   );
-  server.registerTool('answer', { description: 'Answer a waiting or blocked task\'s question.', inputSchema: { ...task, text: z.string() } }, async (a) =>
+  tool('answer', { description: 'Answer a waiting or blocked task\'s question.', inputSchema: { ...task, text: z.string() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/answer`, { text: a.text })),
   );
-  server.registerTool('cancel', { description: 'Cancel a task. release: let dependents proceed as if it were done.', inputSchema: { ...task, reason: z.string().optional(), release: z.boolean().optional() } }, async (a) =>
+  tool('cancel', { description: 'Cancel a task. release: let dependents proceed as if it were done.', inputSchema: { ...task, reason: z.string().optional(), release: z.boolean().optional() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/cancel`, { reason: a.reason ?? 'cancelled by operator', release: a.release ?? false })),
   );
-  server.registerTool(
+  tool(
     'reopen',
     {
       description:
@@ -369,10 +402,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     },
     async (a) => guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/reopen`, { cascade: a.cascade ?? false })),
   );
-  server.registerTool('proposals', { description: 'Agent proposals for follow-up tasks: pending by default, or accepted, rejected, all.', inputSchema: { status: z.enum(['pending', 'accepted', 'rejected', 'all']).optional() } }, async (a) =>
+  tool('proposals', { description: 'Agent proposals for follow-up tasks: pending by default, or accepted, rejected, all.', inputSchema: { status: z.enum(['pending', 'accepted', 'rejected', 'all']).optional() } }, async (a) =>
     guarded(() => client.call('GET', `/v1/proposals${a.status ? `?status=${a.status}` : ''}`)),
   );
-  server.registerTool(
+  tool(
     'accept_proposal',
     {
       description: 'Accept a proposal into the graph: appends a task depending on the proposer (and joins its gated milestone). nodeId: the tracker issue key when the session created one; payload: extra fields for the node.',
@@ -380,30 +413,30 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     },
     async (a) => guarded(() => client.call('POST', `/v1/proposals/${encodeURIComponent(a.id)}/accept`, { nodeId: a.nodeId, payload: a.payload })),
   );
-  server.registerTool('reject_proposal', { description: 'Reject a proposal with a note.', inputSchema: { id: z.string(), note: z.string() } }, async (a) =>
+  tool('reject_proposal', { description: 'Reject a proposal with a note.', inputSchema: { id: z.string(), note: z.string() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/proposals/${encodeURIComponent(a.id)}/reject`, { note: a.note })),
   );
-  server.registerTool('unblock', { description: 'Return a blocked task to unstarted, optionally with an answer or accepting a remediation candidate.', inputSchema: { ...task, answer: z.string().optional(), acceptCandidate: z.boolean().optional() } }, async (a) =>
+  tool('unblock', { description: 'Return a blocked task to unstarted, optionally with an answer or accepting a remediation candidate.', inputSchema: { ...task, answer: z.string().optional(), acceptCandidate: z.boolean().optional() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/unblock`, { answer: a.answer, acceptCandidate: a.acceptCandidate ?? false })),
   );
-  server.registerTool('accept', { description: 'Accept a submitted milestone at the given pinned sha and review version (from review).', inputSchema: { ...milestone, sha: z.string(), version: z.number().int() } }, async (a) =>
+  tool('accept', { description: 'Accept a submitted milestone at the given pinned sha and review version (from review).', inputSchema: { ...milestone, sha: z.string(), version: z.number().int() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/milestones/${encodeURIComponent(a.milestone)}/accept`, { sha: a.sha, version: a.version })),
   );
-  server.registerTool('reject', { description: 'Reject a submitted milestone with a note; it becomes blocked until repaired and unblocked.', inputSchema: { ...milestone, note: z.string() } }, async (a) =>
+  tool('reject', { description: 'Reject a submitted milestone with a note; it becomes blocked until repaired and unblocked.', inputSchema: { ...milestone, note: z.string() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/milestones/${encodeURIComponent(a.milestone)}/reject`, { note: a.note })),
   );
-  server.registerTool('pause', { description: 'Stop admitting new launches; running work continues and is verified.', inputSchema: {} }, async () => guarded(() => client.call('POST', '/v1/pause')));
-  server.registerTool('resume', { description: 'Resume admission after a pause. Refused with 409 while the run cost is at or above the ceiling unless overrideBudget is true, which raises the ceiling by one budget.', inputSchema: { overrideBudget: z.boolean().optional() } }, async (a) =>
+  tool('pause', { description: 'Stop admitting new launches; running work continues and is verified.', inputSchema: {} }, async () => guarded(() => client.call('POST', '/v1/pause')));
+  tool('resume', { description: 'Resume admission after a pause. Refused with 409 while the run cost is at or above the ceiling unless overrideBudget is true, which raises the ceiling by one budget.', inputSchema: { overrideBudget: z.boolean().optional() } }, async (a) =>
     guarded(() => client.call('POST', '/v1/resume', { overrideBudget: a.overrideBudget ?? false })),
   );
-  server.registerTool('nudge', { description: 'Queue a message for a running task\'s agent (delivered on its next inbox call). 409 when the task has no live launch.', inputSchema: { ...task, message: z.string() } }, async (a) =>
+  tool('nudge', { description: 'Queue a message for a running task\'s agent (delivered on its next inbox call). 409 when the task has no live launch.', inputSchema: { ...task, message: z.string() } }, async (a) =>
     guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/nudge`, { message: a.message })),
   );
-  server.registerTool('logs', { description: 'Captured output of a task\'s launch (latest by default).', inputSchema: { ...task, launch: z.number().int().optional() } }, async (a) =>
+  tool('logs', { description: 'Captured output of a task\'s launch (latest by default).', inputSchema: { ...task, launch: z.number().int().optional() } }, async (a) =>
     guarded(() => client.call('GET', `/v1/tasks/${encodeURIComponent(a.task)}/logs${a.launch ? `?launch=${a.launch}` : ''}`)),
   );
 
-  server.registerTool(
+  tool(
     'outbox',
     {
       description: 'Pending tracker effects (setState, comment) in id order with the tracker policy. Apply each with the session\'s tracker tools, then ack.',
@@ -411,7 +444,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     },
     async (a) => guarded(() => client.call('GET', `/v1/outbox?after=${a.after ?? 0}&limit=${a.limit ?? 50}`)),
   );
-  server.registerTool(
+  tool(
     'ack',
     {
       description: 'Acknowledge an outbox effect with the vendor result (e.g. { commentId }), or reject it with error text; exactly one of result or error.',
@@ -429,7 +462,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   );
 
   // Pull runner: a session subagent claims a prepared launch and acts as its agent through token-scoped tools. See specs/operator-mcp "Worker tools".
-  server.registerTool(
+  tool(
     'claim',
     {
       description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner (the CLI the launch was prepared for), model, effort, and pending when a question is open. runner filters by the kinds this worker can run (one or a list); a named task of another kind is 409. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable (for the runner filter) or the run is paused.',
@@ -441,7 +474,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         return client.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access, runner: a.runner, attachment: client.attachmentId });
       }),
   );
-  server.registerTool(
+  tool(
     'release',
     {
       description: 'Hand a claimed launch back with a reason. Untouched: the task returns to unstarted at no cost; after progress: a failed attempt, unless keep is true, which commits uncommitted work on the launch branch, keeps the branch, and returns the task to unstarted at no cost with an interrupted context for the next brief (bounded by daemon.maxKeptReleases).',
@@ -452,10 +485,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   const scoped = { launchId: z.string(), token: z.string() };
   const forwardLaunch = (op: 'heartbeat' | 'report' | 'block' | 'log' | 'inbox', launchId: string, token: string, body: Record<string, unknown>, timeoutMs = 30_000) =>
     client.call(op === 'inbox' ? 'GET' : 'POST', `/v1/launches/${encodeURIComponent(launchId)}/${op}`, body, timeoutMs, { authorization: `Bearer ${token}` });
-  server.registerTool('launch_heartbeat', { description: 'Worker: renew the lease and report progress text for a claimed launch.', inputSchema: { ...scoped, progress: z.string().optional() } }, async ({ launchId, token, ...body }) =>
+  tool('launch_heartbeat', { description: 'Worker: renew the lease and report progress text for a claimed launch.', inputSchema: { ...scoped, progress: z.string().optional() } }, async ({ launchId, token, ...body }) =>
     guarded(() => forwardLaunch('heartbeat', launchId, token, body)),
   );
-  server.registerTool(
+  tool(
     'launch_report',
     {
       description: 'Worker: final report for a claimed launch. kind=submit needs a committed, clean worktree (409 with the dirty files otherwise: commit and call again with the same seq); kind=fail gives up. seq increases per call.',
@@ -479,7 +512,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     },
     async ({ launchId, token, ...body }) => guarded(() => forwardLaunch('report', launchId, token, body)),
   );
-  server.registerTool(
+  tool(
     'launch_block',
     {
       description: `Worker: ask a human a question for a claimed launch. Returns { answer } when it arrives within ${WAIT_CAP_MS / 1000}s, otherwise { pending: true, seq }: call again with the same seq until the answer comes.`,
@@ -501,10 +534,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         }
       }),
   );
-  server.registerTool('launch_inbox', { description: 'Worker: pending notices for a claimed launch (stuck, nudge, baseMoved, payloadChanged).', inputSchema: scoped }, async ({ launchId, token }) =>
+  tool('launch_inbox', { description: 'Worker: pending notices for a claimed launch (stuck, nudge, baseMoved, payloadChanged).', inputSchema: scoped }, async ({ launchId, token }) =>
     guarded(() => forwardLaunch('inbox', launchId, token, {})),
   );
-  server.registerTool('launch_log', { description: 'Worker: append a log line to a claimed launch.', inputSchema: { ...scoped, text: z.string(), seq: z.number().int().optional() } }, async ({ launchId, token, ...body }) =>
+  tool('launch_log', { description: 'Worker: append a log line to a claimed launch.', inputSchema: { ...scoped, text: z.string(), seq: z.number().int().optional() } }, async ({ launchId, token, ...body }) =>
     guarded(() => forwardLaunch('log', launchId, token, body)),
   );
 

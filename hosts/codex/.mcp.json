@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "orchestrator_operator": {
+      "command": "node",
+      "args": [
+        "./bin/orchestrator.mjs",
+        "mcp"
+      ],
+      "cwd": ".",
+      "startup_timeout_sec": 60,
+      "tool_timeout_sec": 180,
+      "env_vars": [
+        "PATH",
+        "HOME",
+        "ORCH_HOME",
+        "ORCH_WAIT_CAP_MS",
+        "ORCH_REPO"
+      ]
+    }
+  }
+}

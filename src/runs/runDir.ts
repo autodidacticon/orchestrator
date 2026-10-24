@@ -44,11 +44,16 @@ export async function resolveRepoPath(opts: { repo?: string; cwd?: string; env?:
   if (explicit) return realpathSync(path.resolve(explicit));
   const cwd = opts.cwd ?? process.cwd();
   try {
-    const { stdout } = await execFileP('git', ['rev-parse', '--show-toplevel'], { cwd });
-    return realpathSync(stdout.trim());
+    return await gitTopLevel(cwd);
   } catch {
     throw new Error(`not inside a git repository: ${cwd}; pass --repo or set ORCH_REPO`);
   }
+}
+
+/** The real path of the git top level containing dir; throws when dir is not inside a git repository. */
+export async function gitTopLevel(dir: string): Promise<string> {
+  const { stdout } = await execFileP('git', ['rev-parse', '--show-toplevel'], { cwd: dir });
+  return realpathSync(stdout.trim());
 }
 
 export interface RunPaths {

@@ -1,0 +1,12 @@
+{
+  "name": "orchestrator",
+  "interface": { "displayName": "Orchestrator" },
+  "plugins": [
+    {
+      "name": "orchestrator-codex",
+      "source": { "source": "local", "path": "./hosts/codex" },
+      "policy": { "installation": "AVAILABLE" },
+      "category": "Developer Tools"
+    }
+  ]
+}

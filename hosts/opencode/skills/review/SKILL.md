@@ -10,6 +10,12 @@ published. Verification only proves the checks were green; you judge whether the
 was asked for. The tools named here belong to the operator MCP server
 (`orchestrator_operator_<tool>`).
 
+Pass `repo`, set to the absolute path of this session's working directory, on every
+operator tool call. A plugin install starts the operator server in the plugin's own
+directory, so the server cannot tell which project this session is in: without `repo` (and
+before any call has passed it) a call is refused with an error naming the argument. Passing it
+on every call keeps the right project even after the server restarts.
+
 ## 1. Get the bundle
 
 Call `review` with the milestone id. It returns the pinned integration sha, the review

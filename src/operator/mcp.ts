@@ -14,8 +14,12 @@ import_graph, wait, review, answer, cancel, reopen, unblock, accept, reject,
 pause, resume, logs, outbox, ack, nudge, proposals, accept_proposal,
 reject_proposal, and the worker tools claim, release, launch_heartbeat,
 launch_report, launch_block, launch_inbox, launch_log. Forwards to the daemon over loopback HTTP; never opens
-the store. The run is resolved from --repo, ORCH_REPO, or the git top level of
-the working directory. ORCH_HOME overrides ~/.orchestrator.
+the store. Every tool takes an optional repo (an absolute path); the run is
+resolved from the call's repo, else the repo the session last passed, else
+--repo, ORCH_REPO, or the git top level of the working directory. Started
+outside any git repository (as a Codex or OpenCode plugin is), the server
+refuses a call without repo, naming the argument. ORCH_HOME overrides
+~/.orchestrator.
 `;
 
 const isEntry = isEntrypoint(import.meta.url);

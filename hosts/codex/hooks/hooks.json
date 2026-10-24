@@ -1,0 +1,16 @@
+{
+  "description": "Orchestrator: report runs at session start; release this session's worker launches at session end",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/hooks/session-start.mjs\"", "timeout": 10 }]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/hooks/session-end.mjs\"" }]
+      }
+    ]
+  }
+}

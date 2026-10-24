@@ -3,11 +3,74 @@
 The orchestrator's operator session can be a Codex session. This directory holds what Codex
 needs for it: the dependency-free launcher `bin/orchestrator.mjs`, a private `package.json`
 that pins the published `@autodidacticon/orchestrator` package at the version the Claude Code
-plugin pins, the MCP registration template `config.toml`, and the `orchestrator-import`,
-`orchestrator-run`, and `orchestrator-review` skills under `skills/`.
+plugin pins, the `orchestrator-import`, `orchestrator-run`, and `orchestrator-review` skills
+under `skills/`, and two ways to install them: the Codex plugin `orchestrator-codex`
+(`.codex-plugin/plugin.json`, `.mcp.json`, `hooks/hooks.json`), or the manual registration
+template `config.toml`.
 
-Codex has no established plugin manifest yet, so installation is two documented steps rather
-than a one-click plugin.
+## Install as a Codex plugin
+
+The repository root's `.agents/plugins/marketplace.json` lists the plugin `orchestrator-codex`
+from `./hosts/codex`. Add the repository as a marketplace and install the plugin:
+
+```sh
+codex plugin marketplace add autodidacticon/orchestrator
+codex plugin add orchestrator-codex@orchestrator
+```
+
+A local checkout works as the marketplace too (`codex plugin marketplace add
+/path/to/orchestrator`). `codex plugin list` shows `orchestrator-codex@orchestrator` as
+installed, and `codex mcp get orchestrator_operator` shows the operator server it declares:
+command `node` with args `./bin/orchestrator.mjs mcp`, its `cwd` the installed plugin root
+(`~/.codex/plugins/cache/orchestrator/orchestrator-codex/<version>`), `startup_timeout_sec` 60
+(the first start may fetch the package through npx), and `tool_timeout_sec` 180. The server
+gets `PATH`, `HOME`, `ORCH_HOME`, `ORCH_WAIT_CAP_MS`, and `ORCH_REPO` from Codex's
+environment. The skills are installed as `orchestrator-codex:orchestrator-import`,
+`orchestrator-codex:orchestrator-run`, and `orchestrator-codex:orchestrator-review`.
+
+The server runs in the plugin root, not in your project, and Codex tells an MCP server
+neither the session's project (it advertises no MCP roots) nor its directory. So every
+operator tool takes a `repo` argument, the project's absolute path, and the skills pass this
+session's working directory as `repo` on every call. A call without `repo`, before any call
+passed one, is refused with an error naming the argument. Called directly, pass it yourself.
+
+The plugin's `hooks/hooks.json` runs the two session hooks (section 3) through
+`${PLUGIN_ROOT}`. Codex runs a plugin's hooks only after you review and trust them in an
+interactive session.
+
+Under `codex exec` the operator tools need approvals granted in advance, as for the manual
+install ("Approvals" below), but for a plugin's server they go under the plugin's key in
+`config.toml`:
+
+```toml
+approval_policy = "never"
+
+[plugins."orchestrator-codex@orchestrator".mcp_servers.orchestrator_operator]
+default_tools_approval_mode = "approve"
+
+[plugins."orchestrator-codex@orchestrator".mcp_servers.orchestrator_operator.tools.start]
+approval_mode = "approve"
+# ... one such table for each operator tool the session calls
+```
+
+If you added this repository as a Codex marketplace before it had
+`.agents/plugins/marketplace.json`, Codex installed the Claude Code plugin as
+`orchestrator@orchestrator`. Its operator server cannot start under Codex (its args use
+`${CLAUDE_PLUGIN_ROOT}`, which Codex does not expand) and its skills are the Claude Code
+edition. Remove it before installing this one:
+
+```sh
+codex plugin remove orchestrator@orchestrator
+```
+
+Remove the plugin itself with `codex plugin remove orchestrator-codex@orchestrator`. Use
+either the plugin or the manual install below, not both: both declare `orchestrator_operator`.
+
+## Manual install (alternative)
+
+The two steps below register the server and the skills by hand. A manually registered server
+started from your project's directory finds the repository by itself; the skills still pass
+`repo`.
 
 ## 1. Register the operator MCP server
 
@@ -15,8 +78,9 @@ The launcher resolves the package from a checkout (this directory's grandparent)
 `hosts/codex/node_modules` (`npm install` here), then from `npx` at the pinned version, so
 nothing needs to be on PATH but `node` (22.13 or newer).
 
-Primary form: append the block in `config.toml` to `~/.codex/config.toml` (or a project's
-`.codex/config.toml`), with `<hosts/codex>` replaced by the absolute path of this directory:
+Primary manual form: append the block in `config.toml` to `~/.codex/config.toml` (or a
+project's `.codex/config.toml`), with `<hosts/codex>` replaced by the absolute path of this
+directory:
 
 ```toml
 [mcp_servers.orchestrator_operator]

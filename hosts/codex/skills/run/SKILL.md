@@ -11,6 +11,12 @@ report digests, never raw event lists. Every tool named here belongs to the orch
 operator MCP server (`mcp__orchestrator_operator__<tool>`); see hosts/codex/README.md for its
 registration.
 
+Pass `repo`, set to the absolute path of this session's working directory, on every
+operator tool call. A plugin install starts the operator server in the plugin's own
+directory, so the server cannot tell which project this session is in: without `repo` (and
+before any call has passed it) a call is refused with an error naming the argument. Passing it
+on every call keeps the right project even after the server restarts.
+
 In `codex exec`, the operator tools run only when their approvals are granted in advance
 (`approval_policy = "never"` with `default_tools_approval_mode = "approve"` and each tool's
 `approval_mode = "approve"` on `mcp_servers.orchestrator_operator`); without them every call

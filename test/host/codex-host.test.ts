@@ -3,14 +3,15 @@
  * skill edition. See specs/host-integration "Codex host".
  */
 import { execFile, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { WAIT_CAP_MS } from '../../src/operator/mcp-server.js';
-import { makeSlice } from '../slice/harness.js';
+import { TOOL_NAMES, WAIT_CAP_MS } from '../../src/operator/mcp-server.js';
+import { listRuns, stopDaemon } from '../../src/runs/lifecycle.js';
+import { makeRepo, makeSlice } from '../slice/harness.js';
 
 const execFileP = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -110,6 +111,121 @@ describe('codex host', () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  // See specs/host-integration "Codex plugin".
+  it('the Codex plugin: manifest at the package version, .mcp.json run from the plugin root, hooks through PLUGIN_ROOT, and the root marketplace file', () => {
+    const readJson = (file: string) => JSON.parse(readFileSync(path.join(root, file), 'utf8')) as Record<string, unknown>;
+    const manifest = readJson('hosts/codex/.codex-plugin/plugin.json');
+    expect(manifest).toMatchObject({ name: 'orchestrator-codex', skills: './skills/', mcpServers: './.mcp.json', hooks: './hooks/hooks.json' });
+    // A release that bumps package.json without the plugin manifest fails here.
+    expect(manifest['version']).toBe(pkgJson.version);
+
+    const mcp = readJson('hosts/codex/.mcp.json') as { mcpServers: Record<string, Record<string, unknown>> };
+    expect(Object.keys(mcp.mcpServers)).toEqual(['orchestrator_operator']);
+    const op = mcp.mcpServers['orchestrator_operator']!;
+    expect(op).toMatchObject({ command: 'node', args: ['./bin/orchestrator.mjs', 'mcp'], cwd: '.', startup_timeout_sec: 60 });
+    // Codex expands no variable in args: they are relative to cwd ".", the installed plugin root.
+    for (const arg of op['args'] as string[]) {
+      expect(path.isAbsolute(arg), arg).toBe(false);
+      expect(arg).not.toContain('${');
+    }
+    expect(existsSync(path.join(host, 'bin/orchestrator.mjs'))).toBe(true);
+    expect(op['tool_timeout_sec']).toBeGreaterThan(WAIT_CAP_MS / 1000 + 30);
+    expect(op['env_vars']).toEqual(['PATH', 'HOME', 'ORCH_HOME', 'ORCH_WAIT_CAP_MS', 'ORCH_REPO']);
+
+    const hooks = readJson('hosts/codex/hooks/hooks.json') as { hooks: Record<string, Array<{ matcher?: string; hooks: Array<Record<string, unknown>> }>> };
+    expect(Object.keys(hooks.hooks).sort()).toEqual(['SessionEnd', 'SessionStart']);
+    expect(hooks.hooks['SessionStart']).toEqual([{ matcher: 'startup|resume|clear', hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/hooks/session-start.mjs"', timeout: 10 }] }]);
+    expect(hooks.hooks['SessionEnd']).toEqual([{ hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/hooks/session-end.mjs"' }] }]);
+
+    const market = readJson('.agents/plugins/marketplace.json') as { name: string; plugins: Array<Record<string, unknown>> };
+    expect(market.name).toBe('orchestrator');
+    expect(market.plugins).toEqual([{ name: 'orchestrator-codex', source: { source: 'local', path: './hosts/codex' }, policy: { installation: 'AVAILABLE' }, category: 'Developer Tools' }]);
+    // Claude Code keeps reading its own marketplace file.
+    expect((readJson('.claude-plugin/marketplace.json') as { plugins: Array<{ name: string; source: string }> }).plugins).toEqual([expect.objectContaining({ name: 'orchestrator', source: './hosts/claude-code' })]);
+
+    const readme = readFileSync(path.join(host, 'README.md'), 'utf8');
+    for (const word of ['codex plugin marketplace add autodidacticon/orchestrator', 'codex plugin add orchestrator-codex@orchestrator', 'codex plugin remove orchestrator@orchestrator', '[plugins."orchestrator-codex@orchestrator".mcp_servers.orchestrator_operator]', '`repo`', 'Manual install']) expect(readme, word).toContain(word);
+    expect(readme.indexOf('codex plugin add orchestrator-codex@orchestrator')).toBeLessThan(readme.indexOf('[mcp_servers.orchestrator_operator]'));
+    expect(readme).not.toContain('no established plugin manifest');
+  });
+
+  // See specs/host-integration "Codex host": a plugin-installed server cannot see the session's project.
+  it('the skills tell the model to pass repo, the session\'s working directory, on every operator call', () => {
+    for (const name of ['import', 'run', 'review']) {
+      const text = readFileSync(path.join(host, 'skills', name, 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+      expect(text, name).toContain("Pass `repo`, set to the absolute path of this session's working directory, on every operator tool call.");
+    }
+  });
+
+  // The plugin from this checkout, installed by the installed codex into a scratch CODEX_HOME. The exec step uses a model.
+  it.skipIf(!CODEX_HOST)('codex installs the plugin from the marketplace file and calls its start tool with repo (ORCH_E2E_CODEX_HOST=1)', async () => {
+    const codexHome = mkdtempSync(path.join(tmpdir(), 'orch-codex-home-'));
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-codex-plugin-orch-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-codex-plugin-repo-'));
+    const { ORCH_REPO: _unset, ...parentEnv } = process.env;
+    const env = { ...parentEnv, CODEX_HOME: codexHome, ORCH_HOME: home };
+    const codex = async (...args: string[]) => (await execFileP('codex', args, { env, timeout: 60_000 })).stdout;
+    let repo: string | undefined;
+    try {
+      await codex('plugin', 'marketplace', 'add', root);
+      // Only the Codex marketplace file is read: the Claude Code plugin is not offered.
+      const listed = (await codex('plugin', 'list')).split('\n').filter((l) => l.includes('@orchestrator')).map((l) => l.trim().split(/\s+/)[0]);
+      expect(listed).toEqual(['orchestrator-codex@orchestrator']);
+      const added = await codex('plugin', 'add', 'orchestrator-codex@orchestrator');
+      const pluginRoot = /Installed plugin root: (.+)/.exec(added)?.[1]?.trim();
+      expect(pluginRoot, added).toBeDefined();
+      expect(pluginRoot).toContain(path.join('plugins', 'cache', 'orchestrator', 'orchestrator-codex', pkgJson.version));
+      const got = JSON.parse(await codex('mcp', 'get', 'orchestrator_operator', '--json')) as { enabled: boolean; transport: { command: string; args: string[]; cwd: string }; startup_timeout_sec: number; tool_timeout_sec: number };
+      expect(got).toMatchObject({ enabled: true, transport: { command: 'node', args: ['./bin/orchestrator.mjs', 'mcp'] }, startup_timeout_sec: 60, tool_timeout_sec: 180 });
+      expect(realpathSync(got.transport.cwd)).toBe(realpathSync(pluginRoot!));
+
+      // The installed copy would run the published package through npx; point it at this checkout's build instead.
+      expect(existsSync(path.join(root, 'dist/src/operator/mcp.js')), 'npm run build first').toBe(true);
+      const link = path.join(pluginRoot!, 'node_modules', ...pkgJson.name.split('/'));
+      mkdirSync(path.dirname(link), { recursive: true });
+      symlinkSync(root, link);
+      expect((await dryRun(pluginRoot!, 'mcp')).source).toBe('plugin');
+      // codex exec cannot answer approval prompts; a plugin's server takes them under the plugin's key.
+      const key = 'plugins."orchestrator-codex@orchestrator".mcp_servers.orchestrator_operator';
+      appendFileSync(path.join(codexHome, 'config.toml'), ['', 'approval_policy = "never"', `[${key}]`, 'default_tools_approval_mode = "approve"', ...TOOL_NAMES.flatMap((t) => [`[${key}.tools.${t}]`, 'approval_mode = "approve"']), ''].join('\n'));
+      const auth = path.join(process.env['CODEX_HOME'] ?? path.join(homedir(), '.codex'), 'auth.json');
+      if (existsSync(auth)) cpSync(auth, path.join(codexHome, 'auth.json'));
+
+      repo = realpathSync(makeRepo(base));
+      writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'runner: { mode: pull }'].join('\n'));
+      const prompt = `Call the orchestrator_operator start tool exactly once, with repo set to ${repo} and no other arguments. Then reply with only the value of the "repo" field of its result.`;
+      // Started from outside the repository, so only the repo argument names it; stdin closed, or codex waits for more input.
+      const log = await new Promise<string>((resolve, reject) => {
+        const child = spawn('codex', ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-C', repo!, '-m', 'gpt-6-astra', '-c', 'model_reasoning_effort="low"', '-s', 'read-only', prompt], { cwd: tmpdir(), env, stdio: ['ignore', 'pipe', 'pipe'] });
+        let out = '';
+        child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+        child.stderr.on('data', (d: Buffer) => (out += d.toString()));
+        child.on('error', reject);
+        child.on('exit', (code) => (code === 0 ? resolve(out) : reject(new Error(`codex exec exited ${code}: ${out.slice(-4000)}`))));
+      });
+      type Item = { type: string; server?: string; tool?: string; arguments?: Record<string, unknown>; result?: { content?: Array<{ text?: string }> } };
+      const items = log.split('\n').flatMap((l) => {
+        try {
+          const e = JSON.parse(l) as { type?: string; item?: Item };
+          return e.type === 'item.completed' && e.item?.type === 'mcp_tool_call' ? [e.item] : [];
+        } catch {
+          return [];
+        }
+      });
+      const start = items.find((i) => i.server === 'orchestrator_operator' && i.tool === 'start');
+      expect(start, log.slice(-4000)).toBeDefined();
+      expect(start!.arguments).toMatchObject({ repo });
+      const result = JSON.parse(start!.result?.content?.[0]?.text ?? '{}') as Record<string, unknown>;
+      expect(result, log.slice(-4000)).toMatchObject({ status: 200, repo });
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      console.warn('codex CLI not installed; Codex plugin check skipped');
+    } finally {
+      for (const r of await listRuns(env)) if (r.alive && r.repo) await stopDaemon({ repo: r.repo, env, reap: true });
+      for (const d of [codexHome, home, base]) rmSync(d, { recursive: true, force: true });
+    }
+  }, 300_000);
 
   // See specs/host-integration "Session start hook" and "Session end hook".
   it('the config template declares the session hooks running the two scripts with node, gated by features.hooks', () => {

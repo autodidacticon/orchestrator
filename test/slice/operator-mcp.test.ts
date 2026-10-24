@@ -1,12 +1,13 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { clampWait, defaultModeFor, digestSatisfies, kindOfRun, modeNoteFor, TOOL_NAMES, WAIT_CAP_MS, WAIT_DEFAULT_MS } from '../../src/operator/mcp-server.js';
-import { listRuns, stopDaemon } from '../../src/runs/lifecycle.js';
+import { clampWait, defaultModeFor, digestSatisfies, kindOfRun, modeNoteFor, REPO_ARG_TEXT, TOOL_NAMES, WAIT_CAP_MS, WAIT_DEFAULT_MS } from '../../src/operator/mcp-server.js';
+import { listRuns, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
+import { runPaths } from '../../src/runs/runDir.js';
 import { pidAlive } from '../../src/runner/subprocess.js';
 import { gitIn, makeRepo, scriptedAgent, tsxLoader } from './harness.js';
 
@@ -65,7 +66,7 @@ describe('operator MCP server', () => {
     // The wait description quotes the cap in force, which a Codex registration sizes tool_timeout_sec against. See specs/operator-mcp "Wait tool".
     expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain(`cap ${WAIT_CAP_MS}`);
     const configure = tools.tools.find((t) => t.name === 'configure');
-    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'codex', 'commit', 'dataDir', 'effort', 'model', 'opencode', 'permission', 'runnerCommand', 'runnerKind', 'sandbox']);
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'codex', 'commit', 'dataDir', 'effort', 'model', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
     const codexArg = (configure?.inputSchema as { properties: Record<string, { anyOf?: Array<{ properties?: Record<string, unknown> }>; properties?: Record<string, unknown> }> }).properties['codex'];
     expect(JSON.stringify(codexArg)).toContain('"model"');
     expect(JSON.stringify(codexArg)).toContain('"ultra"');
@@ -300,6 +301,55 @@ describe('operator MCP server', () => {
     expect(defaultModeFor('opencode')).toBe('spawn');
     expect(defaultModeFor('claude-code')).toBe('pull');
   }, 120_000);
+
+  // A plugin-installed server runs in the plugin root, outside any git repository. See specs/operator-mcp "Operator MCP server".
+  it('outside a git repository the server refuses a call without repo, serves the repo a call passes, and reuses it for the session', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    const pluginRoot = realpathSync(mkdtempSync(path.join(tmpdir(), 'orch-mcp-plugin-root-')));
+    dirs.push(home, base, pluginRoot);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'runner: { mode: pull }'].join('\n'));
+    const { ORCH_REPO: _unset, ...rest } = process.env as Record<string, string>;
+    env = { ...rest, ORCH_HOME: home };
+    // The fixture's run exists before the session: a daemon with a graph, started from the test process.
+    const lifecycleEnv = { ...env, ORCH_REPO: repo };
+    const run = await startDaemon({ repo, env: lifecycleEnv });
+    const put = await fetch(`${run.url}/v1/graph`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n' }) });
+    expect(put.status).toBe(200);
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, cwd: pluginRoot, stderr: 'pipe' }));
+
+    const tools = await client.listTools();
+    for (const t of tools.tools) {
+      expect(Object.keys((t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {}), t.name).toContain('repo');
+      expect(JSON.stringify(t.inputSchema), t.name).toContain(REPO_ARG_TEXT.slice(0, 40));
+    }
+
+    const refused = await client.callTool({ name: 'status', arguments: {} });
+    expect(refused.isError).toBe(true);
+    expect(parse(refused)['error']).toMatch(/not inside a git repository: .*orch-mcp-plugin-root-.*pass repo, the absolute path of the session's project, as a tool argument/);
+    const relative = await client.callTool({ name: 'status', arguments: { repo: 'some/where' } });
+    expect(relative.isError).toBe(true);
+    expect(parse(relative)['error']).toMatch(/repo must be an absolute path/);
+    const notGit = await client.callTool({ name: 'status', arguments: { repo: pluginRoot } });
+    expect(parse(notGit)['error']).toMatch(/repo .* is not inside a git repository/);
+
+    // A subdirectory of the project names its top level.
+    mkdirSync(path.join(repo, 'sub'));
+    const tasksOf = (s: Record<string, unknown>) => Object.values(s['byStatus'] as Record<string, string[]>).flat();
+    const served = await tool('status', { repo: path.join(repo, 'sub') });
+    expect(served).toMatchObject({ status: 200 });
+    expect(tasksOf(served)).toEqual(['T1']);
+    const again = await tool('status');
+    expect(again).toMatchObject({ status: 200 });
+    expect(tasksOf(again)).toEqual(['T1']);
+    // repo is never forwarded: configure would refuse an unknown key.
+    expect(await tool('configure', { capacity: 3 })).toMatchObject({ status: 200, applied: ['capacity'] });
+    expect(await tool('configure', { capacity: null, repo })).toMatchObject({ status: 200 });
+    const started = await tool('start');
+    expect(started).toMatchObject({ status: 200, started: false, repo, runDir: runPaths(repo, env).runDir });
+  }, 60_000);
 
   it('revives the daemon after an idle exit and refuses after a stop', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));

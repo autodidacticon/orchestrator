@@ -11,6 +11,12 @@ report digests, never raw event lists. Every tool named here belongs to the orch
 operator MCP server (`orchestrator_operator_<tool>`); see hosts/opencode/README.md for its
 registration.
 
+Pass `repo`, set to the absolute path of this session's working directory, on every
+operator tool call. A plugin install starts the operator server in the plugin's own
+directory, so the server cannot tell which project this session is in: without `repo` (and
+before any call has passed it) a call is refused with an error naming the argument. Passing it
+on every call keeps the right project even after the server restarts.
+
 OpenCode runs the operator tools without asking unless the `permission` block of
 `opencode.json` says otherwise. Under `opencode run`, a tool whose permission is `ask` is
 rejected automatically ("The user rejected permission to use this specific tool call"), and
