@@ -61,8 +61,15 @@ describe('codex work loop (work.mjs, fake codex on PATH)', () => {
     h = await makeSlice({ graph, config: { runner: { mode: 'pull', kind: 'codex' } } });
     expect(h.orch.effective().config.runner.codex.command).toBeUndefined();
     const loop = startLoop(h, binDir(h), ['--workers', '2', '--run-tag', 'cx', '--idle-exit-ms', '20000']);
-    await h.waitFor(() => ['T1', 'T2', 'T3'].every((t) => h!.orch.entry(t).status.kind === 'done'), 90_000);
-    // The run is finished, so both loops stop by themselves.
+    const t0 = Date.now();
+    const events = () => JSON.stringify(h!.store.listEvents().map((ev) => [ev.ts - t0, ev.kind, ev.taskId, ev.payload]));
+    try {
+      await h.waitFor(() => ['T1', 'T2', 'T3'].every((t) => h!.orch.entry(t).status.kind === 'done'), 90_000);
+    } catch (e) {
+      throw new Error(`${String(e)}; events: ${events()}`);
+    }
+    // The run is finished, so both loops stop by themselves. A loop must not stop while T1 or T3 is still
+    // verifying: T2 becomes claimable only after T1 is done.
     const timer = setInterval(() => void h?.orch.tick(), 100);
     const out = await loop.done.finally(() => clearInterval(timer));
     expect(out.code, out.stderr).toBe(0);
@@ -158,6 +165,10 @@ describe('work.mjs helpers', () => {
     expect(stopVerdict({ ...base, claimableByKind: { 'claude-code': 0, codex: 1 } }, 0, 5000, 1000).stop).toBe(false);
     expect(stopVerdict({ ...base, liveLaunches: [{ runner: 'codex' }] }, 0, 5000, 1000).stop).toBe(false);
     expect(stopVerdict({ ...base, openQuestions: ['T1'] }, undefined, 0, 1000).stop).toBe(true);
+    expect(stopVerdict({ ...base, awaitingReview: ['MVP'], verifying: [] }, undefined, 0, 1000).stop).toBe(true);
+    // A task awaiting the verifier waits on no human, and its result can make work claimable: not quiet.
+    expect(stopVerdict({ ...base, awaitingReview: ['T1'], verifying: ['T1'] }, 0, 5000, 1000)).toEqual({ stop: false, quiet: false });
+    expect(stopVerdict({ ...base, awaitingReview: ['MVP', 'T1'], verifying: ['T1'] }, undefined, 0, 1000)).toEqual({ stop: false, quiet: false });
     expect(stopVerdict(base, undefined, 0, 1000)).toEqual({ stop: false, quiet: true });
     expect(stopVerdict(base, 0, 999, 1000).stop).toBe(false);
     expect(stopVerdict(base, 0, 1000, 1000).stop).toBe(true);

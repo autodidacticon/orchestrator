@@ -116,16 +116,20 @@ export function parseWorkArgs(argv) {
  * The stop rule, read from GET /v1/status: the run finished or stalled; or nothing is claimable
  * for the kind and no launch of it is live while questions or reviews wait on a human; or that
  * quiet has lasted `idleExitMs` (a run whose remaining work is for another kind, or not yet
- * prepared). A paused run is never quiet.
+ * prepared). A paused run is never quiet, and neither is one with a task awaiting the verifier
+ * (`verifying`): its result can unlock dependents or send it back for another launch. A review is
+ * a milestone in `awaitingReview`; the verifying tasks listed there wait on no human.
  */
 export function stopVerdict(s, quietSinceMs, now, idleExitMs, kind = DEFAULT_RUNNER) {
   if (s.finished === true) return { stop: true, why: 'the run is finished' };
   if (s.stalled === true) return { stop: true, why: 'the run is stalled' };
   const claimable = Number(s.claimableByKind?.[kind] ?? 0);
   const live = (s.liveLaunches ?? []).some((l) => (l.runner ?? 'claude-code') === kind);
-  const quiet = claimable === 0 && !live && s.paused !== true;
+  const verifying = new Set(s.verifying ?? []);
+  const quiet = claimable === 0 && !live && verifying.size === 0 && s.paused !== true;
   if (!quiet) return { stop: false, quiet: false };
-  if ((s.openQuestions ?? []).length || (s.awaitingReview ?? []).length) return { stop: true, why: `nothing is claimable for ${kind} and the run waits on a human` };
+  const reviews = (s.awaitingReview ?? []).filter((id) => !verifying.has(id));
+  if ((s.openQuestions ?? []).length || reviews.length) return { stop: true, why: `nothing is claimable for ${kind} and the run waits on a human` };
   if (quietSinceMs !== undefined && now - quietSinceMs >= idleExitMs) return { stop: true, why: `nothing claimable for ${kind} for ${idleExitMs}ms` };
   return { stop: false, quiet: true };
 }

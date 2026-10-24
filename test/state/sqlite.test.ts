@@ -222,4 +222,23 @@ describe('sqlite store', () => {
     expect(stderr).not.toContain('ExperimentalWarning');
     expect(JSON.parse(stdout.trim())).toEqual({ restored: true });
   }, 20_000);
+
+  it('opening a new store that another process is creating waits for it instead of throwing "database is locked"', async () => {
+    const db = path.join(dir, 'new.sqlite');
+    const flag = path.join(dir, 'flag-new');
+    const child = execFile('node', ['--import', tsxLoader, path.join(here, 'hold-new.ts'), db, flag], { cwd: dir });
+    const exit = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(flag)) {
+      if (Date.now() > deadline) throw new Error('child never took its lock');
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    const t0 = Date.now();
+    const other = new SqliteStore(db);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(500);
+    other.setKv('k', 'v');
+    expect(other.getKv('k')).toBe('v');
+    other.close();
+    expect(await exit).toBe(0);
+  }, 20_000);
 });

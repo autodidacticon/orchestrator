@@ -1,14 +1,41 @@
 /**
  * End to end through the real daemon (main.ts), operator CLI, and scripted agents.
  */
+import type { ChildProcess } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../src/operator/cli.js';
 import { pidAlive } from '../../src/runner/subprocess.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
-import { setupCrashRun } from '../crash/harness.js';
+import { type CrashRun, setupCrashRun } from '../crash/harness.js';
 import { gitIn } from '../slice/harness.js';
+
+/**
+ * The pid of `taskId`'s launch once its `launch.live` event is recorded, asserting the launch is
+ * still live (mid-task). `waitUntil` opens the store only after the daemon has created it, and a
+ * daemon that exits fails the wait at once with its log instead of after the deadline.
+ */
+async function livePid(run: CrashRun, daemon: ChildProcess, taskId: string): Promise<number> {
+  let pid: number | undefined;
+  await run.waitUntil(() => {
+    if (daemon.exitCode !== null) throw new Error(`daemon exited ${daemon.exitCode}; log:\n${readFileSync(run.daemonLog, 'utf8').slice(-4000)}`);
+    const s = new SqliteStore(path.join(run.dataDir, 'store.sqlite'));
+    try {
+      pid = s.listEvents({ kind: 'launch.live', taskId }).at(-1)?.payload?.['pid'] as number | undefined;
+      return pid !== undefined;
+    } finally {
+      s.close();
+    }
+  }, 30_000);
+  const s = new SqliteStore(path.join(run.dataDir, 'store.sqlite'));
+  try {
+    expect(s.listLaunches({ taskId, status: 'live' }).map((l) => l.pid), JSON.stringify(s.listEvents({ taskId }))).toEqual([pid]);
+  } finally {
+    s.close();
+  }
+  return pid!;
+}
 
 describe('e2e with scripted agents', () => {
   it('daemon + CLI: one trailer commit per task, milestone tag, accept via CLI, status finished', async () => {
@@ -58,27 +85,13 @@ describe('e2e with scripted agents', () => {
   it('plain restart adopts a mid-task agent; --reap-on-exit stops it', async () => {
     const run = await setupCrashRun();
     try {
-      writeFileSync(path.join(run.dir, 'graph.yaml'), `nodes:\n  - { id: T1, deps: [], behavior: "slowSubmit:2500", description: d, acceptanceCriteria: [a] }\n`);
+      writeFileSync(path.join(run.dir, 'graph.yaml'), `nodes:\n  - { id: T1, deps: [], behavior: "slowSubmit:4000", description: d, acceptanceCriteria: [a] }\n`);
       const child = run.start();
-      const deadline = Date.now() + 15_000;
-      let pid: number | undefined;
-      while (Date.now() < deadline && !pid) {
-        await new Promise((r) => setTimeout(r, 150));
-        try {
-          const store = new SqliteStore(path.join(run.dataDir, 'store.sqlite'));
-          pid = store.listLaunches({ status: 'live' })[0]?.pid;
-          store.close();
-        } catch {
-          /* store not ready */
-        }
-      }
-      expect(pid).toBeDefined();
+      const pid = await livePid(run, child, 'T1');
       await run.stop(child);
-      expect(pidAlive(pid!)).toBe(true);
+      expect(pidAlive(pid)).toBe(true);
       const resumed = run.start();
-      const until = Date.now() + 30_000;
-      while (Date.now() < until && run.entries().get('T1')?.status.kind !== 'done') await new Promise((r) => setTimeout(r, 200));
-      expect(run.entries().get('T1')?.status.kind).toBe('done');
+      await run.waitUntil(() => run.entries().get('T1')?.status.kind === 'done', 30_000);
       const store = new SqliteStore(path.join(run.dataDir, 'store.sqlite'));
       expect(store.listLaunches({ taskId: 'T1' })).toHaveLength(1);
       store.close();
@@ -87,18 +100,10 @@ describe('e2e with scripted agents', () => {
       // --reap-on-exit on a hung agent
       writeFileSync(path.join(run.dir, 'graph.yaml'), `nodes:\n  - { id: T1, deps: [], behavior: "slowSubmit:2500", description: d, acceptanceCriteria: [a] }\n  - { id: T9, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }\n`);
       const reaper = run.start({ ORCH_ARGS: '--reap-on-exit' });
-      let pid9: number | undefined;
-      const d2 = Date.now() + 15_000;
-      while (Date.now() < d2 && !pid9) {
-        await new Promise((r) => setTimeout(r, 150));
-        const s = new SqliteStore(path.join(run.dataDir, 'store.sqlite'));
-        pid9 = s.listLaunches({ status: 'live', taskId: 'T9' })[0]?.pid;
-        s.close();
-      }
-      expect(pid9).toBeDefined();
+      const pid9 = await livePid(run, reaper, 'T9');
       await run.stop(reaper);
-      for (let i = 0; i < 40 && pidAlive(pid9!); i++) await new Promise((r) => setTimeout(r, 50));
-      expect(pidAlive(pid9!)).toBe(false);
+      for (let i = 0; i < 40 && pidAlive(pid9); i++) await new Promise((r) => setTimeout(r, 50));
+      expect(pidAlive(pid9)).toBe(false);
       const s2 = new SqliteStore(path.join(run.dataDir, 'store.sqlite'));
       const reaped = s2.listEvents({ kind: 'transition', taskId: 'T9' }).some((e) => e.payload?.['to'] === 'failed');
       s2.close();

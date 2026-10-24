@@ -38,7 +38,7 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
     openQuestions: s.openQuestions,
     /** Milestones awaiting a human; tasks awaiting the verifier are `verifying`. */
     awaitingReview: s.awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'milestone'),
-    verifying: s.awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'task'),
+    verifying: s.verifying,
     finished: s.finished,
     stalled: s.stalled,
     stallRoots: s.stallRoots,

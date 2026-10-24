@@ -146,6 +146,8 @@ export interface StatusReport {
   external: Array<{ id: Id; done: boolean }>;
   stallRoots: Id[];
   awaitingReview: Id[];
+  /** The tasks among `awaitingReview`: submitted and awaiting the verifier, not a human. */
+  verifying: Id[];
   openQuestions: Id[];
   liveLaunches: Array<{
     launchId: string;
@@ -1603,6 +1605,7 @@ export class Orchestrator implements OrchestratorCore {
       external: q.externals(g),
       stallRoots: q.stallRoots(g, o),
       awaitingReview: q.awaitingReview(g, o),
+      verifying: q.awaitingReview(g, o).filter((id) => g.nodes.get(id)?.kind === 'task'),
       openQuestions: q.openQuestions(g, o),
       liveLaunches,
       stuck: liveLaunches.filter((l) => l.stuck).map((l) => l.taskId),

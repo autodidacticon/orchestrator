@@ -10,6 +10,18 @@ beforeEach(() => {
 afterEach(() => h.cleanup());
 
 describe('inproc scenarios on the standard fixture', () => {
+  it('status lists a submitted task awaiting its check under verifying as well as awaitingReview; a submitted milestone only under awaitingReview', async () => {
+    await h.orch.tick();
+    expect((await h.submit('T1')).status).toBe(200);
+    let s = h.orch.status();
+    expect(s.awaitingReview).toEqual(['T1']);
+    expect(s.verifying).toEqual(['T1']);
+    await runToQuiet(h);
+    s = h.orch.status();
+    expect(s.awaitingReview).toEqual(['MVP']);
+    expect(s.verifying).toEqual([]);
+  });
+
   it('happy path reaches finished after the gated milestone is accepted', async () => {
     await h.orch.tick();
     expect(h.orch.status().byStatus.running.sort()).toEqual(['T1', 'T5']);

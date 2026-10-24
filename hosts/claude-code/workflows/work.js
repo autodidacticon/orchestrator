@@ -62,7 +62,7 @@ function claimPrompt(workerId, heldCount) {
     `1. Call claim with workerId "${workerId}", access "local", and runner "claude-code".`,
     '2. If it returns a launch (status 200): read the markdown brief at briefPath and return { claimed: true, launchId, taskId, token, worktree, briefPath, briefMarkdown: <the full brief file>, model, effort, pendingSeq, pendingAnswer } (model and effort exactly as the response gives them; pending fields only when the response carries pending).',
     `3. If it returns 404 (nothing claimable for claude-code, or paused): call wait with until "any" and timeoutMs ${CLAIM_WAIT_MS}, then call status, take claimable as status claimableByKind["claude-code"], and compute stop:`,
-    `   stop is true when finished is true, or stalled is true, or (claimable is 0 and ${heldCount} launches are held by other loops is false and (openQuestions is non-empty or awaitingReview is non-empty)). Otherwise stop is false.`,
+    `   stop is true when finished is true, or stalled is true, or (claimable is 0 and verifying is empty and ${heldCount} launches are held by other loops is false and (openQuestions is non-empty or awaitingReview lists an id that verifying does not)). Otherwise stop is false.`,
     `   If stop is false and you have done fewer than ${CLAIM_POLLS} polls (a poll is one claim followed by one wait and one status), go back to step 1. Otherwise return { claimed: false, stop, finished, stalled, openQuestions, awaitingReview, claimable } from the last status.`,
     '4. On any other error return { claimed: false, stop: true }.',
     'Return only the structured output; do not do any task work.',

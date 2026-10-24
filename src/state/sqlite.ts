@@ -80,6 +80,24 @@ CREATE UNIQUE INDEX IF NOT EXISTS outbox_key ON outbox(source_seq, task_id, kind
 CREATE INDEX IF NOT EXISTS outbox_status ON outbox(status);
 `;
 
+const BUSY_TIMEOUT_MS = 5000;
+const SQLITE_BUSY = 5;
+
+/** Run `sql`, retrying with a short blocking backoff while SQLite reports SQLITE_BUSY, until `timeoutMs`. */
+function execRetryingBusy(db: DatabaseSync, sql: string, timeoutMs: number): void {
+  const deadline = Date.now() + timeoutMs;
+  for (let waitMs = 5; ; waitMs = Math.min(waitMs * 2, 100)) {
+    try {
+      db.exec(sql);
+      return;
+    } catch (err) {
+      const code = (err as { errcode?: number }).errcode;
+      if (code === undefined || (code & 0xff) !== SQLITE_BUSY || Date.now() >= deadline) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+    }
+  }
+}
+
 export class SqliteStore implements Store {
   private readonly db: DatabaseSync;
   private depth = 0;
@@ -87,11 +105,13 @@ export class SqliteStore implements Store {
 
   constructor(public readonly path: string) {
     this.db = new DatabaseSync(path);
-    this.db.exec('PRAGMA journal_mode = WAL');
-    this.db.exec('PRAGMA synchronous = NORMAL');
     // better-sqlite3 waited five seconds for a locked database by default; node:sqlite waits zero.
-    this.db.exec('PRAGMA busy_timeout = 5000');
-    this.db.exec(SCHEMA);
+    this.db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    // Two processes opening a new file both hold a shared lock and want the exclusive one to switch
+    // it to WAL; SQLite answers SQLITE_BUSY without calling the busy handler, so retry here.
+    execRetryingBusy(this.db, 'PRAGMA journal_mode = WAL', BUSY_TIMEOUT_MS);
+    this.db.exec('PRAGMA synchronous = NORMAL');
+    execRetryingBusy(this.db, SCHEMA, BUSY_TIMEOUT_MS);
   }
 
   /**
