@@ -121,6 +121,10 @@ The brief SHALL follow the policy. Under `agent` it SHALL tell the agent to comm
 - **WHEN** `runner.opencode.commit` is `daemon`
 - **THEN** the launch carries `commitPolicy: daemon`, the agent environment sets `ORCH_COMMIT_POLICY=daemon` (so the shim's report tool takes its daemon-commits wording), and the daemon commits a dirty worktree when it accepts the submit
 
+#### Scenario: Daemon commits an OpenCode submit in the real-git slice
+- **WHEN** an `opencode` launch under `runner.opencode.commit: daemon` runs through the OpenCode runner and its default template, with a fake `opencode` on PATH that submits a dirty worktree
+- **THEN** the task reaches `done`, the launch branch head is a commit by `orchestrator` holding only the agent's file with the report summary as its message, `sealedSha` is that head, and `agent.report` carries `committedByOrchestrator: true`
+
 ### Requirement: Codex runner command composition
 The Codex runner SHALL spawn `DEFAULT_CODEX_COMMAND`, or `runner.codex.command` when it is set:
 
@@ -300,4 +304,15 @@ The opt-in OpenCode e2e (test/e2e/opencode.test.ts) SHALL write fixtures only un
 #### Scenario: Committed fixtures carry no personal address
 - **WHEN** `git grep -E '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}' -- test/fixtures/opencode` runs
 - **THEN** every match is an `example.invalid` address
+
+### Requirement: OpenCode e2e contended-death counter rule
+The opt-in OpenCode end-to-end test SHALL check the counter rule of task-lifecycle "Retry and exhaustion" from `health.contendedRetries`, not from the events' own flags. A task's deaths with reason `startupContended` up to that allowance SHALL record `charged: false` and later ones `charged: true`. The task's attempts SHALL equal its launches minus one minus the uncharged deaths so counted.
+
+#### Scenario: Charged death within the allowance
+- **WHEN** the check, run by a unit test without opencode, is given a task whose first `startupContended` death records `charged: true` with the allowance at 2, and attempts consistent with that flag
+- **THEN** the check fails
+
+#### Scenario: Deaths as the rule says
+- **WHEN** a task's first two `startupContended` deaths record `charged: false` and a third `charged: true`, with the allowance at 2, four launches and one attempt
+- **THEN** the check passes
 
