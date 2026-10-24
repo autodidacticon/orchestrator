@@ -103,6 +103,16 @@ export interface OperatorContext {
   env: NodeJS.ProcessEnv;
 }
 
+type Reply = { status: number; body: Record<string, unknown> };
+
+/** One call's view of the client: every request goes to the daemon of the repository the call was bound to. */
+export interface RepoClient {
+  repo(): Promise<string>;
+  call(method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>, timeoutMs?: number, headers?: Record<string, string>): Promise<Reply>;
+  wait(opts: { afterSeq?: number; timeoutMs?: number; until?: Until }): Promise<Reply>;
+  register(): Promise<void>;
+}
+
 export class OperatorClient {
   /** This session's attachment: registered with the daemon on first contact, carried on claims, ended on close. See specs/operator-mcp "Operator MCP server". */
   readonly attachmentId = randomUUID();
@@ -115,19 +125,32 @@ export class OperatorClient {
 
   constructor(private readonly ctx: OperatorContext) {}
 
-  /** Record a call's `repo`: an absolute path inside a git repository, kept as that repository's real top level. */
-  async useRepo(repo: string | undefined): Promise<void> {
-    if (repo === undefined) return;
+  /** Record a call's `repo`: an absolute path inside a git repository, kept as that repository's real top level. Returns the repository the call is bound to: its own, else the one the session last passed, else undefined for the server's default. */
+  async useRepo(repo: string | undefined): Promise<string | undefined> {
+    if (repo === undefined) return this.sessionRepo;
     if (!path.isAbsolute(repo)) throw new Error(`repo must be an absolute path, got ${repo}`);
+    let top: string;
     try {
-      this.sessionRepo = await gitTopLevel(repo);
+      top = await gitTopLevel(repo);
     } catch {
       throw new Error(`repo ${repo} is not inside a git repository`);
     }
+    this.sessionRepo = top;
+    return top;
   }
 
-  async repo(): Promise<string> {
-    if (this.sessionRepo) return this.sessionRepo;
+  /** This client bound to one call's repository; a later call naming another repo does not move it. */
+  at(bound: string | undefined): RepoClient {
+    return {
+      repo: () => this.repo(bound),
+      call: (...a) => this.call(bound, ...a),
+      wait: (opts) => this.wait(bound, opts),
+      register: async () => this.register(await this.url(bound)),
+    };
+  }
+
+  async repo(bound: string | undefined): Promise<string> {
+    if (bound) return bound;
     try {
       return await resolveRepoPath({ repo: this.ctx.repo, env: this.ctx.env });
     } catch (err) {
@@ -137,14 +160,14 @@ export class OperatorClient {
   }
 
   /** The daemon's URL, reviving it after an idle exit or a crash; refused after an explicit stop or for a repository with no run directory. */
-  async url(): Promise<string> {
+  async url(bound: string | undefined): Promise<string> {
     // A remote daemon (ORCH_URL on a non-loopback host) is used as is, without an attachment (its pids are not ours); reviveDaemon reports it unreachable rather than spawning one here.
     const remote = remoteDaemonUrl(this.ctx.env);
     if (remote) {
       await reviveDaemon({ env: this.ctx.env });
       return remote;
     }
-    const repo = await this.repo();
+    const repo = await this.repo(bound);
     const paths = runPaths(repo, this.ctx.env);
     const state = await daemonState(paths.runDir);
     if (state.healthy && state.url) {
@@ -166,8 +189,7 @@ export class OperatorClient {
     this.attachedToPid.set(base, daemonPid);
   }
 
-  async register(base?: string): Promise<void> {
-    const url = base ?? (await this.url());
+  async register(url: string): Promise<void> {
     this.pids ??= await ancestorPids(process.pid);
     await fetch(`${url}/v1/attachments`, {
       method: 'POST',
@@ -191,8 +213,8 @@ export class OperatorClient {
     );
   }
 
-  async call(method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>, timeoutMs = 30_000, headers: Record<string, string> = {}): Promise<{ status: number; body: Record<string, unknown> }> {
-    const base = await this.url();
+  async call(bound: string | undefined, method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>, timeoutMs = 30_000, headers: Record<string, string> = {}): Promise<{ status: number; body: Record<string, unknown> }> {
+    const base = await this.url(bound);
     const res = await fetch(`${base}${route}`, {
       method,
       headers: { 'content-type': 'application/json', 'x-orch-attachment': this.attachmentId, ...headers },
@@ -205,12 +227,13 @@ export class OperatorClient {
     return out;
   }
 
-  async wait(opts: { afterSeq?: number; timeoutMs?: number; until?: Until }): Promise<{ status: number; body: Record<string, unknown> }> {
+  /** Every slice polls the daemon of the repository the wait was bound to, whatever later calls pass. */
+  async wait(bound: string | undefined, opts: { afterSeq?: number; timeoutMs?: number; until?: Until }): Promise<{ status: number; body: Record<string, unknown> }> {
     const budget = clampWait(opts.timeoutMs);
     const deadline = Date.now() + budget;
     let after = opts.afterSeq;
     if (after === undefined) {
-      const s = await this.call('GET', '/v1/status');
+      const s = await this.call(bound, 'GET', '/v1/status');
       after = Number(s.body['latestSeq'] ?? 0);
     }
     const collected: unknown[] = [];
@@ -219,7 +242,7 @@ export class OperatorClient {
     for (;;) {
       const remaining = deadline - Date.now();
       const slice = Math.max(0, Math.min(POLL_SLICE_MS, remaining));
-      const r = await this.call('GET', `/v1/events?after=${seq}&wait=${slice}`, undefined, slice + 15_000);
+      const r = await this.call(bound, 'GET', `/v1/events?after=${seq}&wait=${slice}`, undefined, slice + 15_000);
       const events = (r.body['events'] as unknown[]) ?? [];
       collected.push(...events);
       seq = Number(r.body['seq'] ?? seq);
@@ -255,16 +278,17 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const server = new McpServer({ name: 'orchestrator-operator', version: '0.5.0' });
-  // Every tool takes the optional repo; it is recorded for the session and never forwarded. See specs/operator-mcp "Operator MCP server".
-  const tool = <S extends z.ZodRawShape>(name: string, config: { description: string; inputSchema: S }, cb: (a: z.objectOutputType<S, z.ZodTypeAny>) => Promise<ReturnType<typeof text>>) =>
+  // Every tool takes the optional repo; it is recorded for the session and never forwarded. The call is bound to its repository once, here, so concurrent calls naming different repos each reach their own daemon. See specs/operator-mcp "Operator MCP server".
+  const tool = <S extends z.ZodRawShape>(name: string, config: { description: string; inputSchema: S }, cb: (a: z.objectOutputType<S, z.ZodTypeAny>, c: RepoClient) => Promise<ReturnType<typeof text>>) =>
     server.registerTool(name, { ...config, inputSchema: { ...config.inputSchema, repo: z.string().optional().describe(REPO_ARG_TEXT) } }, (async (args: Record<string, unknown>) => {
       const { repo, ...rest } = args;
+      let bound: string | undefined;
       try {
-        await client.useRepo(repo as string | undefined);
+        bound = await client.useRepo(repo as string | undefined);
       } catch (err) {
         return failure(err);
       }
-      return cb(rest as z.objectOutputType<S, z.ZodTypeAny>);
+      return cb(rest as z.objectOutputType<S, z.ZodTypeAny>, client.at(bound));
     }) as never);
   const task = { task: z.string().describe('Task id as it appears in the graph, e.g. ENG-123') };
   const milestone = { milestone: z.string().describe('Milestone id') };
@@ -292,10 +316,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         commit: z.enum(COMMIT_POLICIES).optional().describe(RUNNER_ARG_TEXT.commit),
       },
     },
-    async (a) =>
+    async (a, c) =>
       guarded(async () => {
         const { mode, ...rest } = a;
-        const repo = await client.repo();
+        const repo = await c.repo();
         // The kind in force decides the plugin's mode default: the argument, else the run's stored override, else orchestrator.yaml. See specs/operator-mcp "Start tool".
         const kind = rest.runnerKind ?? kindOfRun(repo, env);
         const defaultMode = defaultModeFor(kind);
@@ -328,22 +352,22 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         commit: z.enum(COMMIT_POLICIES).nullable().optional().describe(RUNNER_ARG_TEXT.commit),
       },
     },
-    async (a) =>
+    async (a, c) =>
       guarded(async () => {
         const patch = Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined));
         // The commit policy binds to runnerKind in the same call, else to the kind in force on the daemon.
-        const kind = a.commit === undefined || a.runnerKind ? (a.runnerKind ?? 'claude-code') : (((await client.call('GET', '/v1/config')).body['config'] as { runnerKind?: { value?: RunnerKind } } | undefined)?.runnerKind?.value ?? 'claude-code');
-        return client.call('PUT', '/v1/config', foldRunnerArgs(patch, kind));
+        const kind = a.commit === undefined || a.runnerKind ? (a.runnerKind ?? 'claude-code') : (((await c.call('GET', '/v1/config')).body['config'] as { runnerKind?: { value?: RunnerKind } } | undefined)?.runnerKind?.value ?? 'claude-code');
+        return c.call('PUT', '/v1/config', foldRunnerArgs(patch, kind));
       }),
   );
-  tool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a) =>
+  tool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a, c) =>
     guarded(async () => {
-      const r = await stopDaemon({ repo: await client.repo(), env, reap: a.reap });
+      const r = await stopDaemon({ repo: await c.repo(), env, reap: a.reap });
       return { status: r.stopped ? 200 : 409, body: r };
     }),
   );
-  tool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (runnerKind, the kind in force; allowedTools with its parts and whether the runner command applies it, claude-code only; model and effort of the kind in force likewise; the claude, codex, and opencode leaves such as codex.sandbox, codex.commit, and opencode.permission; each live launch also listing its own runner, model, and effort), claimableByKind: parked launches per runner kind, toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async () =>
-    guarded(() => client.call('GET', '/v1/status')),
+  tool('status', { description: 'Current run status: sets by state, stall roots, open questions, milestones awaiting review, run facts, stuck tasks, pause reason, cost and budgets, per-launch health (with interruptions, the kept releases a task absorbed), deferred: ready tasks held back because their scope overlaps a running, waiting, submitted, or claimable task (each with the ids it overlaps), idle: whether the daemon is quiescent and how long it has been idle against its exit window, attachments: the sessions attached and the launches each holds, config: every configuration key as { value, source } (runnerKind, the kind in force; allowedTools with its parts and whether the runner command applies it, claude-code only; model and effort of the kind in force likewise; the claude, codex, and opencode leaves such as codex.sandbox, codex.commit, and opencode.permission; each live launch also listing its own runner, model, and effort), claimableByKind: parked launches per runner kind, toolchain: the detection record for the repository root, and needsConfig: keys no layer supplied (checkCommand there holds submitted work until configure sets it). Present even before a graph is loaded.', inputSchema: {} }, async (_a, c) =>
+    guarded(() => c.call('GET', '/v1/status')),
   );
   tool('runs', { description: 'List every run under ORCH_HOME with its repository, daemon liveness, and, for a daemon that is gone, its exit record (idle, stop, or signal with the last digest) or none after a crash.', inputSchema: {} }, async () =>
     guarded(async () => ({ status: 200, body: { runs: await listRuns(env) } })),
@@ -360,7 +384,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         tracker: trackerSchema.optional().describe('The tracker these issues came from; recorded by the daemon so the run skill can mirror states and comments back. kind linear | atlassian | github; workspace is the Linear workspace, the Jira site, or the GitHub owner/repo; inProgressLabel (github only) names the label that stands for in progress.'),
       },
     },
-    async (a) =>
+    async (a, c) =>
       guarded(async () => {
         let mapped;
         try {
@@ -369,12 +393,12 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
           if (err instanceof ImportError) return { status: 400, body: { error: err.message, details: err.details } };
           throw err;
         }
-        const r = await client.call('PUT', '/v1/graph', { content: mapped.content, ...(a.tracker ? { tracker: a.tracker } : {}) });
+        const r = await c.call('PUT', '/v1/graph', { content: mapped.content, ...(a.tracker ? { tracker: a.tracker } : {}) });
         return { status: r.status, body: { ...r.body, summary: mapped.summary } };
       }),
   );
-  tool('import_graph', { description: 'Import a graph file verbatim (YAML or JSON content) or as a node list.', inputSchema: { content: z.string().optional(), nodes: z.array(z.record(z.unknown())).optional() } }, async (a) =>
-    guarded(() => client.call('PUT', '/v1/graph', a)),
+  tool('import_graph', { description: 'Import a graph file verbatim (YAML or JSON content) or as a node list.', inputSchema: { content: z.string().optional(), nodes: z.array(z.record(z.unknown())).optional() } }, async (a, c) =>
+    guarded(() => c.call('PUT', '/v1/graph', a)),
   );
   tool(
     'wait',
@@ -382,16 +406,16 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       description: `Block until something happens. Returns events after afterSeq (default: now), the latest seq, and a digest (openQuestions, awaitingReview, finished, stalled, stuck, pausedReason, deferred: the count of ready tasks held back by scope overlap, needsConfig: configuration keys still unresolved, with checkCommand meaning submitted work is held until configure sets it, outboxPending, trackerErrors). until: question | review | finished | stalled | any; any also returns on launch.stuck, launch.unstuck, and budget.exceeded. timeoutMs default ${WAIT_DEFAULT_MS}, cap ${WAIT_CAP_MS}. Loop on this instead of polling status.`,
       inputSchema: { afterSeq: z.number().int().nonnegative().optional(), timeoutMs: z.number().int().nonnegative().optional(), until: z.enum(['question', 'review', 'finished', 'stalled', 'any']).optional() },
     },
-    async (a) => guarded(() => client.wait(a)),
+    async (a, c) => guarded(() => c.wait(a)),
   );
-  tool('review', { description: 'Review bundle for a submitted gated milestone: pinned sha, version, tag, diff stat, closure task summaries, acceptance criteria.', inputSchema: milestone }, async (a) =>
-    guarded(() => client.call('GET', `/v1/milestones/${encodeURIComponent(a.milestone)}/review`)),
+  tool('review', { description: 'Review bundle for a submitted gated milestone: pinned sha, version, tag, diff stat, closure task summaries, acceptance criteria.', inputSchema: milestone }, async (a, c) =>
+    guarded(() => c.call('GET', `/v1/milestones/${encodeURIComponent(a.milestone)}/review`)),
   );
-  tool('answer', { description: 'Answer a waiting or blocked task\'s question.', inputSchema: { ...task, text: z.string() } }, async (a) =>
-    guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/answer`, { text: a.text })),
+  tool('answer', { description: 'Answer a waiting or blocked task\'s question.', inputSchema: { ...task, text: z.string() } }, async (a, c) =>
+    guarded(() => c.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/answer`, { text: a.text })),
   );
-  tool('cancel', { description: 'Cancel a task. release: let dependents proceed as if it were done.', inputSchema: { ...task, reason: z.string().optional(), release: z.boolean().optional() } }, async (a) =>
-    guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/cancel`, { reason: a.reason ?? 'cancelled by operator', release: a.release ?? false })),
+  tool('cancel', { description: 'Cancel a task. release: let dependents proceed as if it were done.', inputSchema: { ...task, reason: z.string().optional(), release: z.boolean().optional() } }, async (a, c) =>
+    guarded(() => c.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/cancel`, { reason: a.reason ?? 'cancelled by operator', release: a.release ?? false })),
   );
   tool(
     'reopen',
@@ -400,10 +424,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         'Reopen a done or cancelled task. Without cascade it is refused with blockers when a started task depends on it (milestones are transparent and reset). With cascade it records a plan that resets every started dependent and returns it as reset: [{ id, from }].',
       inputSchema: { ...task, cascade: z.boolean().optional() },
     },
-    async (a) => guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/reopen`, { cascade: a.cascade ?? false })),
+    async (a, c) => guarded(() => c.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/reopen`, { cascade: a.cascade ?? false })),
   );
-  tool('proposals', { description: 'Agent proposals for follow-up tasks: pending by default, or accepted, rejected, all.', inputSchema: { status: z.enum(['pending', 'accepted', 'rejected', 'all']).optional() } }, async (a) =>
-    guarded(() => client.call('GET', `/v1/proposals${a.status ? `?status=${a.status}` : ''}`)),
+  tool('proposals', { description: 'Agent proposals for follow-up tasks: pending by default, or accepted, rejected, all.', inputSchema: { status: z.enum(['pending', 'accepted', 'rejected', 'all']).optional() } }, async (a, c) =>
+    guarded(() => c.call('GET', `/v1/proposals${a.status ? `?status=${a.status}` : ''}`)),
   );
   tool(
     'accept_proposal',
@@ -411,29 +435,29 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       description: 'Accept a proposal into the graph: appends a task depending on the proposer (and joins its gated milestone). nodeId: the tracker issue key when the session created one; payload: extra fields for the node.',
       inputSchema: { id: z.string(), nodeId: z.string().optional(), payload: z.record(z.unknown()).optional() },
     },
-    async (a) => guarded(() => client.call('POST', `/v1/proposals/${encodeURIComponent(a.id)}/accept`, { nodeId: a.nodeId, payload: a.payload })),
+    async (a, c) => guarded(() => c.call('POST', `/v1/proposals/${encodeURIComponent(a.id)}/accept`, { nodeId: a.nodeId, payload: a.payload })),
   );
-  tool('reject_proposal', { description: 'Reject a proposal with a note.', inputSchema: { id: z.string(), note: z.string() } }, async (a) =>
-    guarded(() => client.call('POST', `/v1/proposals/${encodeURIComponent(a.id)}/reject`, { note: a.note })),
+  tool('reject_proposal', { description: 'Reject a proposal with a note.', inputSchema: { id: z.string(), note: z.string() } }, async (a, c) =>
+    guarded(() => c.call('POST', `/v1/proposals/${encodeURIComponent(a.id)}/reject`, { note: a.note })),
   );
-  tool('unblock', { description: 'Return a blocked task to unstarted, optionally with an answer or accepting a remediation candidate.', inputSchema: { ...task, answer: z.string().optional(), acceptCandidate: z.boolean().optional() } }, async (a) =>
-    guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/unblock`, { answer: a.answer, acceptCandidate: a.acceptCandidate ?? false })),
+  tool('unblock', { description: 'Return a blocked task to unstarted, optionally with an answer or accepting a remediation candidate.', inputSchema: { ...task, answer: z.string().optional(), acceptCandidate: z.boolean().optional() } }, async (a, c) =>
+    guarded(() => c.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/unblock`, { answer: a.answer, acceptCandidate: a.acceptCandidate ?? false })),
   );
-  tool('accept', { description: 'Accept a submitted milestone at the given pinned sha and review version (from review).', inputSchema: { ...milestone, sha: z.string(), version: z.number().int() } }, async (a) =>
-    guarded(() => client.call('POST', `/v1/milestones/${encodeURIComponent(a.milestone)}/accept`, { sha: a.sha, version: a.version })),
+  tool('accept', { description: 'Accept a submitted milestone at the given pinned sha and review version (from review).', inputSchema: { ...milestone, sha: z.string(), version: z.number().int() } }, async (a, c) =>
+    guarded(() => c.call('POST', `/v1/milestones/${encodeURIComponent(a.milestone)}/accept`, { sha: a.sha, version: a.version })),
   );
-  tool('reject', { description: 'Reject a submitted milestone with a note; it becomes blocked until repaired and unblocked.', inputSchema: { ...milestone, note: z.string() } }, async (a) =>
-    guarded(() => client.call('POST', `/v1/milestones/${encodeURIComponent(a.milestone)}/reject`, { note: a.note })),
+  tool('reject', { description: 'Reject a submitted milestone with a note; it becomes blocked until repaired and unblocked.', inputSchema: { ...milestone, note: z.string() } }, async (a, c) =>
+    guarded(() => c.call('POST', `/v1/milestones/${encodeURIComponent(a.milestone)}/reject`, { note: a.note })),
   );
-  tool('pause', { description: 'Stop admitting new launches; running work continues and is verified.', inputSchema: {} }, async () => guarded(() => client.call('POST', '/v1/pause')));
-  tool('resume', { description: 'Resume admission after a pause. Refused with 409 while the run cost is at or above the ceiling unless overrideBudget is true, which raises the ceiling by one budget.', inputSchema: { overrideBudget: z.boolean().optional() } }, async (a) =>
-    guarded(() => client.call('POST', '/v1/resume', { overrideBudget: a.overrideBudget ?? false })),
+  tool('pause', { description: 'Stop admitting new launches; running work continues and is verified.', inputSchema: {} }, async (_a, c) => guarded(() => c.call('POST', '/v1/pause')));
+  tool('resume', { description: 'Resume admission after a pause. Refused with 409 while the run cost is at or above the ceiling unless overrideBudget is true, which raises the ceiling by one budget.', inputSchema: { overrideBudget: z.boolean().optional() } }, async (a, c) =>
+    guarded(() => c.call('POST', '/v1/resume', { overrideBudget: a.overrideBudget ?? false })),
   );
-  tool('nudge', { description: 'Queue a message for a running task\'s agent (delivered on its next inbox call). 409 when the task has no live launch.', inputSchema: { ...task, message: z.string() } }, async (a) =>
-    guarded(() => client.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/nudge`, { message: a.message })),
+  tool('nudge', { description: 'Queue a message for a running task\'s agent (delivered on its next inbox call). 409 when the task has no live launch.', inputSchema: { ...task, message: z.string() } }, async (a, c) =>
+    guarded(() => c.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/nudge`, { message: a.message })),
   );
-  tool('logs', { description: 'Captured output of a task\'s launch (latest by default).', inputSchema: { ...task, launch: z.number().int().optional() } }, async (a) =>
-    guarded(() => client.call('GET', `/v1/tasks/${encodeURIComponent(a.task)}/logs${a.launch ? `?launch=${a.launch}` : ''}`)),
+  tool('logs', { description: 'Captured output of a task\'s launch (latest by default).', inputSchema: { ...task, launch: z.number().int().optional() } }, async (a, c) =>
+    guarded(() => c.call('GET', `/v1/tasks/${encodeURIComponent(a.task)}/logs${a.launch ? `?launch=${a.launch}` : ''}`)),
   );
 
   tool(
@@ -442,7 +466,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       description: 'Pending tracker effects (setState, comment) in id order with the tracker policy. Apply each with the session\'s tracker tools, then ack.',
       inputSchema: { after: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() },
     },
-    async (a) => guarded(() => client.call('GET', `/v1/outbox?after=${a.after ?? 0}&limit=${a.limit ?? 50}`)),
+    async (a, c) => guarded(() => c.call('GET', `/v1/outbox?after=${a.after ?? 0}&limit=${a.limit ?? 50}`)),
   );
   tool(
     'ack',
@@ -450,14 +474,14 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       description: 'Acknowledge an outbox effect with the vendor result (e.g. { commentId }), or reject it with error text; exactly one of result or error.',
       inputSchema: { id: z.number().int(), result: z.record(z.unknown()).optional(), error: z.string().optional() },
     },
-    async (a) =>
+    async (a, c) =>
       guarded(async () => {
         const hasResult = a.result !== undefined;
         const hasError = a.error !== undefined;
         if (hasResult === hasError) return { status: 400, body: { error: 'exactly one of result or error is required' } };
         return hasError
-          ? client.call('POST', `/v1/outbox/${a.id}/nack`, { error: a.error })
-          : client.call('POST', `/v1/outbox/${a.id}/ack`, { result: a.result });
+          ? c.call('POST', `/v1/outbox/${a.id}/nack`, { error: a.error })
+          : c.call('POST', `/v1/outbox/${a.id}/ack`, { result: a.result });
       }),
   );
 
@@ -468,10 +492,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner (the CLI the launch was prepared for), model, effort, and pending when a question is open. runner filters by the kinds this worker can run (one or a list); a named task of another kind is 409. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable (for the runner filter) or the run is paused.',
       inputSchema: { workerId: z.string(), taskId: z.string().optional(), access: z.enum(['local', 'remote']).optional(), runner: z.union([z.enum(RUNNER_KINDS), z.array(z.enum(RUNNER_KINDS))]).optional() },
     },
-    async (a) =>
+    async (a, c) =>
       guarded(async () => {
-        await client.register();
-        return client.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access, runner: a.runner, attachment: client.attachmentId });
+        await c.register();
+        return c.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access, runner: a.runner, attachment: client.attachmentId });
       }),
   );
   tool(
@@ -480,13 +504,13 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       description: 'Hand a claimed launch back with a reason. Untouched: the task returns to unstarted at no cost; after progress: a failed attempt, unless keep is true, which commits uncommitted work on the launch branch, keeps the branch, and returns the task to unstarted at no cost with an interrupted context for the next brief (bounded by daemon.maxKeptReleases).',
       inputSchema: { launchId: z.string(), reason: z.string(), keep: z.boolean().optional() },
     },
-    async (a) => guarded(() => client.call('POST', `/v1/launches/${encodeURIComponent(a.launchId)}/release`, { reason: a.reason, ...(a.keep ? { keep: true } : {}) })),
+    async (a, c) => guarded(() => c.call('POST', `/v1/launches/${encodeURIComponent(a.launchId)}/release`, { reason: a.reason, ...(a.keep ? { keep: true } : {}) })),
   );
   const scoped = { launchId: z.string(), token: z.string() };
-  const forwardLaunch = (op: 'heartbeat' | 'report' | 'block' | 'log' | 'inbox', launchId: string, token: string, body: Record<string, unknown>, timeoutMs = 30_000) =>
-    client.call(op === 'inbox' ? 'GET' : 'POST', `/v1/launches/${encodeURIComponent(launchId)}/${op}`, body, timeoutMs, { authorization: `Bearer ${token}` });
-  tool('launch_heartbeat', { description: 'Worker: renew the lease and report progress text for a claimed launch.', inputSchema: { ...scoped, progress: z.string().optional() } }, async ({ launchId, token, ...body }) =>
-    guarded(() => forwardLaunch('heartbeat', launchId, token, body)),
+  const forwardLaunch = (c: RepoClient, op: 'heartbeat' | 'report' | 'block' | 'log' | 'inbox', launchId: string, token: string, body: Record<string, unknown>, timeoutMs = 30_000) =>
+    c.call(op === 'inbox' ? 'GET' : 'POST', `/v1/launches/${encodeURIComponent(launchId)}/${op}`, body, timeoutMs, { authorization: `Bearer ${token}` });
+  tool('launch_heartbeat', { description: 'Worker: renew the lease and report progress text for a claimed launch.', inputSchema: { ...scoped, progress: z.string().optional() } }, async ({ launchId, token, ...body }, c) =>
+    guarded(() => forwardLaunch(c, 'heartbeat', launchId, token, body)),
   );
   tool(
     'launch_report',
@@ -510,7 +534,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         whatWouldUnblock: z.string().optional(),
       },
     },
-    async ({ launchId, token, ...body }) => guarded(() => forwardLaunch('report', launchId, token, body)),
+    async ({ launchId, token, ...body }, c) => guarded(() => forwardLaunch(c, 'report', launchId, token, body)),
   );
   tool(
     'launch_block',
@@ -524,21 +548,21 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         options: z.array(z.string()).optional(),
       },
     },
-    async ({ launchId, token, ...body }) =>
+    async ({ launchId, token, ...body }, c) =>
       guarded(async () => {
         try {
-          return await forwardLaunch('block', launchId, token, body, WAIT_CAP_MS);
+          return await forwardLaunch(c, 'block', launchId, token, body, WAIT_CAP_MS);
         } catch (err) {
           if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) return { status: 200, body: { pending: true, seq: body['seq'] } };
           throw err;
         }
       }),
   );
-  tool('launch_inbox', { description: 'Worker: pending notices for a claimed launch (stuck, nudge, baseMoved, payloadChanged).', inputSchema: scoped }, async ({ launchId, token }) =>
-    guarded(() => forwardLaunch('inbox', launchId, token, {})),
+  tool('launch_inbox', { description: 'Worker: pending notices for a claimed launch (stuck, nudge, baseMoved, payloadChanged).', inputSchema: scoped }, async ({ launchId, token }, c) =>
+    guarded(() => forwardLaunch(c, 'inbox', launchId, token, {})),
   );
-  tool('launch_log', { description: 'Worker: append a log line to a claimed launch.', inputSchema: { ...scoped, text: z.string(), seq: z.number().int().optional() } }, async ({ launchId, token, ...body }) =>
-    guarded(() => forwardLaunch('log', launchId, token, body)),
+  tool('launch_log', { description: 'Worker: append a log line to a claimed launch.', inputSchema: { ...scoped, text: z.string(), seq: z.number().int().optional() } }, async ({ launchId, token, ...body }, c) =>
+    guarded(() => forwardLaunch(c, 'log', launchId, token, body)),
   );
 
   const transport = new StdioServerTransport();

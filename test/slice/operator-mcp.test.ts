@@ -351,6 +351,53 @@ describe('operator MCP server', () => {
     expect(started).toMatchObject({ status: 200, started: false, repo, runDir: runPaths(repo, env).runDir });
   }, 60_000);
 
+  // Requests run concurrently on one server; each call is bound to its repository once. See specs/operator-mcp "Operator MCP server".
+  it('a wait bound to one repo keeps polling its daemon while a call names another repo', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const pluginRoot = realpathSync(mkdtempSync(path.join(tmpdir(), 'orch-mcp-plugin-root-')));
+    dirs.push(home, pluginRoot);
+    const { ORCH_REPO: _unset, ...rest } = process.env as Record<string, string>;
+    env = { ...rest, ORCH_HOME: home };
+    const fixture = async (ids: string[]) => {
+      const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+      dirs.push(base);
+      const repo = realpathSync(makeRepo(base));
+      writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'runner: { mode: pull }'].join('\n'));
+      const run = await startDaemon({ repo, env: { ...env, ORCH_REPO: repo } });
+      const content = ['nodes:', ...ids.map((id) => `  - { id: ${id}, deps: [], description: d, acceptanceCriteria: [a] }`), ''].join('\n');
+      const put = await fetch(`${run.url}/v1/graph`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content }) });
+      expect(put.status).toBe(200);
+      return { repo, url: run.url };
+    };
+    const a = await fixture(['A1']);
+    // B has more events than A, so a slice polling B with A's seq would return B's events.
+    const b = await fixture(['B1', 'B2', 'B3', 'B4', 'B5']);
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, cwd: pluginRoot, stderr: 'pipe' }));
+    const tasksOf = (s: Record<string, unknown>) => Object.values(s['byStatus'] as Record<string, string[]>).flat().sort();
+
+    const seqA = Number((await tool('status', { repo: a.repo }))['latestSeq']);
+    const waiting = tool('wait', { repo: a.repo, afterSeq: seqA, until: 'finished', timeoutMs: 4000 });
+    await new Promise((r) => setTimeout(r, 300));
+    const statusB = await tool('status', { repo: b.repo });
+    expect(statusB).toMatchObject({ status: 200 });
+    expect(tasksOf(statusB)).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
+    // An event on A ends the wait's current slice; the next slice must poll A again.
+    expect((await fetch(`${a.url}/v1/pause`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status).toBe(200);
+    const w = await waiting;
+    const latestA = Number(((await (await fetch(`${a.url}/v1/status`)).json()) as Record<string, unknown>)['latestSeq']);
+    expect(w).toMatchObject({ status: 200, matched: false, seq: latestA, digest: { pausedReason: 'operator' } });
+    const events = w['events'] as Array<{ seq: number; kind: string }>;
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.every((e) => e.seq > seqA && e.seq <= latestA)).toBe(true);
+    expect(JSON.stringify(events)).not.toMatch(/B[1-5]/);
+
+    // A call without repo is served by the repo the session last passed.
+    const again = await tool('status');
+    expect(again).toMatchObject({ status: 200 });
+    expect(tasksOf(again)).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
+  }, 60_000);
+
   it('revives the daemon after an idle exit and refuses after a stop', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
     const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
