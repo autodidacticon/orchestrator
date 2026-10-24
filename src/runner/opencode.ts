@@ -78,23 +78,79 @@ export function bashPatterns(allowedTools: readonly string[]): string[] {
  * The bash patterns that let a check command run: one per simple command, split outside quotes at
  * `&&`, `||`, `;`, `|`, `|&`, a lone `&`, newlines and grouping parentheses, with a brace group's `{`
  * and `}` dropped. A backslash escapes the next character outside quotes and inside double quotes. The
- * `&` of a redirection (`2>&1`, `&>`, `<&`) and the `|` of `>|` stay in the command, as does a `$(...)`
- * substitution. OpenCode 1.18.30 matches each command node, with its redirections, against the rules on
- * its own, and a pattern holding a whole chain never matches (test/fixtures/opencode/events/X-*.jsonl).
+ * `&` of a redirection (`2>&1`, `&>`, `<&`) and the `|` of `>|` stay in the command. A `$(...)`,
+ * backtick or `<(...)`/`>(...)` substitution stays whole in its command and its inner commands get
+ * patterns of their own, as OpenCode matches them too (X-subst-*.jsonl, X-backtick-*.jsonl). A heredoc
+ * body (the lines after `<<WORD` through the terminator) and an unquoted `#` comment are dropped; neither
+ * is a command node. OpenCode 1.18.30 matches each command node, with its redirections, against the rules
+ * on its own, and a pattern holding a whole chain never matches (test/fixtures/opencode/events/X-*.jsonl).
  * A pattern is the command verbatim: OpenCode has no escape for `*` and `?`, so a check command holding
- * them yields a wildcard pattern (X-glob-*.jsonl); `[` is literal.
+ * them yields a wildcard pattern (X-glob-*.jsonl); `[` is literal. A pattern made only of `*`, `?` and
+ * spaces is never returned.
  */
 export function checkCommandPatterns(checkCommand: string | undefined): string[] {
   if (!checkCommand) return [];
-  const s = checkCommand;
   const out: string[] = [];
+  for (const p of splitCommands(checkCommand)) if (!isGlobOnly(p) && !out.includes(p)) out.push(p);
+  return out;
+}
+
+/** True for a pattern that is empty or holds only `*`, `?` and whitespace: it matches (nearly) every command. */
+function isGlobOnly(pattern: string): boolean {
+  return /^[\s*?]*$/.test(pattern);
+}
+
+/** The index just past the `)` closing a substitution whose body starts at `i`. */
+function substitutionEnd(s: string, i: number): number {
+  let depth = 1;
+  let quote: string | undefined;
+  for (; i < s.length; i++) {
+    const c = s[i];
+    if (c === '\\' && quote !== "'") i++;
+    else if (quote) {
+      if (c === quote) quote = undefined;
+    } else if (c === '"' || c === "'" || c === '`') quote = c;
+    else if (c === '(') depth++;
+    else if (c === ')' && --depth === 0) return i + 1;
+  }
+  return s.length;
+}
+
+/** The index just past the backtick closing a substitution whose body starts at `i`. */
+function backtickEnd(s: string, i: number): number {
+  for (; i < s.length; i++) {
+    if (s[i] === '\\') i++;
+    else if (s[i] === '`') return i + 1;
+  }
+  return s.length;
+}
+
+/** The index just past the heredoc bodies starting at `i`, each up to and including its terminator line. */
+function heredocsEnd(s: string, i: number, docs: readonly { word: string; strip: boolean }[]): number {
+  for (const doc of docs) {
+    while (i < s.length) {
+      const nl = s.indexOf('\n', i);
+      const end = nl < 0 ? s.length : nl;
+      const line = s.slice(i, end);
+      i = end + 1;
+      if ((doc.strip ? line.replace(/^\t+/, '') : line) === doc.word) break;
+    }
+  }
+  return Math.min(i, s.length);
+}
+
+function splitCommands(s: string): string[] {
+  const out: string[] = [];
+  let inner: string[] = [];
   let cur = '';
   let quote: string | undefined;
-  let subst = 0;
+  let heredocs: { word: string; strip: boolean }[] = [];
   const flush = () => {
     let seg = cur.trim();
-    if (/^\{\s/.test(seg)) seg = seg.slice(1).trim();
-    if (seg && seg !== '}' && !out.includes(seg)) out.push(seg);
+    if (/^\{(\s|$)/.test(seg)) seg = seg.slice(1).trim();
+    if (seg && !/^\}(\s|$)/.test(seg)) out.push(seg);
+    out.push(...inner);
+    inner = [];
     cur = '';
   };
   for (let i = 0; i < s.length; i++) {
@@ -103,20 +159,62 @@ export function checkCommandPatterns(checkCommand: string | undefined): string[]
     if (c === '\\' && quote !== "'") {
       cur += c + (next ?? '');
       i++;
+    } else if (quote === "'") {
+      if (c === quote) quote = undefined;
+      cur += c;
+    } else if (c === '$' && next === '(' && s[i + 2] === '(') {
+      const end = substitutionEnd(s, i + 2);
+      cur += s.slice(i, end);
+      i = end - 1;
+    } else if ((c === '$' && next === '(') || (!quote && (c === '<' || c === '>') && next === '(')) {
+      const end = substitutionEnd(s, i + 2);
+      inner.push(...splitCommands(s.slice(i + 2, end - 1)));
+      cur += s.slice(i, end);
+      i = end - 1;
+    } else if (c === '`') {
+      const end = backtickEnd(s, i + 1);
+      inner.push(...splitCommands(s.slice(i + 1, end - 1)));
+      cur += s.slice(i, end);
+      i = end - 1;
     } else if (quote) {
       if (c === quote) quote = undefined;
       cur += c;
     } else if (c === '"' || c === "'") {
       quote = c;
       cur += c;
-    } else if (c === '$' && next === '(') {
-      subst++;
-      cur += '$(';
-      i++;
-    } else if (subst > 0) {
-      if (c === '(') subst++;
-      else if (c === ')') subst--;
-      cur += c;
+    } else if (c === '#' && (cur === '' || /\s$/.test(cur))) {
+      while (i + 1 < s.length && s[i + 1] !== '\n') i++;
+    } else if (c === '<' && next === '<' && s[i + 2] === '<') {
+      cur += '<<<';
+      i += 2;
+    } else if (c === '<' && next === '<') {
+      let j = i + 2;
+      const strip = s[j] === '-';
+      if (strip) j++;
+      while (s[j] === ' ' || s[j] === '\t') j++;
+      let word = '';
+      while (j < s.length && !/[\s;&|<>()]/.test(s[j] as string)) {
+        const w = s[j] as string;
+        if (w === "'" || w === '"') {
+          const close = s.indexOf(w, j + 1);
+          const stop = close < 0 ? s.length : close;
+          word += s.slice(j + 1, stop);
+          j = stop + 1;
+        } else if (w === '\\') {
+          word += s[j + 1] ?? '';
+          j += 2;
+        } else {
+          word += w;
+          j++;
+        }
+      }
+      if (word) heredocs.push({ word, strip });
+      cur += s.slice(i, j);
+      i = j - 1;
+    } else if (c === '\n' && heredocs.length) {
+      flush();
+      i = heredocsEnd(s, i + 1, heredocs) - 1;
+      heredocs = [];
     } else if (c === '&' && next === '&') {
       flush();
       i++;
@@ -143,12 +241,13 @@ export function checkCommandPatterns(checkCommand: string | undefined): string[]
  * and the orchestrator tools are allowed. No rule asks: a headless `ask` is auto-rejected and ends the
  * run after that step, while a `deny` returns an error to the model and the run goes on
  * (test/fixtures/opencode/events/P-ask.jsonl, P-deny.jsonl). `allow`: every tool is allowed. The
- * catch-all comes first: OpenCode takes the last matching rule.
+ * catch-all comes first: OpenCode takes the last matching rule. A derived or check-command pattern made
+ * only of `*`, `?` and spaces is skipped, so nothing overwrites the `deny` catch-all.
  */
 export function openCodePermission(permission: OpenCodePermission, allowedTools: readonly string[], checkCommand?: string): Record<string, unknown> {
   if (permission === 'allow') return { '*': 'allow' };
   const bash: Record<string, string> = { '*': 'deny', 'git *': 'allow' };
-  for (const p of [...bashPatterns(allowedTools), ...checkCommandPatterns(checkCommand)]) bash[p] = 'allow';
+  for (const p of [...bashPatterns(allowedTools), ...checkCommandPatterns(checkCommand)]) if (!isGlobOnly(p)) bash[p] = 'allow';
   return {
     '*': 'deny',
     read: 'allow',

@@ -107,6 +107,16 @@ Feasibility probes for an `opencode` runner kind. Facts the orchestrator would r
 - The evidence for `checkCommandPatterns` (src/runner/opencode.ts); the cases are mirrored as unit tests in test/runner/opencode.test.ts,
   which does not read these files.
 
+## Command substitution (probed 2026-10-24, ORC-76; opencode 1.18.30, model opencode/big-pickle)
+- Each run is `node configs/probe-bash-rule.mjs configs/X-<name>.json events/X-<name>.jsonl`, the same setup as above. The rule: the
+  commands inside a `$(...)` or backtick substitution are matched on their own, next to the command that holds it.
+  - events/X-subst-outer.jsonl: `echo $(uname -s)` under the single pattern `echo $(uname -s)` was denied (the model tried twice).
+  - events/X-subst-inner.jsonl: the same under `echo $(uname -s)` and `uname -s` ran.
+  - events/X-backtick-outer.jsonl: ``echo `uname -s` `` under the single pattern ``echo `uname -s` `` was denied.
+  - events/X-backtick-inner.jsonl: the same under ``echo `uname -s` `` and `uname -s` ran.
+- Not probed: whether the outer pattern is needed once the inner one is there, and process substitution (`<(...)`), which the splitter
+  treats the same way.
+
 ## Real e2e run (recorded 2026-10-19, ORC-63)
 - e2e-T1.jsonl, e2e-T2.jsonl, e2e-T3.jsonl: the JSONL events of each task's first launch in a passing
   `ORCH_E2E_OPENCODE=1 ORCH_E2E_OPENCODE_RECORD=1` run of test/e2e/opencode.test.ts (stderr dropped, redacted as below by the test).

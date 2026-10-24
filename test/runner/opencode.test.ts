@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_OPENCODE_COMMAND } from '../../src/runner/command.js';
-import { bashPatterns, checkCommandPatterns, classifyOpenCodeFailure, composeOpenCodeCommand, openCodeConfig, OpenCodeRunner, type OpenCodeSettings } from '../../src/runner/opencode.js';
+import { bashPatterns, checkCommandPatterns, classifyOpenCodeFailure, composeOpenCodeCommand, openCodeConfig, openCodePermission, OpenCodeRunner, type OpenCodeSettings } from '../../src/runner/opencode.js';
 import { logPath } from '../../src/runner/subprocess.js';
 import type { Launch } from '../../src/state/store.js';
 
@@ -101,13 +101,47 @@ describe('OpenCode per-launch config', () => {
     expect(checkCommandPatterns("echo 'a\\' && true")).toEqual(["echo 'a\\'", 'true']);
   });
 
-  it('keeps redirections, substitutions and brace groups whole', () => {
+  it('keeps redirections and brace groups whole', () => {
     expect(checkCommandPatterns('npm test 2>&1 | tee out.txt')).toEqual(['npm test 2>&1', 'tee out.txt']);
     expect(checkCommandPatterns('make &> log.txt && make <&3 && echo a >| f')).toEqual(['make &> log.txt', 'make <&3', 'echo a >| f']);
     expect(checkCommandPatterns('make 2>&1 |& cat')).toEqual(['make 2>&1', 'cat']);
-    expect(checkCommandPatterns('test -n "$(git status --porcelain && true)" || true')).toEqual(['test -n "$(git status --porcelain && true)"', 'true']);
-    expect(checkCommandPatterns('echo $(date; true) && true')).toEqual(['echo $(date; true)', 'true']);
     expect(checkCommandPatterns('{ npm run lint; npm test; }')).toEqual(['npm run lint', 'npm test']);
+    // A redirected brace group: `} > log` is not a command.
+    expect(checkCommandPatterns('{ npm test; } > log && true')).toEqual(['npm test', 'true']);
+  });
+
+  // OpenCode 1.18.30 matches the commands inside a substitution as well as the command holding it: `echo $(uname -s)` and
+  // ``echo `uname -s` `` are denied under their own pattern alone and run once `uname -s` is allowed too
+  // (test/fixtures/opencode/events/X-subst-outer, X-subst-inner, X-backtick-outer, X-backtick-inner).
+  it('keeps a substitution whole in its command and gives its inner commands patterns of their own', () => {
+    expect(checkCommandPatterns('test -n "$(git status --porcelain && true)" || true')).toEqual(['test -n "$(git status --porcelain && true)"', 'git status --porcelain', 'true']);
+    expect(checkCommandPatterns('echo $(date; true) && true')).toEqual(['echo $(date; true)', 'date', 'true']);
+    expect(checkCommandPatterns('echo `a && b` && c')).toEqual(['echo `a && b`', 'a', 'b', 'c']);
+    expect(checkCommandPatterns('diff <(sort a) <(sort b)')).toEqual(['diff <(sort a) <(sort b)', 'sort a', 'sort b']);
+    expect(checkCommandPatterns('test -z "$(git diff "a b" | head)"')).toEqual(['test -z "$(git diff "a b" | head)"', 'git diff "a b"', 'head']);
+    expect(checkCommandPatterns('echo $((1 + 2)) && cat <<< "x; y"')).toEqual(['echo $((1 + 2))', 'cat <<< "x; y"']);
+  });
+
+  // Heredoc bodies and comments are not command nodes; a pattern from them would only over-allow (ORC-76).
+  it('drops heredoc bodies and comments', () => {
+    expect(checkCommandPatterns('cat <<EOF\n*\nEOF')).toEqual(['cat <<EOF']);
+    expect(checkCommandPatterns("node - <<'EOF'\nrm -rf build\nEOF")).toEqual(["node - <<'EOF'"]);
+    expect(checkCommandPatterns('cat <<"END" | grep x\na && b\nEND\nnpm test')).toEqual(['cat <<"END"', 'grep x', 'npm test']);
+    expect(checkCommandPatterns('cat <<-EOF\n\trm -rf x\n\tEOF\ntrue')).toEqual(['cat <<-EOF', 'true']);
+    expect(checkCommandPatterns('cat <<A <<B\na\nA\nb\nB\ntrue')).toEqual(['cat <<A <<B', 'true']);
+    expect(checkCommandPatterns('npm test # && rm -rf ~')).toEqual(['npm test']);
+    expect(checkCommandPatterns('# setup\nnpm ci\nnpm test #run\necho a#b "#c" $#')).toEqual(['npm ci', 'npm test', 'echo a#b "#c" $#']);
+  });
+
+  it('never returns a pattern made only of glob characters', () => {
+    expect(checkCommandPatterns('* && ? ; npm test | * *')).toEqual(['npm test']);
+  });
+
+  it('keeps the bash catch-all denied whatever the check command splits into', () => {
+    for (const cmd of ['cat <<EOF\n*\nEOF', '*', 'npm test && *', '? ; * *', 'echo $(*)', 'echo `*`']) {
+      expect((openCodePermission('derived', [], cmd).bash as Record<string, string>)['*']).toBe('deny');
+    }
+    expect((openCodePermission('derived', ['Bash(*)', 'Bash(* *)'], 'npm test').bash as Record<string, string>)).toEqual({ '*': 'deny', 'git *': 'allow', 'npm test': 'allow' });
   });
 
   // OpenCode 1.18.30 has no escape for `*` and `?` (X-glob-escape: `cat probe-\*.txt` does not allow `cat probe-*.txt`), so a
