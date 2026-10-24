@@ -277,7 +277,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   const client = new OperatorClient({ repo: values.repo, env });
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
-  const server = new McpServer({ name: 'orchestrator-operator', version: '0.5.0' });
+  const server = new McpServer({ name: 'orchestrator-operator', version: '0.5.1' });
   // Every tool takes the optional repo; it is recorded for the session and never forwarded. The call is bound to its repository once, here, so concurrent calls naming different repos each reach their own daemon. See specs/operator-mcp "Operator MCP server".
   const tool = <S extends z.ZodRawShape>(name: string, config: { description: string; inputSchema: S }, cb: (a: z.objectOutputType<S, z.ZodTypeAny>, c: RepoClient) => Promise<ReturnType<typeof text>>) =>
     server.registerTool(name, { ...config, inputSchema: { ...config.inputSchema, repo: z.string().optional().describe(REPO_ARG_TEXT) } }, (async (args: Record<string, unknown>) => {

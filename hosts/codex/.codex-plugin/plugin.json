@@ -1,6 +1,6 @@
 {
   "name": "orchestrator-codex",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Run a dependency graph of tasks with parallel coding agents from a Codex session: import an epic, start a run, monitor it, answer questions, review milestones.",
   "author": { "name": "Richard" },
   "homepage": "https://github.com/autodidacticon/orchestrator/tree/main/hosts/codex",
