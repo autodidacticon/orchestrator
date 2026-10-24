@@ -2,7 +2,9 @@
 
 ## Purpose
 Durable record bracketing around every external effect, including the outbox boundary around tracker writes, the cascade boundary that records the plan before any reset so that a cascade reopen resumes after a crash, and the claim boundary that records a claim in one transaction before its response so that a lost response is repaired by an idempotent re-claim, recovery per boundary, including the durable `claimable` launch state and the launches workers hold, whose liveness is judged by the lease rather than by a process, adoption of surviving agents, fencing, sweeps, named crash points including `cascade.afterPlan`, `launch.afterClaimable`, and `claim.afterRecord`, and the convergence invariants the orchestrator must satisfy after any crash.
+
 ## Requirements
+
 ### Requirement: Durable record bracketing
 Every external effect, meaning worktree creation, process spawn, acknowledgement to an agent, ref update, and tag creation, SHALL be preceded by a durable record of intent and followed by a durable record of outcome, so that recovery can determine or safely re-derive what happened. The orchestrator SHALL hold no state in memory that a restart would lose.
 
@@ -141,7 +143,7 @@ The launch lifecycle SHALL gain the durable state `claimable`, entered after the
 - **THEN** the launch stays live without a pid and the worker's next call succeeds
 
 ### Requirement: Store transactions
-The store's `transaction(fn)` SHALL run `fn` inside one SQLite transaction that commits when `fn` returns, returning its value, and that is rolled back entirely when `fn` throws, rethrowing the error. A `transaction` call made while a transaction is open SHALL nest as a savepoint: when the inner function throws, only the inner function's writes are undone and the outer transaction continues; when the outer function throws, the inner function's writes are undone with it. A primary key or unique violation SHALL throw an `Error` whose message names the constraint, and the transaction it happened in SHALL roll back. The store SHALL open in WAL mode with `synchronous = NORMAL` and a busy timeout of five seconds, so that a reader in another process never blocks the writer and a writer that finds the database locked by another connection waits for it rather than failing at once. An existing store file SHALL open unchanged.
+The store's `transaction(fn)` SHALL run `fn` inside one SQLite transaction that commits when `fn` returns, returning its value, and that is rolled back entirely when `fn` throws, rethrowing the error. A `transaction` call made while a transaction is open SHALL nest as a savepoint: when the inner function throws, only the inner function's writes are undone and the outer transaction continues; when the outer function throws, the inner function's writes are undone with it. A primary key or unique violation SHALL throw an `Error` whose message names the constraint, and the transaction it happened in SHALL roll back. The store SHALL open in WAL mode with `synchronous = NORMAL` and a busy timeout of five seconds, so that a reader in another process never blocks the writer and a writer that finds the database locked by another connection waits for it rather than failing at once. The busy timeout SHALL be set before the switch to WAL mode, and opening the store SHALL retry the WAL switch and the schema creation while SQLite reports `SQLITE_BUSY`, for up to the same five seconds, because SQLite returns `SQLITE_BUSY` from the switch without calling the busy handler when two connections open a new file at once. An existing store file SHALL open unchanged.
 
 #### Scenario: Inner rollback, outer commit
 - **WHEN** an outer transaction writes entry T1, calls an inner `transaction` that writes entry T2 and throws, catches the error, and returns
@@ -158,6 +160,10 @@ The store's `transaction(fn)` SHALL run `fn` inside one SQLite transaction that 
 #### Scenario: Second process waits for the writer
 - **WHEN** another process holds a write transaction open on the store and this process writes a key
 - **THEN** a read of that key made while the other transaction is open returns the previous value, and the write succeeds after the other process commits, having waited rather than thrown
+
+#### Scenario: Opening a store another process is creating
+- **WHEN** another process has created the store file, still in rollback-journal mode, and holds its exclusive lock for one second while this process opens the store
+- **THEN** the open waits for the lock and succeeds, rather than throwing "database is locked"; a daemon starting in that moment keeps running instead of exiting at startup
 
 #### Scenario: Existing file reopens
 - **WHEN** a store is closed and opened again from its file
@@ -192,4 +198,3 @@ The end of an attachment SHALL be a durable record written before any launch is 
 #### Scenario: Crash between preserve and transition
 - **WHEN** the daemon dies after committing a launch's uncommitted work and before ending the launch
 - **THEN** after restart the launch is released with `keep`, the branch holds the work-in-progress commit once, and the task is `unstarted` with `attempts` unchanged
-

@@ -2,7 +2,9 @@
 
 ## Purpose
 The HTTP-backed operator interface, reached through both a CLI and an MCP server, and its operations: status, answers, cancellation, reopen and unblock, milestone review, pause and resume, shutdown, and logs, together with per-user run directories, daemon lifecycle and discovery, the event stream, the review bundle, graph import through the daemon, the tracker outbox routes a drainer uses to list, acknowledge, and reject tracker-bound effects, the health operations (`nudge` to reach a running agent through its inbox, the health facts `status` reports such as stuck tasks, cost, and budgets, and the cost-budget pause that `resume` lifts only with an override), the `cascade` flag on `reopen` that resets the started closure downstream of the target and returns its plan, the proposal operations (`proposals`, `accept_proposal`, and `reject_proposal`) through which a human decides the follow-up work agents propose, and the pull-runner operations (`claim` and `release`, through which a worker takes a prepared launch and hands it back, and the `mode` override that `start` and the `runner` route apply to a run) together with the `runner`, `claimable`, and `workers` facts `status` reports, where every human action is recorded as an event.
+
 ## Requirements
+
 ### Requirement: Operator interface
 The orchestrator SHALL expose operator routes on its loopback HTTP server, and both a CLI and an MCP server SHALL speak to them. The operations SHALL be `status`, `answer`, `cancel` with optional release, `reopen` with optional cascade, `unblock`, `accept`, `reject`, `pause`, `resume` with optional budget override, `logs`, `events`, `review`, `import`, `shutdown`, `start` with optional mode and configuration arguments, `stop`, `runs`, `outbox`, `ack`, `nudge`, `proposals`, `accept_proposal`, `reject_proposal`, `claim`, `release`, `mode`, and `config` to show and set the configuration. Humans and host sessions SHALL act only through this interface.
 
@@ -22,7 +24,7 @@ Each operator command SHALL be appended to the event log before the orchestrator
 - **THEN** the event log contains an operator cancel event for T2 with that reason, followed by the transition
 
 ### Requirement: Status report
-`status` SHALL report the `ready`, `running`, `waiting`, `submitted`, `blocked`, and `external` sets, `stallRoots`, `awaitingReview`, `openQuestions`, whether the run is `finished` or `stalled`, whether it is paused, any `graphRejected` reasons, the active graph revision, any foreign commits, the run directory, the graph file path, the daemon's pid and URL, the latest event sequence number, and `claimableByKind`: the number of claimable launches per runner kind, every kind present, beside the unchanged `claimable` list. The event digest SHALL carry `claimableByKind` beside its `claimable` count.
+`status` SHALL report the `ready`, `running`, `waiting`, `submitted`, `blocked`, and `external` sets, `stallRoots`, `awaitingReview`, `verifying`, `openQuestions`, whether the run is `finished` or `stalled`, whether it is paused, any `graphRejected` reasons, the active graph revision, any foreign commits, the run directory, the graph file path, the daemon's pid and URL, the latest event sequence number, and `claimableByKind`: the number of claimable launches per runner kind, every kind present, beside the unchanged `claimable` list. `awaitingReview` SHALL list every submitted node; `verifying` SHALL list the tasks among them, which await the verifier and not a human, as the event digest's `verifying` does. The event digest SHALL carry `claimableByKind` beside its `claimable` count.
 
 #### Scenario: Stalled run names its roots
 - **WHEN** the run is stalled on a failed T1
@@ -39,6 +41,10 @@ Each operator command SHALL be appended to the event log before the orchestrator
 #### Scenario: Claimable launches counted per kind
 - **WHEN** one launch is parked for `claude-code` and one for `codex`
 - **THEN** `status.claimable` lists both tasks and `status.claimableByKind` is `{ "claude-code": 1, "codex": 1 }`, and the digest shows `claimable: 2` with the same `claimableByKind`
+
+#### Scenario: Verifying tasks are told apart from reviews
+- **WHEN** task T1 is submitted and awaiting its check and milestone MVP is submitted
+- **THEN** `status.awaitingReview` lists T1 and MVP, `status.verifying` lists T1 only, and the digest's `awaitingReview` lists MVP and its `verifying` lists T1
 
 ### Requirement: Answer
 `answer` SHALL apply to a task that is `waiting` or `blocked` with a question. For a `waiting` task the answer SHALL be persisted before resume is attempted. For a `blocked` task it SHALL act as unblock with the answer attached to the next brief.
@@ -534,4 +540,3 @@ The daemon lifecycle `start` SHALL accept `checkCommand`, `integrationBranch`, `
 #### Scenario: Codex run names its work loop
 - **WHEN** the `start` tool is called with `runnerKind: "codex"` on a run with no configured mode, and later with `mode: "pull"`
 - **THEN** both results carry a `modeNote` naming `orchestrator-work --runner codex`
-
