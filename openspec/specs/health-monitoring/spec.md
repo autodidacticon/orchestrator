@@ -2,9 +2,7 @@
 
 ## Purpose
 How the daemon tells a working agent from a dead or stuck one and keeps a run inside its budgets: process liveness observed by the runner, which replaces silence as the failure signal; progress signals from the worktree, commits, API calls, and heartbeat text; stuck detection and escalation with a diagnosis hook; the launch time budget; usage accounting from launch logs; the run cost budget that pauses admission; and the base-moved notice that tells live agents when the integration head advances.
-
 ## Requirements
-
 ### Requirement: Process liveness
 On every tick, in the reconcile phase, the daemon SHALL ask the runner for the liveness of each live launch as `alive`, `dead`, or `unknown`. `alive` SHALL renew the task's lease and feed the progress, stuck, and time-budget checks. `dead` SHALL be handled as before: a fallback file is applied, otherwise the task fails with reason `exitedWithoutReport`. When the runner implements `readFailure` and returns a diagnosis `{ reason, detail? }` for the dead launch, the dead-launch record SHALL carry it: the failure's message SHALL name the reason and the detail, its `detail.runnerFailure` SHALL hold the diagnosis, and the `launch.ended` event SHALL carry `runnerFailure`. A runner without `readFailure`, or one that returns nothing, SHALL leave the record as before. The same SHALL hold for a launch found dead at recovery. `unknown` SHALL leave lease expiry as the only bound on silence. Runners that spawn processes SHALL derive liveness from the recorded pid; a runner that cannot observe its launches SHALL report `unknown`. For the OpenCode runner the recorded pid leads the `sh` process group that holds `opencode` and its MCP child (the shim): liveness follows the `sh`, which lives as long as `opencode`, and reaping signals the whole group, so the shim does not outlive its launch. A dead launch's diagnosis also decides whether its failure is charged: see task-lifecycle "Retry and exhaustion" for `startupContended`.
 
@@ -199,3 +197,15 @@ When a verified task is published and `health.baseMovedNotice` is true (default)
 #### Scenario: Notice disabled
 - **WHEN** `health.baseMovedNotice` is false and T1 is published while T5 is running
 - **THEN** T5's inbox stays empty
+
+### Requirement: Worktree observation takes no index lock
+The daemon's read-only git commands against a launch worktree, such as the progress fingerprint's `git status` and `git diff HEAD`, SHALL run with `GIT_OPTIONAL_LOCKS=0`, so they never create the worktree's `index.lock` and never make the agent's own concurrent git command fail. Commands that write SHALL take their locks as before.
+
+#### Scenario: Agent commits while the daemon fingerprints
+- **WHEN** an agent runs `git commit` in its worktree during the same tick in which the daemon computes that launch's progress fingerprint
+- **THEN** the commit does not fail with "Unable to create '.../index.lock': File exists", and the launch is not failed as `exitedWithoutReport`
+
+#### Scenario: Observation still sees uncommitted edits
+- **WHEN** an agent modifies a tracked file without committing
+- **THEN** the next tick's fingerprint differs from the previous one and `progressAt` is recorded with `lastSignal` `worktree`, as without the setting
+
