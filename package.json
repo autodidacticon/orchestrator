@@ -1,6 +1,6 @@
 {
   "name": "@autodidacticon/orchestrator",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Parallel coding-agent orchestrator over a task DAG",
   "type": "module",
   "engines": {
