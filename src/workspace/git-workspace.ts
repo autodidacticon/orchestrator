@@ -137,12 +137,16 @@ export class GitWorkspace implements Workspace {
     return { headSha: await revParse(launch.worktree, 'HEAD'), wipCommit };
   }
 
-  /** Head sha plus a hash over `git status --porcelain` (minus .orchestrator/) and `git diff HEAD`, so edits to an already dirty file still register. */
+  /**
+   * Head sha plus a hash over `git status --porcelain` (minus .orchestrator/) and `git diff-index -p HEAD`, so edits to an already dirty file still register.
+   * `diff-index` is plumbing and never refreshes the index; porcelain `git diff` does, taking index.lock even under GIT_OPTIONAL_LOCKS=0.
+   * A touch that keeps a tracked file's content shows in neither, so it does not change the fingerprint.
+   */
   async fingerprint(launch: Launch): Promise<string> {
     const head = await revParse(launch.worktree, 'HEAD');
     const status = await git(launch.worktree, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { allowFail: true });
     const entries = status.stdout.split('\0').filter((e) => e && !e.slice(3).startsWith(`${ORCH_DIR}/`));
-    const diff = await git(launch.worktree, ['diff', 'HEAD', '--', '.', `:(exclude)${ORCH_DIR}`], { allowFail: true });
+    const diff = await git(launch.worktree, ['diff-index', '-p', 'HEAD', '--', '.', `:(exclude)${ORCH_DIR}`], { allowFail: true });
     const hash = createHash('sha256').update(entries.join('\0')).update('\n').update(diff.stdout).digest('hex').slice(0, 16);
     return `${head}:${hash}`;
   }

@@ -19,8 +19,9 @@ export class GitError extends Error {
 }
 
 /**
- * GIT_OPTIONAL_LOCKS=0: the daemon's reads of a live worktree (`status`, `diff`) must not refresh its index,
- * which takes index.lock and makes the agent's own `git commit` fail. Writes still lock. See
+ * GIT_OPTIONAL_LOCKS=0: the daemon's reads of a live worktree must not refresh its index, which takes index.lock
+ * and makes the agent's own `git commit` fail. The setting covers `git status`, but porcelain `git diff` refreshes
+ * the index regardless, so worktree reads use plumbing (`git diff-index`) instead. Writes still lock. See
  * specs/health-monitoring "Worktree observation takes no index lock".
  */
 const baseEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0' };
