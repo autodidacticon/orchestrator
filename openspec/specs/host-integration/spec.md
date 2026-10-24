@@ -2,9 +2,7 @@
 
 ## Purpose
 How the orchestrator is packaged for host sessions: the npm package's subpath exports and executables, thin per-host wrappers under `hosts/<host>/` such as the Claude Code plugin, the import, run, and review skills those wrappers ship, including how the import skill records the tracker and how the run skill mirrors the run back to it by draining the outbox, handles stuck tasks and budget pauses on the user's say, presents pending proposals for the user to accept or reject, creating the tracker issue first in a tracker-backed run, and offers `cascade` with its plan when a reopen is refused for its blockers, the `work` skill and the bundled `workflows/work.js` workflow through which a session fans out worker subagents that claim and work prepared launches in `pull` or `mixed` mode, and the marketplace manifest at the repository root through which the plugin is installed.
-
 ## Requirements
-
 ### Requirement: Package entrypoints
 The npm package SHALL declare subpath exports `.` for the core library, `./daemon`, `./operator-mcp`, and `./agent-shim`, and SHALL install the executables `orchestrator`, `orchestrator-ctl`, `orchestrator-mcp`, and `orchestrator-mcp-shim`. The package SHALL be publishable as `@autodidacticon/orchestrator`: not `private`, with `publishConfig.access` `public`, `prepublishOnly` running the build, and `files` covering `dist/src`, `hosts`, and `README.md`. Host wrappers SHALL NOT reference executables by name on PATH; they SHALL reach the package through the plugin launcher, which resolves a checkout or the published package.
 
@@ -451,3 +449,15 @@ The Codex host SHALL ship `hosts/codex/bin/work.mjs`, also the package executabl
 #### Scenario: Nothing needs attention
 - **WHEN** the plugin runs with an `ORCH_HOME` that holds no run
 - **THEN** the user's message part is unchanged and no toast is shown
+
+### Requirement: Import skill scope guidance for OpenSpec
+The import skill of every host SHALL say that, in a repository with an `openspec/` root, a task that changes a spec lists its change directory `openspec/changes/<name>/**` in Scope, not `openspec/specs/<capability>/spec.md`. When an issue's Scope lists a file under `openspec/specs/`, the skill SHALL tell the user and suggest the change directory; the description is still sent as is.
+
+#### Scenario: Import skill names the change directory
+- **WHEN** the import skill of `hosts/claude-code`, `hosts/codex` or `hosts/opencode` is read
+- **THEN** its Scope guidance names `openspec/changes/<name>/**` in place of `openspec/specs/<capability>/spec.md`
+
+#### Scenario: Issue scope names a main spec file
+- **WHEN** an issue being imported into a repository with an `openspec/` root lists `openspec/specs/worker-runners/spec.md` in its Scope
+- **THEN** the skill tells the user and suggests `openspec/changes/<name>/**`, and imports the description unchanged
+

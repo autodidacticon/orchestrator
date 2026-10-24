@@ -2,13 +2,11 @@
 
 ## Purpose
 What an agent receives and how it reports back: the standalone brief, launch token scoping, deduplicated events, sealed submissions, declared no-ops, acceptance evidence, blocking and resume, the file fallback, the MCP façade, brief validation, the inbox notices of kind `stuck`, `nudge`, and `baseMoved` through which the daemon and the operator reach a running agent, the `payloadChanged` notice that tells a live agent its task's payload changed on reload, the revision context a brief carries after a reopen or a cascade reset so that the agent revises its prior work rather than redoing it, the proposals a submit report may carry for follow-up work, which the orchestrator stores pending and never adds to the graph on its own, and the worker access rules under which a worker holding a claimed launch acts as the agent through the same five operations with the launch token, directly against the loopback API or through the token-scoped operator tools, with no per-launch façade and no fallback file.
-
 ## Requirements
-
 ### Requirement: Standalone brief
 Before launching, the orchestrator SHALL write `<worktree>/.orchestrator/brief.md` and `brief.json`. They SHALL contain:
 - the task payload verbatim and the acceptance criteria;
-- the definition of done: under the `agent` commit policy, commit all work on the launch branch (a dirty worktree is refused with the file list; commit and resubmit); under `daemon`, leave the changes in the worktree, committed or not, because the orchestrator commits what is uncommitted when it accepts the report. In both cases: never merge or touch the integration branch, declare a no-op explicitly, and terminate after the report is accepted;
+- the definition of done: under the `agent` commit policy, commit all work on the launch branch (a dirty worktree is refused with the file list; commit and resubmit); under `daemon`, leave the changes in the worktree, committed or not, because the orchestrator commits what is uncommitted when it accepts the report. In both cases: never merge or touch the integration branch, declare a no-op explicitly, and terminate after the report is accepted. When the repository has an `openspec/` root (the launch worktree contains `openspec/`), for every runner kind and commit policy it SHALL also say to record any spec change as an OpenSpec change directory `openspec/changes/<name>/` named after the task, with `proposal.md`, `tasks.md` and `specs/<capability>/spec.md` delta files holding `## ADDED|MODIFIED|REMOVED Requirements` sections with full `### Requirement:` blocks, validated with `openspec validate <name>`, and not to edit `openspec/specs/` directly. Without an `openspec/` root the brief SHALL NOT carry that item;
 - workspace facts: worktree path, branch, `baseSha`, integration branch;
 - the completion report of each direct dependency, and any released cancellation with its reason;
 - attempt context when present: the prior failure report, verifier output, conflict details naming the files and the sibling that landed, and the human's answer. Under `agent`, the conflict, interruption, and revision texts tell the agent to rebase, merge or cherry-pick the prior branch, squash a work-in-progress commit, and commit the delta. Under `daemon` they tell it instead to inspect the prior branch with `git show`/`git diff` and reapply the changes as file edits;
@@ -39,6 +37,14 @@ An `opencode` brief's workspace section SHALL say that OpenCode permission rules
 #### Scenario: Claude Code and Codex briefs unchanged by the third kind
 - **WHEN** the briefs of a `claude-code` and a `codex` launch are composed from the inputs of the goldens in `test/fixtures/brief`
 - **THEN** each is byte-identical to its golden
+
+#### Scenario: Brief in a repository with an openspec root carries the change-directory rule
+- **WHEN** a brief is composed for a launch whose worktree contains `openspec/`
+- **THEN** its Definition of done says to record spec changes as an OpenSpec change directory `openspec/changes/<name>/` validated with `openspec validate <name>` and not to edit `openspec/specs/` directly, and the `claude-code` brief is byte-identical to the golden `test/fixtures/brief/claude-code-openspec.md`
+
+#### Scenario: Brief without an openspec root has no change-directory rule
+- **WHEN** a brief is composed for a launch whose worktree has no `openspec/`
+- **THEN** its Definition of done does not mention OpenSpec
 
 ### Requirement: Launch token scoping
 Every API call SHALL carry a bearer token issued for one launch. A call whose token does not match the launch in the path, or whose launch has been revoked or ended, SHALL be answered with 401 and SHALL have no effect.
@@ -331,3 +337,4 @@ The brief of a `codex` launch SHALL tell the agent to call heartbeat, report, bl
 #### Scenario: Real Codex reports through the MCP server
 - **WHEN** the opt-in e2e (`ORCH_E2E_CODEX=1`) runs four tasks under `workspace-write`
 - **THEN** every task is published through an MCP `report`, no launch ends with `fallback:submit`, and the question task's log holds exactly one completed `block` item carrying the answer
+
