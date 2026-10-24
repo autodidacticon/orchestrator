@@ -2,9 +2,7 @@
 
 ## Purpose
 The agent CLIs a launch can run under: the runner kinds, how a run selects one, each kind's configuration block and defaults, and the effort levels each kind accepts. The Codex runner itself (its command, sandbox, and commit policy) and how a launch is prepared under a kind are specified where they are built; this capability owns the kinds and their configuration.
-
 ## Requirements
-
 ### Requirement: Runner kinds and defaults
 The configuration SHALL carry `runner.kind`, one of `claude-code`, `codex`, and `opencode`, defaulting to `claude-code`, and one block per kind: `runner.claude`, `runner.codex`, and `runner.opencode`. `runner.kind` SHALL resolve through the configuration layers as the key `runnerKind`: an argument (a `start` argument, a `--set` flag, or a runtime override) beats the file, which beats the default; it SHALL NOT be detected, pinned, or start-only, and a change SHALL apply to launches prepared afterwards. A value outside the kinds SHALL be refused at configuration time naming `runner.kind` in the file and `runnerKind` as an argument. Each kind SHALL have its own default model: `claude-opus-5-5` for `claude-code`, `gpt-6-astra` for `codex`, and `anthropic/claude-opus-5-5` for `opencode` (the Claude Code default reached through the user's OpenCode Anthropic login); all default to effort `medium`. `runner.codex` SHALL carry `command` (unset by default, so the runner's built-in template applies), `model`, `effort`, `sandbox` (`read-only`, `workspace-write`, or `danger-full-access`, default `workspace-write`), `commit` (`agent` or `daemon`, unset by default), `networkAccess` (unset by default), `ignoreUserConfig` (default true), `ephemeral` (default true), `mcpApproval`, `toolTimeoutSec`, and `startupTimeoutSec`; the semantics of the policy keys belong to the Codex runner. `runner.opencode` SHALL carry `command` (unset by default), `model` (a `provider/model` id), `effort`, `commit` (`agent` or `daemon`, default `agent`), `permission` (`derived` or `allow`, default `derived`), `dataDir` (`shared` or `launch`, default `shared`), `ignoreUserConfig` (default false), `pure` (default true), and `snapshots` (default false); the semantics of the policy keys belong to the OpenCode runner. The run default `model` and `effort` SHALL be those of the kind in force, so a run under `codex` never resolves a Claude model. Every operator surface SHALL expose the kind and the per-kind keys. These are `orchestrator-ctl start --set runnerKind=... --set codex.<leaf>=...`, `orchestrator-ctl config --runner-kind --sandbox --commit`, the MCP `start` and `configure` tools (`runnerKind`, `codex`, `sandbox`, `commit`), and `PUT /v1/config`. Each surface that names a default SHALL name both kinds' defaults.
 
@@ -247,7 +245,8 @@ The derived rules SHALL be the composed allow list when there is one. Under an o
 
 ### Requirement: OpenCode usage parsing
 `OpenCodeRunner.readUsage` SHALL read the launch log. The parser SHALL:
-- read at most the last 256 KiB, line by line;
+- read the whole log, line by line, streaming the file so memory stays bounded by the read chunk and the line cap, not the log size. OpenCode reports usage per step, not as a running total, so a step dropped from the read is usage lost; the log also carries full tool outputs and WARN-level stderr, so a tail window would drop the early steps of any task that reads large files;
+- skip a line longer than 64 KiB without parsing its body: `step_finish` lines are a few hundred bytes, and the long lines are tool output;
 - `JSON.parse` each line and skip lines that fail;
 - for every line with `type: "step_finish"`, add `part.tokens.input + part.tokens.cache.read` to `input` (opencode's `input` excludes cache reads), `cache.read` to `cachedInput`, `cache.write` to `cacheWriteInput`, `output` to `output`, `reasoning` to `reasoningOutput`, and `part.cost` to `costUsd`.
 
@@ -261,6 +260,15 @@ The usage SHALL have `source: 'opencode'`, `turns` the number of `step_finish` l
 - **WHEN** the log holds several `step_finish` lines, one with `reason: "stop"`
 - **THEN** each field is their sum and `turns` is 1
 
+#### Scenario: A step before a large tool output
+- **WHEN** the log holds a `step_finish` with input 1000 and cost 1, then a 300 KiB `tool_use` line, then a `step_finish` with input 5 and cost 1
+- **THEN** the usage sums both steps: the input counts 1005 plus their cache reads and `costUsd` is 2
+
+#### Scenario: Long log
+- **WHEN** the log is 5 MiB with 200 `step_finish` lines between large tool outputs and stderr lines
+- **THEN** each field is the exact sum of the 200 steps
+
 #### Scenario: No step_finish
 - **WHEN** the log was cut before any `step_finish`, or is a Codex log
 - **THEN** no usage is read
+
