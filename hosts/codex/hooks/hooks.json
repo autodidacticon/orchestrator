@@ -9,7 +9,7 @@
     ],
     "SessionEnd": [
       {
-        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/hooks/session-end.mjs\"" }]
+        "hooks": [{ "type": "command", "command": "node \"${PLUGIN_ROOT}/hooks/session-end.mjs\"", "timeout": 3 }]
       }
     ]
   }

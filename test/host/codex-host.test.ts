@@ -131,12 +131,15 @@ describe('codex host', () => {
     }
     expect(existsSync(path.join(host, 'bin/orchestrator.mjs'))).toBe(true);
     expect(op['tool_timeout_sec']).toBeGreaterThan(WAIT_CAP_MS / 1000 + 30);
-    expect(op['env_vars']).toEqual(['PATH', 'HOME', 'ORCH_HOME', 'ORCH_WAIT_CAP_MS', 'ORCH_REPO']);
+    // Codex gives a plugin's server only these and its own baseline (test/fixtures/codex/plugin-probe). The daemon the
+    // server starts inherits them: ORCH_URL names a remote daemon, CODEX_HOME and CODEX_API_KEY are what its codex workers authenticate with.
+    expect(op['env_vars']).toEqual(['PATH', 'HOME', 'ORCH_HOME', 'ORCH_WAIT_CAP_MS', 'ORCH_REPO', 'ORCH_URL', 'CODEX_HOME', 'CODEX_API_KEY']);
 
+    // The shape the plugin probe saw Codex run: ${PLUGIN_ROOT} substituted, SessionEnd capped at 3 seconds (1 when undeclared).
     const hooks = readJson('hosts/codex/hooks/hooks.json') as { hooks: Record<string, Array<{ matcher?: string; hooks: Array<Record<string, unknown>> }>> };
     expect(Object.keys(hooks.hooks).sort()).toEqual(['SessionEnd', 'SessionStart']);
     expect(hooks.hooks['SessionStart']).toEqual([{ matcher: 'startup|resume|clear', hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/hooks/session-start.mjs"', timeout: 10 }] }]);
-    expect(hooks.hooks['SessionEnd']).toEqual([{ hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/hooks/session-end.mjs"' }] }]);
+    expect(hooks.hooks['SessionEnd']).toEqual([{ hooks: [{ type: 'command', command: 'node "${PLUGIN_ROOT}/hooks/session-end.mjs"', timeout: 3 }] }]);
 
     const market = readJson('.agents/plugins/marketplace.json') as { name: string; plugins: Array<Record<string, unknown>> };
     expect(market.name).toBe('orchestrator');
@@ -159,7 +162,7 @@ describe('codex host', () => {
   });
 
   // The plugin from this checkout, installed by the installed codex into a scratch CODEX_HOME. The exec step uses a model.
-  it.skipIf(!CODEX_HOST)('codex installs the plugin from the marketplace file and calls its start tool with repo (ORCH_E2E_CODEX_HOST=1)', async () => {
+  it.skipIf(!CODEX_HOST)('codex installs the plugin from the marketplace file, runs its SessionStart hook with trust bypassed, and calls its start tool with repo (ORCH_E2E_CODEX_HOST=1)', async () => {
     const codexHome = mkdtempSync(path.join(tmpdir(), 'orch-codex-home-'));
     const home = mkdtempSync(path.join(tmpdir(), 'orch-codex-plugin-orch-home-'));
     const base = mkdtempSync(path.join(tmpdir(), 'orch-codex-plugin-repo-'));
@@ -194,10 +197,18 @@ describe('codex host', () => {
 
       repo = realpathSync(makeRepo(base));
       writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'runner: { mode: pull }'].join('\n'));
+      // A run needing attention for the plugin's SessionStart hook: its daemon is dead and exited with two launches parked.
+      const parked = path.join(home, 'runs', 'parked');
+      mkdirSync(parked, { recursive: true });
+      writeFileSync(path.join(parked, 'repo'), '/elsewhere/parked-repo\n');
+      writeFileSync(path.join(parked, 'daemon.pid'), '999999\n');
+      writeFileSync(path.join(parked, 'daemon.json'), JSON.stringify({ pid: 999_999, url: 'http://127.0.0.1:1', port: 1, startedAt: 1, exit: { reason: 'idle', at: Date.now(), digest: { claimable: ['L1', 'L2'] } } }));
       const prompt = `Call the orchestrator_operator start tool exactly once, with repo set to ${repo} and no other arguments. Then reply with only the value of the "repo" field of its result.`;
       // Started from outside the repository, so only the repo argument names it; stdin closed, or codex waits for more input.
+      // Not --ephemeral: the session's rollout records what the hooks added to the context. The plugin's hooks are not trusted
+      // in this CODEX_HOME, so they run only with trust bypassed.
       const log = await new Promise<string>((resolve, reject) => {
-        const child = spawn('codex', ['exec', '--json', '--ephemeral', '--skip-git-repo-check', '-C', repo!, '-m', 'gpt-6-astra', '-c', 'model_reasoning_effort="low"', '-s', 'read-only', prompt], { cwd: tmpdir(), env, stdio: ['ignore', 'pipe', 'pipe'] });
+        const child = spawn('codex', ['exec', '--dangerously-bypass-hook-trust', '--json', '--skip-git-repo-check', '-C', repo!, '-m', 'gpt-6-astra', '-c', 'model_reasoning_effort="low"', '-s', 'read-only', prompt], { cwd: tmpdir(), env, stdio: ['ignore', 'pipe', 'pipe'] });
         let out = '';
         child.stdout.on('data', (d: Buffer) => (out += d.toString()));
         child.stderr.on('data', (d: Buffer) => (out += d.toString()));
@@ -218,6 +229,28 @@ describe('codex host', () => {
       expect(start!.arguments).toMatchObject({ repo });
       const result = JSON.parse(start!.result?.content?.[0]?.text ?? '{}') as Record<string, unknown>;
       expect(result, log.slice(-4000)).toMatchObject({ status: 200, repo });
+
+      // The SessionStart line, from ${PLUGIN_ROOT}/hooks/session-start.mjs, reached the context as a hook's additional context.
+      const rollout: string[] = [];
+      const walk = (dir: string) => {
+        for (const e of existsSync(dir) ? readdirSync(dir, { withFileTypes: true }) : []) {
+          if (e.isDirectory()) walk(path.join(dir, e.name));
+          else rollout.push(...readFileSync(path.join(dir, e.name), 'utf8').split('\n'));
+        }
+      };
+      walk(path.join(codexHome, 'sessions'));
+      type Message = { type?: string; payload?: { type?: string; role?: string; content?: Array<{ text?: string }>; internal_chat_message_metadata_passthrough?: { content_item_kinds?: string[] } } };
+      const hookContext = rollout.flatMap((l) => {
+        try {
+          const m = JSON.parse(l) as Message;
+          return m.type === 'response_item' && m.payload?.role === 'developer' && m.payload.internal_chat_message_metadata_passthrough?.content_item_kinds?.includes('hooks.additional_context') ? (m.payload.content ?? []).map((c) => c.text ?? '') : [];
+        } catch {
+          return [];
+        }
+      });
+      expect(hookContext, rollout.join('\n').slice(-4000)).toEqual([
+        expect.stringMatching(new RegExp(`^orchestrator: 1 run under ${home.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} need attention: /elsewhere/parked-repo \\(daemon exited idle \\d+ min ago: 2 launches parked\\)\\. Use the run skill in that repository to continue\\.`)),
+      ]);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
       console.warn('codex CLI not installed; Codex plugin check skipped');

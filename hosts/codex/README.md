@@ -23,10 +23,30 @@ A local checkout works as the marketplace too (`codex plugin marketplace add
 installed, and `codex mcp get orchestrator_operator` shows the operator server it declares:
 command `node` with args `./bin/orchestrator.mjs mcp`, its `cwd` the installed plugin root
 (`~/.codex/plugins/cache/orchestrator/orchestrator-codex/<version>`), `startup_timeout_sec` 60
-(the first start may fetch the package through npx), and `tool_timeout_sec` 180. The server
-gets `PATH`, `HOME`, `ORCH_HOME`, `ORCH_WAIT_CAP_MS`, and `ORCH_REPO` from Codex's
-environment. The skills are installed as `orchestrator-codex:orchestrator-import`,
-`orchestrator-codex:orchestrator-run`, and `orchestrator-codex:orchestrator-review`.
+(the first start may fetch the package through npx), and `tool_timeout_sec` 180. The skills
+are installed as `orchestrator-codex:orchestrator-import`, `orchestrator-codex:orchestrator-run`,
+and `orchestrator-codex:orchestrator-review`.
+
+Codex gives a plugin's server only the variables its `env_vars` lists, plus its own baseline:
+`HOME`, `LANG`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR` and `USER` (and
+`__CF_USER_TEXT_ENCODING` on macOS). The plugin forwards
+`PATH`, `HOME`, `ORCH_HOME`, `ORCH_WAIT_CAP_MS`, `ORCH_REPO`, `ORCH_URL`, `CODEX_HOME` and
+`CODEX_API_KEY`. The server starts the daemon with its own environment, and a spawn-mode daemon
+passes that environment to the codex workers it spawns. So:
+
+- `ORCH_URL` points the server at a remote daemon.
+- `CODEX_HOME` keeps the workers on the session's Codex home. Without it they would use
+  `~/.codex` and its `auth.json`, whatever `CODEX_HOME` the session has.
+- `CODEX_API_KEY` is the key variable `codex exec` reads, for a user who authenticates by key
+  rather than with `auth.json`.
+- `OPENAI_API_KEY` is not forwarded. `codex exec` 0.164 ignores it: in a Codex home without
+  `auth.json`, a run with only `OPENAI_API_KEY` set fails to authenticate, as with no key at all.
+
+Any other variable your workers need, such as a model provider's key named in `config.toml`,
+does not reach a daemon started from the plugin. For spawn mode, start that daemon outside Codex
+(`npx --package=@autodidacticon/orchestrator orchestrator-ctl start` from a shell in the
+repository, with the same `ORCH_HOME`), and the plugin's server uses the running daemon.
+The probe behind these facts is `test/fixtures/codex/plugin-probe/` (see `results.json`).
 
 The server runs in the plugin root, not in your project, and Codex tells an MCP server
 neither the session's project (it advertises no MCP roots) nor its directory. So every
@@ -35,8 +55,25 @@ session's working directory as `repo` on every call. A call without `repo`, befo
 passed one, is refused with an error naming the argument. Called directly, pass it yourself.
 
 The plugin's `hooks/hooks.json` runs the two session hooks (section 3) through
-`${PLUGIN_ROOT}`. Codex runs a plugin's hooks only after you review and trust them in an
-interactive session.
+`${PLUGIN_ROOT}`. A probe with codex-cli 0.164 showed:
+
+- Codex reads the plugin's `hooks/hooks.json` and substitutes `${PLUGIN_ROOT}` with the installed
+  plugin root before the shell runs. The hook also gets `PLUGIN_ROOT`, `CLAUDE_PLUGIN_ROOT` and
+  `PLUGIN_DATA` in its environment, plus all of codex's own environment. It runs in the
+  session's working directory.
+- The codex process is the parent of each hook and of the operator server, which the session
+  end hook's ancestry match needs.
+- The SessionStart line reaches the session's context as hook context. `codex exec` does not
+  print it, but the session's rollout under `$CODEX_HOME/sessions` records it.
+- A SessionEnd hook gets one second unless it declares a timeout, and Codex caps a declared
+  one at three seconds. The plugin declares three.
+- Codex runs a plugin's hooks only once they are trusted. Review them in an interactive session
+  (`/hooks`). The review records each hook in `config.toml` as
+  `[hooks.state."orchestrator-codex@orchestrator:hooks/hooks.json:session_start:0:0"]` (and
+  `session_end:0:0`) with `trusted_hash` and `trusted_content_hash`. The content hash was the
+  same for every hook of the file, so a plugin update that changes `hooks/hooks.json` most
+  likely needs a new review (not probed). Under `codex exec`, untrusted hooks are skipped with
+  no message unless you pass `--dangerously-bypass-hook-trust`.
 
 Under `codex exec` the operator tools need approvals granted in advance, as for the manual
 install ("Approvals" below), but for a plugin's server they go under the plugin's key in

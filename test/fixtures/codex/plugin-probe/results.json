@@ -1,0 +1,1125 @@
+{
+  "codex": "codex-cli 0.164.0",
+  "model": "gpt-6-astra",
+  "steps": [
+    {
+      "name": "marketplace add",
+      "args": [
+        "plugin",
+        "marketplace",
+        "add",
+        "<scratch>/market"
+      ],
+      "code": 0,
+      "startLineInStdout": false,
+      "startLineInStderr": false,
+      "startLineInRollout": [],
+      "stdout": "Added marketplace `probe-market` from <scratch>/market.\nInstalled marketplace root: <scratch>/market\n",
+      "stderr": "",
+      "records": []
+    },
+    {
+      "name": "plugin add",
+      "args": [
+        "plugin",
+        "add",
+        "probe@probe-market"
+      ],
+      "code": 0,
+      "startLineInStdout": false,
+      "startLineInStderr": false,
+      "startLineInRollout": [],
+      "stdout": "Added plugin `probe` from marketplace `probe-market`.\nInstalled plugin root: <scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1\n",
+      "stderr": "",
+      "records": []
+    },
+    {
+      "name": "app-server hooks/list before trust",
+      "responses": [
+        {
+          "method": "hooks/list",
+          "params": {
+            "cwds": [
+              "<scratch>/work"
+            ]
+          },
+          "response": {
+            "id": 2,
+            "result": {
+              "data": [
+                {
+                  "cwd": "<scratch>/work",
+                  "hooks": [
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_start:0:0",
+                      "eventName": "sessionStart",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-start plugin-root-form",
+                      "async": false,
+                      "matcher": "startup|resume|clear",
+                      "timeoutSec": 10,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 0,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:1b6f3b66f58c057c88325cf78d37fa0276a5c705645badaee21fcf4423abf1cd/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "untrusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_start:0:1",
+                      "eventName": "sessionStart",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/market/plugins/probe/record.mjs\" hook-start-quoting \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1\" '<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1'",
+                      "async": false,
+                      "matcher": "startup|resume|clear",
+                      "timeoutSec": 10,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 1,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:71b728e1da5cbe6d960402e83f1dd645f19d9e75a8d98c79bc50b75c58669165/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "untrusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_end:0:0",
+                      "eventName": "sessionEnd",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-end plugin-root-form",
+                      "async": false,
+                      "matcher": null,
+                      "timeoutSec": 1,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 2,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:cd3f849cbf41fdb14c53cac94e24215c550f5487eeb2cf756d5f84131d1cd417/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "untrusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_end:0:1",
+                      "eventName": "sessionEnd",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-end-timeout-5 plugin-root-form",
+                      "async": false,
+                      "matcher": null,
+                      "timeoutSec": 3,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 3,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:5d15309c13ddfb8b83991dbf7be7c0960651d81b98eed2f70029634190941b20/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "untrusted"
+                    }
+                  ],
+                  "warnings": [
+                    "clamping SessionEnd hook timeout to 3s in <scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json"
+                  ],
+                  "errors": []
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "records": []
+    },
+    {
+      "name": "exec, hooks untrusted",
+      "args": [
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "-m",
+        "gpt-6-astra",
+        "-c",
+        "model_reasoning_effort=\"low\"",
+        "-s",
+        "read-only",
+        "Reply with only the word ok."
+      ],
+      "code": 0,
+      "startLineInStdout": false,
+      "startLineInStderr": false,
+      "startLineInRollout": [],
+      "stdout": "{\"type\":\"thread.started\",\"thread_id\":\"01a16e8e-ef7d-7ee2-9460-dd60f09ca230\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"clamping SessionEnd hook timeout to 3s in <scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json\"}}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"ok\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":18024,\"cached_input_tokens\":12160,\"cache_write_input_tokens\":0,\"output_tokens\":5,\"reasoning_output_tokens\":0}}\n",
+      "stderr": "Reading additional input from stdin...\n",
+      "records": [
+        {
+          "label": "mcp",
+          "argv": [],
+          "cwd": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+          "env": {
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "SHELL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "",
+          "chain": [
+            {
+              "pid": 93672,
+              "comm": "node"
+            },
+            {
+              "pid": 93488,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "exec --dangerously-bypass-hook-trust",
+      "args": [
+        "exec",
+        "--dangerously-bypass-hook-trust",
+        "--json",
+        "--skip-git-repo-check",
+        "-m",
+        "gpt-6-astra",
+        "-c",
+        "model_reasoning_effort=\"low\"",
+        "-s",
+        "read-only",
+        "Reply with only the word ok."
+      ],
+      "code": 0,
+      "startLineInStdout": false,
+      "startLineInStderr": false,
+      "startLineInRollout": [
+        {
+          "timestamp": "2026-10-24T15:37:11.492Z",
+          "ordinal": 11,
+          "type": "response_item",
+          "payload": {
+            "type": "message",
+            "id": "msg_01a16e8f-0e44-73a3-995d-ee012048aaff",
+            "role": "developer",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "PROBE-SESSION-START-LINE"
+              }
+            ],
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a16e8f-0949-7473-945d-9ac013a6ae9e",
+              "create_time": 1792856231.492206,
+              "content_item_kinds": [
+                "hooks.additional_context"
+              ],
+              "content_item_metadata": [
+                {
+                  "provenance": {
+                    "type": "harness",
+                    "hook": true
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "stdout": "{\"type\":\"thread.started\",\"thread_id\":\"01a16e8f-0773-7752-85d0-b297ca579e49\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"error\",\"message\":\"`--dangerously-bypass-hook-trust` is enabled. Enabled hooks may run without review for this invocation.\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"error\",\"message\":\"clamping SessionEnd hook timeout to 3s in <scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json\"}}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_3\",\"type\":\"agent_message\",\"text\":\"ok\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":19542,\"cached_input_tokens\":12160,\"cache_write_input_tokens\":0,\"output_tokens\":5,\"reasoning_output_tokens\":0}}\n",
+      "stderr": "Reading additional input from stdin...\n",
+      "records": [
+        {
+          "label": "mcp",
+          "argv": [],
+          "cwd": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+          "env": {
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "SHELL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "",
+          "chain": [
+            {
+              "pid": 95565,
+              "comm": "node"
+            },
+            {
+              "pid": 95521,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-start",
+          "argv": [
+            "plugin-root-form"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-0773-7752-85d0-b297ca579e49\",\"transcript_path\":\"<scratch>/codex-home/sessions/2026/10/24/rollout-2026-10-24T10-37-09-01a16e8f-0773-7752-85d0-b297ca579e49.jsonl\",\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionStart\",\"model\":\"gpt-6-astra\",\"permission_mode\":\"bypassPermissions\",\"source\":\"startup\"}",
+          "chain": [
+            {
+              "pid": 95966,
+              "comm": "node"
+            },
+            {
+              "pid": 95521,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-start-quoting",
+          "argv": [
+            "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-0773-7752-85d0-b297ca579e49\",\"transcript_path\":\"<scratch>/codex-home/sessions/2026/10/24/rollout-2026-10-24T10-37-09-01a16e8f-0773-7752-85d0-b297ca579e49.jsonl\",\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionStart\",\"model\":\"gpt-6-astra\",\"permission_mode\":\"bypassPermissions\",\"source\":\"startup\"}",
+          "chain": [
+            {
+              "pid": 95967,
+              "comm": "node"
+            },
+            {
+              "pid": 95521,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-end",
+          "argv": [
+            "plugin-root-form"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-0773-7752-85d0-b297ca579e49\",\"transcript_path\":\"<scratch>/codex-home/sessions/2026/10/24/rollout-2026-10-24T10-37-09-01a16e8f-0773-7752-85d0-b297ca579e49.jsonl\",\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionEnd\",\"reason\":\"other\"}",
+          "chain": [
+            {
+              "pid": 96689,
+              "comm": "node"
+            },
+            {
+              "pid": 95521,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-end-timeout-5",
+          "argv": [
+            "plugin-root-form"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-0773-7752-85d0-b297ca579e49\",\"transcript_path\":\"<scratch>/codex-home/sessions/2026/10/24/rollout-2026-10-24T10-37-09-01a16e8f-0773-7752-85d0-b297ca579e49.jsonl\",\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionEnd\",\"reason\":\"other\"}",
+          "chain": [
+            {
+              "pid": 96693,
+              "comm": "node"
+            },
+            {
+              "pid": 95521,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "debug prompt-input --dangerously-bypass-hook-trust",
+      "args": [
+        "--dangerously-bypass-hook-trust",
+        "debug",
+        "prompt-input",
+        "hi"
+      ],
+      "code": 0,
+      "startLineInStdout": false,
+      "startLineInStderr": false,
+      "startLineInRollout": [],
+      "stdout": "...        \"text\": \"<environment_context>\\n  <cwd><scratch>/work</cwd>\\n  <shell>zsh</shell>\\n  <current_date>2026-10-24</current_date>\\n  <timezone>America/Chicago</timezone>\\n  <filesystem><workspace_roots><root><scratch>/work</root></workspace_roots><permission_profile type=\\\"managed\\\"><file_system type=\\\"restricted\\\"><entry access=\\\"read\\\"><special>:root</special></entry></file_system></permission_profile></filesystem>\\n</environment_context>\"\n      }\n    ],\n    \"internal_chat_message_metadata_passthrough\": {\n      \"turn_id\": \"auto-compact-0\",\n      \"create_time\": 1792856235.165043,\n      \"content_item_kinds\": [\n        \"environments.environment_context\"\n      ],\n      \"content_item_metadata\": [\n        {\n          \"provenance\": {\n            \"type\": \"harness\",\n            \"hook\": false\n          }\n        }\n      ]\n    }\n  },\n  {\n    \"type\": \"message\",\n    \"id\": \"msg_01a16e8f-1c9d-7d23-9fc3-2ec558219cde\",\n    \"role\": \"user\",\n    \"content\": [\n      {\n        \"type\": \"input_text\",\n        \"text\": \"hi\"\n      }\n    ],\n    \"internal_chat_message_metadata_passthrough\": {\n      \"turn_id\": \"auto-compact-0\",\n      \"create_time\": 1792856235.165338,\n      \"content_item_kinds\": [\n        \"user.text\"\n      ],\n      \"content_item_metadata\": [\n        {\n          \"provenance\": {\n            \"type\": \"user\"\n          }\n        }\n      ]\n    }\n  }\n]\n",
+      "stderr": "",
+      "records": [
+        {
+          "label": "mcp",
+          "argv": [],
+          "cwd": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+          "env": {
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "SHELL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "",
+          "chain": [
+            {
+              "pid": 97499,
+              "comm": "node"
+            },
+            {
+              "pid": 97491,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-end",
+          "argv": [
+            "plugin-root-form"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-1aae-71a0-87ef-338ea54107a8\",\"transcript_path\":null,\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionEnd\",\"reason\":\"other\"}",
+          "chain": [
+            {
+              "pid": 97591,
+              "comm": "node"
+            },
+            {
+              "pid": 97491,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-end-timeout-5",
+          "argv": [
+            "plugin-root-form"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-1aae-71a0-87ef-338ea54107a8\",\"transcript_path\":null,\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionEnd\",\"reason\":\"other\"}",
+          "chain": [
+            {
+              "pid": 97592,
+              "comm": "node"
+            },
+            {
+              "pid": 97491,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "app-server trust the plugin hooks",
+      "responses": [
+        {
+          "method": "hooks/list",
+          "params": {
+            "cwds": [
+              "<scratch>/work"
+            ]
+          },
+          "response": {
+            "id": 2,
+            "result": {
+              "data": [
+                {
+                  "cwd": "<scratch>/work",
+                  "hooks": [
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_start:0:0",
+                      "eventName": "sessionStart",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-start plugin-root-form",
+                      "async": false,
+                      "matcher": "startup|resume|clear",
+                      "timeoutSec": 10,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 0,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:1b6f3b66f58c057c88325cf78d37fa0276a5c705645badaee21fcf4423abf1cd/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "untrusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_start:0:1",
+                      "eventName": "sessionStart",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/market/plugins/probe/record.mjs\" hook-start-quoting \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1\" '<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1'",
+                      "async": false,
+                      "matcher": "startup|resume|clear",
+                      "timeoutSec": 10,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 1,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:71b728e1da5cbe6d960402e83f1dd645f19d9e75a8d98c79bc50b75c58669165/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "untrusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_end:0:0",
+                      "eventName": "sessionEnd",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-end plugin-root-form",
+                      "async": false,
+                      "matcher": null,
+                      "timeoutSec": 1,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 2,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:cd3f849cbf41fdb14c53cac94e24215c550f5487eeb2cf756d5f84131d1cd417/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "untrusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_end:0:1",
+                      "eventName": "sessionEnd",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-end-timeout-5 plugin-root-form",
+                      "async": false,
+                      "matcher": null,
+                      "timeoutSec": 3,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 3,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:5d15309c13ddfb8b83991dbf7be7c0960651d81b98eed2f70029634190941b20/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "untrusted"
+                    }
+                  ],
+                  "warnings": [
+                    "clamping SessionEnd hook timeout to 3s in <scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json"
+                  ],
+                  "errors": []
+                }
+              ]
+            }
+          }
+        },
+        {
+          "method": "config/batchWrite",
+          "response": {
+            "id": 3,
+            "result": {
+              "status": "ok",
+              "version": "sha256:e6e08e389d2be7cd0044dac62063ae5a30d1adde0656abf7e614da74b9276dfd",
+              "filePath": "<scratch>/codex-home/config.toml",
+              "overriddenMetadata": null
+            }
+          }
+        },
+        {
+          "method": "hooks/list",
+          "params": {
+            "cwds": [
+              "<scratch>/work"
+            ]
+          },
+          "response": {
+            "id": 4,
+            "result": {
+              "data": [
+                {
+                  "cwd": "<scratch>/work",
+                  "hooks": [
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_start:0:0",
+                      "eventName": "sessionStart",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-start plugin-root-form",
+                      "async": false,
+                      "matcher": "startup|resume|clear",
+                      "timeoutSec": 10,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 0,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:1b6f3b66f58c057c88325cf78d37fa0276a5c705645badaee21fcf4423abf1cd/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "trusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_start:0:1",
+                      "eventName": "sessionStart",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/market/plugins/probe/record.mjs\" hook-start-quoting \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1\" '<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1'",
+                      "async": false,
+                      "matcher": "startup|resume|clear",
+                      "timeoutSec": 10,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 1,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:71b728e1da5cbe6d960402e83f1dd645f19d9e75a8d98c79bc50b75c58669165/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "trusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_end:0:0",
+                      "eventName": "sessionEnd",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-end plugin-root-form",
+                      "async": false,
+                      "matcher": null,
+                      "timeoutSec": 1,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 2,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:cd3f849cbf41fdb14c53cac94e24215c550f5487eeb2cf756d5f84131d1cd417/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "trusted"
+                    },
+                    {
+                      "key": "probe@probe-market:hooks/hooks.json:session_end:0:1",
+                      "eventName": "sessionEnd",
+                      "handlerType": "command",
+                      "command": "node \"<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/record.mjs\" hook-end-timeout-5 plugin-root-form",
+                      "async": false,
+                      "matcher": null,
+                      "timeoutSec": 3,
+                      "statusMessage": null,
+                      "additionalContextLimit": null,
+                      "sourcePath": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json",
+                      "source": "plugin",
+                      "pluginId": "probe@probe-market",
+                      "displayOrder": 3,
+                      "enabled": true,
+                      "isManaged": false,
+                      "currentHash": "sha256:5d15309c13ddfb8b83991dbf7be7c0960651d81b98eed2f70029634190941b20/sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d",
+                      "trustStatus": "trusted"
+                    }
+                  ],
+                  "warnings": [
+                    "clamping SessionEnd hook timeout to 3s in <scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json"
+                  ],
+                  "errors": []
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "config": "[marketplaces.probe-market]\nsource_type = \"local\"\nsource = \"<scratch>/market\"\n\n[plugins.\"probe@probe-market\"]\nenabled = true\n\n[hooks.state.\"probe@probe-market:hooks/hooks.json:session_start:0:0\"]\ntrusted_hash = \"sha256:1b6f3b66f58c057c88325cf78d37fa0276a5c705645badaee21fcf4423abf1cd\"\ntrusted_content_hash = \"sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d\"\n\n[hooks.state.\"probe@probe-market:hooks/hooks.json:session_start:0:1\"]\ntrusted_hash = \"sha256:71b728e1da5cbe6d960402e83f1dd645f19d9e75a8d98c79bc50b75c58669165\"\ntrusted_content_hash = \"sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d\"\n\n[hooks.state.\"probe@probe-market:hooks/hooks.json:session_end:0:0\"]\ntrusted_hash = \"sha256:cd3f849cbf41fdb14c53cac94e24215c550f5487eeb2cf756d5f84131d1cd417\"\ntrusted_content_hash = \"sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d\"\n\n[hooks.state.\"probe@probe-market:hooks/hooks.json:session_end:0:1\"]\ntrusted_hash = \"sha256:5d15309c13ddfb8b83991dbf7be7c0960651d81b98eed2f70029634190941b20\"\ntrusted_content_hash = \"sha256:bc25f596c4dbf86111334db034a7e1a4ed473999d281f2e76637c8a48b9f540d\"\n",
+      "records": []
+    },
+    {
+      "name": "exec, hooks trusted in config.toml",
+      "args": [
+        "exec",
+        "--json",
+        "--skip-git-repo-check",
+        "-m",
+        "gpt-6-astra",
+        "-c",
+        "model_reasoning_effort=\"low\"",
+        "-s",
+        "read-only",
+        "Reply with only the word ok."
+      ],
+      "code": 0,
+      "startLineInStdout": false,
+      "startLineInStderr": false,
+      "startLineInRollout": [
+        {
+          "timestamp": "2026-10-24T15:37:16.809Z",
+          "ordinal": 11,
+          "type": "response_item",
+          "payload": {
+            "type": "message",
+            "id": "msg_01a16e8f-2309-7380-a7a5-14bc6cc62aa2",
+            "role": "developer",
+            "content": [
+              {
+                "type": "input_text",
+                "text": "PROBE-SESSION-START-LINE"
+              }
+            ],
+            "internal_chat_message_metadata_passthrough": {
+              "turn_id": "01a16e8f-1ede-76a3-91d0-e9aa300208e1",
+              "create_time": 1792856236.809642,
+              "content_item_kinds": [
+                "hooks.additional_context"
+              ],
+              "content_item_metadata": [
+                {
+                  "provenance": {
+                    "type": "harness",
+                    "hook": true
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "stdout": "{\"type\":\"thread.started\",\"thread_id\":\"01a16e8f-1d28-7ba1-a965-196d2c8302db\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"error\",\"message\":\"clamping SessionEnd hook timeout to 3s in <scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1/hooks/hooks.json\"}}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"agent_message\",\"text\":\"ok\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":19542,\"cached_input_tokens\":12160,\"cache_write_input_tokens\":0,\"output_tokens\":5,\"reasoning_output_tokens\":0}}\n",
+      "stderr": "Reading additional input from stdin...\n",
+      "records": [
+        {
+          "label": "mcp",
+          "argv": [],
+          "cwd": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+          "env": {
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "SHELL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "",
+          "chain": [
+            {
+              "pid": 97715,
+              "comm": "node"
+            },
+            {
+              "pid": 97670,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-start-quoting",
+          "argv": [
+            "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-1d28-7ba1-a965-196d2c8302db\",\"transcript_path\":\"<scratch>/codex-home/sessions/2026/10/24/rollout-2026-10-24T10-37-15-01a16e8f-1d28-7ba1-a965-196d2c8302db.jsonl\",\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionStart\",\"model\":\"gpt-6-astra\",\"permission_mode\":\"bypassPermissions\",\"source\":\"startup\"}",
+          "chain": [
+            {
+              "pid": 97844,
+              "comm": "node"
+            },
+            {
+              "pid": 97670,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-start",
+          "argv": [
+            "plugin-root-form"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-1d28-7ba1-a965-196d2c8302db\",\"transcript_path\":\"<scratch>/codex-home/sessions/2026/10/24/rollout-2026-10-24T10-37-15-01a16e8f-1d28-7ba1-a965-196d2c8302db.jsonl\",\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionStart\",\"model\":\"gpt-6-astra\",\"permission_mode\":\"bypassPermissions\",\"source\":\"startup\"}",
+          "chain": [
+            {
+              "pid": 97843,
+              "comm": "node"
+            },
+            {
+              "pid": 97670,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-end",
+          "argv": [
+            "plugin-root-form"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-1d28-7ba1-a965-196d2c8302db\",\"transcript_path\":\"<scratch>/codex-home/sessions/2026/10/24/rollout-2026-10-24T10-37-15-01a16e8f-1d28-7ba1-a965-196d2c8302db.jsonl\",\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionEnd\",\"reason\":\"other\"}",
+          "chain": [
+            {
+              "pid": 98838,
+              "comm": "node"
+            },
+            {
+              "pid": 97670,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        },
+        {
+          "label": "hook-end-timeout-5",
+          "argv": [
+            "plugin-root-form"
+          ],
+          "cwd": "<scratch>/work",
+          "env": {
+            "CLAUDE_PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "CLAUDE_PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "CODEX_HOME": "<scratch>/codex-home",
+            "HOME": "<set>",
+            "LANG": "<set>",
+            "LOGNAME": "<set>",
+            "OLDPWD": "<set>",
+            "ORCH_HOME": "<scratch>/orch-home",
+            "ORCH_URL": "http://127.0.0.1:9/probe-url",
+            "PATH": "<set>",
+            "PLUGIN_DATA": "<scratch>/codex-home/plugins/data/probe-probe-market",
+            "PLUGIN_ROOT": "<scratch>/codex-home/plugins/cache/probe-market/probe/0.0.1",
+            "PROBE_EXTRA": "from-codex-env",
+            "PWD": "<set>",
+            "SHELL": "<set>",
+            "SHLVL": "<set>",
+            "TERM": "<set>",
+            "TMPDIR": "<set>",
+            "USER": "<set>",
+            "_": "<set>",
+            "__CF_USER_TEXT_ENCODING": "<set>"
+          },
+          "stdin": "{\"session_id\":\"01a16e8f-1d28-7ba1-a965-196d2c8302db\",\"transcript_path\":\"<scratch>/codex-home/sessions/2026/10/24/rollout-2026-10-24T10-37-15-01a16e8f-1d28-7ba1-a965-196d2c8302db.jsonl\",\"cwd\":\"<scratch>/work\",\"hook_event_name\":\"SessionEnd\",\"reason\":\"other\"}",
+          "chain": [
+            {
+              "pid": 98842,
+              "comm": "node"
+            },
+            {
+              "pid": 97670,
+              "comm": "codex"
+            },
+            {
+              "pid": 93453,
+              "comm": "node"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "worker auth: CODEX_HOME without auth.json, no key",
+      "code": 1,
+      "last": "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses, cf-ray: a4fa104f48c4301b-MCI, re",
+      "stderr": "...:responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://api.openai.com/v1/responses\n2026-10-24T15:37:27.906678Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://api.openai.com/v1/responses\n"
+    },
+    {
+      "name": "worker auth: CODEX_HOME without auth.json, OPENAI_API_KEY",
+      "code": 1,
+      "last": "unexpected status 401 Unauthorized: Missing bearer or basic authentication in header, url: https://api.openai.com/v1/responses, cf-ray: a4fa10b4af80d30b-MCI, re",
+      "stderr": "...:responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://api.openai.com/v1/responses\n2026-10-24T15:37:43.886360Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://api.openai.com/v1/responses\n"
+    },
+    {
+      "name": "worker auth: CODEX_HOME without auth.json, CODEX_API_KEY",
+      "code": 1,
+      "last": "unexpected status 401 Unauthorized: Incorrect API key provided: sk-probe*******0000. You can find your API key at https://platform.openai.com/account/api-keys.,",
+      "stderr": "...:responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://api.openai.com/v1/responses\n2026-10-24T15:38:01.392827Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 401 Unauthorized, url: wss://api.openai.com/v1/responses\n"
+    },
+    {
+      "name": "worker auth: CODEX_HOME with auth.json",
+      "code": 0,
+      "last": "turn.completed",
+      "stderr": "Reading additional input from stdin...\n"
+    }
+  ]
+}

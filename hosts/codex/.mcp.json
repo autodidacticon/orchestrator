@@ -14,7 +14,10 @@
         "HOME",
         "ORCH_HOME",
         "ORCH_WAIT_CAP_MS",
-        "ORCH_REPO"
+        "ORCH_REPO",
+        "ORCH_URL",
+        "CODEX_HOME",
+        "CODEX_API_KEY"
       ]
     }
   }
