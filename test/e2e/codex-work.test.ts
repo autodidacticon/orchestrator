@@ -60,6 +60,7 @@ describe.skipIf(!enabled)('e2e: Codex work loop', () => {
       config: { capacity: 2, leaseTtlMs: 10 * 60_000, maxWaitMs: 2 * 60_000, checkCommand: 'true', runner: { mode: 'pull', kind: 'codex' } },
     });
     let stderr = '';
+    let passed = false;
     const child = spawn(process.execPath, ['--import', tsxLoader, workMjs, '--url', h.orch.apiBaseUrl, '--workers', '2', '--run-tag', 'e2e', '--capacity', '2'], { stdio: ['ignore', 'pipe', 'pipe'] });
     child.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
     const exited = new Promise<number | null>((r) => child.on('close', r));
@@ -87,7 +88,10 @@ describe.skipIf(!enabled)('e2e: Codex work loop', () => {
         expect(l.tokens?.output, l.launchId).toBeGreaterThan(0);
       }
       expect(h.store.listLaunches().every((l) => l.pid === undefined)).toBe(true);
+      passed = true;
     } finally {
+      // Any failure, a waitFor timeout included, shows the loop's own view of the run.
+      if (!passed) console.error(`codex work-loop stderr (last 16000 chars):\n${stderr.slice(-16_000)}`);
       child.kill('SIGTERM');
       await h.cleanup();
       rmSync(dir, { recursive: true, force: true });

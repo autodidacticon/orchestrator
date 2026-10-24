@@ -4,10 +4,12 @@
 // over HTTP (workerId <runTag>-<n>, runner "codex" or "opencode"), run the agent CLI in the claimed
 // worktree with the command a spawned launch gets (composeCodexCommand or composeOpenCodeCommand),
 // post the summed usage after it exits, and claim again until the stop rule holds. A small adapter
-// per kind (ADAPTERS) holds everything that differs. See specs/host-integration "Work loop by runner kind".
+// per kind (ADAPTERS) holds everything that differs. While the agent runs, a watcher ends its process
+// group when the daemon has ended the launch or the agent has been silent past the silence limit.
+// See specs/host-integration "Work loop by runner kind" and "Work loop ends a hung agent".
 //
 //   orchestrator-work [--runner codex|opencode] [--workers N] [--run-tag T] [--capacity C] [--url URL]
-//                     [--repo DIR] [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N]
+//                     [--repo DIR] [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N] [--max-silence-ms MS]
 //
 // Dependency-light: node built-ins plus the orchestrator package this file ships in, found the
 // way bin/orchestrator.mjs finds it (a checkout, the host-local install, else npx at the pinned
@@ -23,6 +25,12 @@ export const PACKAGE_NAME = '@autodidacticon/orchestrator';
 export const RUNNER_KINDS = ['codex', 'opencode'];
 const DEFAULT_RUNNER = 'codex';
 const WAKE_KINDS = 'launch.claimable,launch.ended,launch.released';
+/** The silence limit when neither --max-silence-ms nor the claim names one: the daemon's default health.stuckFailAfterMs. */
+export const DEFAULT_MAX_SILENCE_MS = 45 * 60_000;
+/** How long an agent whose launch has reported may keep running (its last output carries the usage) before it is ended. */
+export const REPORT_GRACE_MS = 30_000;
+/** SIGTERM to SIGKILL. */
+export const KILL_GRACE_MS = 5000;
 const hostDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function readJson(file) {
@@ -78,6 +86,7 @@ export function parseWorkArgs(argv) {
       'idle-exit-ms': { type: 'string', default: '120000' },
       'poll-ms': { type: 'string', default: '2000' },
       'max-failures': { type: 'string', default: '3' },
+      'max-silence-ms': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
     strict: true,
@@ -98,6 +107,8 @@ export function parseWorkArgs(argv) {
     idleExitMs: Math.max(0, Number(values['idle-exit-ms']) || 0),
     pollMs: Math.max(100, Number(values['poll-ms']) || 2000),
     maxFailures: Math.max(1, Number.parseInt(values['max-failures'], 10) || 3),
+    // Undefined: learnt from the claim, else DEFAULT_MAX_SILENCE_MS. 0 turns the silence limit off.
+    maxSilenceMs: values['max-silence-ms'] === undefined ? undefined : Math.max(0, Number(values['max-silence-ms']) || 0),
   };
 }
 
@@ -117,6 +128,57 @@ export function stopVerdict(s, quietSinceMs, now, idleExitMs, kind = DEFAULT_RUN
   if ((s.openQuestions ?? []).length || (s.awaitingReview ?? []).length) return { stop: true, why: `nothing is claimable for ${kind} and the run waits on a human` };
   if (quietSinceMs !== undefined && now - quietSinceMs >= idleExitMs) return { stop: true, why: `nothing claimable for ${kind} for ${idleExitMs}ms` };
   return { stop: false, quiet: true };
+}
+
+/**
+ * The silence limit for one claimed launch: --max-silence-ms when given, else the daemon's stuck-fail
+ * threshold when the claim carries one (`health.stuckFailAfterMs`), else DEFAULT_MAX_SILENCE_MS; 0 is off.
+ */
+export function silenceLimitMs(optMs, claim) {
+  if (optMs !== undefined) return optMs;
+  const fromClaim = Number(claim?.health?.stuckFailAfterMs);
+  return Number.isFinite(fromClaim) && fromClaim > 0 ? fromClaim : DEFAULT_MAX_SILENCE_MS;
+}
+
+/**
+ * Where the daemon has the claimed launch, from GET /v1/status: 'running' or 'waiting' while the worker
+ * still holds it; 'reported' when its task submitted or is done; 'ended' otherwise (failed, stuck, lease
+ * expired, cancelled, released, superseded by a relaunch).
+ */
+export function launchState(s, workerId, c) {
+  const by = s.byStatus ?? {};
+  if ((by.submitted ?? []).includes(c.taskId) || (by.done ?? []).includes(c.taskId)) return 'reported';
+  const holds = (s.workers ?? []).some((w) => w.id === workerId && w.launchId === c.launchId);
+  if (holds && (by.waiting ?? []).includes(c.taskId)) return 'waiting';
+  if (holds && (by.running ?? []).includes(c.taskId)) return 'running';
+  return 'ended';
+}
+
+/**
+ * The watcher's verdict for one look: `{ why, hung }` to end the agent, or undefined. Silence is not
+ * counted while the task waits on an answer (the agent is in a long-poll); the caller resets its clock then.
+ */
+export function watchVerdict(state, { now, lastOutputAt, reportedAt, maxSilenceMs, reportGraceMs = REPORT_GRACE_MS }) {
+  if (state === 'ended') return { why: 'the daemon ended the launch', hung: true };
+  if (state === 'reported') {
+    return reportedAt !== undefined && now - reportedAt >= reportGraceMs ? { why: `the launch reported ${Math.round(reportGraceMs / 1000)}s ago and the agent has not exited`, hung: false } : undefined;
+  }
+  if (state === 'waiting') return undefined;
+  if (maxSilenceMs > 0 && now - lastOutputAt >= maxSilenceMs) return { why: `no output for ${Math.round((now - lastOutputAt) / 1000)}s (limit ${maxSilenceMs}ms)`, hung: true };
+  return undefined;
+}
+
+/** End a detached child's process group: SIGTERM, then SIGKILL after `graceMs`, sent even if the shell has gone, for the agent it started. */
+export function killGroup(child, graceMs = KILL_GRACE_MS) {
+  const send = (sig) => {
+    try {
+      process.kill(-child.pid, sig);
+    } catch {
+      /* gone */
+    }
+  };
+  send('SIGTERM');
+  setTimeout(() => send('SIGKILL'), graceMs).unref();
 }
 
 /** The text fed to the agent on stdin: a short preamble (credentials, the 401 rule), then the brief. */
@@ -235,13 +297,7 @@ export async function runWork(opts, mods) {
     if (stopping) return;
     stopping = true;
     log(`${sig}: stopping; live ${kind} processes are terminated and their launches released with keep`);
-    for (const { child } of active.values()) {
-      try {
-        process.kill(-child.pid, 'SIGTERM');
-      } catch {
-        /* gone */
-      }
-    }
+    for (const { child } of active.values()) killGroup(child);
   };
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => onSignal(sig));
 
@@ -258,7 +314,7 @@ export async function runWork(opts, mods) {
     log(`${c.taskId}: released (${reason}; keep ${keep}) -> ${r.status} ${r.body.outcome ?? r.body.reason ?? ''}`);
   }
 
-  /** One claimed launch: compose, run, post usage, hand back what the agent did not report. 'started' | 'startFailed' | 'contended' | 'noReport'. */
+  /** One claimed launch: compose, run, post usage, hand back what the agent did not report. 'started' | 'startFailed' | 'contended' | 'noReport' | 'hung'. */
   async function work(workerId, c) {
     const blk = adapter.block(c);
     if (!blk) {
@@ -276,7 +332,9 @@ export async function runWork(opts, mods) {
     const out = createWriteStream(logFile, { flags: 'a' });
     let text = '';
     let spawnError;
-    log(`${workerId}: ${c.taskId} (launch ${c.launchId.slice(0, 8)}) ${adapter.label} -m ${c.model ?? '(default)'}; log ${logFile}`);
+    let terminated;
+    const maxSilenceMs = silenceLimitMs(opts.maxSilenceMs, c);
+    log(`${workerId}: ${c.taskId} (launch ${c.launchId.slice(0, 8)}) ${adapter.label} -m ${c.model ?? '(default)'}; log ${logFile}; silence limit ${maxSilenceMs ? `${maxSilenceMs}ms` : 'off'}`);
     const exit = await new Promise((resolve) => {
       let child;
       try {
@@ -287,7 +345,11 @@ export async function runWork(opts, mods) {
         return;
       }
       active.set(workerId, { child, launchId: c.launchId });
+      let closed = false;
+      let lastOutputAt = Date.now();
+      let reportedAt;
       const take = (chunk) => {
+        lastOutputAt = Date.now();
         text += chunk.toString('utf8');
         if (text.length > 1024 * 1024) text = text.slice(text.length - 512 * 1024);
         out.write(chunk);
@@ -297,7 +359,33 @@ export async function runWork(opts, mods) {
       child.on('error', (err) => {
         spawnError = err;
       });
-      child.on('close', (code, signal) => resolve({ code, signal }));
+      child.on('close', (code, signal) => {
+        closed = true;
+        resolve({ code, signal });
+      });
+      // The watcher: an agent that hangs (a provider stream error, a turn that never ends) is ended here, not waited on.
+      void (async () => {
+        while (!closed && !terminated && !stopping) {
+          await sleep(opts.pollMs);
+          if (closed || stopping) return;
+          let state;
+          try {
+            const s = await http('GET', '/v1/status');
+            state = s.status === 200 ? launchState(s.body, workerId, c) : 'running';
+          } catch {
+            state = 'running'; // the daemon is unreachable: only the silence limit applies
+          }
+          const now = Date.now();
+          if (state === 'waiting') lastOutputAt = now;
+          if (state === 'reported') reportedAt ??= now;
+          const v = watchVerdict(state, { now, lastOutputAt, reportedAt, maxSilenceMs });
+          if (v && !closed) {
+            terminated = v;
+            log(`${workerId}: ${c.taskId} ending ${kind} (process group ${child.pid}): ${v.why}`);
+            killGroup(child);
+          }
+        }
+      })();
     });
     active.delete(workerId);
     await new Promise((r) => out.end(r));
@@ -312,7 +400,13 @@ export async function runWork(opts, mods) {
     const failure = spawnError ? { reason: 'exitBeforeTurn', detail: String(spawnError) } : adapter.classifyFailure(text);
     const startFailed = Boolean(spawnError) || exit.code === 127 || !adapter.started(text, failure);
     const held = await stillHeld(workerId, c);
-    log(`${workerId}: ${c.taskId} ${kind} exited (code ${exit.code}${exit.signal ? `, ${exit.signal}` : ''})${failure ? ` ${failure.reason}${failure.detail ? `: ${failure.detail}` : ''}` : ''}${held ? '; no report' : ''}`);
+    log(`${workerId}: ${c.taskId} ${kind} exited (code ${exit.code}${exit.signal ? `, ${exit.signal}` : ''})${terminated ? ` terminated: ${terminated.why}` : failure ? ` ${failure.reason}${failure.detail ? `: ${failure.detail}` : ''}` : ''}${held ? '; no report' : ''}`);
+    if (terminated && !stopping) {
+      // Ended by the watcher, not a start failure, whatever the output says. The daemon's own verdict (failed, stuck, lease
+      // expired) stands; a launch still held was silent past the limit and is handed back as an agent failure, without keep.
+      if (held) await release(c, `${kind} was terminated by the work loop: ${terminated.why}`, false);
+      return terminated.hung ? 'hung' : 'started';
+    }
     if (!held) return 'started';
     if (stopping) {
       await release(c, `the ${kind} work loop was stopped`, true);
@@ -393,9 +487,12 @@ export async function runWork(opts, mods) {
 
 const USAGE = `usage: orchestrator-work [--runner <codex|opencode>] [--workers N] [--run-tag T] [--capacity C]
                          [--url URL] [--repo DIR] [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N]
+                         [--max-silence-ms MS]
 Claims launches of one runner kind from the orchestrator daemon and runs the agent CLI for each:
 codex exec for --runner codex (the default), opencode run for --runner opencode. The daemon is
-found by --url, ORCH_URL, or the run directory of --repo (default: the current directory).\n`;
+found by --url, ORCH_URL, or the run directory of --repo (default: the current directory).
+The agent's process group is ended when the daemon ends its launch, or when the agent writes no
+output for --max-silence-ms (default: the claim's health.stuckFailAfterMs, else 45 minutes; 0 is off).\n`;
 
 async function main() {
   let opts;

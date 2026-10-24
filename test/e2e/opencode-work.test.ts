@@ -78,6 +78,7 @@ describe.skipIf(!enabled)('e2e: OpenCode work loop', () => {
       },
     });
     let stderr = '';
+    let passed = false;
     const child = spawn(process.execPath, ['--import', tsxLoader, workMjs, '--runner', 'opencode', '--url', h.orch.apiBaseUrl, '--workers', '2', '--run-tag', 'e2e', '--capacity', '2', '--max-failures', '5'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -133,7 +134,10 @@ describe.skipIf(!enabled)('e2e: OpenCode work loop', () => {
       }
       expect(h.store.listLaunches().every((l) => l.pid === undefined)).toBe(true);
       console.info(`opencode work e2e: ${claimed.length} launches; contended releases: ${(stderr.match(/startupContended/g) ?? []).length}`);
+      passed = true;
     } finally {
+      // Any failure, a waitFor timeout included, shows the loop's own view of the run.
+      if (!passed) console.error(`opencode work-loop stderr (last 16000 chars):\n${stderr.slice(-16_000)}`);
       child.kill('SIGTERM');
       await h.cleanup();
       rmSync(dir, { recursive: true, force: true });
