@@ -2,9 +2,7 @@
 
 ## Purpose
 Node states, allowed transitions by actor, admission, counters, leases, retry, the reopen guard, cancellation, milestone review, milestone resets, and cascade reopen for every node in the task graph, where a lease is renewed by observed process liveness as well as by API calls, so that silence from a live agent is a health matter rather than a lease failure, and where reopening a task resets every done or submitted milestone downstream of it while a reopen with cascade resets the whole started closure downstream of it, dependents before their dependencies, and where in `pull` and `mixed` modes a launch is parked as `claimable` once prepared, holding its run slot with a lease that starts only at the claim, and the release of a claimed launch returns the task to `unstarted` without spending an attempt when no progress was observed and fails it, spending one, otherwise.
-
 ## Requirements
-
 ### Requirement: Node states
 Each node SHALL have exactly one status from `unstarted`, `running`, `waiting`, `submitted`, `done`, `failed`, `blocked`, and `cancelled`. A node with no overlay entry SHALL be treated as `unstarted`. Each overlay entry SHALL carry `attempts`, `integrationRetries`, `launches`, an optional lease, and `updatedAt`. `failed` and `blocked` SHALL carry a structured reason, `waiting` SHALL carry the question and any answer, and `cancelled` SHALL carry a reason and `releasesDependents`.
 
@@ -137,7 +135,7 @@ A `running` or `waiting` task SHALL hold a lease recording `launchId`, `token`, 
 ### Requirement: Retry and exhaustion
 When a task becomes `failed` and `attempts` is below `maxAttempts` (default 2), the orchestrator SHALL return it to `unstarted` and the next launch's brief MUST include the prior failure report and any verifier output. When `attempts` reaches `maxAttempts`, the orchestrator SHALL move the task to `blocked` with the last reason.
 
-Every launch that dies without a report SHALL be recorded as a `launch.failed` event carrying the runner's `reason` and `detail` when it gave a diagnosis, and `charged`. A death the runner diagnoses as `startupContended` SHALL NOT be charged while the task has had fewer than `health.contendedRetries` (default 3) uncharged contended deaths, counted from those events and never reset: the task SHALL return to `unstarted` at once through the orchestrator's `running -> unstarted` (`released`) transition, with `attempts` unchanged, the transition event carrying `reason: startupContended`, and the next brief carrying the `exitedWithoutReport` failure as the prior failure. Later contended deaths SHALL be charged like any other failure. `0` charges every one.
+Every launch that dies without a report SHALL be recorded as a `launch.failed` event carrying the runner's `reason` and `detail` when it gave a diagnosis, and `charged`, whether the death is observed by a tick or by startup recovery. A death the runner diagnoses as `startupContended` SHALL NOT be charged while the task has had fewer than `health.contendedRetries` (default 3) uncharged contended deaths, counted from those events and never reset: the task SHALL return to `unstarted` at once through the orchestrator's `running -> unstarted` (`released`) transition, with `attempts` unchanged, the transition event carrying `reason: startupContended`, and the next brief carrying the `exitedWithoutReport` failure as the prior failure. The count SHALL be read in the same store transaction that appends the `launch.failed` event. Later contended deaths SHALL be charged like any other failure. `0` charges every one.
 
 #### Scenario: Contended startups relaunch without charge
 - **WHEN** a task's first two launches die and the runner diagnoses each as `startupContended`, and the third launch submits and is published
@@ -146,6 +144,10 @@ Every launch that dies without a report SHALL be recorded as a `launch.failed` e
 #### Scenario: The allowance runs out
 - **WHEN** a task's fourth launch dies `startupContended` with `health.contendedRetries` at 3
 - **THEN** the death is charged: `attempts` is one and its `launch.failed` event carries `charged: true`
+
+#### Scenario: Restart deaths share the allowance
+- **WHEN** with `health.contendedRetries` at 1, a task's first launch dies `startupContended` while the daemon runs and its second dies `startupContended` while the daemon is down
+- **THEN** recovery charges the second death: its `launch.failed` event carries `charged: true` and `attempts` is one
 
 #### Scenario: One automatic retry with context
 - **WHEN** a task fails on its first attempt
@@ -368,3 +370,4 @@ In `pull` and `mixed` modes a launch SHALL be parked as `claimable` once its wor
 #### Scenario: Resume renews the lease
 - **WHEN** a claimed launch's task has been `waiting` for longer than the lease TTL and is answered and admitted
 - **THEN** its lease expires `leaseTtlMs` after the admission, not before
+
