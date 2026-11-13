@@ -11,7 +11,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ApiServer } from './agent/server.js';
 import { SlotValidator } from './brief/template.js';
-import { type Config, loadConfig, redactedStore, storeConfigError, urlSecrets } from './config.js';
+import { type Config, loadConfig, redactedStore, storeConfigError, storeUrlSource, urlSecrets } from './config.js';
 import { FileGraphSource, StoreGraphSource } from './graph/source.js';
 import type { Logger } from './loop/core.js';
 import { Orchestrator } from './loop/orchestrator.js';
@@ -24,7 +24,8 @@ import { OpenCodeRunner } from './runner/opencode.js';
 import { composeAllowedTools } from './toolchain/tools.js';
 import { openStore, type OpenedStore } from './state/open.js';
 import { GitVerifierBackend } from './verify/verifier.js';
-import { DAEMON_PID, ensureRunDir, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
+import { chooseRunId, CONFIG_FILE, DAEMON_PID, ensureRunDir, repoRunId, type RunIdChoice, runIdInputOf, runIdWarning, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, trackedInRepo, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
+import { withholdStoreUrl } from './runs/childEnv.js';
 import { applyOverridePatch, configSummary, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved, resolveLayers } from './runs/resolve.js';
 import { digestOf } from './operator/routes.js';
 import { runIdOf, setRunId } from './state/store.js';
@@ -118,25 +119,44 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   let resolveWith: (opts: ResolveOptions) => Promise<Resolved>;
   // The store block comes from the file and the environment, before the store (and its override document) is open.
   let early: Config;
+  // A Postgres run needs its id before the store opens: the lock and the rows are keyed by it. See specs/state-backend "Run id per deployment".
+  let choice: RunIdChoice | undefined;
+  let configFile: string;
+  let fileRaw: Record<string, unknown> | undefined;
   if (values.config) {
     const file = values.config;
+    configFile = path.resolve(file);
     early = await loadConfig(file);
+    fileRaw = rawConfig(file);
     dataDir = early.dataDir;
     fileSetsMode = rawRunnerMode(file) !== undefined;
     resolveWith = (opts) => resolveFileConfig(file, opts);
-    // A Postgres run needs its id before the store opens (the lock and the rows are keyed by it): by repository.
-    if (early.store.kind === 'postgres') runId = runIdFor(realpathOr(early.repoPath));
+    if (early.store.kind === 'postgres') choice = runIdOrExit(() => chooseRunId(runIdInputOf(early, realpathOr(early.repoPath))));
   } else {
     const repo = await resolveRepoPath({ repo: values.repo });
+    configFile = path.join(repo, CONFIG_FILE);
+    fileRaw = readRepoConfigRaw(repo);
+    // The run directory follows the run id (the path hash for SQLite, as always).
+    choice = runIdOrExit(() => repoRunId(repo));
     ensureRunDir(repo);
     early = (await resolveRunConfig(repo, process.env, { detect: false })).config;
     dataDir = early.dataDir;
-    runId = runIdFor(repo);
-    fileSetsMode = (readRepoConfigRaw(repo)?.['runner'] as { mode?: unknown } | undefined)?.mode !== undefined;
+    fileSetsMode = (fileRaw?.['runner'] as { mode?: unknown } | undefined)?.mode !== undefined;
     resolveWith = (opts) => resolveRunConfig(repo, process.env, opts);
   }
+  runId = choice?.runId;
+  const runIdWarn = choice ? runIdWarning(early.store.kind, choice) : undefined;
+  if (runIdWarn) stderrLogger.warn(runIdWarn, { runId });
   await mkdir(dataDir, { recursive: true });
   scrubSecretsOf(early.store.url);
+  // No child gets the store's connection: not by DATABASE_URL, not by any variable holding the URL. See specs/state-backend "No store URL in child environments".
+  withholdStoreUrl(early.store.url);
+  // A store URL written in a tracked config file would be checked out into every worktree.
+  if (storeUrlSource(early, fileRaw) === 'file' && trackedInRepo(early.repoPath, configFile)) {
+    const msg = `${configFile} sets store.url and is tracked by git, so every worktree would carry the database URL: set DATABASE_URL instead, or keep the file untracked`;
+    stderrLogger.error('store configuration refused', { error: msg });
+    throw new Error(msg);
+  }
   // Startup refuses a store block that cannot work: no URL, or a lease shorter than the flush deadline. See specs/state-backend "Lease versus flush deadline".
   const storeError = storeConfigError(early);
   if (storeError) {
@@ -348,6 +368,27 @@ function realpathOr(p: string): string {
     return realpathSync(p);
   } catch {
     return path.resolve(p);
+  }
+}
+
+/** The run id, or a logged refusal naming the invalid id. */
+function runIdOrExit(pick: () => RunIdChoice): RunIdChoice {
+  try {
+    return pick();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    stderrLogger.error('run id refused', { error: msg });
+    throw err;
+  }
+}
+
+/** A config file as parsed, without defaults; undefined when unreadable. */
+function rawConfig(file: string): Record<string, unknown> | undefined {
+  try {
+    const raw = parseYaml(readFileSync(file, 'utf8')) as unknown;
+    return raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
   }
 }
 

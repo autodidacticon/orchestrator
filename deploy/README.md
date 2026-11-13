@@ -65,6 +65,20 @@ The `orchestrator` Deployment runs one daemon with strategy `Recreate`. It has n
 
 The run's state (tasks, launches, events, outbox, the accepted and proposed graphs) is in Postgres: `store.kind: postgres`, with the connection URL in `DATABASE_URL`, read from the CloudNativePG application Secret `postgres-app` (key `uri`). The integration branch and the milestone tags are on origin (`git.pushIntegration: true`). A new pod therefore takes the run lock, loads the run from Postgres, fetches origin, and continues: a parked launch's worktree is prepared again, a claimed launch whose worktree is gone is ended and retried, and a queued verifier job whose sealed commit the new clone lacks fails its task without spending an attempt. Two daemons never write one run: the second one cannot take the run's Postgres lock and exits, and the pod restarts until the first is gone.
 
+#### The run id
+
+Many runs can share one database: their rows are keyed by `run_id`, and each daemon holds an advisory lock keyed by it. Every deployment from this manifest clones into the same path, `/data/repo`, so the run id does not come from the path. With `store.kind: postgres` the daemon picks it in this order:
+
+1. `store.runId` in `orchestrator.yaml` (the ConfigMap);
+2. the environment variable `ORCH_RUN_ID`;
+3. a hash of `git.originUrl`, when set;
+4. with `git.pushIntegration: true`, a hash of the clone's `origin` remote, which is `REPO_URL`. This is what the base manifest uses: each deployment cloning a different repository gets its own run id, with nothing to set. User information in the URL (a token) is left out of the hash, so rotating a credential keeps the id;
+5. otherwise the repository path hash, with one warning in the log. Every deployment on the same path and database would share that run.
+
+Set `store.runId` or `ORCH_RUN_ID` when two deployments clone the same repository into one database (for example a staging and a production run of one project), or when the id must survive a change of `REPO_URL`. An explicit id is 1 to 64 characters of `A-Z a-z 0-9 _ -`; any other value stops the daemon at startup with a message naming it. The run directory under `ORCH_HOME` is named after the id, and `deploy/smoke.sh` reads it from `/v1/status` (`runDir`).
+
+The store's connection does not reach check commands or agents (of every runner kind, nor what they start): they run without `DATABASE_URL`, `ORCH_RUN_ID`, and any variable whose value is the store URL. A `store.url` written in a config file that git tracks is refused at startup, because every worktree would carry it. The mounted `orchestrator.yaml` is excluded from the clone. The daemon's own git commands still inherit its environment. A project git hook they run, such as `pre-commit` on a kept-release WIP commit, can see `DATABASE_URL`.
+
 The init container `clone` clones `REPO_URL` into `/data/repo`. The daemon container then runs `orchestrator --repo /data/repo`, with `/healthz` as its liveness probe and `/readyz` as its readiness probe.
 
 `orchestrator --repo` reads `<repo>/orchestrator.yaml`, so the ConfigMap's `orchestrator.yaml` is mounted into the clone with `subPath` and listed in the clone's `.git/info/exclude`. It takes precedence over a file of the same name in the project. The configuration is:

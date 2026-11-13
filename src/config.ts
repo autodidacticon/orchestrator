@@ -142,6 +142,12 @@ export const configSchema = z.object({
       kind: z.enum(['sqlite', 'postgres']).default('sqlite'),
       /** The Postgres connection URL; `DATABASE_URL` when unset. Printed only with its password removed. */
       url: z.string().min(1).optional(),
+      /**
+       * postgres only: the run id, which keys the rows and the run lock. Unset: `ORCH_RUN_ID`, else a hash of
+       * git.originUrl (or of the clone's origin while git.pushIntegration is on), else the repository path hash.
+       * Checked at startup against 1 to 64 characters of [A-Za-z0-9_-]. See specs/state-backend "Run id per deployment".
+       */
+      runId: z.string().optional(),
       /** The oldest unflushed batch may be this old before the daemon exits. A worker lease must be at least as long. */
       flushDeadlineMs: z.number().int().positive().default(120_000),
     })

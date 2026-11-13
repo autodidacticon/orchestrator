@@ -2,7 +2,7 @@
  * Per-user run directories keyed by the repository's real path.
  * See specs/operator-control "Run directory".
  */
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -29,12 +29,128 @@ export function orchHome(env: NodeJS.ProcessEnv = process.env): string {
   return env['ORCH_HOME'] ?? path.join(homedir(), '.orchestrator');
 }
 
+/** The repository path hash: the run id of every SQLite run, and of a Postgres run that names no deployment. */
 export function runIdFor(realRepoPath: string): string {
   return createHash('sha256').update(realRepoPath, 'utf8').digest('hex').slice(0, 16);
 }
 
+/** What an explicit run id may be: 1 to 64 characters of letters, digits, `_` and `-`. See specs/state-backend "Run id per deployment". */
+export const RUN_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Where a run id came from, in order of precedence. `origin` is the clone's origin remote, read when git.pushIntegration is on and git.originUrl is unset. */
+export type RunIdSource = 'store.runId' | 'ORCH_RUN_ID' | 'git.originUrl' | 'origin' | 'repository';
+
+export interface RunIdChoice {
+  runId: string;
+  source: RunIdSource;
+}
+
+/** The inputs of the run id: the store block (file and environment only) and the origin. */
+export interface RunIdInput {
+  kind: 'sqlite' | 'postgres';
+  /** `store.runId` from the config file. */
+  storeRunId?: unknown;
+  env?: NodeJS.ProcessEnv;
+  originUrl?: string;
+  pushIntegration?: boolean;
+  /** The repository's real path. */
+  repo: string;
+}
+
+/** An origin URL without its user information, so a rotated credential keeps the id. */
+export function originIdentity(url: string): string {
+  const u = url.trim();
+  try {
+    const parsed = new URL(u);
+    if (parsed.username || parsed.password) {
+      parsed.username = '';
+      parsed.password = '';
+    }
+    return parsed.toString();
+  } catch {
+    return u; // scp-like `git@host:path` or a local path
+  }
+}
+
+/** The run id derived from an origin URL. */
+export function runIdForOrigin(url: string): string {
+  return createHash('sha256').update(`origin\0${originIdentity(url)}`, 'utf8').digest('hex').slice(0, 16);
+}
+
+function explicitRunId(value: unknown, source: 'store.runId' | 'ORCH_RUN_ID'): string {
+  if (typeof value !== 'string' || !RUN_ID_PATTERN.test(value)) {
+    throw new Error(`invalid run id ${JSON.stringify(value)} from ${source}: a run id is 1 to 64 characters of A-Z, a-z, 0-9, _ and -`);
+  }
+  return value;
+}
+
+/** The URL of the clone's `origin` remote, or undefined. */
+function cloneOriginUrl(repo: string): string | undefined {
+  try {
+    return execFileSync('git', ['config', '--get', 'remote.origin.url'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The run id. SQLite: the repository path hash, as always. Postgres: `store.runId`, else `ORCH_RUN_ID`, else a hash
+ * of git.originUrl, else (git.pushIntegration on) a hash of the clone's origin remote, else the path hash.
+ * An explicit id that does not match RUN_ID_PATTERN throws, naming it. See specs/state-backend "Run id per deployment".
+ */
+export function chooseRunId(input: RunIdInput): RunIdChoice {
+  const pathHash: RunIdChoice = { runId: runIdFor(input.repo), source: 'repository' };
+  if (input.kind !== 'postgres') return pathHash;
+  if (input.storeRunId !== undefined && input.storeRunId !== null) return { runId: explicitRunId(input.storeRunId, 'store.runId'), source: 'store.runId' };
+  const fromEnv = (input.env ?? process.env)['ORCH_RUN_ID'];
+  if (fromEnv !== undefined && fromEnv !== '') return { runId: explicitRunId(fromEnv, 'ORCH_RUN_ID'), source: 'ORCH_RUN_ID' };
+  if (input.originUrl) return { runId: runIdForOrigin(input.originUrl), source: 'git.originUrl' };
+  if (input.pushIntegration) {
+    const origin = cloneOriginUrl(input.repo);
+    if (origin) return { runId: runIdForOrigin(origin), source: 'origin' };
+  }
+  return pathHash;
+}
+
+/** The warning for a Postgres run on the path hash: every deployment with the same repository path shares it. */
+export function runIdWarning(kind: 'sqlite' | 'postgres', choice: RunIdChoice): string | undefined {
+  if (kind !== 'postgres' || choice.source !== 'repository') return undefined;
+  return 'the run id is the repository path hash: every deployment with this repository path on this database shares the run and its lock; set store.runId, ORCH_RUN_ID or git.originUrl';
+}
+
+/** The run id input of a parsed config: its store block and git block. */
+export function runIdInputOf(cfg: Pick<Config, 'store' | 'git'>, repo: string, env: NodeJS.ProcessEnv = process.env): RunIdInput {
+  return { kind: cfg.store.kind, storeRunId: cfg.store.runId, env, originUrl: cfg.git.originUrl, pushIntegration: cfg.git.pushIntegration, repo };
+}
+
+/** The run id of a repository run (`orchestrator --repo`), from <repo>/orchestrator.yaml and the environment. */
+export function repoRunId(realRepoPath: string, env: NodeJS.ProcessEnv = process.env): RunIdChoice {
+  const raw = readRepoConfigRaw(realRepoPath);
+  const store = (raw?.['store'] ?? {}) as { kind?: unknown; runId?: unknown };
+  const git = (raw?.['git'] ?? {}) as { originUrl?: unknown; pushIntegration?: unknown };
+  return chooseRunId({
+    kind: store.kind === 'postgres' ? 'postgres' : 'sqlite',
+    storeRunId: store.runId,
+    env,
+    originUrl: typeof git.originUrl === 'string' && git.originUrl ? git.originUrl : undefined,
+    pushIntegration: git.pushIntegration === true,
+    repo: realRepoPath,
+  });
+}
+
+/** Whether `file` is tracked by git in `repo`: a tracked file is checked out into every worktree. */
+export function trackedInRepo(repo: string, file: string): boolean {
+  try {
+    execFileSync('git', ['ls-files', '--error-unmatch', '--', path.resolve(file)], { cwd: repo, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The run directory: `<ORCH_HOME>/runs/<run id>`. See specs/operator-control "Run directory". */
 export function runDirFor(realRepoPath: string, env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(orchHome(env), 'runs', runIdFor(realRepoPath));
+  return path.join(orchHome(env), 'runs', repoRunId(realRepoPath, env).runId);
 }
 
 /** Resolve the repository: explicit path, ORCH_REPO, or the git top level of cwd. Always a real path. */

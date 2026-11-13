@@ -7,6 +7,7 @@ import { execFile, spawn } from 'node:child_process';
 import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { withoutStore } from '../runs/childEnv.js';
 import type { Launch } from '../state/store.js';
 import type { AgentRunner, Liveness, SpawnResult } from './runner.js';
 import { quoteRules } from './command.js';
@@ -69,7 +70,8 @@ export class SubprocessRunner implements AgentRunner {
       for (const k of Object.keys(merged)) if (merged[k] === '') delete merged[k];
       const child = spawn('/bin/sh', ['-c', `${cmd}\n# orch-launch:${launch.launchId}`], {
         cwd: launch.worktree,
-        env: merged as NodeJS.ProcessEnv,
+        // Never the store's connection, for every runner kind. See specs/state-backend "No store URL in child environments".
+        env: withoutStore(merged) as NodeJS.ProcessEnv,
         detached: true,
         stdio: ['ignore', log.fd, log.fd],
       });

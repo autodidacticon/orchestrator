@@ -76,6 +76,8 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     expect(volumes.some((v) => 'persistentVolumeClaim' in v)).toBe(false);
     const db = daemon.env.find((e: { name: string }) => e.name === 'DATABASE_URL');
     expect(db.valueFrom.secretKeyRef).toEqual({ name: 'postgres-app', key: 'uri' });
+    // No fixed run id: each deployment's id is the hash of its clone's origin. See deploy/README.md "The run id".
+    expect(daemon.env.some((e: { name: string }) => e.name === 'ORCH_RUN_ID')).toBe(false);
     const cluster = find(base, 'Cluster', 'postgres');
     expect(cluster.spec.instances).toBe(1);
     expect(cluster.spec.bootstrap.initdb.database).toBeTruthy();

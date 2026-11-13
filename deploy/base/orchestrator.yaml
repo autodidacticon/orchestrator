@@ -8,6 +8,9 @@ apiPort: 8080
 apiBaseUrl: http://orchestrator.orch.svc:8080
 # The run's state is in Postgres; the URL is DATABASE_URL, from the CloudNativePG application Secret.
 # A worker lease (leaseTtlMs, 10 minutes by default) must be at least flushDeadlineMs.
+# No runId here: the run id is a hash of the clone's origin (REPO_URL, with git.pushIntegration on), so each
+# deployment of a different repository has its own run on a shared database. Set store.runId or ORCH_RUN_ID for
+# two deployments of one repository. See deploy/README.md "The run id".
 store:
   kind: postgres
   flushDeadlineMs: 120000
