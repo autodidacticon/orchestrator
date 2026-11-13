@@ -45,6 +45,9 @@ export interface BriefRunner {
   permission?: { mode: OpenCodePermission; bashPatterns?: string[] };
 }
 
+/** A milestone tag push to origin: landed, failed (retry later), or refused because origin holds the tag at another sha. */
+export type TagPushResult = { pushed: true } | { pushed: false; error: string; conflict?: { remoteSha: string } };
+
 export interface Workspace {
   integrationHead(): Promise<string>;
   /** Create the worktree for a launch at baseSha and write the brief. */
@@ -56,7 +59,8 @@ export interface Workspace {
   remove(launch: Launch): Promise<void>;
   /** Launch ids that currently have a worktree. */
   listWorktrees(): Promise<string[]>;
-  tagMilestone(id: Id, version: number, sha: string): Promise<void>;
+  /** Create the tag locally (idempotent). With an origin, also push it; the push outcome is returned, never thrown. */
+  tagMilestone(id: Id, version: number, sha: string): Promise<TagPushResult | void>;
   /** `git diff --stat from..to`, or an empty string when unavailable. */
   diffStat(from: string, to: string): Promise<string>;
   /** Progress fingerprint: the worktree head sha, a colon, and a hash of its status and diff. */

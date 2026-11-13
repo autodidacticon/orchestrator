@@ -121,6 +121,17 @@ export const configSchema = z.object({
         .default({}),
     })
     .default({}),
+  /** The integration branch's remote. See specs/integration-pipeline "Origin as source of truth". */
+  git: z
+    .object({
+      /** The URL of the clone's `origin` remote; set, the remote is added or re-pointed to it. Unset, the clone's existing `origin` is used. Read only while pushIntegration is on. */
+      originUrl: z.string().min(1).optional(),
+      /** Origin is the source of truth: the verifier fetches before each job and pushes each publication with a lease, base selection reads origin's head, and milestone tags are pushed. Off, no git command contacts a remote. */
+      pushIntegration: z.boolean().default(false),
+      /** How often base selection and milestone pinning may fetch origin; 0 fetches on every read. The verifier fetches at every job. */
+      fetchIntervalMs: z.number().int().nonnegative().default(30_000),
+    })
+    .default({}),
   /** Graph reload behaviour. See specs/agent-protocol "Payload change notice". */
   graph: z
     .object({

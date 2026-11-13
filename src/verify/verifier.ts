@@ -20,6 +20,7 @@ import {
   worktreeList,
   worktreeRemove,
 } from '../workspace/git.js';
+import { type Origin, OriginConfigError } from '../workspace/origin.js';
 import type { VerifierBackend, VerifierContext, VerifierOutcome } from './job.js';
 
 export const TRAILER_TASK = 'Orchestrator-Task';
@@ -49,7 +50,14 @@ const identity = {
 };
 
 export class GitVerifierBackend implements VerifierBackend {
+  private origin: Origin | undefined;
+
   constructor(private readonly opts: GitVerifierOptions) {}
+
+  /** Make origin the source of truth for publication. See specs/integration-pipeline "Origin as source of truth". */
+  useOrigin(origin: Origin | undefined): void {
+    this.origin = origin;
+  }
 
   private get ref(): string {
     return `refs/heads/${this.opts.integrationBranch}`;
@@ -58,7 +66,14 @@ export class GitVerifierBackend implements VerifierBackend {
   async run(job: VerifierJob, ctx: VerifierContext): Promise<VerifierOutcome> {
     const { repo } = this.opts;
     const checkCommand = typeof this.opts.checkCommand === 'function' ? this.opts.checkCommand() : this.opts.checkCommand;
-    const expectedHead = await revParse(repo, this.opts.integrationBranch);
+    let expectedHead: string;
+    if (this.origin) {
+      const start = await this.startFromOrigin(job);
+      if (start.kind !== 'head') return start.outcome;
+      expectedHead = start.head;
+    } else {
+      expectedHead = await revParse(repo, this.opts.integrationBranch);
+    }
     ctx.progress({ status: 'checking', expectedHead });
     const temp = path.join(this.opts.tempRoot, job.jobId);
     await mkdir(this.opts.tempRoot, { recursive: true });
@@ -115,6 +130,18 @@ export class GitVerifierBackend implements VerifierBackend {
       const ok = await updateRefCas(repo, this.ref, squashSha, expectedHead);
       crashPoint('verify.afterPublish');
       if (!ok) return { kind: 'requeue' };
+      if (this.origin) {
+        this.origin.inFlight = squashSha;
+        try {
+          if (!(await this.origin.pushBranch(squashSha, expectedHead))) {
+            // Origin moved (its lease failed) or could not be reached: undo the local swap and verify again on origin's new head.
+            await updateRefCas(repo, this.ref, expectedHead, squashSha);
+            return { kind: 'requeue', reason: `push to ${this.origin.remote} was rejected or failed (lease on ${expectedHead})` };
+          }
+        } finally {
+          this.origin.inFlight = undefined;
+        }
+      }
       await this.syncPrimaryWorktree();
       return { kind: 'published', publishedSha: squashSha, verifiedSha: rebasedSha, changedFiles };
     } finally {
@@ -129,12 +156,98 @@ export class GitVerifierBackend implements VerifierBackend {
     if (head === this.ref) await git(this.opts.repo, ['reset', '--quiet', '--hard', 'HEAD'], { allowFail: true });
   }
 
+  /**
+   * Fetch, then bring the clone to origin: fast-forward when behind, push the clone's publications when ahead.
+   * A launch already on origin (a push whose answer was lost) is published as found; a diverged clone fails the job.
+   */
+  private async startFromOrigin(job: VerifierJob): Promise<{ kind: 'head'; head: string } | { kind: 'done'; outcome: VerifierOutcome }> {
+    const origin = this.origin as Origin;
+    try {
+      await origin.fetch();
+    } catch (err) {
+      if (err instanceof OriginConfigError) throw err;
+      return { kind: 'done', outcome: { kind: 'requeue', reason: String(err) } };
+    }
+    const remote = await origin.head();
+    if (remote) {
+      const landed = await findTrailer(this.opts.repo, origin.trackingRef, TRAILER_LAUNCH, job.launchId);
+      if (landed) {
+        await this.fastForwardTo(remote);
+        return { kind: 'done', outcome: { kind: 'published', publishedSha: landed, verifiedSha: landed } };
+      }
+    }
+    const local = await origin.localHead();
+    const rel = await origin.relation(local, remote);
+    if (rel === 'behind') {
+      await this.fastForwardTo(remote as string);
+      return { kind: 'head', head: remote as string };
+    }
+    if (rel === 'ahead' || rel === 'noRemoteBranch') {
+      // Publications made before pushing was on, or by a daemon that never reached origin: push them first.
+      if (!(await origin.pushBranch(local, remote))) return { kind: 'done', outcome: { kind: 'requeue', reason: `catch-up push of ${local} to ${origin.remote} was rejected or failed` } };
+      return { kind: 'head', head: local };
+    }
+    if (rel === 'diverged') {
+      const diverged = `the clone's ${this.opts.integrationBranch} (${local}) and ${origin.trackingRef} (${remote}) have diverged; reconcile them by hand`;
+      return {
+        kind: 'done',
+        outcome: {
+          kind: 'failed',
+          reason: { kind: 'checkFailed', message: diverged, output: diverged },
+        },
+      };
+    }
+    return { kind: 'head', head: local };
+  }
+
+  /** Move the clone's integration branch forward to `sha` and bring the primary worktree along. */
+  private async fastForwardTo(sha: string): Promise<void> {
+    const local = await revParse(this.opts.repo, this.opts.integrationBranch);
+    if (local === sha) return;
+    if (!(await (this.origin as Origin).isAncestor(local, sha))) return;
+    if (await updateRefCas(this.opts.repo, this.ref, sha, local)) await this.syncPrimaryWorktree();
+  }
+
   async recoverPublishing(job: VerifierJob): Promise<'published' | 'requeue'> {
+    if (this.origin) return this.recoverPublishingFromOrigin(job);
     const found = await findTrailer(this.opts.repo, this.opts.integrationBranch, TRAILER_LAUNCH, job.launchId);
     if (found) {
       await this.syncPrimaryWorktree();
       return 'published';
     }
+    return 'requeue';
+  }
+
+  /**
+   * Origin first: the launch trailer on origin means published. On the clone alone means the daemon died between
+   * its compare-and-swap and the push: push the recorded squash once, with the lease the job started from. A lost
+   * lease undoes the local swap and requeues; an unreachable origin requeues, and the next run finds a landed push.
+   */
+  private async recoverPublishingFromOrigin(job: VerifierJob): Promise<'published' | 'requeue'> {
+    const origin = this.origin as Origin;
+    try {
+      await origin.fetch();
+    } catch {
+      return 'requeue';
+    }
+    const remote = await origin.head();
+    if (remote && (await findTrailer(this.opts.repo, origin.trackingRef, TRAILER_LAUNCH, job.launchId))) {
+      await this.fastForwardTo(remote);
+      return 'published';
+    }
+    const local = await findTrailer(this.opts.repo, this.opts.integrationBranch, TRAILER_LAUNCH, job.launchId);
+    if (!local || !job.squashSha || local !== job.squashSha) {
+      return 'requeue';
+    }
+    const expected = job.expectedHead;
+    if (expected && remote === expected) {
+      if (await origin.pushBranch(job.squashSha, remote)) {
+        await this.syncPrimaryWorktree();
+        return 'published';
+      }
+    }
+    // Origin moved past the job's expected head: the squash cannot land as is. Undo the swap if it is still the tip.
+    if (expected) await updateRefCas(this.opts.repo, this.ref, expected, job.squashSha);
     return 'requeue';
   }
 
@@ -149,9 +262,15 @@ export class GitVerifierBackend implements VerifierBackend {
     await rm(this.opts.tempRoot, { recursive: true, force: true });
   }
 
+  /**
+   * Without an origin, commits since the baseline lacking the launch trailer. With one, origin is the source of
+   * truth and commits that arrive there are expected: only commits on the clone that origin lacks are considered.
+   */
   async foreignCommits(): Promise<string[]> {
-    const range = this.opts.baselineSha ? `${this.opts.baselineSha}..${this.opts.integrationBranch}` : this.opts.integrationBranch;
-    const list = (await git(this.opts.repo, ['rev-list', '--first-parent', '-n', '500', range], { allowFail: true })).stdout.trim().split('\n').filter(Boolean);
+    const range = [this.opts.integrationBranch];
+    if (this.opts.baselineSha) range.push(`^${this.opts.baselineSha}`);
+    if (this.origin && (await this.origin.head())) range.push(`^${this.origin.trackingRef}`);
+    const list = (await git(this.opts.repo, ['rev-list', '--first-parent', '-n', '500', ...range], { allowFail: true })).stdout.trim().split('\n').filter(Boolean);
     const foreign: string[] = [];
     for (const sha of list) {
       const trailers = await commitTrailers(this.opts.repo, sha);

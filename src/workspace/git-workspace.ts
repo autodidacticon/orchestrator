@@ -9,20 +9,41 @@ import type { Id } from '../graph/model.js';
 import type { Launch } from '../state/store.js';
 import { existsSync } from 'node:fs';
 import { dirtyFiles, git, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeRemove } from './git.js';
-import type { BriefInput, FallbackReport, SealOptions, SealResult, Workspace } from './workspace.js';
+import { type Origin, TagConflictError } from './origin.js';
+import type { BriefInput, FallbackReport, SealOptions, SealResult, TagPushResult, Workspace } from './workspace.js';
 
 export const ORCH_DIR = '.orchestrator';
 export const FALLBACK_FILE = 'report.json';
 
 export class GitWorkspace implements Workspace {
+  private origin: Origin | undefined;
+
   constructor(
     public readonly repo: string,
     public readonly integrationBranch: string,
     public readonly worktreesRoot: string,
   ) {}
 
+  /** Make origin the source of truth: base selection reads its head and milestone tags are pushed. See specs/integration-pipeline "Origin as source of truth". */
+  useOrigin(origin: Origin | undefined): void {
+    this.origin = origin;
+  }
+
+  /**
+   * Without an origin, the clone's integration branch. With one, origin's head as last fetched (fetching when the
+   * interval allows); the clone's head instead while it holds publications origin has not received yet, so a base
+   * always contains every published dependency.
+   */
   async integrationHead(): Promise<string> {
-    return revParse(this.repo, this.integrationBranch);
+    const local = await revParse(this.repo, this.integrationBranch);
+    const origin = this.origin;
+    if (!origin) return local;
+    await origin.maybeFetch();
+    const remote = await origin.head();
+    // A swap whose push is in flight is not yet published: its lease may still fail.
+    if (remote !== undefined && local === origin.inFlight) return remote;
+    const rel = await origin.relation(local, remote);
+    return rel === 'ahead' || rel === 'noRemoteBranch' || remote === undefined ? local : remote;
   }
 
   async prepare(launch: Launch, brief: BriefInput): Promise<void> {
@@ -114,8 +135,18 @@ export class GitWorkspace implements Workspace {
     return out;
   }
 
-  async tagMilestone(id: Id, version: number, sha: string): Promise<void> {
-    await tagIdempotent(this.repo, `milestone/${id}/v${version}`, sha);
+  /** Tag locally (idempotent); with an origin, push the tag without force, so an existing tag on origin is never moved. */
+  async tagMilestone(id: Id, version: number, sha: string): Promise<TagPushResult | void> {
+    const name = `milestone/${id}/v${version}`;
+    await tagIdempotent(this.repo, name, sha);
+    if (!this.origin) return;
+    try {
+      await this.origin.pushTag(name, sha);
+      return { pushed: true };
+    } catch (err) {
+      if (err instanceof TagConflictError) return { pushed: false, error: err.message, conflict: { remoteSha: err.remoteSha } };
+      return { pushed: false, error: String(err) };
+    }
   }
 
   async diffStat(from: string, to: string): Promise<string> {

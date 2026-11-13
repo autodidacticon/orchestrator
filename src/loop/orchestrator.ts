@@ -34,6 +34,7 @@ import type { CascadeStep } from '../graph/query.js';
 import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
+import { Origin } from '../workspace/origin.js';
 import { gateOnDurable, RUNNER_METHODS, storeLag, VERIFIER_METHODS, WORKSPACE_METHODS } from '../state/gate.js';
 import type { BriefInput, FallbackReport, SealResult, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
@@ -269,6 +270,12 @@ export class Orchestrator implements OrchestratorCore {
     this.store = deps.store;
     this.config = deps.config;
     // Durability before effects: every call out waits until what was committed before it is durable. See specs/state-backend.
+    // Origin as the source of truth: one shared remote for the workspace and the verifier. See specs/integration-pipeline "Origin as source of truth".
+    const origin = this.config.git.pushIntegration
+      ? new Origin({ repo: this.config.repoPath, integrationBranch: this.config.integrationBranch, url: this.config.git.originUrl, fetchIntervalMs: this.config.git.fetchIntervalMs })
+      : undefined;
+    (deps.workspace as { useOrigin?: (o: Origin | undefined) => void }).useOrigin?.(origin);
+    (deps.verifier as { useOrigin?: (o: Origin | undefined) => void }).useOrigin?.(origin);
     this.runner = gateOnDurable(this.store, deps.runner, RUNNER_METHODS);
     this.workspace = gateOnDurable(this.store, deps.workspace, WORKSPACE_METHODS);
     this.verifier = gateOnDurable(this.store, deps.verifier, VERIFIER_METHODS);
@@ -1742,7 +1749,8 @@ export class Orchestrator implements OrchestratorCore {
     if (outcome.kind === 'published') {
       this.store.updateJob(job.jobId, { status: 'published', publishedSha: outcome.publishedSha, verifiedSha: outcome.verifiedSha, changedFiles: outcome.changedFiles, updatedAt: this.now() });
     } else if (outcome.kind === 'requeue') {
-      this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId } }, this.now());
+      if (outcome.reason) this.log.warn('verifier job requeued', { jobId: job.jobId, taskId: job.taskId, reason: outcome.reason });
+      this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, ...(outcome.reason ? { reason: outcome.reason } : {}) } }, this.now());
       this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, updatedAt: this.now() });
     } else if (outcome.kind === 'failed') {
       this.store.updateJob(job.jobId, { status: 'failed', failureKind: outcome.reason.kind, output: outcome.reason.output ?? outcome.reason.message, updatedAt: this.now() });

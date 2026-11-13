@@ -11,7 +11,7 @@ export type VerifierOutcome =
   | { kind: 'failed'; reason: FailedReason }
   | { kind: 'conflict'; files: string[]; since: Id[] }
   /** Compare-and-swap lost: the integration head moved. The job goes back to queued. */
-  | { kind: 'requeue' };
+  | { kind: 'requeue'; reason?: string };
 
 export interface VerifierProgress {
   /** Persist intermediate job state (checking, verified, publishing) durably. */

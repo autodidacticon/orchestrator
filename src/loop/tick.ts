@@ -12,6 +12,7 @@ import { spawnLaunch, startLaunch } from '../launch/launch.js';
 import type { Id } from '../graph/model.js';
 import type { AttemptContext, Entry, FailedKind } from '../state/status.js';
 import type { Launch, VerifierJob } from '../state/store.js';
+import type { TagPushResult } from '../workspace/workspace.js';
 import type { Orchestrator } from './orchestrator.js';
 import { admit } from './schedule.js';
 import { ceilingUsd, checkTimeBudget, runCostUsd } from '../health/budgets.js';
@@ -29,6 +30,7 @@ export async function runTick(o: Orchestrator): Promise<void> {
   crashPoint('tick.afterPhase2');
 
   await completeMilestones(o);
+  await pushMilestoneTags(o);
   crashPoint('tick.afterPhase3');
 
   await admitAndLaunch(o);
@@ -274,11 +276,49 @@ export async function completeMilestones(o: Orchestrator): Promise<void> {
           summary: String(o.store.getCompletionReport(t)?.body['summary'] ?? ''),
         }));
       const entry = o.transition(c.id, { kind: 'submitted' }, 'orchestrator', 'milestoneGated', { integrationSha: c.integrationSha }, { integrationSha: sha, diffStat, closure });
-      await o.workspace.tagMilestone(c.id, entry.reviewVersion, c.integrationSha ?? head);
+      const result = await o.workspace.tagMilestone(c.id, entry.reviewVersion, c.integrationSha ?? head);
       crashPoint('milestone.afterTag');
       o.store.setKv(`tagged:${c.id}:${entry.reviewVersion}`, c.integrationSha ?? head);
+      if (result) recordTagPush(o, c.id, entry.reviewVersion, c.integrationSha ?? head, result);
       o.store.appendEvent({ kind: 'milestone.tagged', taskId: c.id, payload: { version: entry.reviewVersion, sha: c.integrationSha } }, o.now());
     }
+  }
+}
+
+/**
+ * Phase 3, with `git.pushIntegration` on: every gated milestone that is submitted or accepted has its pinned tag on
+ * origin. A push that fails is retried on the next tick; a tag origin holds at another sha is never moved and is
+ * reported once as `milestone.tagConflict`. See specs/integration-pipeline "Milestone tagging".
+ */
+export async function pushMilestoneTags(o: Orchestrator): Promise<void> {
+  if (!o.config.git.pushIntegration) return;
+  for (const [id, entry] of o.overlay()) {
+    const node = o.graph().nodes.get(id);
+    if (!node || node.kind !== 'milestone' || !node.gated) continue;
+    if (entry.status.kind !== 'submitted' && entry.status.kind !== 'done') continue;
+    const sha = entry.integrationSha;
+    if (!sha || entry.reviewVersion < 1) continue;
+    if (o.store.getKv(`tagPushed:${id}:${entry.reviewVersion}`)) continue;
+    const result = await o.workspace.tagMilestone(id, entry.reviewVersion, sha);
+    if (!o.store.getKv(`tagged:${id}:${entry.reviewVersion}`)) {
+      o.store.setKv(`tagged:${id}:${entry.reviewVersion}`, sha);
+      o.store.appendEvent({ kind: 'milestone.tagged', taskId: id, payload: { version: entry.reviewVersion, sha } }, o.now());
+    }
+    if (result) recordTagPush(o, id, entry.reviewVersion, sha, result);
+  }
+}
+
+/** Record a tag push outcome: landed, a conflict reported once and never retried, or a failure left for the next tick. */
+function recordTagPush(o: Orchestrator, id: Id, version: number, sha: string, result: TagPushResult): void {
+  const key = `tagPushed:${id}:${version}`;
+  if (result.pushed) {
+    o.store.setKv(key, sha);
+  } else if (result.conflict) {
+    o.store.setKv(key, `conflict:${result.conflict.remoteSha}`);
+    o.store.appendEvent({ kind: 'milestone.tagConflict', taskId: id, payload: { version, sha, remoteSha: result.conflict.remoteSha } }, o.now());
+    o.log.error('milestone tag exists on origin at another sha; not moved', { milestone: id, version, sha, remoteSha: result.conflict.remoteSha });
+  } else {
+    o.log.warn('milestone tag push failed; retrying', { milestone: id, version, err: result.error });
   }
 }
 
