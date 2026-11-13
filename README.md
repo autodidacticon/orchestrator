@@ -31,6 +31,7 @@ codex plugin add orchestrator-codex@orchestrator
 - If an older install picked up the Claude Code plugin, remove it first: `codex plugin remove orchestrator@orchestrator`.
 - To update, run `codex plugin marketplace upgrade orchestrator`, then `codex plugin add` again.
 - Codex runs the plugin's session hooks only after you trust them in an interactive session.
+- Codex has no `/orchestrator:*` commands. Type `$` and pick a skill, or name it in plain text, for example "use orchestrator-import to import P-ORC-6". `/skills` lists the loaded skills; start Codex in the target repository.
 - The skills `orchestrator-codex:orchestrator-import`, `-run`, and `-review` pass the session's directory as `repo` on every operator call. They start fresh runs in `spawn` mode and read the test command from `AGENTS.md`.
 - Under `codex exec`, grant the operator tools' approvals in advance.
 
