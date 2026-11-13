@@ -34,6 +34,7 @@ import type { CascadeStep } from '../graph/query.js';
 import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
+import { gateOnDurable, RUNNER_METHODS, storeLag, VERIFIER_METHODS, WORKSPACE_METHODS } from '../state/gate.js';
 import type { BriefInput, FallbackReport, SealResult, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
 import { chainPolicy, type Deferral, type Policy } from './schedule.js';
@@ -180,6 +181,9 @@ export interface StatusReport {
   daemonPid: number;
   daemonUrl: string;
   latestSeq: number;
+  /** How far the durable copy of the state trails the image. See specs/state-backend "Durability". */
+  storeLagMs: number;
+  storePendingBatches: number;
   /** Pending agent proposals awaiting a human. See specs/operator-control "Status report: proposals". */
   proposals: Array<{ id: string; taskId: Id; title: string }>;
   /** Pull runner: the mode in force, parked launches in claim order, and the workers holding launches. See specs/operator-control "Status report: workers". */
@@ -264,9 +268,10 @@ export class Orchestrator implements OrchestratorCore {
   constructor(deps: OrchestratorDeps) {
     this.store = deps.store;
     this.config = deps.config;
-    this.runner = deps.runner;
-    this.workspace = deps.workspace;
-    this.verifier = deps.verifier;
+    // Durability before effects: every call out waits until what was committed before it is durable. See specs/state-backend.
+    this.runner = gateOnDurable(this.store, deps.runner, RUNNER_METHODS);
+    this.workspace = gateOnDurable(this.store, deps.workspace, WORKSPACE_METHODS);
+    this.verifier = gateOnDurable(this.store, deps.verifier, VERIFIER_METHODS);
     this.graphSource = deps.graphSource;
     this.policy = deps.policy ?? chainPolicy(this.config);
     this.briefValidator = deps.briefValidator ?? alwaysValid;
@@ -1624,6 +1629,7 @@ export class Orchestrator implements OrchestratorCore {
       daemonPid: process.pid,
       daemonUrl: this.apiBaseUrl,
       latestSeq: this.store.latestEventSeq(),
+      ...storeLag(this.store),
       proposals: this.store.listProposals({ status: 'pending' }).map((p) => ({ id: p.id, taskId: p.taskId, title: p.payload.title })),
       runner: { mode: this.effectiveMode(), claimWindowMs: this.config.runner.claimWindowMs },
       claimable: claimable.map((l) => l.taskId),

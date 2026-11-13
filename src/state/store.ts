@@ -189,8 +189,24 @@ export interface StoredEvent extends EventInput {
   ts: number;
 }
 
+/**
+ * How far the durable copy of the state trails the image. `eventSeq` and `outboxId` are the highest
+ * event sequence number and outbox id known durable. See specs/state-backend "Durability".
+ */
+export interface Durability {
+  /** Age of the oldest committed batch not yet in the sink; 0 when nothing is pending. */
+  lagMs: number;
+  pendingBatches: number;
+  eventSeq: number;
+  outboxId: number;
+}
+
 export interface Store {
   transaction<T>(fn: () => T): T;
+
+  /** Resolves when everything committed so far is durable. A plain SQLite store is always durable. */
+  durable(): Promise<void>;
+  durability(): Durability;
 
   getEntry(id: Id): Entry | undefined;
   setEntry(id: Id, entry: Entry): void;
@@ -249,6 +265,8 @@ export interface Store {
   /** Record a rejection: attempts + 1, pending below maxAttempts, failed at it. */
   nackOutbox(id: number, error: string, maxAttempts: number): OutboxEffect | undefined;
   countOutbox(status: EffectStatus): number;
+  /** Highest outbox id in use, 0 when empty. */
+  latestOutboxId(): number;
   /** State of the latest setState effect recorded for an issue, whatever its status. */
   lastSetState(taskId: Id): string | undefined;
 

@@ -9,15 +9,15 @@ import { Orchestrator, type ApiResponse } from '../../src/loop/orchestrator.js';
 import { InprocRunner } from '../../src/runner/inproc.js';
 import { MultiRunner } from '../../src/runner/multi.js';
 import type { RunnerKind } from '../../src/runner/selection.js';
-import { SqliteStore } from '../../src/state/sqlite.js';
-import type { Launch } from '../../src/state/store.js';
+import type { Launch, Store } from '../../src/state/store.js';
+import { harnessStore } from '../slice/harness.js';
 import { FakeVerifierBackend } from '../../src/verify/fake.js';
 import { FakeWorkspace } from '../../src/workspace/fake.js';
 import { fixtureText } from '../graph/helpers.js';
 
 export interface Harness {
   orch: Orchestrator;
-  store: SqliteStore;
+  store: Store;
   /** The claude-code fake; `runners` holds one per kind behind the orchestrator's MultiRunner. */
   runner: InprocRunner;
   runners: Record<RunnerKind, InprocRunner>;
@@ -43,7 +43,7 @@ export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: 
   // checkCommand has no default any more; in-process scenarios verify with the fake backend and must not be held. See specs/integration-pipeline "Check and verified tree".
   // Fake processes never exit by themselves, so in-process scenarios reap on the tick after submit. See specs/health-monitoring "Usage accounting".
   const config = defaultConfig({ dataDir: dir, capacity: 4, maxWaiting: 4, checkCommand: 'true', health: { reportGraceMs: 0, ...(opts.config?.health ?? {}) }, ...opts.config });
-  const store = new SqliteStore(path.join(dir, 'store.sqlite'));
+  const store = harnessStore(path.join(dir, 'store.sqlite'));
   const runners: Record<RunnerKind, InprocRunner> = { 'claude-code': new InprocRunner(), codex: new InprocRunner(), opencode: new InprocRunner() };
   const runner = runners['claude-code'];
   const workspace = new FakeWorkspace();

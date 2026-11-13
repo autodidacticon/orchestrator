@@ -73,13 +73,17 @@ export class ApiServer {
       const attachment = req.headers['x-orch-attachment'];
       const attachmentId = typeof attachment === 'string' && attachment ? attachment : undefined;
       this.orch.requestBegan();
+      // A write's response waits until its record is durable; a read answers from the image. See specs/state-backend "Reads".
+      const writes = req.method === 'POST' || req.method === 'PUT';
       try {
-        const body = req.method === 'POST' || req.method === 'PUT' ? await readJson(req) : Object.fromEntries(url.searchParams.entries());
+        const body = writes ? await readJson(req) : Object.fromEntries(url.searchParams.entries());
         const out = await r.handler(req, body, m.slice(1));
+        if (writes) await this.orch.store.durable();
         // The operation stands; the caller learns its attachment is unknown and registers again. See specs/operator-control "Session attachments".
         const headers = attachmentId && !this.orch.isLiveAttachment(attachmentId) ? { 'x-orch-attachment': 'unknown' } : undefined;
         send(res, out.status, out.body, headers);
       } catch (err) {
+        if (writes) await this.orch.store.durable();
         send(res, 500, { error: String(err) });
       } finally {
         this.orch.requestEnded(probe);

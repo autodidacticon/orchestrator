@@ -2,20 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SqliteStore } from '../../src/state/sqlite.js';
-import { runIdOf, setRunId, setTracker, trackerOf } from '../../src/state/store.js';
-
-let dir: string;
-let store: SqliteStore;
-
-beforeEach(() => {
-  dir = mkdtempSync(path.join(tmpdir(), 'orch-outbox-'));
-  store = new SqliteStore(path.join(dir, 's.sqlite'));
-});
-afterEach(() => {
-  store.close();
-  rmSync(dir, { recursive: true, force: true });
-});
+import { runIdOf, setRunId, setTracker, type Store, trackerOf } from '../../src/state/store.js';
+import { backends } from './backends.js';
 
 const effect = (sourceSeq: number, taskId = 'T1', kind: 'setState' | 'comment' = 'setState', payload: Record<string, unknown> = { issue: taskId, state: 'inProgress' }) => ({
   sourceSeq,
@@ -25,7 +13,24 @@ const effect = (sourceSeq: number, taskId = 'T1', kind: 'setState' | 'comment' =
   createdAt: 100,
 });
 
-describe('outbox store', () => {
+describe.each(backends)('outbox store ($name)', (backend) => {
+  let dir: string;
+  let store: Store;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'orch-outbox-'));
+    store = backend.open(dir);
+  });
+  afterEach(async () => {
+    try {
+      await backend.check(store);
+    } finally {
+      store.close();
+      backend.release();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('a duplicate key keeps one row', () => {
     const first = store.insertOutbox(effect(7));
     expect(first).toBeDefined();
@@ -76,18 +81,12 @@ describe('outbox store', () => {
     expect(store.lastSetState('T2')).toBeUndefined();
   });
 
-  it('an existing store opens with an empty outbox and keeps the tracker and run id', () => {
+  it('an existing store opens with an empty outbox and keeps the tracker and run id', async () => {
     setTracker(store, { kind: 'linear', workspace: 'acme', recordedAt: 1 });
     setRunId(store, 'abc123');
-    store.close();
-    const reopened = new SqliteStore(path.join(dir, 's.sqlite'));
-    try {
-      expect(reopened.listOutbox()).toEqual([]);
-      expect(trackerOf(reopened)).toEqual({ kind: 'linear', workspace: 'acme', recordedAt: 1 });
-      expect(runIdOf(reopened)).toBe('abc123');
-    } finally {
-      reopened.close();
-      store = new SqliteStore(path.join(dir, 's.sqlite'));
-    }
+    store = await backend.reopen(store, dir);
+    expect(store.listOutbox()).toEqual([]);
+    expect(trackerOf(store)).toEqual({ kind: 'linear', workspace: 'acme', recordedAt: 1 });
+    expect(runIdOf(store)).toBe('abc123');
   });
 });

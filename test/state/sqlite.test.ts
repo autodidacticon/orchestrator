@@ -6,24 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
+import type { Store } from '../../src/state/store.js';
 import { applyTransition } from '../../src/state/transitions.js';
 import { tsxLoader } from '../slice/harness.js';
+import { backends } from './backends.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
-let dir: string;
-let store: SqliteStore;
-
-beforeEach(() => {
-  dir = mkdtempSync(path.join(tmpdir(), 'orch-store-'));
-  store = new SqliteStore(path.join(dir, 's.sqlite'));
-});
-afterEach(() => {
-  store.close();
-  rmSync(dir, { recursive: true, force: true });
-});
-
-function claim(s: SqliteStore, id: string, launchId: string): boolean {
+function claim(s: Store, id: string, launchId: string): boolean {
   try {
     s.transaction(() => {
       const e = s.getEntry(id) ?? defaultEntry();
@@ -44,18 +34,29 @@ function claim(s: SqliteStore, id: string, launchId: string): boolean {
   }
 }
 
-describe('sqlite store', () => {
-  it('two claims on one task yield exactly one lease', () => {
-    const other = new SqliteStore(path.join(dir, 's.sqlite'));
+describe.each(backends)('store ($name)', (backend) => {
+  let dir: string;
+  let store: Store;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'orch-store-'));
+    store = backend.open(dir);
+  });
+  afterEach(async () => {
     try {
-      const a = claim(store, 'T1', 'L1');
-      const b = claim(other, 'T1', 'L2');
-      expect([a, b].filter(Boolean)).toHaveLength(1);
-      expect(store.getEntry('T1')?.lease?.launchId).toBe('L1');
-      expect(store.getEntry('T1')?.launches).toBe(1);
+      await backend.check(store);
     } finally {
-      other.close();
+      store.close();
+      backend.release();
+      rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('a claim on a task already claimed fails and leaves one lease', () => {
+    expect(claim(store, 'T1', 'L1')).toBe(true);
+    expect(claim(store, 'T1', 'L2')).toBe(false);
+    expect(store.getEntry('T1')?.lease?.launchId).toBe('L1');
+    expect(store.getEntry('T1')?.launches).toBe(1);
   });
 
   it('dedup returns the stored response', () => {
@@ -65,24 +66,18 @@ describe('sqlite store', () => {
     expect(store.getDedup('L', 2)).toBeUndefined();
   });
 
-  it('events and overlay agree after reopening the database', () => {
+  it('events and overlay agree after reopening the database', async () => {
     store.transaction(() => {
       store.setEntry('T1', { ...defaultEntry(), status: { kind: 'done' } });
       store.appendEvent({ kind: 'transition', taskId: 'T1', payload: { to: 'done' } }, 5);
     });
     store.setKv('paused', '1');
     store.setSnapshot('rev1', 'nodes: []');
-    store.close();
-    const reopened = new SqliteStore(path.join(dir, 's.sqlite'));
-    try {
-      expect(reopened.getEntry('T1')?.status.kind).toBe('done');
-      expect(reopened.listEvents({ taskId: 'T1' })).toMatchObject([{ kind: 'transition', ts: 5 }]);
-      expect(reopened.getKv('paused')).toBe('1');
-      expect(reopened.getSnapshot()).toEqual({ rev: 'rev1', content: 'nodes: []' });
-    } finally {
-      reopened.close();
-      store = new SqliteStore(path.join(dir, 's.sqlite'));
-    }
+    store = await backend.reopen(store, dir);
+    expect(store.getEntry('T1')?.status.kind).toBe('done');
+    expect(store.listEvents({ taskId: 'T1' })).toMatchObject([{ kind: 'transition', ts: 5 }]);
+    expect(store.getKv('paused')).toBe('1');
+    expect(store.getSnapshot()).toEqual({ rev: 'rev1', content: 'nodes: []' });
   });
 
   it('a failing transaction leaves nothing behind', () => {
@@ -183,7 +178,7 @@ describe('sqlite store', () => {
     expect(store.listLaunches()).toHaveLength(1);
   });
 
-  it('appendEvent and insertOutbox return numbers, getSnapshot returns a plain object, close twice is a no-op', () => {
+  it('appendEvent and insertOutbox return numbers, getSnapshot returns a plain object, close twice is a no-op', async () => {
     const seq = store.appendEvent({ kind: 'x' }, 1);
     expect(typeof seq).toBe('number');
     const id = store.insertOutbox({ sourceSeq: seq, taskId: 'T1', kind: 'setState', payload: { state: 'done' }, createdAt: 1 });
@@ -194,7 +189,42 @@ describe('sqlite store', () => {
     expect(snap).toEqual({ rev: 'rev', content: 'nodes: []' });
     store.close();
     expect(() => store.close()).not.toThrow();
+    store = await backend.reopen(store, dir);
+  });
+
+  it('durability: committed writes become durable, and the ids known durable follow them', async () => {
+    const seq = store.appendEvent({ kind: 'x' }, 1);
+    const id = store.insertOutbox({ sourceSeq: seq, taskId: 'T1', kind: 'setState', payload: { state: 'done' }, createdAt: 1 })!;
+    await store.durable();
+    expect(store.durability()).toEqual({ lagMs: 0, pendingBatches: 0, eventSeq: seq, outboxId: id });
+  });
+});
+
+/** SQLite-specific: two connections or two processes on one file. A journaled daemon is the only writer of its run's state. */
+describe('sqlite store: two connections (SQLite only)', () => {
+  let dir: string;
+  let store: SqliteStore;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'orch-store-'));
     store = new SqliteStore(path.join(dir, 's.sqlite'));
+  });
+  afterEach(() => {
+    store.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('two claims on one task yield exactly one lease', () => {
+    const other = new SqliteStore(path.join(dir, 's.sqlite'));
+    try {
+      const a = claim(store, 'T1', 'L1');
+      const b = claim(other, 'T1', 'L2');
+      expect([a, b].filter(Boolean)).toHaveLength(1);
+      expect(store.getEntry('T1')?.lease?.launchId).toBe('L1');
+      expect(store.getEntry('T1')?.launches).toBe(1);
+    } finally {
+      other.close();
+    }
   });
 
   it('a writer in another process makes this one wait, and a reader is not blocked', async () => {

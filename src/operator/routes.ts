@@ -14,6 +14,7 @@ import { zeroByKind } from '../runner/selection.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import { logPath } from '../runner/subprocess.js';
 import { setTracker, trackerOf } from '../state/store.js';
+import { storeLag } from '../state/gate.js';
 import { policyReport } from '../tracker/policy.js';
 import { git } from '../workspace/git.js';
 
@@ -210,6 +211,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           workers: [],
           foreignCommits: [],
           latestSeq: orch.store.latestEventSeq(),
+          ...storeLag(orch.store),
           tracker: trackerOf(orch.store),
           outboxPending: orch.store.countOutbox('pending'),
           trackerErrors: orch.trackerErrors(),
@@ -315,12 +317,17 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     const kinds = typeof query['kinds'] === 'string' && query['kinds'] ? String(query['kinds']).split(',').filter(Boolean) : undefined;
     const wait = Math.max(0, Math.min(120_000, Number(query['wait'] ?? 0)));
     const deadline = Date.now() + wait;
-    let events = orch.store.listEvents({ afterSeq: after, kinds, limit });
-    while (events.length === 0 && Date.now() < deadline) {
+    // Only durable events: after a crash an unflushed sequence number is given to a different event. See specs/state-backend "Reads".
+    const durableEvents = () => {
+      const upTo = orch.store.durability().eventSeq;
+      return { upTo, events: orch.store.listEvents({ afterSeq: after, kinds, limit }).filter((e) => e.seq <= upTo) };
+    };
+    let read = durableEvents();
+    while (read.events.length === 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 200));
-      events = orch.store.listEvents({ afterSeq: after, kinds, limit });
+      read = durableEvents();
     }
-    return { status: 200, body: { events, seq: orch.store.latestEventSeq(), digest: digestOf(orch) } };
+    return { status: 200, body: { events: read.events, seq: Math.min(orch.store.latestEventSeq(), read.upTo), digest: digestOf(orch) } };
   });
   server.addRoute('GET', /^\/v1\/milestones\/([^/]+)\/review$/, async (_req, _query, [id]) => {
     if (!orch.hasGraph()) return { status: 409, body: { ok: false, reason: 'graph not loaded' } };
@@ -373,7 +380,9 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
   server.addRoute('GET', /^\/v1\/outbox$/, async (_req, query) => {
     const after = Number(query['after'] ?? 0);
     const limit = Math.max(1, Math.min(500, Number(query['limit'] ?? 50)));
-    const effects = orch.store.listOutbox({ status: 'pending', afterId: Number.isFinite(after) ? after : 0, limit });
+    // Only durable effects: the operator writes to the tracker from this listing. See specs/state-backend "Reads".
+    const upTo = orch.store.durability().outboxId;
+    const effects = orch.store.listOutbox({ status: 'pending', afterId: Number.isFinite(after) ? after : 0, limit }).filter((e) => e.id <= upTo);
     return { status: 200, body: { effects, policy: policyReport(orch.config, orch.store) } };
   });
   server.addRoute('POST', /^\/v1\/outbox\/([^/]+)\/ack$/, async (_req, body, [idStr]) => {

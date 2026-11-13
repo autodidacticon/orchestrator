@@ -12,6 +12,7 @@ import type { Id } from '../graph/model.js';
 import type { Entry } from './status.js';
 import type {
   Attachment,
+  Durability,
   EffectStatus,
   EventInput,
   JobStatus,
@@ -60,7 +61,8 @@ function rowToEffect(r: OutboxRow): OutboxEffect {
   };
 }
 
-const SCHEMA = `
+/** The store's tables; a journal sink holds the same tables. */
+export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS overlay (id TEXT PRIMARY KEY, entry TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, kind TEXT NOT NULL, task_id TEXT, launch_id TEXT, payload TEXT);
 CREATE INDEX IF NOT EXISTS events_task ON events(task_id);
@@ -139,6 +141,20 @@ export class SqliteStore implements Store {
     } finally {
       this.depth = level;
     }
+  }
+
+  /** Always durable: a committed SQLite transaction is on disk. */
+  durable(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  durability(): Durability {
+    return { lagMs: 0, pendingBatches: 0, eventSeq: this.latestEventSeq(), outboxId: this.latestOutboxId() };
+  }
+
+  /** The connection itself, for the journal that records this store's writes. Not part of the Store interface. */
+  database(): DatabaseSync {
+    return this.db;
   }
 
   getEntry(id: Id): Entry | undefined {
@@ -461,6 +477,11 @@ export class SqliteStore implements Store {
   countOutbox(status: EffectStatus): number {
     const row = this.db.prepare('SELECT COUNT(*) AS n FROM outbox WHERE status = ?').get(status) as { n: number };
     return row.n;
+  }
+
+  latestOutboxId(): number {
+    const row = this.db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM outbox').get() as { id: number };
+    return row.id;
   }
 
   lastSetState(taskId: Id): string | undefined {

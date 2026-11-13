@@ -1,0 +1,345 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { applyOps, dumpTables, type FatalInfo, FencedError, JournaledStore, type JournalSink, type Row, type RowOp, SqliteSink } from '../../src/state/journal.js';
+import { SqliteStore } from '../../src/state/sqlite.js';
+import { defaultEntry } from '../../src/state/status.js';
+import type { Launch } from '../../src/state/store.js';
+
+let dir: string;
+beforeEach(() => {
+  dir = mkdtempSync(path.join(tmpdir(), 'orch-journal-'));
+});
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
+});
+
+async function until(pred: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!pred()) {
+    if (Date.now() > deadline) throw new Error('condition not reached');
+    await new Promise((r) => setTimeout(r, 2));
+  }
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** A sink that fails some applies, some of them after writing part of the batch, and remembers the last batch it accepted. */
+class FlakySink implements JournalSink {
+  failRate = 0;
+  lastApplied: RowOp[] | undefined;
+  accepted = 0;
+  constructor(
+    readonly inner: SqliteSink,
+    private readonly rand: () => number,
+  ) {}
+  async applyBatch(ops: readonly RowOp[]): Promise<void> {
+    if (this.rand() < this.failRate) {
+      // Partial: some rows reach the sink's transaction before it fails, and roll back with it.
+      const db = this.inner.db;
+      db.exec('BEGIN');
+      try {
+        applyOps(db, ops.slice(0, Math.floor(this.rand() * ops.length)));
+        throw new Error('sink unavailable');
+      } finally {
+        db.exec('ROLLBACK');
+      }
+    }
+    await this.inner.applyBatch(ops);
+    this.lastApplied = [...ops];
+    this.accepted++;
+  }
+}
+
+const launch = (id: string, n: number): Launch => ({ launchId: id, taskId: `T${n % 4}`, attempt: 1, launchNo: n, status: 'preparing', token: `tok-${id}`, branch: 'b', worktree: 'w', baseSha: 's', graphRev: 'r', createdAt: n % 3 });
+
+async function runFuzz(seed: number, steps: number): Promise<{ batches: number; crashes: number; flushes: number }> {
+  const rand = mulberry32(seed);
+  const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)]!;
+  const sinkDb = new SqliteSink(path.join(dir, `sink-${seed}.sqlite`));
+  const sink = new FlakySink(sinkDb, rand);
+  let image = new SqliteStore(':memory:');
+  let store = new JournaledStore(image, sink, { autoFlush: false });
+  /** Image tables at each committed, not yet flushed batch boundary, oldest first. */
+  let expected: Array<Record<string, Row[]>> = [];
+  let lastFlushed = dumpTables(image.database());
+  let launchNo = 0;
+  let batches = 0;
+  let crashes = 0;
+  let flushes = 0;
+
+  const write = () => {
+    const k = rand();
+    if (k < 0.12) store.setEntry(`T${Math.floor(rand() * 6)}`, { ...defaultEntry(), launches: Math.floor(rand() * 5) });
+    else if (k < 0.26) store.appendEvent({ kind: pick(['a', 'b', 'transition']), taskId: `T${Math.floor(rand() * 4)}`, payload: { n: Math.floor(rand() * 100) } }, Math.floor(rand() * 1000));
+    else if (k < 0.38) store.insertOutbox({ sourceSeq: Math.floor(rand() * 10), taskId: `T${Math.floor(rand() * 3)}`, kind: pick(['setState', 'comment'] as const), payload: { state: 'x' }, createdAt: 1 });
+    else if (k < 0.44) store.ackOutbox(1 + Math.floor(rand() * 20), { ok: true }, 5);
+    else if (k < 0.5) store.nackOutbox(1 + Math.floor(rand() * 20), 'no', 3);
+    else if (k < 0.58) store.setKv(`k${Math.floor(rand() * 5)}`, String(rand()));
+    else if (k < 0.64) store.putAttachment({ id: `a${Math.floor(rand() * 3)}`, pids: [1, 2], since: 1 });
+    else if (k < 0.69) store.deleteAttachment(`a${Math.floor(rand() * 3)}`);
+    // A duplicate launch id is a failing statement.
+    else if (k < 0.78) store.createLaunch(launch(`L${rand() < 0.3 ? Math.floor(rand() * Math.max(1, launchNo)) : launchNo++}`, launchNo));
+    // A missing launch throws.
+    else if (k < 0.86) store.updateLaunch(`L${Math.floor(rand() * (launchNo + 2))}`, { status: pick(['live', 'ended'] as const), pid: Math.floor(rand() * 100) });
+    else if (k < 0.92) store.putDedup(`L${Math.floor(rand() * 3)}`, Math.floor(rand() * 3), { r: rand() });
+    else if (k < 0.96) store.setSnapshot(`rev${Math.floor(rand() * 3)}`, 'nodes: []');
+    else store.putReport({ launchId: `L${Math.floor(rand() * 4)}`, taskId: 'T1', kind: 'submit', body: { s: rand() }, createdAt: Math.floor(rand() * 10) });
+  };
+
+  const level = (depth: number) => {
+    const n = 1 + Math.floor(rand() * 4);
+    for (let i = 0; i < n; i++) {
+      try {
+        if (depth < 3 && rand() < 0.3) store.transaction(() => level(depth + 1));
+        else write();
+      } catch {
+        /* a failing statement or a rolled-back level: the caller continues */
+      }
+    }
+    // Roll back at any level.
+    if (rand() < 0.2) throw new Error(`rollback at depth ${depth}`);
+  };
+
+  for (let step = 0; step < steps; step++) {
+    const before = store.durability().pendingBatches;
+    const r = rand();
+    if (r < 0.55) {
+      try {
+        if (rand() < 0.6) store.transaction(() => level(1));
+        else write();
+      } catch {
+        /* top-level rollback or failing bare write */
+      }
+      const after = store.durability().pendingBatches;
+      expect(after - before).toBeLessThanOrEqual(1);
+      if (after > before) {
+        expected.push(dumpTables(image.database()));
+        batches++;
+      }
+    } else if (r < 0.9) {
+      sink.failRate = rand() < 0.3 ? 0.6 : 0;
+      const accepted = sink.accepted;
+      // Pump by hand: the flusher's attempt without its timer.
+      await store.flushOnce();
+      if (sink.accepted > accepted) {
+        flushes++;
+        lastFlushed = expected.shift()!;
+        expect(sinkDb.tables()).toEqual(lastFlushed);
+        expect(store.durability().pendingBatches).toBe(expected.length);
+        // Applying an already-applied batch again changes nothing.
+        if (rand() < 0.3) {
+          await sinkDb.applyBatch(sink.lastApplied!);
+          expect(sinkDb.tables()).toEqual(lastFlushed);
+        }
+      } else {
+        expect(sinkDb.tables()).toEqual(lastFlushed);
+      }
+    } else if (r < 0.95) {
+      // Crash: the unflushed batches are lost; a fresh image loads from the sink.
+      store.close();
+      image = new SqliteStore(':memory:');
+      sinkDb.loadInto(image);
+      expect(dumpTables(image.database())).toEqual(lastFlushed);
+      store = new JournaledStore(image, sink, { autoFlush: false });
+      expected = [];
+      crashes++;
+    }
+  }
+  store.close();
+  sinkDb.close();
+  return { batches, crashes, flushes };
+}
+
+describe('journal', () => {
+  it('a seeded randomized run: the sink equals the image at each flushed batch boundary, and a reloaded image equals the last flushed state', async () => {
+    let totals = { batches: 0, crashes: 0, flushes: 0 };
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const r = await runFuzz(seed, 1500);
+      totals = { batches: totals.batches + r.batches, crashes: totals.crashes + r.crashes, flushes: totals.flushes + r.flushes };
+    }
+    // The run exercised what it claims to.
+    expect(totals.batches).toBeGreaterThan(1000);
+    expect(totals.flushes).toBeGreaterThan(500);
+    expect(totals.crashes).toBeGreaterThan(50);
+  }, 60_000);
+
+  it('applying an already-applied batch a second time leaves the sink unchanged', async () => {
+    const sink = new SqliteSink(path.join(dir, 'sink.sqlite'));
+    const recorded: RowOp[][] = [];
+    const store = new JournaledStore(new SqliteStore(':memory:'), { applyBatch: async (ops) => (recorded.push([...ops]), sink.applyBatch(ops)) });
+    store.transaction(() => {
+      store.createLaunch(launch('L1', 1));
+      store.appendEvent({ kind: 'x' }, 1);
+      store.insertOutbox({ sourceSeq: 1, taskId: 'T1', kind: 'setState', payload: {}, createdAt: 1 });
+      store.putAttachment({ id: 'a', pids: [1], since: 1 });
+    });
+    store.transaction(() => {
+      store.updateLaunch('L1', { status: 'live' });
+      store.deleteAttachment('a');
+      store.ackOutbox(1, {}, 2);
+    });
+    await store.durable();
+    const before = sink.tables();
+    for (const ops of recorded) await sink.applyBatch(ops);
+    expect(sink.tables()).toEqual(before);
+    await sink.applyBatch(recorded[1]!);
+    expect(sink.tables()).toEqual(before);
+    expect(before['launches']).toHaveLength(1);
+    expect(before['kv']).toEqual([]);
+    store.close();
+    sink.close();
+  });
+
+  it('one top-level transaction is one batch of row operations carrying the resulting rows; a rolled-back level contributes nothing', async () => {
+    const batches: RowOp[][] = [];
+    const store = new JournaledStore(new SqliteStore(':memory:'), { applyBatch: async (ops) => void batches.push([...ops]) });
+    store.transaction(() => {
+      store.setKv('a', '1');
+      try {
+        store.transaction(() => {
+          store.setKv('b', '1');
+          throw new Error('inner');
+        });
+      } catch {
+        /* inner level discarded */
+      }
+      store.transaction(() => store.setKv('c', '1'));
+      store.setKv('a', '2');
+    });
+    expect(() => store.transaction(() => (store.setKv('d', '1'), (() => { throw new Error('outer'); })()))).toThrow('outer');
+    store.setKv('e', '1');
+    await store.durable();
+    expect(batches).toEqual([
+      [
+        { op: 'upsert', table: 'kv', row: { key: 'a', value: '2' } },
+        { op: 'upsert', table: 'kv', row: { key: 'c', value: '1' } },
+      ],
+      [{ op: 'upsert', table: 'kv', row: { key: 'e', value: '1' } }],
+    ]);
+    store.close();
+  });
+
+  it('a sink that fails past flushDeadlineMs calls onFatal exactly once with the unflushed batch count', async () => {
+    const fatal: FatalInfo[] = [];
+    const now = { value: 1_000 };
+    let attempts = 0;
+    const store = new JournaledStore(
+      new SqliteStore(':memory:'),
+      { applyBatch: async () => (attempts++, Promise.reject(new Error('down'))) },
+      { flushDeadlineMs: 60_000, retryBaseMs: 2, retryMaxMs: 5, clock: () => now.value, onFatal: (f) => fatal.push(f) },
+    );
+    store.setKv('a', '1');
+    store.setKv('b', '1');
+    store.transaction(() => store.setKv('c', '1'));
+    let resolved = false;
+    void store.durable().then(() => (resolved = true));
+    // Within the deadline the flusher keeps retrying and nothing is fatal.
+    await until(() => attempts >= 5);
+    now.value += 30_000;
+    expect(fatal).toEqual([]);
+    expect(store.durability()).toMatchObject({ pendingBatches: 3, lagMs: 30_000 });
+    // Past it, the next failed retry is fatal, once.
+    now.value += 30_001;
+    await until(() => fatal.length > 0);
+    expect(fatal).toEqual([expect.objectContaining({ reason: 'deadline', unflushedBatches: 3 })]);
+    const after = attempts;
+    await new Promise((r) => setTimeout(r, 30));
+    expect(fatal).toHaveLength(1);
+    expect(attempts).toBe(after);
+    expect(resolved).toBe(false);
+    store.close();
+  });
+
+  it('a sink that stalls past flushDeadlineMs calls onFatal once', async () => {
+    const fatal: FatalInfo[] = [];
+    const store = new JournaledStore(new SqliteStore(':memory:'), { applyBatch: () => new Promise<void>(() => undefined) }, { flushDeadlineMs: 50, onFatal: (f) => fatal.push(f) });
+    store.setKv('a', '1');
+    await until(() => fatal.length > 0);
+    expect(fatal).toEqual([expect.objectContaining({ reason: 'deadline', unflushedBatches: 1 })]);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(fatal).toHaveLength(1);
+    store.close();
+  });
+
+  it('the flusher retries a failed batch and then applies every batch in commit order', async () => {
+    const fatal: FatalInfo[] = [];
+    const sink = new SqliteSink(path.join(dir, 'sink.sqlite'));
+    const applied: RowOp[][] = [];
+    let failures = 0;
+    const store = new JournaledStore(
+      new SqliteStore(':memory:'),
+      {
+        applyBatch: async (ops) => {
+          if (failures < 2) {
+            failures++;
+            throw new Error('transient');
+          }
+          await sink.applyBatch(ops);
+          applied.push([...ops]);
+        },
+      },
+      { retryBaseMs: 2, retryMaxMs: 5, onFatal: (f) => fatal.push(f) },
+    );
+    store.setKv('a', '1');
+    store.transaction(() => (store.createLaunch(launch('L1', 1)), store.appendEvent({ kind: 'x' }, 1)));
+    store.setKv('a', '2');
+    await store.durable();
+    expect(failures).toBe(2);
+    expect(fatal).toEqual([]);
+    expect(applied.map((ops) => ops.map((o) => o.table))).toEqual([['kv'], ['launches', 'events'], ['kv']]);
+    expect(sink.tables()).toEqual(dumpTables(store.image.database()));
+    expect(store.durability()).toMatchObject({ lagMs: 0, pendingBatches: 0, eventSeq: 1 });
+    store.close();
+    sink.close();
+  });
+
+  it('a sink that reports fenced calls onFatal immediately, once', async () => {
+    const fatal: FatalInfo[] = [];
+    const store = new JournaledStore(new SqliteStore(':memory:'), { applyBatch: async () => Promise.reject(new FencedError()) }, { flushDeadlineMs: 60_000, onFatal: (f) => fatal.push(f) });
+    store.setKv('a', '1');
+    await new Promise((r) => setImmediate(r));
+    expect(fatal).toEqual([expect.objectContaining({ reason: 'fenced', unflushedBatches: 1 })]);
+    store.setKv('b', '1');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fatal).toHaveLength(1);
+    store.close();
+  });
+
+  it('durability reports the highest event and outbox ids known durable, and ids keep increasing after a reload', async () => {
+    let release!: () => void;
+    let gate = new Promise<void>((r) => (release = r));
+    const sink = new SqliteSink(path.join(dir, 'sink.sqlite'));
+    const store = new JournaledStore(new SqliteStore(':memory:'), { applyBatch: async (ops) => (await gate, sink.applyBatch(ops)) });
+    const s1 = store.appendEvent({ kind: 'x' }, 1);
+    const o1 = store.insertOutbox({ sourceSeq: s1, taskId: 'T1', kind: 'setState', payload: {}, createdAt: 1 })!;
+    expect(store.durability()).toMatchObject({ eventSeq: 0, outboxId: 0, pendingBatches: 2 });
+    release();
+    await store.durable();
+    expect(store.durability()).toEqual({ lagMs: 0, pendingBatches: 0, eventSeq: s1, outboxId: o1 });
+    gate = new Promise<void>((r) => (release = r));
+    store.appendEvent({ kind: 'y' }, 2);
+    expect(store.durability()).toMatchObject({ eventSeq: s1, pendingBatches: 1 });
+    // Crash before the flush: a reloaded image issues the unflushed sequence number again.
+    store.close();
+    const image = new SqliteStore(':memory:');
+    sink.loadInto(image);
+    const again = new JournaledStore(image, sink);
+    expect(again.durability()).toMatchObject({ eventSeq: s1, outboxId: o1 });
+    expect(again.appendEvent({ kind: 'z' }, 3)).toBe(s1 + 1);
+    expect(again.insertOutbox({ sourceSeq: s1 + 1, taskId: 'T1', kind: 'setState', payload: {}, createdAt: 1 })!).toBeGreaterThan(o1);
+    await again.durable();
+    again.close();
+    sink.close();
+  });
+});

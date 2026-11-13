@@ -12,8 +12,9 @@ import { registerOperatorRoutes } from '../../src/operator/routes.js';
 import { CodexRunner } from '../../src/runner/codex.js';
 import { DEFAULT_CODEX_COMMAND } from '../../src/runner/command.js';
 import { SubprocessRunner } from '../../src/runner/subprocess.js';
+import { JournaledStore, type JournalOptions, type JournalSink, SqliteSink } from '../../src/state/journal.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
-import type { Launch, VerifierJob } from '../../src/state/store.js';
+import type { Launch, Store, VerifierJob } from '../../src/state/store.js';
 import type { VerifierBackend, VerifierContext, VerifierOutcome } from '../../src/verify/job.js';
 import { GitVerifierBackend } from '../../src/verify/verifier.js';
 import { GitWorkspace } from '../../src/workspace/git-workspace.js';
@@ -52,7 +53,7 @@ export function makeRepo(dir: string): string {
 export interface SliceHarness {
   dir: string;
   repo: string;
-  store: SqliteStore;
+  store: Store;
   orch: Orchestrator;
   server: ApiServer;
   runner: SubprocessRunner;
@@ -69,7 +70,18 @@ export interface SliceHarness {
   cleanup(): Promise<void>;
 }
 
-export async function makeSlice(opts: { graph: string; config?: ConfigInput; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean; kind?: 'codex' }): Promise<SliceHarness> {
+/**
+ * The store a harness runs on: a plain SqliteStore, or with `journal` (or ORCH_TEST_STORE=journal) a
+ * JournaledStore whose image is the same file, over the given sink or a SQLite sink beside it.
+ */
+export function harnessStore(file: string, journal?: { sink?: JournalSink; options?: JournalOptions }): Store {
+  const image = new SqliteStore(file);
+  if (!journal && process.env['ORCH_TEST_STORE'] !== 'journal') return image;
+  const sink = journal?.sink ?? new SqliteSink(`${file}.sink`);
+  return new JournaledStore(image, sink, journal?.options);
+}
+
+export async function makeSlice(opts: { graph: string; config?: ConfigInput; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean; kind?: 'codex'; journal?: { sink?: JournalSink; options?: JournalOptions } }): Promise<SliceHarness> {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-slice-'));
   const repo = opts.repo ?? makeRepo(dir);
   const dataDir = path.join(dir, 'run');
@@ -91,7 +103,7 @@ export async function makeSlice(opts: { graph: string; config?: ConfigInput; ver
     // A codex slice: launches run the Codex runner with the fake as `runner.codex.command`.
     ...(opts.kind === 'codex' ? { runner: { ...opts.config?.runner, kind: 'codex' as const, codex: { command: fakeCodexCommand, ...opts.config?.runner?.codex } } } : {}),
   });
-  const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
+  const store = harnessStore(path.join(dataDir, 'store.sqlite'), opts.journal);
   const graphPath = path.join(dataDir, 'graph.yaml');
   if (opts.fileGraph) writeFileSync(graphPath, opts.graph);
   const source = opts.fileGraph ? new FileGraphSource(graphPath) : new StaticGraphSource(opts.graph);
