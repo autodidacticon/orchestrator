@@ -22,11 +22,13 @@ import type {
   OutboxEffect,
   Proposal,
   ProposalStatus,
+  ProposedGraph,
   Store,
   StoredEvent,
   StoredReport,
   VerifierJob,
 } from './store.js';
+import { readProposedGraph, writeProposedGraph } from './store.js';
 
 // Armed after `node:sqlite` has evaluated, so its queued warning is handled before the fallback restore.
 releaseSqliteWarningFilter();
@@ -400,6 +402,14 @@ export class SqliteStore implements Store {
     this.db
       .prepare('INSERT INTO graph_snapshot (id, rev, content) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET rev = excluded.rev, content = excluded.content')
       .run(rev, content);
+  }
+
+  getProposedGraph(): ProposedGraph | undefined {
+    return readProposedGraph(this);
+  }
+
+  setProposedGraph(rev: string, content: string): ProposedGraph {
+    return this.transaction(() => writeProposedGraph(this, rev, content));
   }
 
   getKv(key: string): string | undefined {

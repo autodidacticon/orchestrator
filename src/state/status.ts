@@ -74,7 +74,11 @@ export type FailedKind =
   | 'malformedReport'
   | 'stuck'
   | 'timeBudget'
-  | 'released';
+  | 'released'
+  /** A queued job's sealed commit is missing from a fresh clone. Not charged. See specs/crash-recovery "Startup on a fresh clone". */
+  | 'commitLost'
+  /** A claimed launch's worktree is missing from a fresh clone. Not charged. */
+  | 'worktreeLost';
 
 export interface FailedReason {
   kind: FailedKind;

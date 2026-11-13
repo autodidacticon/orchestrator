@@ -132,6 +132,20 @@ export const configSchema = z.object({
       fetchIntervalMs: z.number().int().nonnegative().default(30_000),
     })
     .default({}),
+  /**
+   * Where the run's state lives. Read from the file and the environment only, never from the stored override
+   * document, which lives in the store being selected. See specs/state-backend "Store selection".
+   */
+  store: z
+    .object({
+      /** sqlite: `<dataDir>/store.sqlite`; postgres: a journaled memory image flushed to the database at `url`. */
+      kind: z.enum(['sqlite', 'postgres']).default('sqlite'),
+      /** The Postgres connection URL; `DATABASE_URL` when unset. Printed only with its password removed. */
+      url: z.string().min(1).optional(),
+      /** The oldest unflushed batch may be this old before the daemon exits. A worker lease must be at least as long. */
+      flushDeadlineMs: z.number().int().positive().default(120_000),
+    })
+    .default({}),
   /** Graph reload behaviour. See specs/agent-protocol "Payload change notice". */
   graph: z
     .object({
@@ -236,12 +250,88 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
 
-/** Load a YAML/JSON config file; relative paths resolve against the file's directory. */
-export async function loadConfig(file: string): Promise<Config> {
+/** Load a YAML/JSON config file; relative paths resolve against the file's directory. `DATABASE_URL` fills `store.url`. */
+export async function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): Promise<Config> {
   const text = await readFile(file, 'utf8');
   const raw = (parseYaml(text) ?? {}) as Record<string, unknown>;
-  const cfg = configSchema.parse(raw);
+  const cfg = withStoreEnv(configSchema.parse(raw), env);
   const base = path.dirname(path.resolve(file));
   const abs = (p: string) => (path.isAbsolute(p) ? p : path.resolve(base, p));
   return { ...cfg, repoPath: abs(cfg.repoPath), graphPath: abs(cfg.graphPath), dataDir: abs(cfg.dataDir) };
+}
+
+/** `store.url` from `DATABASE_URL` when the file leaves it unset. The only environment input of the store block. */
+export function withStoreEnv(cfg: Config, env: NodeJS.ProcessEnv = process.env): Config {
+  const fromEnv = env['DATABASE_URL']?.trim();
+  if (cfg.store.url || !fromEnv) return cfg;
+  return { ...cfg, store: { ...cfg.store, url: fromEnv } };
+}
+
+/** Where `store.url` came from: the file, `DATABASE_URL`, or nowhere. */
+export function storeUrlSource(cfg: Config, fileRaw: Record<string, unknown> | undefined): 'file' | 'environment' | undefined {
+  if (!cfg.store.url) return undefined;
+  const fileStore = fileRaw?.['store'] as { url?: unknown } | undefined;
+  return typeof fileStore?.url === 'string' && fileStore.url ? 'file' : 'environment';
+}
+
+/**
+ * A connection URL with its password removed: from the userinfo, from a `password` query parameter, and from a
+ * libpq `password=` keyword. Anything that does not parse is cut to its scheme. See specs/state-backend "Database URL redaction".
+ */
+export function redactUrl(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  const trimmed = url.trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    // libpq keyword/value form: host=... password=...
+    return trimmed.replace(/(^|\s)password\s*=\s*('(?:[^'\\]|\\.)*'|\S*)/gi, '$1password=');
+  }
+  try {
+    const u = new URL(trimmed);
+    if (u.password) u.password = '';
+    for (const k of [...u.searchParams.keys()]) if (k.toLowerCase() === 'password') u.searchParams.delete(k);
+    return u.toString();
+  } catch {
+    return `${trimmed.slice(0, trimmed.indexOf('://') + 3)}<unparseable>`;
+  }
+}
+
+/** Every form the URL's password may be printed in (raw and percent-decoded), for scrubbing log text. */
+export function urlSecrets(url: string | undefined): string[] {
+  if (!url) return [];
+  const out = new Set<string>();
+  try {
+    const u = new URL(url.trim());
+    if (u.password) {
+      out.add(u.password);
+      try {
+        out.add(decodeURIComponent(u.password));
+      } catch {
+        /* keep the raw form */
+      }
+    }
+    for (const [k, v] of u.searchParams) if (k.toLowerCase() === 'password' && v) out.add(v);
+  } catch {
+    const m = /(?:^|\s)password\s*=\s*('(?:[^'\\]|\\.)*'|\S+)/i.exec(url);
+    if (m?.[1]) out.add(m[1].replace(/^'|'$/g, ''));
+  }
+  return [...out].filter((s) => s.length > 0);
+}
+
+/**
+ * Why the store block cannot start, or undefined. Under `postgres` a URL is required, and the worker lease must
+ * outlast the flush deadline: a lease may not run out while the records that granted or renewed it are still unflushed.
+ * See specs/state-backend "Lease versus flush deadline".
+ */
+export function storeConfigError(cfg: Pick<Config, 'store' | 'leaseTtlMs'>): string | undefined {
+  if (cfg.store.kind !== 'postgres') return undefined;
+  if (!cfg.store.url) return 'store.kind is postgres but no database URL is set: set store.url or DATABASE_URL';
+  if (cfg.leaseTtlMs < cfg.store.flushDeadlineMs) {
+    return `leaseTtlMs (${cfg.leaseTtlMs}) is shorter than store.flushDeadlineMs (${cfg.store.flushDeadlineMs}): raise leaseTtlMs to at least ${cfg.store.flushDeadlineMs} or lower store.flushDeadlineMs`;
+  }
+  return undefined;
+}
+
+/** The store block as printed: the URL without its password. */
+export function redactedStore(store: Config['store']): Config['store'] {
+  return { ...store, ...(store.url !== undefined ? { url: redactUrl(store.url) } : {}) };
 }

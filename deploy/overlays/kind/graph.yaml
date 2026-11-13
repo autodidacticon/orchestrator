@@ -1,4 +1,5 @@
 # The kind overlay's graph: one ready task, so a pull-mode daemon parks a claimable launch for deploy/smoke.sh to see.
+# deploy/smoke.sh sends it with PUT /v1/graph; the daemon keeps it in the store.
 nodes:
   - id: SMOKE
     title: Smoke task

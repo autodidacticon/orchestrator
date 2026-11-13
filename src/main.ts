@@ -11,8 +11,8 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ApiServer } from './agent/server.js';
 import { SlotValidator } from './brief/template.js';
-import { loadConfig } from './config.js';
-import { FileGraphSource } from './graph/source.js';
+import { type Config, loadConfig, redactedStore, storeConfigError, urlSecrets } from './config.js';
+import { FileGraphSource, StoreGraphSource } from './graph/source.js';
 import type { Logger } from './loop/core.js';
 import { Orchestrator } from './loop/orchestrator.js';
 import { registerOperatorRoutes } from './operator/routes.js';
@@ -22,7 +22,7 @@ import { DEFAULT_CODEX_COMMAND, DEFAULT_OPENCODE_COMMAND } from './runner/comman
 import { MultiRunner } from './runner/multi.js';
 import { OpenCodeRunner } from './runner/opencode.js';
 import { composeAllowedTools } from './toolchain/tools.js';
-import { SqliteStore } from './state/sqlite.js';
+import { openStore, type OpenedStore } from './state/open.js';
 import { GitVerifierBackend } from './verify/verifier.js';
 import { DAEMON_PID, ensureRunDir, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, runIdFor, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
 import { applyOverridePatch, configSummary, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved, resolveLayers } from './runs/resolve.js';
@@ -32,10 +32,29 @@ import { randomUUID } from 'node:crypto';
 import { revParse } from './workspace/git.js';
 import { GitWorkspace } from './workspace/git-workspace.js';
 import { isEntrypoint } from './entry.js';
-import { makeStderrLogger } from './log.js';
+import { logFormatOf, makeStderrLogger } from './log.js';
+import { realpathSync } from 'node:fs';
 
-/** Text by default; one JSON object per line with ORCH_LOG_FORMAT=json. */
-export const stderrLogger: Logger = makeStderrLogger();
+/** Strings never written to a log line: the database password, in every form it may be printed in. */
+const secrets = new Set<string>();
+
+/** Register a database URL's password for scrubbing. See specs/state-backend "Database URL redaction". */
+export function scrubSecretsOf(url: string | undefined): void {
+  for (const p of urlSecrets(url)) {
+    secrets.add(p);
+    secrets.add(encodeURIComponent(p));
+    secrets.add(JSON.stringify(p).slice(1, -1));
+  }
+}
+
+export function scrub(line: string): string {
+  let out = line;
+  for (const s of secrets) if (s) out = out.split(s).join('***');
+  return out;
+}
+
+/** Text by default; one JSON object per line with ORCH_LOG_FORMAT=json. Every line is scrubbed of the database password. */
+export const stderrLogger: Logger = makeStderrLogger(logFormatOf(), (line) => process.stderr.write(scrub(line)));
 
 /** How long a signalled shutdown may wait for the in-flight tick and verifier job before exiting anyway. */
 const SHUTDOWN_GRACE_MS = 8_000;
@@ -97,21 +116,51 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   let fileSetsMode = false;
   let dataDir: string;
   let resolveWith: (opts: ResolveOptions) => Promise<Resolved>;
+  // The store block comes from the file and the environment, before the store (and its override document) is open.
+  let early: Config;
   if (values.config) {
     const file = values.config;
-    dataDir = (await loadConfig(file)).dataDir;
+    early = await loadConfig(file);
+    dataDir = early.dataDir;
     fileSetsMode = rawRunnerMode(file) !== undefined;
     resolveWith = (opts) => resolveFileConfig(file, opts);
+    // A Postgres run needs its id before the store opens (the lock and the rows are keyed by it): by repository.
+    if (early.store.kind === 'postgres') runId = runIdFor(realpathOr(early.repoPath));
   } else {
     const repo = await resolveRepoPath({ repo: values.repo });
     ensureRunDir(repo);
-    dataDir = (await resolveRunConfig(repo, process.env, { detect: false })).config.dataDir;
+    early = (await resolveRunConfig(repo, process.env, { detect: false })).config;
+    dataDir = early.dataDir;
     runId = runIdFor(repo);
     fileSetsMode = (readRepoConfigRaw(repo)?.['runner'] as { mode?: unknown } | undefined)?.mode !== undefined;
     resolveWith = (opts) => resolveRunConfig(repo, process.env, opts);
   }
   await mkdir(dataDir, { recursive: true });
-  const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
+  scrubSecretsOf(early.store.url);
+  // Startup refuses a store block that cannot work: no URL, or a lease shorter than the flush deadline. See specs/state-backend "Lease versus flush deadline".
+  const storeError = storeConfigError(early);
+  if (storeError) {
+    stderrLogger.error('store configuration refused', { error: storeError, leaseTtlMs: early.leaseTtlMs, flushDeadlineMs: early.store.flushDeadlineMs });
+    throw new Error(storeError);
+  }
+  let opened: OpenedStore;
+  try {
+    opened = await openStore({
+      store: early.store,
+      dataDir,
+      runId: runId ?? '',
+      // A journal that cannot flush exits non-zero: the deadline passed, or the run lock was lost. See specs/state-backend "Fatal flush".
+      onFatal: (info) => {
+        stderrLogger.error('store fatal: exiting', { reason: info.reason, unflushedBatches: info.unflushedBatches, ...(info.error !== undefined ? { error: String(info.error) } : {}) });
+        process.exit(1);
+      },
+    });
+  } catch (err) {
+    stderrLogger.error('could not open the store', { kind: early.store.kind, url: redactedStore(early.store).url, error: err instanceof Error ? err.message : String(err) });
+    throw err;
+  }
+  const store = opened.store;
+  stderrLogger.info('store opened', { kind: opened.kind, ...(opened.kind === 'postgres' ? { url: redactedStore(early.store).url, runId, backendPid: opened.sink?.backendPid } : {}) });
   // The run id names this run in tracker comments; by repository under a run directory, otherwise once per store.
   if (runId) setRunId(store, runId);
   else if (!runIdOf(store)) setRunId(store, randomUUID().slice(0, 16));
@@ -132,12 +181,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const first = await resolveWith({ overrides: current, pinned });
   const patched = applyOverridePatch(first.inputs, current, flags);
   if (!patched.ok) {
-    store.close();
+    await opened.close();
     process.stderr.write(`--set ${patched.key}: ${patched.error}\n\n${USAGE}`);
     process.exit(2);
   }
   const overrides = patched.next;
-  const resolved = resolveLayers(first.inputs, overrides);
+  // Nothing past this point holds the database password: the report, status, config.json and the orchestrator see it removed.
+  const resolved = withoutPassword(resolveLayers(first.inputs, overrides));
   const config = resolved.config;
 
   // The branch the run first used is pinned; only an explicit layer can name another one, and only on an untouched run. See specs/toolchain-discovery "Integration branch detection and pinning".
@@ -147,7 +197,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     if (launches || jobs) {
       const msg = `integration branch change refused: this run is pinned to ${pinned} and ${resolved.provenance.integrationBranch === 'file' ? 'orchestrator.yaml' : 'an argument'} names ${config.integrationBranch}; keep ${pinned} for this run (start without --set integrationBranch, or remove the key from orchestrator.yaml), or start from a fresh run directory to use ${config.integrationBranch}`;
       stderrLogger.error(msg, { pinned, requested: config.integrationBranch, source: resolved.provenance.integrationBranch, launches, jobs });
-      store.close();
+      await opened.close();
       throw new Error(msg);
     }
     stderrLogger.info('integration branch re-pinned on an untouched run', { from: pinned, to: config.integrationBranch, source: resolved.provenance.integrationBranch });
@@ -208,7 +258,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     store,
     config,
     resolved,
-    graphSource: new FileGraphSource(config.graphPath),
+    // Under Postgres the graph lives in the store: PUT /v1/graph writes the proposed slot. See specs/graph-import.
+    graphSource: opened.kind === 'postgres' ? new StoreGraphSource(store) : new FileGraphSource(config.graphPath),
     runner,
     workspace,
     verifier,
@@ -267,7 +318,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     await orch.stop({ reap });
     await server.close();
     recordExit();
-    store.close();
+    await opened.close();
     stderrLogger.info('stopped', { cause, reason });
     process.exit(0);
   };
@@ -279,6 +330,25 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   };
 
   await orch.start();
+}
+
+/** A resolution whose store URL (config, base, and file layer) has its password removed. */
+function withoutPassword(r: Resolved): Resolved {
+  const fileStore = r.inputs.fileRaw?.['store'];
+  const fileRaw = r.inputs.fileRaw && fileStore && typeof fileStore === 'object' ? { ...r.inputs.fileRaw, store: { ...(fileStore as Record<string, unknown>), ...(typeof (fileStore as { url?: unknown }).url === 'string' ? { url: redactedStore({ ...r.config.store, url: (fileStore as { url: string }).url }).url } : {}) } } : r.inputs.fileRaw;
+  return {
+    ...r,
+    config: { ...r.config, store: redactedStore(r.config.store) },
+    inputs: { ...r.inputs, base: { ...r.inputs.base, store: redactedStore(r.inputs.base.store) }, fileRaw },
+  };
+}
+
+function realpathOr(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
 }
 
 /** `runner.mode` as written in a config file, without defaults. */

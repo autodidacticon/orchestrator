@@ -190,6 +190,7 @@ export class PgSink implements JournalSink {
   private fencedAt: FencedError | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private closed = false;
+  private readonly lostListeners: Array<(err: unknown) => void> = [];
 
   private constructor(
     readonly client: pg.Client,
@@ -198,7 +199,11 @@ export class PgSink implements JournalSink {
     readonly backendPid: number,
   ) {
     const mark = (err: unknown) => {
-      this.lost ??= err ?? new Error('connection ended');
+      if (this.lost !== undefined) return;
+      this.lost = err ?? new Error('connection ended');
+      // An intentional close is not a loss.
+      if (this.closed) return;
+      for (const fn of this.lostListeners.splice(0)) fn(this.lost);
     };
     // Without a listener a server-side termination is an unhandled 'error'.
     client.on('error', mark);
@@ -221,6 +226,21 @@ export class PgSink implements JournalSink {
       await client.end().catch(() => undefined);
       throw err;
     }
+  }
+
+  /**
+   * Call `fn` once when the session holding the run lock is lost while the sink is open, even with no batch in
+   * flight (a terminated backend, a server shutdown). Not called for `close`. Called at once when already lost.
+   */
+  onLost(fn: (err: unknown) => void): void {
+    if (this.closed) return;
+    if (this.lost !== undefined) fn(this.lost);
+    else this.lostListeners.push(fn);
+  }
+
+  /** True once the session holding the run lock is gone (fenced or not yet noticed by a batch); false after `close`. */
+  get lockLost(): boolean {
+    return !this.closed && (this.lost !== undefined || this.fencedAt !== undefined);
   }
 
   /** True once the session is gone: every later batch throws `FencedError`. */

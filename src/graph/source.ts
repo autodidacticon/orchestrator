@@ -5,6 +5,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import { parseGraph } from './load.js';
 import type { Graph } from './model.js';
+import type { Store } from '../state/store.js';
 
 export interface GraphSource {
   /** Return the current text if it changed since `knownRev`, else undefined. */
@@ -40,5 +41,26 @@ export class FileGraphSource implements GraphSource {
     this.lastRev = graph.rev;
     if (graph.rev === knownRev) return undefined;
     return { content, graph };
+  }
+}
+
+/**
+ * The proposed-graph slot of the store as the graph source, for a run whose state is in Postgres: `PUT /v1/graph`
+ * writes the slot and the reload reads it. A document is evaluated once per write (its stamp), so a rejected one is not
+ * classified again every tick, and a re-sent one is. The accepted graph stays in the snapshot. See specs/graph-import.
+ */
+export class StoreGraphSource implements GraphSource {
+  private lastStamp: number | undefined;
+  private lastKnown: string | undefined;
+  constructor(private readonly store: Pick<Store, 'getProposedGraph'>) {}
+  async poll(knownRev: string | undefined) {
+    const proposed = this.store.getProposedGraph();
+    if (!proposed) return undefined;
+    if (proposed.stamp === this.lastStamp && knownRev === this.lastKnown) return undefined;
+    this.lastStamp = proposed.stamp;
+    this.lastKnown = knownRev;
+    const graph = parseGraph(proposed.content);
+    if (graph.rev === knownRev) return undefined;
+    return { content: proposed.content, graph };
   }
 }

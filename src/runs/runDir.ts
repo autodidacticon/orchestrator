@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFil
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { type Config, configSchema, defaultConfig, loadConfig } from '../config.js';
+import { type Config, configSchema, defaultConfig, loadConfig, withStoreEnv } from '../config.js';
 import { parse as parseYaml } from 'yaml';
 import { detectIntegrationBranch } from '../toolchain/branch.js';
 import { detectToolchain, type ToolchainRecord } from '../toolchain/detect.js';
@@ -156,10 +156,10 @@ function baseRunConfig(realRepoPath: string, env: NodeJS.ProcessEnv): { config: 
   const p = runPaths(realRepoPath, env);
   const file = path.join(realRepoPath, CONFIG_FILE);
   if (!existsSync(file)) {
-    return { config: defaultConfig({ repoPath: realRepoPath, dataDir: p.runDir, graphPath: p.graphPath, runDir: p.runDir }), fileRaw: undefined };
+    return { config: withStoreEnv(defaultConfig({ repoPath: realRepoPath, dataDir: p.runDir, graphPath: p.graphPath, runDir: p.runDir }), env), fileRaw: undefined };
   }
   const raw = (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
-  const cfg = configSchema.parse(raw);
+  const cfg = withStoreEnv(configSchema.parse(raw), env);
   const abs = (v: string) => (path.isAbsolute(v) ? v : path.resolve(realRepoPath, v));
   return {
     config: {
@@ -227,4 +227,20 @@ export function readConfigJson(runDir: string): ConfigReport | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The store kind a run directory belongs to: config.json's record, else the repository's orchestrator.yaml, else sqlite.
+ * A Postgres run keeps no store file locally. See specs/state-backend "Store selection".
+ */
+export function runStoreKind(runDir: string, realRepoPath?: string): 'sqlite' | 'postgres' {
+  const recorded = (readConfigJson(runDir) as { store?: { kind?: unknown } } | undefined)?.store?.kind;
+  if (recorded === 'postgres' || recorded === 'sqlite') return recorded;
+  const raw = realRepoPath ? (readRepoConfigRaw(realRepoPath)?.['store'] as { kind?: unknown } | undefined) : undefined;
+  return raw?.kind === 'postgres' ? 'postgres' : 'sqlite';
+}
+
+/** The answer for a Postgres run that has no local store: its daemon is found by URL only. */
+export function remoteRunError(where: string): Error {
+  return new Error(`the run ${where} keeps its state in Postgres and is remote: no store file is kept locally, so pass --url or set ORCH_URL to reach its daemon`);
 }

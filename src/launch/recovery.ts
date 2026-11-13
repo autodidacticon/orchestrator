@@ -4,6 +4,20 @@
 import type { Orchestrator } from '../loop/orchestrator.js';
 import { applyPendingCascade } from '../loop/tick.js';
 import { startLaunch } from './launch.js';
+import type { Launch } from '../state/store.js';
+import { git } from '../workspace/git.js';
+
+/**
+ * True only when the clone definitely lacks the commit: `git cat-file -e` on a full sha exits 1 for a missing object.
+ * Any other failure (no repository, a malformed sha) is not a lost commit.
+ */
+export async function commitMissing(repo: string, sha: string): Promise<boolean> {
+  if (!/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(sha)) return false;
+  // A missing directory surfaces as code 1 from the spawn too: confirm the repository first.
+  if ((await git(repo, ['rev-parse', '--git-dir'], { allowFail: true })).code !== 0) return false;
+  const r = await git(repo, ['cat-file', '-e', sha], { allowFail: true });
+  return r.code === 1 && !r.stderr.trim();
+}
 
 export async function recover(o: Orchestrator): Promise<void> {
   if (!o.hasGraph()) return;
@@ -11,6 +25,14 @@ export async function recover(o: Orchestrator): Promise<void> {
 
   // A cascade recorded before the crash resumes first; nodes already reset are skipped.
   await applyPendingCascade(o);
+
+  // With origin as the source of truth, a fresh clone (no volume) learns origin's integration head before anything is
+  // prepared or checked. Without an origin this reads the clone's head. See specs/crash-recovery "Startup on a fresh clone".
+  try {
+    await workspace.integrationHead();
+  } catch (err) {
+    o.log.warn('recovery: could not read the integration head', { err: String(err) });
+  }
 
   for (const launch of store.listLaunches({ status: ['preparing', 'launching'] })) {
     const entry = o.entry(launch.taskId);
@@ -44,6 +66,12 @@ export async function recover(o: Orchestrator): Promise<void> {
     const owns = entry.lease?.launchId === launch.launchId;
     if (!owns || (entry.status.kind !== 'running' && entry.status.kind !== 'waiting')) continue;
     if (launch.worker && launch.pid === undefined) {
+      // A claimed launch whose worktree is gone (a fresh clone) cannot be worked: end it and retry now, not at lease expiry.
+      if (!(await workspace.exists(launch))) {
+        endLostClaim(o, launch);
+        await workspace.remove(launch);
+        continue;
+      }
       // A claimed launch is judged by its lease, never as a dead process, and has no fallback file.
       if (entry.status.kind === 'running' && entry.lease && entry.lease.expiresAt <= o.now()) {
         o.fail(launch.taskId, { kind: 'leaseExpired', message: 'worker lease expired while the daemon was down' }, 'orchestrator', 'deadOrExpired');
@@ -92,6 +120,19 @@ export async function recover(o: Orchestrator): Promise<void> {
     }
   }
 
+  // A queued job whose sealed commit is not in the clone (a fresh clone; launch branches live only in the clone) can
+  // never be verified: drop it and retry the task, without spending an attempt. See specs/crash-recovery "Startup on a fresh clone".
+  for (const job of store.listJobs({ status: 'queued', applied: false })) {
+    if (!(await commitMissing(o.config.repoPath, job.sealedSha))) continue;
+    const message = `sealed commit ${job.sealedSha} of launch ${job.launchId} is not in the clone (lost with the previous clone); retried without spending an attempt`;
+    store.transaction(() => {
+      store.dropJob(job.jobId);
+      store.appendEvent({ kind: 'verify.commitLost', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, sealedSha: job.sealedSha } }, o.now());
+      if (o.entry(job.taskId).status.kind === 'submitted') o.fail(job.taskId, { kind: 'commitLost', message, detail: { sealedSha: job.sealedSha, jobId: job.jobId } }, 'orchestrator', 'commitLost');
+    });
+    o.log.warn('recovery: sealed commit lost; task retried', { taskId: job.taskId, jobId: job.jobId, sealedSha: job.sealedSha });
+  }
+
   // Milestone tags: re-create idempotently for submitted gated milestones lacking the marker.
   for (const [id, entry] of o.overlay()) {
     const node = o.graph().nodes.get(id);
@@ -110,4 +151,19 @@ export async function recover(o: Orchestrator): Promise<void> {
     const l = store.getLaunch(id);
     if (l) await workspace.remove(l);
   }
+}
+
+/** End a claimed launch whose worktree is gone and retry its task at no cost (a waiting one is blocked, as on release). */
+function endLostClaim(o: Orchestrator, launch: Launch): void {
+  const entry = o.entry(launch.taskId);
+  const message = `the worktree of claimed launch ${launch.launchId} is gone (a fresh clone); retried without waiting for lease expiry`;
+  o.store.transaction(() => {
+    if (entry.status.kind === 'running') {
+      o.fail(launch.taskId, { kind: 'worktreeLost', message, detail: { launchId: launch.launchId, workerId: launch.worker?.id } }, 'orchestrator', 'worktreeLost');
+    } else if (entry.status.kind === 'waiting') {
+      o.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');
+    }
+    o.endLaunch(launch, 'worktreeLost', { workerId: launch.worker?.id });
+  });
+  o.log.warn('recovery: claimed launch lost its worktree; task retried', { taskId: launch.taskId, launchId: launch.launchId });
 }

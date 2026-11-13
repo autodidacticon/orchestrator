@@ -1,4 +1,5 @@
 # The base plus an in-cluster git origin seeded from ./fixture. See deploy/README.md.
+# graph.yaml here is not mounted: deploy/smoke.sh sends it with PUT /v1/graph.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: orch
@@ -15,11 +16,6 @@ configMapGenerator:
       - fixture/README.md
       - fixture/package.json
       - fixture/test.js
-  # A one-task graph in place of the base's empty one, so deploy/smoke.sh sees a claimable launch.
-  - name: orchestrator-config
-    behavior: merge
-    files:
-      - graph.yaml
 patches:
   - target:
       kind: Deployment

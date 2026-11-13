@@ -23,12 +23,13 @@
  * The daemon URL comes from --url, ORCH_URL, or the store under --data-dir. For `config`, --data-dir shared|launch
  * is the opencode.dataDir leaf, not a store location; with --url or ORCH_URL any other value is refused.
  */
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { foldRunnerArgs, parseSetFlags } from '../runs/resolve.js';
 import { isRunnerKind, OPENCODE_DATA_DIRS, type RunnerKind } from '../runner/selection.js';
-import { resolveRepoPath, runPaths } from '../runs/runDir.js';
+import { remoteRunError, resolveRepoPath, runPaths, runStoreKind } from '../runs/runDir.js';
 import { SqliteStore } from '../state/sqlite.js';
 import { isEntrypoint } from '../entry.js';
 
@@ -57,6 +58,11 @@ export async function resolveUrl(opts: { url?: string; dataDir?: string; repo?: 
     }
   }
   const dataDir = opts.dataDir ?? process.env['ORCH_DATA_DIR'] ?? '.orchestrator-run';
+  // Opening a missing file would create an empty store; a Postgres run keeps none here. See specs/state-backend "Store selection".
+  if (!existsSync(path.join(dataDir, 'store.sqlite'))) {
+    if (runStoreKind(dataDir) === 'postgres') throw remoteRunError(`in ${dataDir}`);
+    throw new Error(`no daemon url recorded in ${dataDir} (no store there); pass --url`);
+  }
   const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
   try {
     const url = store.getKv('apiBaseUrl');

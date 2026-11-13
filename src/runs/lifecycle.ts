@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { pidAlive } from '../runner/subprocess.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { type ConfigReport, type OverridableKey, type Overrides, overridesSchema, START_ONLY_KEYS } from './resolve.js';
-import { DAEMON_PID, ensureRunDir, orchHome, readDaemonJson, readRepoFile, resolveRepoPath, runPaths, type DaemonInfo, type ExitRecord, type RunPaths } from './runDir.js';
+import { DAEMON_PID, ensureRunDir, orchHome, readDaemonJson, readRepoFile, remoteRunError, resolveRepoPath, runPaths, runStoreKind, type DaemonInfo, type ExitRecord, type RunPaths } from './runDir.js';
 
 export interface DaemonState {
   runDir: string;
@@ -111,6 +111,8 @@ export interface StartResult extends DaemonInfo {
   config?: ConfigReport['config'];
   toolchain?: ToolchainRecord;
   needsConfig?: OverridableKey[];
+  /** The store block as the daemon reports it: the database URL without its password. */
+  store?: ConfigReport['store'];
   /** Override keys applied by this call, and those the daemon refused with its reason. */
   applied?: OverridableKey[];
   rejected?: Array<{ key: OverridableKey; reason: string }>;
@@ -144,8 +146,8 @@ async function applyOverrides(url: string, overrides: Overrides): Promise<{ appl
   return { applied, rejected };
 }
 
-function configFields(report: ConfigReport | undefined): Pick<StartResult, 'config' | 'toolchain' | 'needsConfig'> {
-  return report ? { config: report.config, toolchain: report.toolchain, needsConfig: report.needsConfig } : {};
+function configFields(report: ConfigReport | undefined): Pick<StartResult, 'config' | 'toolchain' | 'needsConfig' | 'store'> {
+  return report ? { config: report.config, toolchain: report.toolchain, needsConfig: report.needsConfig, ...(report.store ? { store: report.store } : {}) } : {};
 }
 
 function modeOf(status: Record<string, unknown> | undefined): 'spawn' | 'pull' | 'mixed' | undefined {
@@ -291,7 +293,12 @@ export async function reviveDaemon(opts: StartOptions = {}): Promise<StartResult
   }
   const repo = await resolveRepoPath({ repo: opts.repo, cwd: opts.cwd, env });
   const paths = runPaths(repo, env);
-  if (!existsSync(path.join(paths.runDir, 'store.sqlite'))) return undefined;
+  if (!existsSync(path.join(paths.runDir, 'store.sqlite'))) {
+    // A Postgres run has no store file: it exists, but remotely, and is not revived from here. See specs/state-backend "Store selection".
+    if (runStoreKind(paths.runDir, repo) !== 'postgres') return undefined;
+    if ((await daemonState(paths.runDir)).healthy) return undefined;
+    throw remoteRunError(`for ${repo}`);
+  }
   const state = await daemonState(paths.runDir);
   if (state.healthy) return undefined;
   if (state.exit && state.exit.reason !== 'idle') {

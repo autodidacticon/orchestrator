@@ -245,8 +245,16 @@ export interface Store {
   getPayloadOverlay(taskId: Id, graphRev: string): Record<string, unknown> | undefined;
   setPayloadOverlay(taskId: Id, graphRev: string, payload: Record<string, unknown>): void;
 
+  /** The accepted graph: written only after a reload passed classification; trusted without classification at startup. */
   getSnapshot(): { rev: string; content: string } | undefined;
   setSnapshot(rev: string, content: string): void;
+
+  /**
+   * The proposed graph: what `PUT /v1/graph` wrote under a Postgres store, accepted or not. `stamp` changes on every write,
+   * so a re-sent document is evaluated again. A kv row. See specs/graph-import "Proposed graph slot".
+   */
+  getProposedGraph(): ProposedGraph | undefined;
+  setProposedGraph(rev: string, content: string): ProposedGraph;
 
   getKv(key: string): string | undefined;
   setKv(key: string, value: string): void;
@@ -270,7 +278,39 @@ export interface Store {
   /** State of the latest setState effect recorded for an issue, whatever its status. */
   lastSetState(taskId: Id): string | undefined;
 
+  /** Why the store cannot take work (lag, a lost run lock, a fatal flush); empty or absent when it can. */
+  readiness?(): string[];
+
   close(): void;
+}
+
+export interface ProposedGraph {
+  rev: string;
+  content: string;
+  /** Increases on every write. */
+  stamp: number;
+  at: number;
+}
+
+export const PROPOSED_GRAPH_KEY = 'graph.proposed';
+
+/** The proposed slot on top of any kv: read and write it through `getKv`/`setKv`. */
+export function readProposedGraph(store: Pick<Store, 'getKv'>): ProposedGraph | undefined {
+  const raw = store.getKv(PROPOSED_GRAPH_KEY);
+  if (!raw) return undefined;
+  try {
+    const p = JSON.parse(raw) as ProposedGraph;
+    return typeof p.content === 'string' && typeof p.rev === 'string' ? p : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeProposedGraph(store: Pick<Store, 'getKv' | 'setKv'>, rev: string, content: string, now = Date.now()): ProposedGraph {
+  const prev = readProposedGraph(store);
+  const p: ProposedGraph = { rev, content, stamp: (prev?.stamp ?? 0) + 1, at: now };
+  store.setKv(PROPOSED_GRAPH_KEY, JSON.stringify(p));
+  return p;
 }
 
 /** The runner kind a launch was prepared for; a row written before the kind was recorded is claude-code. See specs/worker-runners. */

@@ -61,9 +61,26 @@ function validateGraphContent(content: string): ApiResponse | undefined {
   }
 }
 
-/** Atomic write of the run's graph file, then an immediate reload. The caller validated the content. */
+/** A run whose state is in Postgres keeps its graph in the store: the proposed slot, not a file. See specs/graph-import. */
+export function graphInStore(orch: Orchestrator): boolean {
+  return orch.config.store?.kind === 'postgres';
+}
+
+/**
+ * Write the proposed graph, then reload at once. The caller validated the content. Under a Postgres store the document
+ * goes to the store's proposed slot; otherwise the run's graph file is replaced atomically. A rejected document stays
+ * where it was written and the accepted snapshot is unchanged.
+ */
 export async function writeGraphAndReload(orch: Orchestrator, content: string): Promise<ApiResponse> {
   const rev = parseGraph(content).rev;
+  if (graphInStore(orch)) {
+    const proposed = orch.store.setProposedGraph(rev, content);
+    orch.store.appendEvent({ kind: 'graph.imported', payload: { rev, slot: 'proposed', stamp: proposed.stamp } }, orch.now());
+    await orch.loadGraph();
+    const active = orch.hasGraph() ? orch.graph().rev : undefined;
+    const accepted = active === rev;
+    return { status: 200, body: { rev, accepted, active, reasons: accepted ? [] : (orch.graphRejected()?.reasons ?? []), slot: 'proposed' } };
+  }
   const target = orch.config.graphPath;
   await mkdir(path.dirname(target), { recursive: true });
   const tmp = `${target}.${process.pid}.tmp`;
@@ -78,9 +95,9 @@ export async function writeGraphAndReload(orch: Orchestrator, content: string): 
 
 type FileNode = Record<string, unknown> & { id: string; deps?: unknown };
 
-/** The run's graph file as a node list; rebuilt from the active graph when the file is missing. */
+/** The run's proposed graph (the file, or the store's proposed slot under Postgres) as a node list; rebuilt from the active graph when there is none. */
 async function readGraphFile(orch: Orchestrator): Promise<{ nodes: FileNode[] }> {
-  const text = await readFile(orch.config.graphPath, 'utf8').catch(() => undefined);
+  const text = graphInStore(orch) ? orch.store.getProposedGraph()?.content : await readFile(orch.config.graphPath, 'utf8').catch(() => undefined);
   if (text) {
     const parsed = parseYaml(text) as { nodes?: unknown } | undefined;
     if (parsed && Array.isArray(parsed.nodes)) return { nodes: parsed.nodes as FileNode[] };
@@ -166,6 +183,8 @@ export async function readinessFailures(orch: Orchestrator): Promise<string[]> {
   } catch (err) {
     reasons.push(`store: ${String(err)}`);
   }
+  // A journaled store: lag above zero for longer than one flush retry, a lost run lock, a fatal flush. See specs/cluster-runtime "Probes".
+  reasons.push(...(orch.store.readiness?.() ?? []));
   const repo = orch.config.repoPath;
   const branch = orch.config.integrationBranch;
   try {

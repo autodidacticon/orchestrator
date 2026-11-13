@@ -30,6 +30,7 @@ import type {
   OutboxEffect,
   Proposal,
   ProposalStatus,
+  ProposedGraph,
   Store,
   StoredEvent,
   StoredReport,
@@ -43,6 +44,8 @@ export type RowOp = { op: 'upsert'; table: string; row: Row } | { op: 'delete'; 
 /** The durable copy. One `applyBatch` is one sink transaction: all of it lands or none of it does. */
 export interface JournalSink {
   applyBatch(ops: readonly RowOp[]): Promise<void>;
+  /** True once the sink knows its session (and the run lock with it) is gone, before any batch has failed on it. */
+  readonly lockLost?: boolean;
 }
 
 /** Thrown by a sink when this daemon no longer owns the run; the journal stops at once. */
@@ -376,6 +379,23 @@ export class JournaledStore implements Store {
     this.opts.onFatal?.(this.fatal);
   }
 
+  /**
+   * Why the store cannot take work, empty when it can: a fatal condition, a lost run lock, or a lag above zero for
+   * longer than one flush retry. See specs/state-backend "Store readiness".
+   */
+  readiness(): string[] {
+    if (this.fatal) return [`store: ${this.fatal.reason === 'fenced' ? 'the run lock was lost' : 'the flush deadline passed'}; ${this.fatal.unflushedBatches} batches unflushed`];
+    if (this.sink.lockLost) return ['store: the session holding the run lock was lost'];
+    const d = this.durability();
+    if (d.lagMs > this.opts.retryMaxMs) return [`store: ${d.pendingBatches} batches unflushed for ${d.lagMs}ms, longer than one flush retry (${this.opts.retryMaxMs}ms)`];
+    return [];
+  }
+
+  /** Stop at once with reason `fenced`: the sink reported the run lock lost while no batch was in flight. */
+  fence(error?: unknown): void {
+    this.die('fenced', error);
+  }
+
   /** The fatal condition, once one occurred. */
   fatalReason(): FatalInfo | undefined {
     return this.fatal;
@@ -450,6 +470,9 @@ export class JournaledStore implements Store {
   getKv(key: string): string | undefined {
     return this.image.getKv(key);
   }
+  getProposedGraph(): ProposedGraph | undefined {
+    return this.image.getProposedGraph();
+  }
   listAttachments(): Attachment[] {
     return this.image.listAttachments();
   }
@@ -512,6 +535,9 @@ export class JournaledStore implements Store {
   }
   setKv(key: string, value: string): void {
     this.write(() => this.image.setKv(key, value));
+  }
+  setProposedGraph(rev: string, content: string): ProposedGraph {
+    return this.write(() => this.image.setProposedGraph(rev, content));
   }
   putAttachment(a: Attachment): void {
     this.write(() => this.image.putAttachment(a));

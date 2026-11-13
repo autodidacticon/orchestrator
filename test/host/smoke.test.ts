@@ -40,11 +40,19 @@ describe('deploy/smoke.sh', () => {
     const expected = [
       'docker build -t orchestrator:dev .',
       'kind load docker-image orchestrator:dev --name orch',
+      'kubectl --context kind-orch apply --server-side -f https://raw.githubusercontent.com/cloudnative-pg/',
+      'kubectl --context kind-orch -n cnpg-system rollout status deployment/cnpg-controller-manager',
       'kubectl --context kind-orch apply -k deploy/overlays/kind',
+      'kubectl --context kind-orch -n orch wait --for=condition=Ready cluster/postgres',
       'kubectl --context kind-orch -n orch rollout status deployment/orchestrator',
       'kubectl --context kind-orch -n orch port-forward service/orchestrator',
       'curl -fsS -o /dev/null http://127.0.0.1:18080/healthz',
+      'retry 30 put_graph',
       'status_is .runner.mode == "pull" and (.claimable | length > 0)',
+      'no_orchestrator_claim',
+      'kubectl --context kind-orch -n orch delete pod -l app.kubernetes.io/name=orchestrator',
+      'kubectl --context kind-orch -n orch wait --for=condition=Ready pod -l app.kubernetes.io/name=orchestrator',
+      'status_is .graphRev == "unknown" and (.claimable | length > 0)',
     ];
     const at = expected.map((e) => steps.findIndex((s) => s.includes(e)));
     expect(at.every((i) => i >= 0), `missing steps in:\n${steps.join('\n')}`).toBe(true);

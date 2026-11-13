@@ -1,5 +1,4 @@
 # Mounted into the clone as <repo>/orchestrator.yaml, which `orchestrator --repo` reads.
-# Relative paths resolve against the clone.
 runner:
   mode: pull
 daemon:
@@ -7,4 +6,12 @@ daemon:
 apiBind: 0.0.0.0
 apiPort: 8080
 apiBaseUrl: http://orchestrator.orch.svc:8080
-graphPath: graph.yaml
+# The run's state is in Postgres; the URL is DATABASE_URL, from the CloudNativePG application Secret.
+# A worker lease (leaseTtlMs, 10 minutes by default) must be at least flushDeadlineMs.
+store:
+  kind: postgres
+  flushDeadlineMs: 120000
+# The pod has no volume: origin holds the integration branch and the milestone tags, so a restarted daemon
+# on a fresh clone continues from them. The graph lives in the store; load it with PUT /v1/graph.
+git:
+  pushIntegration: true

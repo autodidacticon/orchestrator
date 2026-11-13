@@ -32,12 +32,16 @@ export const TRANSITIONS: readonly TransitionRow[] = [
   { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'timeBudget', effects: ['attempts++'] },
   // A claimed launch released without progress, or with keep after progress (attempts unchanged, interruptions counted by the caller).
   { from: 'running', to: 'unstarted', actor: 'orchestrator', nodeKind: 'task', trigger: 'released', effects: [] },
+  // A claimed launch whose worktree a fresh clone lost: retried without spending an attempt. See specs/crash-recovery "Startup on a fresh clone".
+  { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'worktreeLost', effects: [] },
   { from: 'waiting', to: 'running', actor: 'orchestrator', nodeKind: 'task', trigger: 'resumed', effects: [] },
   // maxWait elapsed, process dead, or a claimed launch released while waiting.
   { from: 'waiting', to: 'blocked', actor: 'orchestrator', nodeKind: 'task', trigger: 'maxWaitOrDead', effects: [] },
   { from: 'submitted', to: 'done', actor: 'verifier', nodeKind: 'task', trigger: 'published', effects: [] },
   { from: 'submitted', to: 'failed', actor: 'verifier', nodeKind: 'task', trigger: 'verificationFailed', effects: ['attempts++'] },
   { from: 'submitted', to: 'unstarted', actor: 'verifier', nodeKind: 'task', trigger: 'conflict', effects: ['integrationRetries++'] },
+  // A queued job whose sealed commit a fresh clone lost: retried without spending an attempt.
+  { from: 'submitted', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'commitLost', effects: [] },
   { from: 'failed', to: 'unstarted', actor: 'orchestrator', nodeKind: 'task', trigger: 'retry', effects: [] },
   { from: 'failed', to: 'blocked', actor: 'orchestrator', nodeKind: 'task', trigger: 'exhausted', effects: [] },
   { from: 'blocked', to: 'unstarted', actor: 'human', nodeKind: 'any', trigger: 'unblock', effects: ['resetBudgets'] },

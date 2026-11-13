@@ -5,7 +5,7 @@
  * "Resolution order and provenance".
  */
 import { z } from 'zod';
-import { type Config, configSchema } from '../config.js';
+import { type Config, configSchema, redactUrl, storeUrlSource } from '../config.js';
 import { hasAllowedToolsSlot, hasEffortSlot, hasModelSlot } from '../runner/command.js';
 import {
   anyModelSchema,
@@ -476,6 +476,22 @@ export interface ConfigReport {
   toolchain: ToolchainRecord | undefined;
   overrides: Overrides;
   needsConfig: OverridableKey[];
+  /** The store block, file and environment only; the URL without its password. See specs/state-backend "Store selection". */
+  store: StoreReport;
+}
+
+export interface StoreReport {
+  kind: 'sqlite' | 'postgres';
+  url?: string;
+  urlSource?: 'file' | 'environment';
+  flushDeadlineMs: number;
+}
+
+/** The printed store block of a resolution: never the password. */
+export function storeReportOf(resolved: Pick<Resolved, 'config' | 'inputs'>): StoreReport {
+  const s = resolved.config.store;
+  const source = storeUrlSource(resolved.config, resolved.inputs.fileRaw);
+  return { kind: s.kind, ...(s.url ? { url: redactUrl(s.url) } : {}), ...(source ? { urlSource: source } : {}), flushDeadlineMs: s.flushDeadlineMs };
 }
 
 /** The compact form appended as the `config.resolved` event. */
@@ -493,6 +509,7 @@ export function configSummary(report: ConfigReport): Record<string, unknown> {
     toolchain: report.toolchain ? { kinds: report.toolchain.kinds, checkCommand: report.toolchain.checkCommand, checkFrom: report.toolchain.checkFrom, packageManager: report.toolchain.packageManager } : undefined,
     needsConfig: report.needsConfig,
     overrides: Object.keys(report.overrides),
+    store: report.store,
   };
 }
 
@@ -505,6 +522,11 @@ export function readOverrides(store: { getKv(key: string): string | undefined })
   if (!raw) return {};
   try {
     let doc: unknown = JSON.parse(raw);
+    // The store block is never an override: the document lives in the store being selected. See specs/state-backend "Store selection".
+    if (isObject(doc) && 'store' in doc) {
+      const { store: _ignored, ...rest } = doc;
+      doc = rest;
+    }
     if (isObject(doc) && (doc['model'] !== undefined || doc['effort'] !== undefined)) doc = bindFlat(doc, 'claude-code').doc;
     const parsed = overridesSchema.safeParse(doc);
     return parsed.success ? parsed.data : {};
@@ -600,5 +622,6 @@ export function reportOf(resolved: Resolved, now: number): ConfigReport {
     toolchain: resolved.toolchain,
     overrides: resolved.overrides,
     needsConfig: resolved.needsConfig,
+    store: storeReportOf(resolved),
   };
 }

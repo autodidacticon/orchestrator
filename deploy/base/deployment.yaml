@@ -1,4 +1,6 @@
-# One daemon per run: Recreate, so two never share the volume.
+# One daemon per run: Recreate, and the Postgres run lock refuses a second writer even if two ever overlap.
+# No volume claim: the clone and the run directory are on an emptyDir; the state is in Postgres and the
+# integration branch on origin, so a new pod starts from a fresh clone. See specs/crash-recovery "Startup on a fresh clone".
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,7 +22,7 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
       initContainers:
-        # Clones REPO_URL into the data volume on first start; later starts keep the existing clone.
+        # Clones REPO_URL into the pod's emptyDir: every pod starts from a fresh clone.
         - name: clone
           image: orchestrator:dev
           imagePullPolicy: IfNotPresent
@@ -31,14 +33,10 @@ spec:
             - sh
             - -ec
             - |
-              if [ ! -d /data/repo/.git ]; then
-                rm -rf /data/repo
-                git clone "$REPO_URL" /data/repo
-              fi
-              # The mounted orchestrator.yaml and graph.yaml are not part of the project.
-              for f in /orchestrator.yaml /graph.yaml; do
-                grep -qxF "$f" /data/repo/.git/info/exclude 2>/dev/null || echo "$f" >> /data/repo/.git/info/exclude
-              done
+              rm -rf /data/repo
+              git clone "$REPO_URL" /data/repo
+              # The mounted orchestrator.yaml is not part of the project.
+              grep -qxF /orchestrator.yaml /data/repo/.git/info/exclude 2>/dev/null || echo /orchestrator.yaml >> /data/repo/.git/info/exclude
           volumeMounts:
             - name: data
               mountPath: /data
@@ -48,9 +46,15 @@ spec:
           imagePullPolicy: IfNotPresent
           command: ["orchestrator", "--repo", "/data/repo"]
           env:
-            # The run directory (store, worktrees, logs) lives on the volume.
+            # The run directory (worktrees, logs, daemon.json) on the emptyDir; the store is in Postgres.
             - name: ORCH_HOME
               value: /data/home
+            # The CloudNativePG application Secret's connection URI. Printed only without its password.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-app
+                  key: uri
             # One JSON object per stderr line, for the cluster's log collector.
             - name: ORCH_LOG_FORMAT
               value: json
@@ -80,14 +84,9 @@ spec:
               mountPath: /data/repo/orchestrator.yaml
               subPath: orchestrator.yaml
               readOnly: true
-            - name: config
-              mountPath: /data/repo/graph.yaml
-              subPath: graph.yaml
-              readOnly: true
       volumes:
         - name: data
-          persistentVolumeClaim:
-            claimName: orchestrator-data
+          emptyDir: {}
         - name: config
           configMap:
             name: orchestrator-config
