@@ -116,6 +116,8 @@ kind create cluster --name orch     # once
 deploy/smoke.sh                     # against the cluster named by KIND_CLUSTER (default orch)
 KIND_CLUSTER=dev deploy/smoke.sh    # another cluster
 deploy/smoke.sh --dry-run           # print each step's command, execute nothing
+deploy/smoke.sh --fresh             # delete and recreate the kind cluster first
+deploy/smoke.sh --break pvc         # falsify one restart-drill assertion on purpose (pvc or claimable); exits 1
 ```
 
 The steps run in this order:
@@ -132,6 +134,22 @@ The steps run in this order:
 It asserts:
 
 - M1: `runner.mode` is `pull` and `claimable` is non-empty. The daemon runs in the cluster in pull mode and has parked a launch for the overlay's `SMOKE` task.
-- M2: `kubectl get pvc` lists no claim of the daemon's (Postgres and `git-origin` keep their own). Then the daemon's pod is deleted; the new one, on a fresh clone and an empty run directory, serves the same `graphRev` and still has a claimable launch, read back from Postgres.
+- M2: `kubectl get pvc` lists no claim of the daemon's. Postgres and `git-origin` keep their own claims.
+- M2 restart drill. The graph has `SMOKE` and `SMOKE-PARKED`, which depends on it. The script works `SMOKE` itself as a pull-mode worker: it claims the launch, commits in the pod's worktree with `kubectl exec`, and submits with the launch token. It waits until the in-pod verifier has published `SMOKE` to origin and `SMOKE-PARKED` is claimable. It then records three things:
+  - from the API: the claimable set, the task states, `latestSeq`, and the integration head (the `publishedSha` of `SMOKE`'s transition to `done`);
+  - through `psql` on the CloudNativePG pod: `select status, count(*) from launches where run_id = ... group by 1`, the claimable launches, and the task states;
+  - a check that the API and `psql` agree.
+
+  Then it deletes the daemon pod. After the rollout, the new pod runs on a fresh clone and an empty run directory. The script asserts that:
+  - the same `graphRev` is served;
+  - the claimable set and the task states are unchanged, from both the API and `psql`, and so are the launch counts;
+  - origin's `main` and the clone are at the recorded head, and origin's history carries the `Orchestrator-Task: SMOKE` commit;
+  - exactly one `launch.reprepared` event per claimable launch follows the recorded sequence;
+  - there is still no orchestrator claim.
+- M2 Postgres-outage drill. The script freezes every `postgres` process in the instance pod with SIGSTOP for `OUTAGE_S` seconds (default 10). One write stays pending meanwhile: a claim for a task that does not exist, whose response waits for durability. While Postgres is frozen, `/readyz` must fail, and `/v1/status` must answer with `storeLagMs` rising. After SIGCONT, the lag must return to zero, `/readyz` must pass, the write must complete, and the daemon pod's uid and restart count must be unchanged.
+
+  The drill freezes Postgres rather than scaling it to zero. The journal sink never reconnects, and a lost session is fatal, so scale-to-zero restarts the daemon by design. A NetworkPolicy does not stall the session either, because kindnet enforces policies only on new connections. Keep `OUTAGE_S` well under 30: CloudNativePG's liveness probe (3 × 10s) restarts a frozen Postgres, which ends the session and so the daemon.
+
+Each assertion prints `smoke: pass: <name>`. The first one that does not hold prints `smoke: FAIL: <name>`, and the script exits 1. A full pass ends with `smoke: ok`. On a kept cluster, a rerun skips the worker step when `SMOKE` is already done. `PUBLISH_TIMEOUT_S` (default 300) bounds the wait for the publish.
 
 Every `kubectl` call passes `--context "$KUBE_CONTEXT"`, default `kind-$KIND_CLUSTER`, so the script never touches whatever context is current. `IMAGE`, `ROLLOUT_TIMEOUT` (default `300s`) and `CNPG_MANIFEST` (the operator release to install) can also be overridden. The script exits non-zero at the first step that fails. `test/host/smoke.test.ts` runs the dry run, with every tool stubbed out, and checks the order of the steps.
