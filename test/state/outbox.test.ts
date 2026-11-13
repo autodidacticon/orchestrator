@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runIdOf, setRunId, setTracker, type Store, trackerOf } from '../../src/state/store.js';
 import { backends } from './backends.js';
 
@@ -13,20 +13,21 @@ const effect = (sourceSeq: number, taskId = 'T1', kind: 'setState' | 'comment' =
   createdAt: 100,
 });
 
-describe.each(backends)('outbox store ($name)', (backend) => {
+for (const backend of backends) (backend.available ? describe : describe.skip)(`outbox store (${backend.name})`, () => {
   let dir: string;
   let store: Store;
 
-  beforeEach(() => {
+  afterAll(() => backend.shutdown());
+  beforeEach(async () => {
     dir = mkdtempSync(path.join(tmpdir(), 'orch-outbox-'));
-    store = backend.open(dir);
+    store = await backend.open(dir);
   });
   afterEach(async () => {
     try {
       await backend.check(store);
     } finally {
       store.close();
-      backend.release();
+      await backend.release();
       rmSync(dir, { recursive: true, force: true });
     }
   });

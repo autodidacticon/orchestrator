@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
 import type { Store } from '../../src/state/store.js';
@@ -34,20 +34,21 @@ function claim(s: Store, id: string, launchId: string): boolean {
   }
 }
 
-describe.each(backends)('store ($name)', (backend) => {
+for (const backend of backends) (backend.available ? describe : describe.skip)(`store (${backend.name})`, () => {
   let dir: string;
   let store: Store;
 
-  beforeEach(() => {
+  afterAll(() => backend.shutdown());
+  beforeEach(async () => {
     dir = mkdtempSync(path.join(tmpdir(), 'orch-store-'));
-    store = backend.open(dir);
+    store = await backend.open(dir);
   });
   afterEach(async () => {
     try {
       await backend.check(store);
     } finally {
       store.close();
-      backend.release();
+      await backend.release();
       rmSync(dir, { recursive: true, force: true });
     }
   });

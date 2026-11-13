@@ -1,7 +1,10 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { applyPgOps, PgSink } from '../../src/state/pg/index.js';
+import { canonical } from './backends.js';
+import { dropRun, freshRunId, pgAvailable, stopTestPostgres, testDatabase } from './pg-db.js';
 import { applyOps, dumpTables, type FatalInfo, FencedError, JournaledStore, type JournalSink, type Row, type RowOp, SqliteSink } from '../../src/state/journal.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
@@ -34,28 +37,74 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+/** The durable copy a randomized run drives: SQLite or Postgres. */
+interface FuzzSink {
+  apply(ops: readonly RowOp[]): Promise<void>;
+  /** Write the first `n` ops inside the sink's transaction, then fail and roll back. */
+  failPartway(ops: readonly RowOp[], n: number): Promise<never>;
+  /** The sink's tables, comparable with `canon(dumpTables(image))`. */
+  tables(): Promise<unknown>;
+  canon(t: Record<string, Row[]>): unknown;
+  loadInto(image: SqliteStore): Promise<void>;
+  close(): Promise<void>;
+}
+
+const sqliteFuzzSink = (file: string): FuzzSink => {
+  const sink = new SqliteSink(file);
+  return {
+    apply: (ops) => sink.applyBatch(ops),
+    failPartway: async (ops, n) => {
+      sink.db.exec('BEGIN');
+      try {
+        applyOps(sink.db, ops.slice(0, n));
+        throw new Error('sink unavailable');
+      } finally {
+        sink.db.exec('ROLLBACK');
+      }
+    },
+    tables: async () => sink.tables(),
+    canon: (t) => t,
+    loadInto: async (image) => sink.loadInto(image),
+    close: async () => sink.close(),
+  };
+};
+
+const pgFuzzSink = async (): Promise<FuzzSink> => {
+  const sink = await PgSink.open({ connection: await testDatabase(), runId: freshRunId('fuzz') });
+  return {
+    apply: (ops) => sink.applyBatch(ops),
+    failPartway: async (ops, n) => {
+      await sink.client.query('BEGIN');
+      try {
+        await applyPgOps(sink.client, sink.runId, ops.slice(0, n));
+        throw new Error('sink unavailable');
+      } finally {
+        await sink.client.query('ROLLBACK');
+      }
+    },
+    tables: async () => canonical(await sink.tables()),
+    canon: canonical,
+    loadInto: (image) => sink.loadInto(image),
+    close: async () => {
+      await sink.close();
+      await dropRun(sink.runId);
+    },
+  };
+};
+
 /** A sink that fails some applies, some of them after writing part of the batch, and remembers the last batch it accepted. */
 class FlakySink implements JournalSink {
   failRate = 0;
   lastApplied: RowOp[] | undefined;
   accepted = 0;
   constructor(
-    readonly inner: SqliteSink,
+    readonly inner: FuzzSink,
     private readonly rand: () => number,
   ) {}
   async applyBatch(ops: readonly RowOp[]): Promise<void> {
-    if (this.rand() < this.failRate) {
-      // Partial: some rows reach the sink's transaction before it fails, and roll back with it.
-      const db = this.inner.db;
-      db.exec('BEGIN');
-      try {
-        applyOps(db, ops.slice(0, Math.floor(this.rand() * ops.length)));
-        throw new Error('sink unavailable');
-      } finally {
-        db.exec('ROLLBACK');
-      }
-    }
-    await this.inner.applyBatch(ops);
+    // Partial: some rows reach the sink's transaction before it fails, and roll back with it.
+    if (this.rand() < this.failRate) await this.inner.failPartway(ops, Math.floor(this.rand() * ops.length));
+    await this.inner.apply(ops);
     this.lastApplied = [...ops];
     this.accepted++;
   }
@@ -63,10 +112,9 @@ class FlakySink implements JournalSink {
 
 const launch = (id: string, n: number): Launch => ({ launchId: id, taskId: `T${n % 4}`, attempt: 1, launchNo: n, status: 'preparing', token: `tok-${id}`, branch: 'b', worktree: 'w', baseSha: 's', graphRev: 'r', createdAt: n % 3 });
 
-async function runFuzz(seed: number, steps: number): Promise<{ batches: number; crashes: number; flushes: number }> {
+async function runFuzz(seed: number, steps: number, sinkDb: FuzzSink): Promise<{ batches: number; crashes: number; flushes: number }> {
   const rand = mulberry32(seed);
   const pick = <T,>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)]!;
-  const sinkDb = new SqliteSink(path.join(dir, `sink-${seed}.sqlite`));
   const sink = new FlakySink(sinkDb, rand);
   let image = new SqliteStore(':memory:');
   let store = new JournaledStore(image, sink, { autoFlush: false });
@@ -135,29 +183,37 @@ async function runFuzz(seed: number, steps: number): Promise<{ batches: number; 
       if (sink.accepted > accepted) {
         flushes++;
         lastFlushed = expected.shift()!;
-        expect(sinkDb.tables()).toEqual(lastFlushed);
+        expect(await sinkDb.tables()).toEqual(sinkDb.canon(lastFlushed));
         expect(store.durability().pendingBatches).toBe(expected.length);
         // Applying an already-applied batch again changes nothing.
         if (rand() < 0.3) {
-          await sinkDb.applyBatch(sink.lastApplied!);
-          expect(sinkDb.tables()).toEqual(lastFlushed);
+          await sinkDb.apply(sink.lastApplied!);
+          expect(await sinkDb.tables()).toEqual(sinkDb.canon(lastFlushed));
         }
       } else {
-        expect(sinkDb.tables()).toEqual(lastFlushed);
+        expect(await sinkDb.tables()).toEqual(sinkDb.canon(lastFlushed));
       }
     } else if (r < 0.95) {
       // Crash: the unflushed batches are lost; a fresh image loads from the sink.
       store.close();
       image = new SqliteStore(':memory:');
-      sinkDb.loadInto(image);
-      expect(dumpTables(image.database())).toEqual(lastFlushed);
+      await sinkDb.loadInto(image);
+      expect(sinkDb.canon(dumpTables(image.database()))).toEqual(sinkDb.canon(lastFlushed));
       store = new JournaledStore(image, sink, { autoFlush: false });
       expected = [];
       crashes++;
     }
   }
+  // Drain what is pending: a fresh image loaded from the sink equals the running image, row for row.
+  sink.failRate = 0;
+  while (await store.flushOnce()) flushes++;
+  expect(store.durability().pendingBatches).toBe(0);
+  const fresh = new SqliteStore(':memory:');
+  await sinkDb.loadInto(fresh);
+  expect(sinkDb.canon(dumpTables(fresh.database()))).toEqual(sinkDb.canon(dumpTables(image.database())));
+  fresh.close();
   store.close();
-  sinkDb.close();
+  await sinkDb.close();
   return { batches, crashes, flushes };
 }
 
@@ -165,7 +221,7 @@ describe('journal', () => {
   it('a seeded randomized run: the sink equals the image at each flushed batch boundary, and a reloaded image equals the last flushed state', async () => {
     let totals = { batches: 0, crashes: 0, flushes: 0 };
     for (const seed of [1, 2, 3, 4, 5, 6]) {
-      const r = await runFuzz(seed, 1500);
+      const r = await runFuzz(seed, 1500, sqliteFuzzSink(path.join(dir, `sink-${seed}.sqlite`)));
       totals = { batches: totals.batches + r.batches, crashes: totals.crashes + r.crashes, flushes: totals.flushes + r.flushes };
     }
     // The run exercised what it claims to.
@@ -342,4 +398,19 @@ describe('journal', () => {
     again.close();
     sink.close();
   });
+});
+
+describe.skipIf(!pgAvailable)('journal over PgSink', () => {
+  afterAll(() => stopTestPostgres());
+
+  it('the same seeded randomized run against Postgres: the sink equals the image at each flushed batch boundary, and a reloaded image equals the last flushed state', async () => {
+    let totals = { batches: 0, crashes: 0, flushes: 0 };
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const r = await runFuzz(seed, 1500, await pgFuzzSink());
+      totals = { batches: totals.batches + r.batches, crashes: totals.crashes + r.crashes, flushes: totals.flushes + r.flushes };
+    }
+    expect(totals.batches).toBeGreaterThan(1000);
+    expect(totals.flushes).toBeGreaterThan(500);
+    expect(totals.crashes).toBeGreaterThan(50);
+  }, 180_000);
 });
