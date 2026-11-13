@@ -36,6 +36,8 @@ const CLAIM_SCHEMA = {
     pendingAnswer: { type: 'string' },
     model: { type: 'string' },
     effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    leaseTtlMs: { type: 'number' },
+    renewEveryMs: { type: 'number' },
     finished: { type: 'boolean' },
     stalled: { type: 'boolean' },
     openQuestions: { type: 'array', items: { type: 'string' } },
@@ -60,12 +62,23 @@ function claimPrompt(workerId, heldCount) {
     `You are the claimer for orchestrator worker "${workerId}". Use the orchestrator operator MCP tools (names end in claim, wait, status; load them with ToolSearch if needed). You make no decisions: follow these steps exactly.`,
     // This workflow's workers are Claude Code subagents, so they only take launches prepared for claude-code. See specs/pull-runner "Claim".
     `1. Call claim with workerId "${workerId}", access "local", and runner "claude-code".`,
-    '2. If it returns a launch (status 200): read the markdown brief at briefPath and return { claimed: true, launchId, taskId, token, worktree, briefPath, briefMarkdown: <the full brief file>, model, effort, pendingSeq, pendingAnswer } (model and effort exactly as the response gives them; pending fields only when the response carries pending).',
+    '2. If it returns a launch (status 200): read the markdown brief at briefPath and return { claimed: true, launchId, taskId, token, worktree, briefPath, briefMarkdown: <the full brief file>, model, effort, leaseTtlMs: lease.ttlMs, renewEveryMs: lease.renewEveryMs, pendingSeq, pendingAnswer } (model, effort and the lease numbers exactly as the response gives them; pending fields only when the response carries pending).',
     `3. If it returns 404 (nothing claimable for claude-code, or paused): call wait with until "any" and timeoutMs ${CLAIM_WAIT_MS}, then call status, take claimable as status claimableByKind["claude-code"], and compute stop:`,
     `   stop is true when finished is true, or stalled is true, or (claimable is 0 and verifying is empty and ${heldCount} launches are held by other loops is false and (openQuestions is non-empty or awaitingReview lists an id that verifying does not)). Otherwise stop is false.`,
     `   If stop is false and you have done fewer than ${CLAIM_POLLS} polls (a poll is one claim followed by one wait and one status), go back to step 1. Otherwise return { claimed: false, stop, finished, stalled, openQuestions, awaitingReview, claimable } from the last status.`,
     '4. On any other error return { claimed: false, stop: true }.',
     'Return only the structured output; do not do any task work.',
+  ].join('\n')
+}
+
+// The interval comes from the claim (lease.ttlMs and lease.renewEveryMs, a third of the TTL); nothing renews the lease between this agent's calls. See specs/host-integration "Work workflow heartbeat interval".
+function leaseRule(c) {
+  const ttl = Number(c.leaseTtlMs)
+  const every = Number(c.renewEveryMs) > 0 ? Number(c.renewEveryMs) : ttl > 0 ? Math.max(1, Math.floor(ttl / 3)) : 0
+  if (!(every > 0)) return '- launch_heartbeat with a short progress text after long steps: every call renews your lease, and a silent launch is expired.'
+  return [
+    `- Your lease lasts ${ttl > 0 ? `${ttl}ms` : '(see the claim)'} and only your own calls renew it. Call launch_heartbeat with a short progress text at least every ${every}ms (a third of the lease), and never let longer than that pass without a launch_* call.`,
+    `  You cannot call a tool while a foreground command runs, so run any command expected to take longer than ${every}ms (a full test suite, an install, a build) in the background and call launch_heartbeat while it runs; then read its output.`,
   ].join('\n')
 }
 
@@ -75,7 +88,8 @@ function workerPrompt(c) {
     'Use the orchestrator operator MCP tools with launchId and token for every report (load them with ToolSearch if needed):',
     `- launch_report with kind "submit", seq 1, a summary, and acceptance evidence for every acceptance criterion in the brief, once your work is committed and the worktree is clean. A 409 with "dirtyWorktree" lists uncommitted files: commit them and call again with the same seq.`,
     '- launch_block with seq 2 to ask a human a question when you cannot proceed; while it returns pending, call it again with the same seq until it returns the answer, then continue.',
-    `- launch_heartbeat with a short progress text after long steps; launch_inbox to read notices (stuck, nudge, baseMoved, payloadChanged).`,
+    leaseRule(c),
+    '- launch_inbox to read notices (stuck, nudge, baseMoved, payloadChanged).',
     '- launch_report with kind "fail" if the task cannot be done, saying what would unblock it.',
     'Never write a fallback report file. If any tool returns 401 your launch has been revoked: stop immediately and return outcome "fenced".',
     c.pendingSeq !== undefined

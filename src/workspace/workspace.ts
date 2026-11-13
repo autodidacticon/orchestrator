@@ -28,6 +28,8 @@ export interface BriefInput {
   carry?: Record<string, unknown>;
   apiBaseUrl: string;
   retryWindowMs: number;
+  /** The lease TTL; the brief names the heartbeat interval from it (a third). Absent: no interval line. See specs/agent-protocol "Heartbeat interval". */
+  leaseTtlMs?: number;
   /** Absent while no check command is configured. */
   checkCommand?: string;
   integrationBranch: string;

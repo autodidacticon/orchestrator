@@ -489,7 +489,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   tool(
     'claim',
     {
-      description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner (the CLI the launch was prepared for), model, effort, and pending when a question is open. runner filters by the kinds this worker can run (one or a list); a named task of another kind is 409. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable (for the runner filter) or the run is paused.',
+      description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner (the CLI the launch was prepared for), model, effort, the lease (leaseTtlMs, leaseExpiresAt, and lease { ttlMs, expiresAt, renewEveryMs }: the worker must call a launch tool at least every renewEveryMs, a third of the TTL, and run longer commands in the background), and pending when a question is open. runner filters by the kinds this worker can run (one or a list); a named task of another kind is 409. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable (for the runner filter) or the run is paused.',
       inputSchema: { workerId: z.string(), taskId: z.string().optional(), access: z.enum(['local', 'remote']).optional(), runner: z.union([z.enum(RUNNER_KINDS), z.array(z.enum(RUNNER_KINDS))]).optional() },
     },
     async (a, c) =>
@@ -509,7 +509,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   const scoped = { launchId: z.string(), token: z.string() };
   const forwardLaunch = (c: RepoClient, op: 'heartbeat' | 'report' | 'block' | 'log' | 'inbox', launchId: string, token: string, body: Record<string, unknown>, timeoutMs = 30_000) =>
     c.call(op === 'inbox' ? 'GET' : 'POST', `/v1/launches/${encodeURIComponent(launchId)}/${op}`, body, timeoutMs, { authorization: `Bearer ${token}` });
-  tool('launch_heartbeat', { description: 'Worker: renew the lease and report progress text for a claimed launch.', inputSchema: { ...scoped, progress: z.string().optional() } }, async ({ launchId, token, ...body }, c) =>
+  tool('launch_heartbeat', { description: 'Worker: renew the lease and report progress text for a claimed launch. Call it at least every lease.renewEveryMs from the claim (a third of the lease TTL), also while a long command runs in the background.', inputSchema: { ...scoped, progress: z.string().optional() } }, async ({ launchId, token, ...body }, c) =>
     guarded(() => forwardLaunch(c, 'heartbeat', launchId, token, body)),
   );
   tool(

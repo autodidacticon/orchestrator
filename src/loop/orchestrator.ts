@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { alwaysValid, type BriefValidator, noRemediation, type Remediator } from '../brief/validate.js';
+import { renewEveryMsOf } from '../brief/compose.js';
 import { checkSubmission } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
 import { type Config, DEFAULT_CONTENDED_RETRIES } from '../config.js';
@@ -597,6 +598,7 @@ export class Orchestrator implements OrchestratorCore {
       carry: entry.carry as Record<string, unknown> | undefined,
       apiBaseUrl: this.apiBaseUrl,
       retryWindowMs: this.config.retryWindowMs,
+      leaseTtlMs: this.config.leaseTtlMs,
       checkCommand: eff.config.checkCommand,
       integrationBranch: this.config.integrationBranch,
       // Only a launch the daemon spawns gets the list; in pull mode every launch is claimed and the worker runs under its own permissions.
@@ -773,6 +775,84 @@ export class Orchestrator implements OrchestratorCore {
     if ((e.status.kind === 'running' || e.status.kind === 'waiting') && e.lease?.launchId === launch.launchId) {
       this.store.setEntry(launch.taskId, { ...e, lease: { ...e.lease, expiresAt: this.now() + this.config.leaseTtlMs } });
     }
+  }
+
+  /**
+   * The lease of a launch's task while the launch holds it: the TTL, the absolute expiry, and the
+   * longest a worker may go between calls (a third of the TTL). See specs/pull-runner "Lease facts in the claim".
+   */
+  leaseFacts(launch: Launch): { ttlMs: number; expiresAt: number; renewEveryMs: number } | undefined {
+    const e = this.entry(launch.taskId);
+    if (e.lease?.launchId !== launch.launchId) return undefined;
+    const ttlMs = this.config.leaseTtlMs;
+    return { ttlMs, expiresAt: e.lease.expiresAt, renewEveryMs: renewEveryMsOf(ttlMs) };
+  }
+
+  /**
+   * Renew a claimed launch's lease for the loop that holds it while its agent process is alive.
+   * A renewal is not a progress signal: it leaves progressAt, lastSignal and the stuck clock alone,
+   * and appends no event. See specs/pull-runner "Lease renewal by the work loop".
+   */
+  renewClaim(launchId: string, token: string): ApiResponse {
+    const launch = this.authenticate(launchId, token);
+    if (!launch) return { status: 401, body: { error: 'unauthorized' } };
+    if (!launch.worker || launch.pid !== undefined) return { status: 409, body: { ok: false, reason: `launch ${launchId} is not a claimed launch` } };
+    const e = this.entry(launch.taskId);
+    if (e.lease?.launchId !== launchId || (e.status.kind !== 'running' && e.status.kind !== 'waiting')) {
+      return { status: 409, body: { ok: false, reason: `launch ${launchId} no longer holds its task; task is ${e.status.kind}` } };
+    }
+    this.renewLease(launch);
+    return { status: 200, body: { ok: true, ...this.leaseFacts(launch) } };
+  }
+
+  /**
+   * A running claimed launch whose lease expired. With progress in the worktree since the claim (a
+   * commit on the launch branch or a dirty file) and the task's kept releases under
+   * `daemon.maxKeptReleases`, it ends as a kept release: uncommitted work is committed on the branch,
+   * the branch is kept, the attempt is not spent, and the next brief names the branch. Otherwise it is a
+   * failed attempt (`leaseExpired`). See specs/pull-runner "Lease expiry".
+   */
+  async expireClaim(launch: Launch): Promise<'kept' | 'failed' | 'skipped'> {
+    const message = `no contact from worker for ${this.config.leaseTtlMs}ms`;
+    const expired = (): boolean => {
+      const e = this.entry(launch.taskId);
+      return e.status.kind === 'running' && e.lease?.launchId === launch.launchId && e.lease.expiresAt <= this.now() && this.store.getLaunch(launch.launchId)?.status === 'live';
+    };
+    if (!expired()) return 'skipped';
+    const bound = this.config.daemon.maxKeptReleases;
+    const interruptions = this.entry(launch.taskId).interruptions ?? 0;
+    let preserved: { headSha: string; wipCommit?: string } | undefined;
+    if (bound === 0 || interruptions < bound) {
+      try {
+        // A clean tree at the base sha is left as it is, so this is also the progress test.
+        preserved = await this.workspace.preserve(launch);
+      } catch (err) {
+        this.log.warn('could not inspect or preserve the worktree of an expired claim; failing the attempt', { launchId: launch.launchId, err: String(err) });
+      }
+    }
+    // A call that arrived while git ran renewed the lease: the launch lives on (any WIP commit stays on its branch).
+    if (!expired()) return 'skipped';
+    const progressed = preserved !== undefined && (preserved.wipCommit !== undefined || preserved.headSha !== launch.baseSha);
+    let outcome: 'kept' | 'failed' = 'failed';
+    if (progressed) {
+      const entry = this.entry(launch.taskId);
+      const interrupted: InterruptedContext = { priorLaunchId: launch.launchId, priorBranch: launch.branch, headSha: preserved!.headSha, ...(preserved!.wipCommit ? { wipCommit: preserved!.wipCommit } : {}), reason: 'leaseExpired', interruptions: interruptions + 1 };
+      this.store.transaction(() => {
+        this.store.appendEvent({ kind: 'launch.released', taskId: launch.taskId, launchId: launch.launchId, payload: { reason: message, reasonCode: 'leaseExpired', progressed: true, keep: true, kept: true, workerId: launch.worker?.id } }, this.now());
+        this.transition(launch.taskId, { kind: 'unstarted' }, 'orchestrator', 'released', { carry: { ...(entry.carry ?? {}), interrupted }, interruptions: interrupted.interruptions }, { reason: 'leaseExpired' });
+        this.endLaunch(launch, 'leaseExpired', { kept: true });
+      });
+      outcome = 'kept';
+    } else {
+      await this.recordUsage(launch);
+      this.store.transaction(() => {
+        this.fail(launch.taskId, { kind: 'leaseExpired', message }, 'orchestrator', 'deadOrExpired');
+        this.endLaunch(launch, 'leaseExpired');
+      });
+    }
+    await this.workspace.remove(launch);
+    this.wake();
+    return outcome;
   }
 
   /** Every API call is progress; a heartbeat with new text is progress with the text kept. */
@@ -1394,6 +1474,7 @@ export class Orchestrator implements OrchestratorCore {
       brief = undefined;
     }
     const entry = this.entry(launch.taskId);
+    const lease = this.leaseFacts(launch);
     let pending: Record<string, unknown> | undefined;
     if (entry.status.kind === 'waiting') pending = { seq: entry.status.seq, question: entry.status.question, ...(entry.status.answer !== undefined ? { answer: entry.status.answer } : {}) };
     else if (launch.pendingAnswer) pending = { seq: launch.pendingAnswer.seq, answer: launch.pendingAnswer.answer };
@@ -1414,6 +1495,8 @@ export class Orchestrator implements OrchestratorCore {
       commitPolicy: commitPolicyOf(launch),
       model: launch.model,
       effort: launch.effort,
+      // The lease: a worker must not go longer than renewEveryMs between calls. See specs/pull-runner "Lease facts in the claim".
+      ...(lease ? { leaseTtlMs: lease.ttlMs, leaseExpiresAt: lease.expiresAt, lease } : {}),
       // A codex worker loop composes the same `codex exec` as a spawned launch: the effective runner.codex keys, the long-poll ceiling, and the agent environment. See specs/pull-runner "Claim".
       ...(runnerOf(launch) === 'codex' ? { codex: { settings: this.effective().config.runner.codex, maxWaitMs: this.config.maxWaitMs, retryWindowMs: this.config.retryWindowMs, env: this.agentEnv(launch) } } : {}),
       // An opencode loop likewise composes the same `opencode run` and per-launch config; `allowedTools` are the rules the derived permission ruleset comes from.

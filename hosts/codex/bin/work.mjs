@@ -172,6 +172,49 @@ export function watchVerdict(state, { now, lastOutputAt, reportedAt, maxSilenceM
   return undefined;
 }
 
+/** The renewal interval from the claim: lease.renewEveryMs, else a third of leaseTtlMs; undefined from a daemon that states no lease. */
+export function renewEveryMs(claim) {
+  const every = Number(claim?.lease?.renewEveryMs);
+  if (Number.isFinite(every) && every > 0) return every;
+  const ttl = Number(claim?.leaseTtlMs);
+  return Number.isFinite(ttl) && ttl > 0 ? Math.max(1, Math.floor(ttl / 3)) : undefined;
+}
+
+/**
+ * Renew a claimed launch's lease every `renewEveryMs(claim)` while the agent process lives, with
+ * POST /v1/launches/:id/renew and the launch token. The renewal is not a progress signal, so a silent
+ * agent still goes stuck. Stops for good on 401, 404 (an older daemon) or 409 (the launch no longer
+ * holds its task); a network failure is retried on the next beat. Returns `{ stop }`; the caller stops it
+ * when the agent exits. See specs/host-integration "Work loop renews the lease".
+ */
+export function startRenewal(http, claim, log = () => {}) {
+  const every = renewEveryMs(claim);
+  if (!every) return { stop() {}, every: undefined };
+  let stopped = false;
+  let inflight = false;
+  const timer = setInterval(async () => {
+    if (stopped || inflight) return;
+    inflight = true;
+    try {
+      const r = await http('POST', `/v1/launches/${encodeURIComponent(claim.launchId)}/renew`, {}, { authorization: `Bearer ${claim.token}` });
+      if (!stopped && (r.status === 401 || r.status === 404 || r.status === 409)) {
+        log(`${claim.taskId}: lease renewal stopped (${r.status} ${r.body?.reason ?? r.body?.error ?? ''})`);
+        stop();
+      }
+    } catch (err) {
+      log(`${claim.taskId}: lease renewal failed (${err}); retrying on the next beat`);
+    } finally {
+      inflight = false;
+    }
+  }, every);
+  timer.unref?.();
+  function stop() {
+    stopped = true;
+    clearInterval(timer);
+  }
+  return { stop, every };
+}
+
 /** End a detached child's process group: SIGTERM, then SIGKILL after `graceMs`, sent even if the shell has gone, for the agent it started. */
 export function killGroup(child, graceMs = KILL_GRACE_MS) {
   const send = (sig) => {
@@ -197,6 +240,11 @@ export function workerPreamble(c, workerId, kind = DEFAULT_RUNNER) {
     `Credentials: ${tools} already carry this launch's identity and token. Use them for every report and question; do not call the HTTP API from a command.`,
     'If any orchestrator tool returns 401, your launch has been revoked: stop immediately.',
     'Never write a fallback report file, whatever the brief says about one: this launch has no process the orchestrator watches, so the file is never read. If a tool call fails because the orchestrator cannot be reached, retry it.',
+    ...(renewEveryMs(c)
+      ? [
+          `Lease: the claim states a lease of ${c.lease?.ttlMs ?? c.leaseTtlMs}ms. Call an orchestrator tool (heartbeat with a short progress text will do) at least every ${renewEveryMs(c)}ms, a third of the lease. Run any command expected to take longer than that in the background and call heartbeat while it runs. This loop keeps the lease alive while you run, but only your own calls and changes in the worktree count as progress: a long silence is still reported stuck.`,
+        ]
+      : []),
     ...(pending
       ? [`A question was asked earlier with seq ${pending.seq}${pending.answer !== undefined ? ` and the answer is: ${pending.answer}` : '; call block with that seq to collect the answer before continuing'}.`]
       : []),
@@ -248,14 +296,14 @@ export function makeAdapter(kind, mod) {
 }
 
 export function makeClient(base, retryWindowMs = 60_000) {
-  return async function http(method, route, body) {
+  return async function http(method, route, body, headers = {}) {
     const deadline = Date.now() + retryWindowMs;
     let delay = 200;
     for (;;) {
       try {
         const res = await fetch(`${base}${route}`, {
           method,
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...headers },
           body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
         });
         let json = {};
@@ -337,6 +385,7 @@ export async function runWork(opts, mods) {
     let text = '';
     let spawnError;
     let terminated;
+    let renewal;
     const maxSilenceMs = silenceLimitMs(opts.maxSilenceMs, c);
     log(`${workerId}: ${c.taskId} (launch ${c.launchId.slice(0, 8)}) ${adapter.label} -m ${c.model ?? '(default)'}; log ${logFile}; silence limit ${maxSilenceMs ? `${maxSilenceMs}ms` : 'off'}`);
     const exit = await new Promise((resolve) => {
@@ -349,6 +398,8 @@ export async function runWork(opts, mods) {
         return;
       }
       active.set(workerId, { child, launchId: c.launchId });
+      // The agent cannot call while one long command runs, so this loop keeps the lease while the process lives.
+      renewal = startRenewal(http, c, log);
       let closed = false;
       let lastOutputAt = Date.now();
       let reportedAt;
@@ -365,6 +416,7 @@ export async function runWork(opts, mods) {
       });
       child.on('close', (code, signal) => {
         closed = true;
+        renewal?.stop();
         resolve({ code, signal });
       });
       // The watcher: an agent that hangs (a provider stream error, a turn that never ends) is ended here, not waited on.
@@ -391,6 +443,7 @@ export async function runWork(opts, mods) {
         }
       })();
     });
+    renewal?.stop();
     active.delete(workerId);
     await new Promise((r) => out.end(r));
 

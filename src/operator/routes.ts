@@ -269,6 +269,12 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     orch.store.appendEvent({ kind: 'operator.release', launchId: id as string, payload: { reason, keep } }, orch.now());
     return orch.release(id as string, reason, { keep });
   });
+  // The work loop renews a claimed launch's lease while its agent process lives; authenticated by the launch token like an agent call,
+  // but not a progress signal. See specs/pull-runner "Lease renewal by the work loop".
+  server.addRoute('POST', /^\/v1\/launches\/([^/]+)\/renew$/, async (req, _body, [id]) => {
+    const h = req.headers.authorization ?? '';
+    return orch.renewClaim(id as string, h.startsWith('Bearer ') ? h.slice(7).trim() : '');
+  });
   // A claimed launch has no log: its worker posts the usage it read after the agent exited. See specs/pull-runner "Worker usage".
   server.addRoute('POST', /^\/v1\/launches\/([^/]+)\/usage$/, async (_req, body, [id]) => {
     orch.store.appendEvent({ kind: 'operator.usage', launchId: id as string, payload: { ...body } }, orch.now());

@@ -32,6 +32,8 @@ export interface BriefJson {
   /** The launch's runner kind, commit policy, (codex) sandbox and (opencode) permission; absent when the brief input had none. See specs/worker-runners. */
   runner?: BriefRunner;
   retryWindowMs: number;
+  /** The lease TTL in force when the brief was composed; a claim response states the same value. */
+  leaseTtlMs?: number;
   fallbackPath: string;
   attempt: number;
   launchNo: number;
@@ -39,6 +41,17 @@ export interface BriefJson {
   acceptanceCriteria: string[];
   dependencies: Array<{ taskId: string; summary?: string; report?: Record<string, unknown>; cancelled?: { reason: string }; external?: { done: boolean; title?: string } }>;
   context?: Record<string, unknown>;
+}
+
+/** The longest a worker may go between calls: a third of the lease TTL. */
+export const renewEveryMsOf = (leaseTtlMs: number): number => Math.max(1, Math.floor(leaseTtlMs / 3));
+
+const seconds = (ms: number): string => (ms % 1000 === 0 ? `${ms / 1000}s` : `${ms}ms`);
+
+/** The brief's heartbeat interval line. See specs/agent-protocol "Heartbeat interval". */
+export function leaseRule(leaseTtlMs: number): string {
+  const every = renewEveryMsOf(leaseTtlMs);
+  return `- Lease: your lease lasts ${seconds(leaseTtlMs)} (\`leaseTtlMs\` ${leaseTtlMs}; a claim response states it as \`lease.ttlMs\` with the expiry). Every call renews it. Call an operation (\`heartbeat\` with a short progress text will do) at least every ${seconds(every)} (\`lease.renewEveryMs\` ${every}, a third of the lease). Run any command expected to take longer than that in the background and call \`heartbeat\` while it runs: you cannot call while a foreground command runs, and a lease that expires ends your launch.`;
 }
 
 export function acceptanceCriteriaOf(payload: Record<string, unknown>): string[] {
@@ -65,6 +78,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     allowedTools: input.allowedTools,
     ...(input.runner ? { runner: input.runner } : {}),
     retryWindowMs: input.retryWindowMs,
+    ...(input.leaseTtlMs ? { leaseTtlMs: input.leaseTtlMs } : {}),
     fallbackPath: opts.fallbackPath,
     attempt: launch.attempt,
     launchNo: launch.launchNo,
@@ -232,6 +246,8 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   lines.push(
     `- API: \`${input.apiBaseUrl}/v1/launches/${launch.launchId}/...\` with header \`Authorization: Bearer <token from brief.json>\`.`,
     '- Operations: heartbeat, report (kind submit|fail, with seq), block (a question; waits for the answer), inbox, log.',
+    // The interval rule. See specs/agent-protocol "Heartbeat interval".
+    ...(input.leaseTtlMs ? [leaseRule(input.leaseTtlMs)] : []),
     `- If the API fails for more than ${Math.round(input.retryWindowMs / 1000)}s, write your report to \`${opts.fallbackPath}\` and exit.`,
     '- If any call returns 401, stop immediately: your launch has been revoked.',
     '',

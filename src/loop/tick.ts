@@ -116,12 +116,8 @@ export async function reconcile(o: Orchestrator): Promise<void> {
         if (await checkStuck(o, observed)) continue;
       }
       const cur = o.entry(launch.taskId);
-      if (cur.status.kind === 'running' && cur.lease?.launchId === launch.launchId && cur.lease.expiresAt <= now) {
-        await o.recordUsage(launch);
-        o.fail(launch.taskId, { kind: 'leaseExpired', message: `no contact from worker for ${o.config.leaseTtlMs}ms` }, 'orchestrator', 'deadOrExpired');
-        o.endLaunch(launch, 'leaseExpired');
-        await o.workspace.remove(launch);
-      }
+      // Expiry with progress in the worktree is a kept release; without it, a failed attempt. See specs/pull-runner "Lease expiry".
+      if (cur.status.kind === 'running' && cur.lease?.launchId === launch.launchId && cur.lease.expiresAt <= now) await o.expireClaim(launch);
       continue;
     }
 

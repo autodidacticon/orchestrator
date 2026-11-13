@@ -9,7 +9,7 @@ import { DEFAULT_OPENCODE_COMMAND } from '../../src/runner/command.js';
 import type { Launch } from '../../src/state/store.js';
 import { makeSlice, type SliceHarness, tsxLoader } from '../slice/harness.js';
 // @ts-expect-error a plain .mjs host script without type declarations
-import { DEFAULT_MAX_SILENCE_MS, launchState, packageModules, parseWorkArgs, silenceLimitMs, stopVerdict, watchVerdict, workerPreamble } from '../../hosts/codex/bin/work.mjs';
+import { DEFAULT_MAX_SILENCE_MS, launchState, packageModules, parseWorkArgs, renewEveryMs, silenceLimitMs, startRenewal, stopVerdict, watchVerdict, workerPreamble } from '../../hosts/codex/bin/work.mjs';
 
 /**
  * The work loop by runner kind (hosts/codex/bin/work.mjs) with `--runner opencode` against a
@@ -59,6 +59,8 @@ if (brief.task.opencodeMode === 'hang' && !existsSync(hung)) {
   setInterval(() => {}, 1 << 30);
   await new Promise(() => {});
 }
+// slow: one long silent step (a full test suite in the foreground), then the normal run.
+if (brief.task.opencodeMode === 'slow') await new Promise((r) => setTimeout(r, Number(brief.task.slowMs)));
 const lines = readFileSync(${JSON.stringify(path.join(events, 'H1.jsonl'))}, 'utf8').trimEnd().split('\\n');
 writeSync(1, lines[0] + '\\n');
 process.argv = [process.argv[0], ${JSON.stringify(scripted)}, briefPath];
@@ -277,20 +279,83 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     }
   }
 
-  it('the daemon expires the silent claim; the loop ends the agent and claims the relaunch', async () => {
-    const { first, out } = await hangThenRun({ leaseTtlMs: 1500, health: health() });
-    expect(first).toMatchObject({ status: 'ended', endReason: 'leaseExpired' });
-    const ended = h!.store.listEvents({ kind: 'launch.ended', launchId: first.launchId }).map((e) => e.payload);
-    expect(ended).toEqual([{ endReason: 'leaseExpired' }]);
-    expect(out.stderr).toMatch(/T1 ending opencode \(process group \d+\): the daemon ended the launch/);
-    // The daemon's verdict stands: the loop does not release a launch it no longer holds.
-    expect(h!.store.listEvents({ kind: 'operator.release' })).toEqual([]);
+  // ORC-85: one long command (here the agent is silent throughout) must not lose the launch while the loop's child lives.
+  it('the loop renews the lease of a silent agent: the claim outlives several TTLs and the renewals are not progress', async () => {
+    const ttl = 1500;
+    const silence = 4 * ttl;
+    const { first, out } = await hangThenRun({ leaseTtlMs: ttl, health: health() }, ['--max-silence-ms', String(silence)]);
+    // The loop, not the lease, ended the launch, after its silence limit of four TTLs.
+    expect(first).toMatchObject({ status: 'ended', endReason: 'released' });
+    expect(h!.store.listEvents({ kind: 'launch.ended', launchId: first.launchId }).map((e) => e.payload)).toEqual([{ endReason: 'released' }]);
+    const claimedAt = h!.store.listEvents({ kind: 'launch.claimed', launchId: first.launchId })[0]!.ts;
+    const releasedAt = h!.store.listEvents({ kind: 'launch.released', launchId: first.launchId })[0]!.ts;
+    expect(releasedAt - claimedAt).toBeGreaterThanOrEqual(silence);
+    expect(out.stderr).toMatch(/no output for \d+s \(limit 6000ms\)/);
+    // No call from the agent and no worktree change: the renewals left the progress clock at the claim.
+    expect(h!.store.listEvents({ kind: 'agent.heartbeat', launchId: first.launchId })).toEqual([]);
+    expect(first.progressAt).toBe(first.worker!.claimedAt);
+    expect(first.lastSignal).toBe('claimed');
+  }, 90_000);
+
+  it('an agent silent for longer than several TTLs under the loop keeps its launch and submits on it', async () => {
+    const ttl = 1500;
+    h = await makeSlice({ graph: one(', opencodeMode: slow, slowMs: 5000'), config: { ...opencodePull, leaseTtlMs: ttl, health: health() } });
+    await h.waitFor(() => h!.store.listLaunches({ status: 'claimable' }).length === 1);
+    const loop = startLoop(h, binDir(h), ['--runner', 'opencode', '--workers', '1', '--run-tag', 'slow', '--idle-exit-ms', '20000']);
+    const timer = setInterval(() => void h?.orch.tick(), 100);
+    try {
+      await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done', 60_000);
+      const out = await loop.done;
+      expect(out.code, out.stderr).toBe(0);
+    } finally {
+      clearInterval(timer);
+    }
+    const launches = h.store.listLaunches({ taskId: 'T1' });
+    expect(launches).toHaveLength(1);
+    expect(launches[0]).toMatchObject({ endReason: 'reported', worker: { id: 'slow-1' } });
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 0, launches: 1 });
+    expect(h.store.listEvents({ kind: 'launch.ended', taskId: 'T1' }).map((e) => e.payload?.['endReason'])).toEqual(['reported']);
+  }, 90_000);
+
+  it('a claim whose loop is gone expires within the TTL plus a tick, though its agent still runs', async () => {
+    const ttl = 1500;
+    h = await makeSlice({ graph: one(', opencodeMode: hang'), config: { ...opencodePull, leaseTtlMs: ttl, health: health() } });
+    await h.waitFor(() => h!.store.listLaunches({ status: 'claimable' }).length === 1);
+    const loop = startLoop(h, binDir(h), ['--runner', 'opencode', '--workers', '1', '--run-tag', 'gone', '--idle-exit-ms', '20000']);
+    const marker = path.join(captureDir(h), 'hung-T1');
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      for (const deadline = Date.now() + 30_000; !existsSync(marker); await new Promise((r) => setTimeout(r, 50))) {
+        if (Date.now() > deadline) throw new Error(`the fake never hung; loop stderr:\n${loop.stderr()}`);
+      }
+      timer = setInterval(() => void h?.orch.tick(), 100);
+      const [claimed] = h.store.listLaunches({ status: 'live' });
+      // Two TTLs under the loop's renewal: still live.
+      await new Promise((r) => setTimeout(r, 2 * ttl));
+      expect(h.store.getLaunch(claimed!.launchId)?.status).toBe('live');
+      // The loop dies without a word; the detached agent lives on, unseen by the daemon.
+      child!.kill('SIGKILL');
+      await loop.done;
+      const killedAt = Date.now();
+      await h.waitFor(() => h!.store.getLaunch(claimed!.launchId)?.status === 'ended', 20_000);
+      const ended = h.store.getLaunch(claimed!.launchId)!;
+      expect(ended.endReason).toBe('leaseExpired');
+      // Bound: the TTL plus one tick (100ms), with margin for a loaded machine.
+      expect(ended.endedAt! - killedAt).toBeLessThanOrEqual(ttl + 100 + 1000);
+      expect(h.orch.entry('T1')).toMatchObject({ attempts: 1 });
+    } finally {
+      clearInterval(timer);
+      const hung = existsSync(marker) ? Number(readFileSync(marker, 'utf8')) : 0;
+      if (hung && pidAlive(hung)) process.kill(hung, 'SIGKILL');
+    }
   }, 90_000);
 
   it('the daemon fails the silent claim as stuck; the loop ends the agent and claims the relaunch', async () => {
     const { first, out } = await hangThenRun({ leaseTtlMs: 60_000, health: health({ stuckFailAfterMs: 1500 }) });
     expect(first).toMatchObject({ status: 'ended', endReason: 'stuck' });
-    expect(out.stderr).toMatch(/the daemon ended the launch/);
+    expect(out.stderr).toMatch(/T1 ending opencode \(process group \d+\): the daemon ended the launch/);
+    // The loop's renewal kept the lease, so stuck, not leaseExpired, ended it; the daemon's verdict stands and the loop does not release.
+    expect(h!.store.listEvents({ kind: 'operator.release' })).toEqual([]);
   }, 90_000);
 
   it('past --max-silence-ms the loop ends the agent, releases the launch without keep, and claims the next one', async () => {
@@ -385,5 +450,60 @@ describe('work.mjs by kind', () => {
     expect(oc.runner).toMatch(/runner[/\\]opencode\.(ts|js)$/);
     expect(oc.codex).toBeUndefined();
     expect((packageModules() as { codex: string }).codex).toMatch(/runner[/\\]codex\.(ts|js)$/);
+  });
+});
+
+describe('work.mjs lease renewal (ORC-85)', () => {
+  it('takes the interval from the claim, and the preamble names it', () => {
+    expect(renewEveryMs({ lease: { ttlMs: 600_000, renewEveryMs: 200_000 } })).toBe(200_000);
+    expect(renewEveryMs({ leaseTtlMs: 9000 })).toBe(3000);
+    expect(renewEveryMs({})).toBeUndefined();
+    const p = workerPreamble({ launchId: 'L1', taskId: 'T1', worktree: '/wt', leaseTtlMs: 600_000, lease: { ttlMs: 600_000, renewEveryMs: 200_000 } }, 'cx-1') as string;
+    expect(p).toContain('a lease of 600000ms');
+    expect(p).toContain('at least every 200000ms');
+    expect(p).toMatch(/longer than that in the background and call heartbeat while it runs/);
+    expect(workerPreamble({ launchId: 'L1', taskId: 'T1', worktree: '/wt' }, 'cx-1')).not.toContain('Lease:');
+  });
+
+  it('renews on the interval with the launch token, and stops for good on 401, 404 or 409, or when stopped', async () => {
+    for (const status of [401, 404, 409]) {
+      const calls: Array<{ route: string; headers: Record<string, string> }> = [];
+      const http = async (_m: string, route: string, _b: unknown, headers: Record<string, string>) => {
+        calls.push({ route, headers });
+        return { status: calls.length < 2 ? 200 : status, body: {} };
+      };
+      const r = startRenewal(http, { launchId: 'L1', taskId: 'T1', token: 'tok', lease: { renewEveryMs: 20 } });
+      expect(r.every).toBe(20);
+      await new Promise((res) => setTimeout(res, 200));
+      r.stop();
+      expect(calls.length).toBe(2);
+      expect(calls[0]).toEqual({ route: '/v1/launches/L1/renew', headers: { authorization: 'Bearer tok' } });
+    }
+    let n = 0;
+    const r = startRenewal(async () => {
+      n++;
+      return { status: 200, body: {} };
+    },{ launchId: 'L1', token: 't', leaseTtlMs: 60 });
+    await new Promise((res) => setTimeout(res, 120));
+    r.stop();
+    const at = n;
+    expect(at).toBeGreaterThan(0);
+    await new Promise((res) => setTimeout(res, 100));
+    expect(n).toBe(at);
+    expect(startRenewal(async () => ({ status: 200, body: {} }), { launchId: 'L1' }).every).toBeUndefined();
+  });
+  it('the Claude Code workflow passes the claimed lease to the worker prompt, which names the interval', () => {
+    const src = readFileSync(path.resolve(here, '../../hosts/claude-code/workflows/work.js'), 'utf8');
+    expect(src).toContain('leaseTtlMs: lease.ttlMs, renewEveryMs: lease.renewEveryMs');
+    expect(src).toContain('leaseTtlMs: { type: \'number\' }');
+    expect(src).toContain('    leaseRule(c),');
+    const body = /function leaseRule\(c\) \{[\s\S]*?\n\}\n/.exec(src)![0];
+    const leaseRule = new Function(`${body}; return leaseRule`)() as (c: Record<string, unknown>) => string;
+    const rule = leaseRule({ leaseTtlMs: 600_000, renewEveryMs: 200_000 });
+    expect(rule).toContain('Your lease lasts 600000ms and only your own calls renew it');
+    expect(rule).toContain('at least every 200000ms');
+    expect(rule).toMatch(/run any command expected to take longer than 200000ms .* in the background and call launch_heartbeat while it runs/);
+    expect(leaseRule({ leaseTtlMs: 9000 })).toContain('at least every 3000ms');
+    expect(leaseRule({})).not.toMatch(/\d+ms/);
   });
 });

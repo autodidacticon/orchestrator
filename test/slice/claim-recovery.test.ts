@@ -1,4 +1,5 @@
-import { existsSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { makeSlice, single, type SliceHarness } from './harness.js';
@@ -54,4 +55,36 @@ describe('recovery of parked and claimed launches', () => {
     expect(existsSync(h.store.getLaunch(launchId)!.worktree)).toBe(false);
     expect(h.workspace).toBeDefined();
   }, 30_000);
+
+  // ORC-85, against real git worktrees: see specs/pull-runner "Lease expiry".
+  it('an expired claim with a dirty file is kept on its branch at no cost; an untouched retry that expires spends the attempt', async () => {
+    h = await makeSlice({ graph: single('hang'), config: pull(1500) });
+    await h.orch.tick();
+    const c = await h.orch.claim({ workerId: 'w1' });
+    const first = h.store.getLaunch(String(c.body['launchId']))!;
+    writeFileSync(path.join(first.worktree, 'progress.txt'), 'half done\n');
+    await h.waitFor(() => h!.store.getLaunch(first.launchId)?.status === 'ended', 15_000);
+    expect(h.store.getLaunch(first.launchId)).toMatchObject({ status: 'ended', endReason: 'leaseExpired' });
+    expect(existsSync(first.worktree)).toBe(false);
+    // The branch is kept, holding a WIP commit of the dirty file on top of the base.
+    const head = execFileSync('git', ['-C', h.repo, 'rev-parse', `refs/heads/${first.branch}`], { encoding: 'utf8' }).trim();
+    expect(head).not.toBe(first.baseSha);
+    expect(execFileSync('git', ['-C', h.repo, 'show', `${head}:progress.txt`], { encoding: 'utf8' })).toBe('half done\n');
+    expect(execFileSync('git', ['-C', h.repo, 'rev-parse', `${head}^`], { encoding: 'utf8' }).trim()).toBe(first.baseSha);
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 0, interruptions: 1, status: { kind: 'running' } });
+
+    // The retry's brief names the kept branch.
+    await h.waitFor(() => h!.store.listLaunches({ taskId: 'T1', status: 'claimable' }).length === 1, 10_000);
+    const second = h.store.listLaunches({ taskId: 'T1', status: 'claimable' })[0]!;
+    const brief = readFileSync(path.join(second.worktree, '.orchestrator', 'brief.md'), 'utf8');
+    expect(brief).toContain(`Its branch \`${first.branch}\` holds the work so far at \`${head}\``);
+    expect(brief).toContain('interrupted (leaseExpired)');
+
+    // The retry touches nothing (its worktree is at its base sha under the real prepare) and expires: a failed attempt.
+    const c2 = await h.orch.claim({ workerId: 'w2' });
+    expect(c2.body['launchId']).toBe(second.launchId);
+    await h.waitFor(() => h!.store.getLaunch(second.launchId)?.status === 'ended', 15_000);
+    expect(h.store.getLaunch(second.launchId)).toMatchObject({ endReason: 'leaseExpired' });
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 1, interruptions: 1 });
+  }, 60_000);
 });
