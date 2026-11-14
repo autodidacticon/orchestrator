@@ -26,6 +26,12 @@ export interface VerifierContext {
   publishedSince: (baseSha: string) => Promise<Id[]>;
   /** Submit report declared no changes. */
   noChanges: boolean;
+  /**
+   * Resolves when every progress record made so far is durable. Awaited once, between the `publishing` record and
+   * the compare-and-swap, so publication never runs ahead of its record. Rejects (and the run stops with no effect)
+   * when the store went fatal or the job was dropped while waiting. See specs/integration-pipeline "Durable publishing record".
+   */
+  durable?: () => Promise<void>;
 }
 
 export interface VerifierBackend {

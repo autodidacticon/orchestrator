@@ -4,8 +4,79 @@
 import type { Orchestrator } from '../loop/orchestrator.js';
 import { applyPendingCascade } from '../loop/tick.js';
 import { startLaunch } from './launch.js';
-import type { Launch } from '../state/store.js';
-import { git } from '../workspace/git.js';
+import type { Launch, VerifierJob } from '../state/store.js';
+import { TRAILER_LAUNCH } from '../verify/verifier.js';
+import { findTrailer, git } from '../workspace/git.js';
+import { OriginConfigError } from '../workspace/origin.js';
+
+/** Jobs recovery decides against origin: every unapplied job that has not reached a verdict. */
+const UNDECIDED: VerifierJob['status'][] = ['queued', 'checking', 'verified', 'publishing'];
+
+/**
+ * With `git.pushIntegration` on, fetch origin once and find each job's launch trailer on origin's integration branch.
+ * `off` when pushing is off or origin is not configured (a setting, not an outage: the verifier reports it);
+ * `unreachable` when the fetch failed, which decides nothing. See specs/crash-recovery "Origin lookup before commit lost".
+ */
+async function landedOnOrigin(o: Orchestrator, jobs: readonly VerifierJob[]): Promise<{ kind: 'off' } | { kind: 'unreachable'; error: string } | { kind: 'fetched'; landed: Map<string, string> }> {
+  const origin = o.origin;
+  if (!origin) return { kind: 'off' };
+  const landed = new Map<string, string>();
+  if (!jobs.length) return { kind: 'fetched', landed };
+  try {
+    await origin.fetch();
+  } catch (err) {
+    if (err instanceof OriginConfigError) return { kind: 'off' };
+    return { kind: 'unreachable', error: String(err) };
+  }
+  if (!(await origin.head())) return { kind: 'fetched', landed };
+  for (const job of jobs) {
+    const sha = await findTrailer(origin.repo, origin.trackingRef, TRAILER_LAUNCH, job.launchId);
+    if (sha) landed.set(job.jobId, sha);
+  }
+  return { kind: 'fetched', landed };
+}
+
+/** A job whose launch trailer is on origin is published at origin's commit, whatever its stored status. */
+async function recordLanded(o: Orchestrator, job: VerifierJob, sha: string): Promise<void> {
+  // The files the commit changed, for the baseMoved notice sent when the publication is applied.
+  const changedFiles = (await git(o.config.repoPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha], { allowFail: true })).stdout.trim().split('\n').filter(Boolean).sort();
+  o.store.updateJob(job.jobId, { status: 'published', publishedSha: sha, verifiedSha: job.verifiedSha ?? sha, changedFiles, updatedAt: o.now() });
+  o.log.info('recovery: launch trailer found on origin; job published there', { taskId: job.taskId, jobId: job.jobId, from: job.status, publishedSha: sha });
+}
+
+/**
+ * A queued job whose sealed commit is not in the clone (a fresh clone; launch branches live only in the clone) and
+ * whose trailer is not on origin can never be verified: drop it and retry the task, without spending an attempt.
+ */
+async function dropIfCommitLost(o: Orchestrator, job: VerifierJob): Promise<void> {
+  if (!(await commitMissing(o.config.repoPath, job.sealedSha))) return;
+  const { store } = o;
+  const message = `sealed commit ${job.sealedSha} of launch ${job.launchId} is not in the clone (lost with the previous clone); retried without spending an attempt`;
+  store.transaction(() => {
+    store.dropJob(job.jobId);
+    store.appendEvent({ kind: 'verify.commitLost', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, sealedSha: job.sealedSha } }, o.now());
+    if (o.entry(job.taskId).status.kind === 'submitted') o.fail(job.taskId, { kind: 'commitLost', message, detail: { sealedSha: job.sealedSha, jobId: job.jobId } }, 'orchestrator', 'commitLost');
+  });
+  o.log.warn('recovery: sealed commit lost; task retried', { taskId: job.taskId, jobId: job.jobId, sealedSha: job.sealedSha });
+}
+
+/**
+ * A later pass over jobs recovery deferred because origin could not be fetched. Still unreachable: they stay queued
+ * and deferred. Otherwise a trailer on origin publishes the job, a missing sealed commit drops it as `commitLost`, and
+ * anything else goes back to the verifier.
+ */
+export async function decideJobsOnOrigin(o: Orchestrator, jobIds: readonly string[]): Promise<void> {
+  const jobs = jobIds.map((id) => o.store.getJob(id)).filter((j): j is VerifierJob => j !== undefined && !j.applied && j.status === 'queued');
+  for (const id of jobIds) if (!jobs.some((j) => j.jobId === id)) o.deferredJobs.delete(id);
+  const found = await landedOnOrigin(o, jobs);
+  if (found.kind === 'unreachable') return;
+  for (const job of jobs) {
+    o.deferredJobs.delete(job.jobId);
+    const sha = found.kind === 'fetched' ? found.landed.get(job.jobId) : undefined;
+    if (sha) await recordLanded(o, job, sha);
+    else await dropIfCommitLost(o, job);
+  }
+}
 
 /**
  * True only when the clone definitely lacks the commit: `git cat-file -e` on a full sha exits 1 for a missing object.
@@ -108,11 +179,22 @@ export async function recover(o: Orchestrator): Promise<void> {
 
   // Verifier jobs: in-flight states restart from queued; publishing is resolved by the backend's recovery hook.
   await (o.verifier as { sweepTemp?: () => Promise<void> }).sweepTemp?.();
+  // With origin as the source of truth, a launch trailer on origin means published, whatever the job's stored status:
+  // a push can land while its record is not yet durable. See specs/crash-recovery "Origin lookup before commit lost".
+  const lookup = await landedOnOrigin(o, store.listJobs({ status: UNDECIDED, applied: false }));
+  if (lookup.kind === 'fetched') {
+    for (const [jobId, sha] of lookup.landed) await recordLanded(o, store.getJob(jobId) as VerifierJob, sha);
+  } else if (lookup.kind === 'unreachable') {
+    o.log.warn('recovery: origin could not be fetched; undecided verifier jobs stay queued until it answers', { err: lookup.error });
+  }
   for (const job of store.listJobs({ status: ['checking', 'verified'] })) {
     store.updateJob(job.jobId, { status: 'queued', updatedAt: o.now() });
   }
   for (const job of store.listJobs({ status: 'publishing' })) {
-    const resolved = await (o.verifier as { recoverPublishing?: (j: typeof job) => Promise<'published' | 'requeue'> }).recoverPublishing?.(job);
+    const resolved =
+      lookup.kind === 'unreachable'
+        ? 'requeue'
+        : await (o.verifier as { recoverPublishing?: (j: typeof job) => Promise<'published' | 'requeue'> }).recoverPublishing?.(job);
     if (resolved === 'published') {
       store.updateJob(job.jobId, { status: 'published', publishedSha: job.squashSha, verifiedSha: job.verifiedSha, updatedAt: o.now() });
     } else {
@@ -120,17 +202,11 @@ export async function recover(o: Orchestrator): Promise<void> {
     }
   }
 
-  // A queued job whose sealed commit is not in the clone (a fresh clone; launch branches live only in the clone) can
-  // never be verified: drop it and retry the task, without spending an attempt. See specs/crash-recovery "Startup on a fresh clone".
+  // A queued job whose sealed commit is not in the clone and whose trailer is not on origin is lost. An unreachable
+  // origin is not an answer: the job stays queued and a later pass decides it. See specs/crash-recovery "Startup on a fresh clone".
   for (const job of store.listJobs({ status: 'queued', applied: false })) {
-    if (!(await commitMissing(o.config.repoPath, job.sealedSha))) continue;
-    const message = `sealed commit ${job.sealedSha} of launch ${job.launchId} is not in the clone (lost with the previous clone); retried without spending an attempt`;
-    store.transaction(() => {
-      store.dropJob(job.jobId);
-      store.appendEvent({ kind: 'verify.commitLost', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, sealedSha: job.sealedSha } }, o.now());
-      if (o.entry(job.taskId).status.kind === 'submitted') o.fail(job.taskId, { kind: 'commitLost', message, detail: { sealedSha: job.sealedSha, jobId: job.jobId } }, 'orchestrator', 'commitLost');
-    });
-    o.log.warn('recovery: sealed commit lost; task retried', { taskId: job.taskId, jobId: job.jobId, sealedSha: job.sealedSha });
+    if (lookup.kind === 'unreachable') o.deferredJobs.add(job.jobId);
+    else await dropIfCommitLost(o, job);
   }
 
   // Milestone tags: re-create idempotently for submitted gated milestones lacking the marker.

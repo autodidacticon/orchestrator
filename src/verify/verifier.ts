@@ -124,6 +124,8 @@ export class GitVerifierBackend implements VerifierBackend {
       const squashSha = (await git(repo, ['commit-tree', rebasedTree, '-p', expectedHead, '-m', message], { env: identity })).stdout.trim();
       crashPoint('verify.afterSquash');
       ctx.progress({ status: 'publishing', squashSha });
+      // The ref update and the push are outside effects: they wait until the publishing record is durable.
+      await ctx.durable?.();
 
       // 4. Compare-and-swap publication.
       const changedFiles = (await git(temp, ['diff', '--name-only', expectedHead, rebasedSha], { allowFail: true })).stdout.trim().split('\n').filter(Boolean).sort();

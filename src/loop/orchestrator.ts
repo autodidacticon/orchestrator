@@ -100,6 +100,17 @@ export type ReopenResult =
   | { ok: true; reset: CascadeStep[] }
   | { ok: false; reason: string; blockers?: Id[]; publishing?: Id };
 
+/** How often a resolution pass for deferred verifier jobs is tried while origin cannot be fetched. */
+const DEFERRED_RETRY_MS = 1000;
+
+/** Thrown while waiting for durability when the store went fatal: the waiting effect must not happen. */
+export class StoreFatalError extends Error {
+  constructor() {
+    super('the store is fatal; the effect waiting for durability does not happen');
+    this.name = 'StoreFatalError';
+  }
+}
+
 /** Thrown by the verifier progress callback when its job was dropped mid-flight. */
 export class JobDroppedError extends Error {
   constructor(public readonly jobId: string) {
@@ -249,6 +260,14 @@ export class Orchestrator implements OrchestratorCore {
   private readonly boot: Resolved;
   private configMemo: { key: string; resolved: Resolved } | undefined;
   private readonly heldJobsLogged = new Set<string>();
+  /**
+   * Jobs recovery could not decide because origin could not be fetched: kept off the verifier and decided by a
+   * later resolution pass. See specs/crash-recovery "Origin lookup before commit lost".
+   */
+  readonly deferredJobs = new Set<string>();
+  private deferredTriedAt = Number.NEGATIVE_INFINITY;
+  /** The integration branch's remote when `git.pushIntegration` is on; shared by the workspace and the verifier. */
+  readonly origin: Origin | undefined;
   /** Models already warned about as having tokens but no price. */
   private readonly unpricedModelsLogged = new Set<string>();
 
@@ -277,6 +296,7 @@ export class Orchestrator implements OrchestratorCore {
       : undefined;
     (deps.workspace as { useOrigin?: (o: Origin | undefined) => void }).useOrigin?.(origin);
     (deps.verifier as { useOrigin?: (o: Origin | undefined) => void }).useOrigin?.(origin);
+    this.origin = origin;
     this.runner = gateOnDurable(this.store, deps.runner, RUNNER_METHODS);
     this.workspace = gateOnDurable(this.store, deps.workspace, WORKSPACE_METHODS);
     this.verifier = gateOnDurable(this.store, deps.verifier, VERIFIER_METHODS);
@@ -1782,8 +1802,19 @@ export class Orchestrator implements OrchestratorCore {
    */
   startVerifierIfIdle(): void {
     if (this.verifierInFlight) return;
+    if (this.deferredJobs.size && this.now() - this.deferredTriedAt >= DEFERRED_RETRY_MS) {
+      this.deferredTriedAt = this.now();
+      this.verifierInFlight = this.resolveDeferredJobs()
+        .catch((err) => this.log.error('deferred verifier jobs: resolution failed', { err: String(err) }))
+        .finally(() => {
+          this.verifierInFlight = undefined;
+          this.wake();
+        });
+      return;
+    }
     const checkCommand = this.effective().config.checkCommand;
     const job = this.store.listJobs({ status: 'queued' }).find((j) => {
+      if (this.deferredJobs.has(j.jobId)) return false;
       if (checkCommand !== undefined || j.sealedSha === j.baseSha) return true;
       if (!this.heldJobsLogged.has(j.jobId)) {
         this.heldJobsLogged.add(j.jobId);
@@ -1798,6 +1829,11 @@ export class Orchestrator implements OrchestratorCore {
       .catch((err) => {
         if (err instanceof JobDroppedError) {
           this.log.info('verifier job dropped mid-flight', { jobId: job.jobId });
+          return;
+        }
+        if (err instanceof StoreFatalError) {
+          // Nothing is recorded: the store takes no more work, and the job is decided at the next start.
+          this.log.error('verifier job stopped before publication: the store is fatal', { jobId: job.jobId });
           return;
         }
         this.log.error('verifier job crashed', { jobId: job.jobId, err: String(err) });
@@ -1823,6 +1859,11 @@ export class Orchestrator implements OrchestratorCore {
         this.store.updateJob(job.jobId, { ...patch, updatedAt: this.now() });
       },
       publishedSince: async (baseSha) => this.publishedSince(baseSha),
+      durable: async () => {
+        await this.waitDurable();
+        const cur = this.store.getJob(job.jobId);
+        if (!cur || cur.status === 'dropped') throw new JobDroppedError(job.jobId);
+      },
     });
     const current = this.store.getJob(job.jobId);
     if (!current || current.status === 'dropped' || current.applied) {
@@ -1840,6 +1881,32 @@ export class Orchestrator implements OrchestratorCore {
     } else {
       this.store.updateJob(job.jobId, { status: 'conflict', conflictFiles: outcome.files, conflictSince: outcome.since, updatedAt: this.now() });
     }
+  }
+
+  /**
+   * Wait until everything committed so far is durable. A journal that went fatal never resolves `durable()`; this
+   * notices and throws StoreFatalError so the caller stops with no outside effect. See specs/integration-pipeline "Durable publishing record".
+   */
+  async waitDurable(): Promise<void> {
+    const fatal = () => (this.store as { fatalReason?: () => unknown }).fatalReason?.();
+    if (this.store.durability().pendingBatches === 0 && !fatal()) return;
+    const done = this.store.durable().then(() => true);
+    for (;;) {
+      if (fatal()) throw new StoreFatalError();
+      let timer: NodeJS.Timeout | undefined;
+      const ok = await Promise.race([done, new Promise<false>((r) => (timer = setTimeout(() => r(false), 100)))]);
+      clearTimeout(timer);
+      if (ok) {
+        if (fatal()) throw new StoreFatalError();
+        return;
+      }
+    }
+  }
+
+  /** Decide the jobs recovery deferred, now that origin may answer. */
+  private async resolveDeferredJobs(): Promise<void> {
+    const { decideJobsOnOrigin } = await import('../launch/recovery.js');
+    await decideJobsOnOrigin(this, [...this.deferredJobs]);
   }
 
   /** Tasks published since a base sha, from the job log (order of publication). */
