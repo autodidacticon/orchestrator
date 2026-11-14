@@ -3,6 +3,7 @@
  */
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
+import { withoutStore } from '../runs/childEnv.js';
 
 const execFileP = promisify(execFile);
 
@@ -24,7 +25,18 @@ export class GitError extends Error {
  * the index regardless, so worktree reads use plumbing (`git diff-index`) instead. Writes still lock. See
  * specs/health-monitoring "Worktree observation takes no index lock".
  */
-const baseEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0' };
+export const GIT_FIXED_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0' } as const;
+
+/**
+ * The environment of one git command, built when it runs: the daemon's environment, the fixed git settings, the
+ * caller's overrides, and then the store removed (`DATABASE_URL`, `ORCH_RUN_ID` and any variable holding a withheld
+ * store URL), so neither git nor a project hook it runs can reach the state database. Built per call, not at import:
+ * the store URL is withheld only once the daemon has resolved its configuration. See specs/state-backend
+ * "No store URL in child environments".
+ */
+export function gitEnv(extra: Record<string, string> = {}): Record<string, string | undefined> {
+  return withoutStore<string | undefined>({ ...process.env, ...GIT_FIXED_ENV, ...extra });
+}
 
 export interface GitResult {
   stdout: string;
@@ -41,7 +53,7 @@ export async function git(cwd: string, args: string[], opts: { allowFail?: boole
     return r;
   }
   try {
-    const { stdout, stderr } = await execFileP('git', args, { cwd, env: { ...baseEnv, ...opts.env }, maxBuffer: 64 * 1024 * 1024 });
+    const { stdout, stderr } = await execFileP('git', args, { cwd, env: gitEnv(opts.env), maxBuffer: 64 * 1024 * 1024 });
     return { stdout, stderr, code: 0 };
   } catch (err) {
     const e = err as { stdout?: string; stderr?: string; code?: number | string | null };
@@ -57,7 +69,7 @@ export async function git(cwd: string, args: string[], opts: { allowFail?: boole
  */
 function gitBounded(cwd: string, args: string[], env: Record<string, string> | undefined, timeoutMs: number): Promise<GitResult> {
   return new Promise((resolve) => {
-    const child = spawn('git', args, { cwd, env: { ...baseEnv, ...env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const child = spawn('git', args, { cwd, env: gitEnv(env), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
