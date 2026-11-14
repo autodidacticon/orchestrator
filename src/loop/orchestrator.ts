@@ -215,6 +215,7 @@ export interface StatusReport {
   graphPath: string;
   daemonPid: number;
   daemonUrl: string;
+  /** The highest durable event sequence number, the cursor for /v1/events. See specs/state-backend "Durable cursor in the status". */
   latestSeq: number;
   /** How far the durable copy of the state trails the image. See specs/state-backend "Durability". */
   storeLagMs: number;
@@ -297,6 +298,8 @@ export class Orchestrator implements OrchestratorCore {
   readonly origin: Origin | undefined;
   /** Models already warned about as having tokens but no price. */
   private readonly unpricedModelsLogged = new Set<string>();
+  /** The inbox read in progress per launch; see `handleInbox`. */
+  private readonly inboxReads = new Map<string, Promise<void>>();
 
   private readonly clock: () => number;
   private _graph: Graph | undefined;
@@ -1052,11 +1055,8 @@ export class Orchestrator implements OrchestratorCore {
       case 'heartbeat':
         this.store.appendEvent({ kind: 'agent.heartbeat', taskId: launch.taskId, launchId, payload: body }, this.now());
         return { status: 200, body: { ok: true } };
-      case 'inbox': {
-        const notices = launch.notices ?? [];
-        if (notices.length) this.store.updateLaunch(launchId, { notices: [] });
-        return { status: 200, body: { notices } };
-      }
+      case 'inbox':
+        return this.handleInbox(launchId);
       case 'log': {
         const seq = this.seqOf(body);
         if (seq !== undefined) {
@@ -1075,6 +1075,47 @@ export class Orchestrator implements OrchestratorCore {
       case 'block':
         return this.handleBlock(launch, body);
     }
+  }
+
+  /**
+   * The inbox hands out only durable notices and answers only once its own writes are durable, although it is a GET.
+   * The notices held now are taken, then everything committed so far (those notices' records, the lease renewal and
+   * the progress signal) is awaited; only the taken notices are then removed from the row, so a notice queued during
+   * the wait stays for the next call, and the removal is awaited too. See specs/state-backend "Durable inbox".
+   */
+  private handleInbox(launchId: string): Promise<ApiResponse> {
+    // One inbox read per launch at a time, so two concurrent reads never hand out the same notice.
+    const prev = this.inboxReads.get(launchId) ?? Promise.resolve();
+    const run = prev.then(() => this.readInbox(launchId));
+    const settled = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.inboxReads.set(launchId, settled);
+    void settled.then(() => {
+      if (this.inboxReads.get(launchId) === settled) this.inboxReads.delete(launchId);
+    });
+    return run;
+  }
+
+  private async readInbox(launchId: string): Promise<ApiResponse> {
+    const taken = this.store.getLaunch(launchId)?.notices ?? [];
+    await this.waitDurable();
+    if (taken.length) {
+      const handed = new Map<string, number>();
+      for (const n of taken) handed.set(JSON.stringify(n), (handed.get(JSON.stringify(n)) ?? 0) + 1);
+      const cur = this.store.getLaunch(launchId)?.notices ?? [];
+      const rest = cur.filter((n) => {
+        const k = JSON.stringify(n);
+        const left = handed.get(k) ?? 0;
+        if (left <= 0) return true;
+        handed.set(k, left - 1);
+        return false;
+      });
+      if (rest.length !== cur.length) this.store.updateLaunch(launchId, { notices: rest });
+      await this.waitDurable();
+    }
+    return { status: 200, body: { notices: taken } };
   }
 
   private seqOf(body: Record<string, unknown>): number | undefined {
@@ -1808,7 +1849,8 @@ export class Orchestrator implements OrchestratorCore {
       graphPath: this.config.graphPath,
       daemonPid: process.pid,
       daemonUrl: this.apiBaseUrl,
-      latestSeq: this.store.latestEventSeq(),
+      // The durable sequence number: a cursor for /v1/events that names no unflushed event. See specs/state-backend "Durable cursor in the status".
+      latestSeq: this.store.durability().eventSeq,
       ...storeLag(this.store),
       proposals: this.store.listProposals({ status: 'pending' }).map((p) => ({ id: p.id, taskId: p.taskId, title: p.payload.title })),
       runner: { mode: this.effectiveMode(), claimWindowMs: this.config.runner.claimWindowMs },

@@ -229,7 +229,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           claimableByKind: zeroByKind(),
           workers: [],
           foreignCommits: [],
-          latestSeq: orch.store.latestEventSeq(),
+          latestSeq: orch.store.durability().eventSeq,
           ...storeLag(orch.store),
           tracker: trackerOf(orch.store),
           outboxPending: orch.store.countOutbox('pending'),
@@ -340,7 +340,8 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     return { status: 200, body: { launchId: launch.launchId, launchNo: launch.launchNo, log: text } };
   });
   server.addRoute('GET', /^\/v1\/events$/, async (_req, query) => {
-    const after = Number(query['after'] ?? 0);
+    const asked = Number(query['after'] ?? 0);
+    const after = Number.isFinite(asked) && asked > 0 ? Math.floor(asked) : 0;
     const limit = Math.max(1, Math.min(500, Number(query['limit'] ?? 200)));
     const kinds = typeof query['kinds'] === 'string' && query['kinds'] ? String(query['kinds']).split(',').filter(Boolean) : undefined;
     const wait = Math.max(0, Math.min(120_000, Number(query['wait'] ?? 0)));
@@ -355,7 +356,12 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
       await new Promise((r) => setTimeout(r, 200));
       read = durableEvents();
     }
-    return { status: 200, body: { events: read.events, seq: Math.min(orch.store.latestEventSeq(), read.upTo), digest: digestOf(orch) } };
+    // The cursor never moves backwards: at most the durable sequence number, never below the `after` given, and at a
+    // page cut by the limit the last event served, so the next read starts where this one stopped. See specs/state-backend "Durable cursor in the status".
+    const last = read.events[read.events.length - 1];
+    const upTo = read.events.length >= limit && last ? last.seq : Math.min(orch.store.latestEventSeq(), read.upTo);
+    const seq = Math.max(after, upTo);
+    return { status: 200, body: { events: read.events, seq, digest: digestOf(orch) } };
   });
   server.addRoute('GET', /^\/v1\/milestones\/([^/]+)\/review$/, async (_req, _query, [id]) => {
     if (!orch.hasGraph()) return { status: 409, body: { ok: false, reason: 'graph not loaded' } };

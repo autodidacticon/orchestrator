@@ -540,6 +540,7 @@ export async function runWork(opts, mods) {
       }
       st.quietSince = v.quiet ? (st.quietSince ?? now) : undefined;
       // Long-poll for a newly parked or ended launch, so a new launch is claimed promptly. Only those kinds wake the poll: every claim appends operator.claim, and idle loops would wake each other.
+      // latestSeq is the durable sequence number, so the cursor names no event a crash could give to another. See specs/state-backend "Durable cursor in the status".
       await http('GET', `/v1/events?after=${Number(s.body.latestSeq ?? 0)}&limit=1&kinds=${WAKE_KINDS}&wait=${opts.pollMs}`);
     }
     await sleep(250);

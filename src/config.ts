@@ -2,6 +2,7 @@
  * Orchestrator configuration with defaults. Loaded from a YAML/JSON file by main.ts.
  */
 import { z } from 'zod';
+import { renewEveryMsOf } from './brief/compose.js';
 import { DEFAULT_CLAUDE_COMMAND } from './runner/command.js';
 import { anyModelSchema, CODEX_SANDBOXES, COMMIT_POLICIES, DEFAULT_EFFORT, DEFAULT_MODEL_BY_KIND, effortSchemaFor, modelSchemaFor, OPENCODE_DATA_DIRS, OPENCODE_PERMISSIONS, RUNNER_KINDS } from './runner/selection.js';
 import { isSafeRule } from './toolchain/tools.js';
@@ -330,15 +331,38 @@ export function urlSecrets(url: string | undefined): string[] {
 }
 
 /**
+ * Whether a lease leaves the stated margin above the flush deadline. A worker renews every third of the lease
+ * (`renewEveryMsOf`), so when a stall begins its lease may have only `leaseTtlMs - renewEveryMs` left. The stall lasts
+ * at most `flushDeadlineMs` (then the daemon exits and restarts), and while it lasts the daemon is not ready and workers
+ * cannot renew. The margin left above the deadline is one more renewal interval, for the worker's first renewal to
+ * reach the daemon once it is ready again: `leaseTtlMs - 2 * renewEveryMs >= flushDeadlineMs`.
+ * See specs/state-backend "Lease margin above the flush deadline".
+ */
+export function leaseCoversFlushDeadline(leaseTtlMs: number, flushDeadlineMs: number): boolean {
+  return leaseTtlMs - 2 * renewEveryMsOf(leaseTtlMs) >= flushDeadlineMs;
+}
+
+/** A lease that always leaves the margin: three times the deadline (then a renewal interval is the deadline itself). */
+export function minLeaseTtlMs(flushDeadlineMs: number): number {
+  return 3 * flushDeadlineMs;
+}
+
+/**
  * Why the store block cannot start, or undefined. Under `postgres` a URL is required, and the worker lease must
- * outlast the flush deadline: a lease may not run out while the records that granted or renewed it are still unflushed.
- * See specs/state-backend "Lease versus flush deadline".
+ * outlast the flush deadline by a stated margin (`minLeaseTtlMs`): a lease may not run out while the records that
+ * granted or renewed it are still unflushed. See specs/state-backend "Lease margin above the flush deadline".
  */
 export function storeConfigError(cfg: Pick<Config, 'store' | 'leaseTtlMs'>): string | undefined {
   if (cfg.store.kind !== 'postgres') return undefined;
   if (!cfg.store.url) return 'store.kind is postgres but no database URL is set: set store.url or DATABASE_URL';
-  if (cfg.leaseTtlMs < cfg.store.flushDeadlineMs) {
-    return `leaseTtlMs (${cfg.leaseTtlMs}) is shorter than store.flushDeadlineMs (${cfg.store.flushDeadlineMs}): raise leaseTtlMs to at least ${cfg.store.flushDeadlineMs} or lower store.flushDeadlineMs`;
+  if (!leaseCoversFlushDeadline(cfg.leaseTtlMs, cfg.store.flushDeadlineMs)) {
+    const min = minLeaseTtlMs(cfg.store.flushDeadlineMs);
+    const every = renewEveryMsOf(cfg.leaseTtlMs);
+    return (
+      `leaseTtlMs (${cfg.leaseTtlMs}) is too short for store.flushDeadlineMs (${cfg.store.flushDeadlineMs}): ` +
+      `a worker renews every ${every}ms, so a stall may begin with ${cfg.leaseTtlMs - every}ms of lease left, and the lease must outlast the deadline by one more renewal interval; ` +
+      `raise leaseTtlMs to at least ${min} (three times the deadline) or lower store.flushDeadlineMs`
+    );
   }
   return undefined;
 }

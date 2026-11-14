@@ -234,6 +234,7 @@ export class OperatorClient {
     let after = opts.afterSeq;
     if (after === undefined) {
       const s = await this.call(bound, 'GET', '/v1/status');
+      // latestSeq is the durable sequence number: no unflushed event, so it names the same event after a crash.
       after = Number(s.body['latestSeq'] ?? 0);
     }
     const collected: unknown[] = [];
@@ -245,7 +246,9 @@ export class OperatorClient {
       const r = await this.call(bound, 'GET', `/v1/events?after=${seq}&wait=${slice}`, undefined, slice + 15_000);
       const events = (r.body['events'] as unknown[]) ?? [];
       collected.push(...events);
-      seq = Number(r.body['seq'] ?? seq);
+      // The cursor only moves forward, from the durable sequence the status and the event feed report. See specs/state-backend "Durable cursor in the status".
+      const next = Number(r.body['seq']);
+      if (Number.isFinite(next) && next > seq) seq = next;
       digest = (r.body['digest'] as Record<string, unknown>) ?? {};
       if (digestSatisfies(digest, opts.until, collected.length)) {
         return { status: 200, body: { matched: true, until: opts.until ?? 'any', events: collected, seq, digest } };

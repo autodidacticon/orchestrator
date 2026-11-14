@@ -552,6 +552,7 @@ API_CLAIMABLE0='' API_STATES0='' PG_COUNTS0='' PG_CLAIMABLE0='' PG_TOKENS0='' PG
 if [ "$DRY_RUN" = 0 ]; then
   RUN_ID="$(basename "$(status_get .runDir)")"
   GRAPH_REV="$(status_get .graphRev)"
+  # latestSeq is the durable sequence number: the restarted daemon serves the same events below it.
   SEQ0="$(status_get .latestSeq)"
   HEAD0="$(published_sha "$WORK_TASK")"
   UID0="$(daemon_uid)"

@@ -18,8 +18,16 @@ export interface OpenedStore {
   kind: Config['store']['kind'];
   /** The Postgres sink, under `postgres`. */
   sink?: PgSink;
-  /** Wait (up to `timeoutMs`) for committed batches to reach the sink, then close the image and the sink. */
-  close(timeoutMs?: number): Promise<void>;
+  /**
+   * Wait (up to `timeoutMs`) for committed batches to reach the sink, then close the image and the sink. Resolves
+   * with the committed batches that never reached the sink (always 0 under `sqlite`).
+   */
+  close(timeoutMs?: number): Promise<CloseOutcome>;
+}
+
+export interface CloseOutcome {
+  /** Committed batches dropped by the close: their records are lost. Non-zero means the daemon exits non-zero. */
+  unflushedBatches: number;
 }
 
 export interface OpenStoreOptions {
@@ -48,7 +56,10 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
     return {
       store,
       kind: 'sqlite',
-      close: async () => store.close(),
+      close: async () => {
+        store.close();
+        return { unflushedBatches: 0 };
+      },
     };
   }
   const url = opts.store.url;
@@ -85,16 +96,25 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
     store: j,
     kind: 'postgres',
     sink,
-    close: async (timeoutMs = 5_000) => {
-      if (!j.fatalReason()) {
-        let timer: NodeJS.Timeout | undefined;
-        await Promise.race([j.durable(), new Promise<void>((r) => (timer = setTimeout(r, timeoutMs)))]);
-        if (timer) clearTimeout(timer);
-      }
-      j.close();
-      await sink.close();
-    },
+    close: (timeoutMs = 5_000) => closeJournaled(j, () => sink.close(), timeoutMs),
   };
+}
+
+/**
+ * Wait up to `timeoutMs` for committed batches to reach the sink, then stop the flusher, close the image and the
+ * sink, and return the batches that never reached it. Stopping the flusher first keeps the sink's own close from
+ * being reported as a lost run lock. See specs/state-backend "Shutdown with unflushed batches".
+ */
+export async function closeJournaled(j: JournaledStore, closeSink: () => Promise<void>, timeoutMs: number): Promise<CloseOutcome> {
+  if (!j.fatalReason()) {
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([j.durable(), new Promise<void>((r) => (timer = setTimeout(r, timeoutMs)))]);
+    if (timer) clearTimeout(timer);
+  }
+  const unflushedBatches = j.abandon();
+  j.close();
+  await closeSink();
+  return { unflushedBatches };
 }
 
 /** Whether the run directory holds a SQLite store; a Postgres run has none. */

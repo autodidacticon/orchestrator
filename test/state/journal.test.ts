@@ -6,6 +6,7 @@ import { applyPgOps, PgSink } from '../../src/state/pg/index.js';
 import { canonical } from './backends.js';
 import { dropRun, freshRunId, pgAvailable, stopTestPostgres, testDatabase } from './pg-db.js';
 import { applyOps, dumpTables, type FatalInfo, FencedError, isRejected, JournaledStore, type JournalSink, RejectedBatchError, type Row, type RowOp, SqliteSink } from '../../src/state/journal.js';
+import { closeJournaled } from '../../src/state/open.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
 import type { Launch } from '../../src/state/store.js';
@@ -559,5 +560,107 @@ describe('rejected batches', () => {
     expect(inner.tables()['kv']).toHaveLength(1);
     store.close();
     inner.close();
+  });
+});
+
+describe('manual flush and shutdown', () => {
+  /** A sink that records the batches it applied, and holds every apply until released. */
+  function gatedSink(inner: SqliteSink) {
+    let open = false;
+    const waiting: Array<() => void> = [];
+    const applied: RowOp[][] = [];
+    const sink: JournalSink = {
+      applyBatch: async (ops) => {
+        while (!open) await new Promise<void>((r) => waiting.push(r));
+        await new Promise((r) => setTimeout(r, 2));
+        applied.push([...ops]);
+        await inner.applyBatch(ops);
+      },
+    };
+    return {
+      sink,
+      applied,
+      release: () => {
+        open = true;
+        for (const w of waiting.splice(0)) w();
+      },
+    };
+  }
+  const keyOf = (ops: RowOp[]) => (ops[0] as { row: Row }).row['key'];
+
+  it('concurrent flushOnce calls with autoFlush off apply every batch once, in order, and drop none', async () => {
+    const inner = new SqliteSink(path.join(dir, 'sink.sqlite'));
+    const g = gatedSink(inner);
+    const store = new JournaledStore(new SqliteStore(':memory:'), g.sink, { autoFlush: false });
+    for (const k of ['a', 'b', 'c', 'd']) store.setKv(k, '1');
+    const calls = [store.flushOnce(), store.flushOnce(), store.flushOnce()];
+    g.release();
+    expect(await Promise.all(calls)).toEqual([true, true, true]);
+    expect(store.durability().pendingBatches).toBe(1);
+    expect(await store.flushOnce()).toBe(true);
+    expect(await store.flushOnce()).toBe(false);
+    expect(g.applied.map(keyOf)).toEqual(['a', 'b', 'c', 'd']);
+    expect(inner.tables()).toEqual(dumpTables(store.image.database()));
+    store.close();
+    inner.close();
+  });
+
+  it('flushOnce with autoFlush on never races the flusher: every batch lands once, in order', async () => {
+    const inner = new SqliteSink(path.join(dir, 'sink.sqlite'));
+    const g = gatedSink(inner);
+    const store = new JournaledStore(new SqliteStore(':memory:'), g.sink, { autoFlush: true, retryBaseMs: 1, retryMaxMs: 2 });
+    store.setKv('a', '1');
+    store.setKv('b', '1');
+    const calls = [store.flushOnce(), store.flushOnce()];
+    store.setKv('c', '1');
+    calls.push(store.flushOnce());
+    g.release();
+    await Promise.all(calls);
+    store.setKv('d', '1');
+    const late = store.flushOnce();
+    store.setKv('e', '1');
+    await late;
+    await store.durable();
+    expect(g.applied.map(keyOf)).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(store.durability()).toMatchObject({ pendingBatches: 0, lagMs: 0 });
+    expect(inner.tables()).toEqual(dumpTables(store.image.database()));
+    store.close();
+    inner.close();
+  });
+
+  it('closeJournaled under a stalled sink returns the unflushed count, and the sink failing as it closes is not reported as fenced', async () => {
+    const fatal: FatalInfo[] = [];
+    const waiting: Array<(err: Error) => void> = [];
+    // A stalled sink: an apply never settles until the sink is closed, and then fails as a lost session would.
+    const sink: JournalSink = { applyBatch: () => new Promise<void>((_r, reject) => waiting.push(reject)) };
+    const store = new JournaledStore(new SqliteStore(':memory:'), sink, { flushDeadlineMs: 600_000, onFatal: (f) => fatal.push(f) });
+    store.setKv('a', '1');
+    store.setKv('b', '1');
+    store.setKv('c', '1');
+    const t0 = Date.now();
+    const out = await closeJournaled(store, async () => {
+      for (const w of waiting.splice(0)) w(new FencedError('connection ended'));
+    }, 50);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(45);
+    expect(out).toEqual({ unflushedBatches: 3 });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(fatal).toEqual([]);
+    expect(store.fatalReason()).toBeUndefined();
+  });
+
+  it('closeJournaled with a sink that keeps up returns zero', async () => {
+    const inner = new SqliteSink(path.join(dir, 'sink.sqlite'));
+    const store = new JournaledStore(new SqliteStore(':memory:'), inner);
+    store.setKv('a', '1');
+    expect(await closeJournaled(store, async () => inner.close(), 5_000)).toEqual({ unflushedBatches: 0 });
+  });
+
+  it('abandon after a fatal condition reports the fatal count', async () => {
+    const fatal: FatalInfo[] = [];
+    const store = new JournaledStore(new SqliteStore(':memory:'), { applyBatch: async () => Promise.reject(new FencedError()) }, { onFatal: (f) => fatal.push(f) });
+    store.setKv('a', '1');
+    await until(() => fatal.length > 0, 1_000);
+    expect(store.abandon()).toBe(1);
+    store.close();
   });
 });

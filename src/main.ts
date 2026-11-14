@@ -330,15 +330,23 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     };
     stderrLogger.info('shutting down', { cause, reap, ...(by ? { by } : {}) });
     // A container runtime kills the process after its grace period; a check still running past ours is abandoned and restarts from queued on the next start. See specs/crash-recovery.
+    // Committed batches a shutdown leaves behind are lost records: they are counted and the exit is non-zero, as on the fatal path. See specs/state-backend "Shutdown with unflushed batches".
+    const exitLosing = (unflushedBatches: number, msg: string) => {
+      stderrLogger.error(msg, { cause, unflushedBatches });
+      process.exit(1);
+    };
     setTimeout(() => {
-      stderrLogger.warn('shutdown grace elapsed; exiting with work in flight', { graceMs: SHUTDOWN_GRACE_MS });
+      const pending = store.durability().pendingBatches;
       recordExit();
+      if (pending > 0) exitLosing(pending, 'shutdown grace elapsed with unflushed batches; their records are lost');
+      stderrLogger.warn('shutdown grace elapsed; exiting with work in flight', { graceMs: SHUTDOWN_GRACE_MS });
       process.exit(0);
     }, SHUTDOWN_GRACE_MS).unref();
     await orch.stop({ reap });
     await server.close();
     recordExit();
-    await opened.close();
+    const { unflushedBatches } = await opened.close();
+    if (unflushedBatches > 0) exitLosing(unflushedBatches, 'stopped with unflushed batches; their records are lost');
     stderrLogger.info('stopped', { cause, reason });
     process.exit(0);
   };

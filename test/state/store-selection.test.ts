@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import pg from 'pg';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { defaultConfig, redactUrl, storeConfigError, urlSecrets, withStoreEnv } from '../../src/config.js';
+import { defaultConfig, leaseCoversFlushDeadline, minLeaseTtlMs, redactUrl, storeConfigError, urlSecrets, withStoreEnv } from '../../src/config.js';
 import { StoreGraphSource } from '../../src/graph/source.js';
 import { parseOverridePatch, parseSetFlags, readOverrides } from '../../src/runs/resolve.js';
 import { type FatalInfo, JournaledStore, type JournalSink, type RowOp } from '../../src/state/journal.js';
@@ -60,7 +60,23 @@ describe('store block', () => {
     const msg = storeConfigError({ leaseTtlMs: 60_000, store: { kind: 'postgres', url: 'postgres://h/db', flushDeadlineMs: 120_000 } });
     expect(msg).toContain('leaseTtlMs (60000)');
     expect(msg).toContain('store.flushDeadlineMs (120000)');
-    expect(storeConfigError({ leaseTtlMs: 120_000, store: { kind: 'postgres', url: 'postgres://h/db', flushDeadlineMs: 120_000 } })).toBeUndefined();
+    // A lease equal to the deadline is refused too: a stall may begin a renewal interval into the lease, and the lease must outlast the deadline by one more.
+    const equal = storeConfigError({ leaseTtlMs: 120_000, store: { kind: 'postgres', url: 'postgres://h/db', flushDeadlineMs: 120_000 } });
+    expect(equal).toContain('leaseTtlMs (120000)');
+    expect(equal).toContain('at least 360000');
+    expect(minLeaseTtlMs(120_000)).toBe(360_000);
+    for (const deadline of [1, 2, 1_500, 120_000, 120_001]) {
+      // The suggested minimum always passes; a lease whose margin falls short is refused.
+      const min = minLeaseTtlMs(deadline);
+      expect(min - 2 * Math.max(1, Math.floor(min / 3))).toBeGreaterThanOrEqual(deadline);
+      expect(storeConfigError({ leaseTtlMs: min, store: { kind: 'postgres', url: 'postgres://h/db', flushDeadlineMs: deadline } })).toBeUndefined();
+      expect(leaseCoversFlushDeadline(min, deadline)).toBe(true);
+    }
+    for (const [ttl, deadline] of [[300_000, 120_000], [240_000, 120_000], [3_000, 1_500]] as const) {
+      expect(leaseCoversFlushDeadline(ttl, deadline)).toBe(false);
+      expect(storeConfigError({ leaseTtlMs: ttl, store: { kind: 'postgres', url: 'postgres://h/db', flushDeadlineMs: deadline } })).toBeDefined();
+    }
+    expect(storeConfigError({ leaseTtlMs: 600_000, store: { kind: 'postgres', url: 'postgres://h/db', flushDeadlineMs: 120_000 } })).toBeUndefined();
     expect(storeConfigError({ leaseTtlMs: 1_000, store: { kind: 'sqlite', flushDeadlineMs: 120_000 } })).toBeUndefined();
     expect(storeConfigError({ leaseTtlMs: 600_000, store: { kind: 'postgres', flushDeadlineMs: 120_000 } })).toContain('DATABASE_URL');
   });

@@ -245,7 +245,11 @@ export class JournaledStore implements Store {
   private committed = 0;
   private flushed = 0;
   private flushing: Promise<void> | undefined;
+  /** The one apply in flight, if any: every apply runs after the previous one settled, whoever started it. */
+  private applying: Promise<unknown> = Promise.resolve();
   private fatal: FatalInfo | undefined;
+  /** Set by `abandon`: the flusher stops, and a sink that fails after its deliberate close is not fatal. */
+  private abandoned = false;
   private deadlineTimer: NodeJS.Timeout | undefined;
   private readonly waiters: Array<{ upTo: number; resolve: () => void }> = [];
   private durableEventSeq: number;
@@ -325,23 +329,23 @@ export class JournaledStore implements Store {
   // ---- flusher ----
 
   private kick(): void {
-    if (this.flushing || this.fatal) return;
+    if (this.flushing || this.fatal || this.abandoned) return;
     this.flushing = this.drain().finally(() => {
       this.flushing = undefined;
       // A batch committed while the last apply was settling.
-      if (this.pending.length && !this.fatal && this.opts.autoFlush) this.kick();
+      if (this.pending.length && !this.fatal && !this.abandoned && this.opts.autoFlush) this.kick();
     });
   }
 
   private async drain(): Promise<void> {
     let attempt = 0;
-    while (this.pending.length && !this.fatal) {
+    while (this.pending.length && !this.fatal && !this.abandoned) {
       const ok = await this.applyOldest();
       if (ok) {
         attempt = 0;
         continue;
       }
-      if (this.fatal) return;
+      if (this.fatal || this.abandoned) return;
       attempt++;
       const delay = Math.min(this.opts.retryBaseMs * 2 ** (attempt - 1), this.opts.retryMaxMs);
       await new Promise<void>((r) => setTimeout(r, delay).unref());
@@ -349,13 +353,25 @@ export class JournaledStore implements Store {
     }
   }
 
-  /** Apply the oldest pending batch once. True when it landed. Tests that pump by hand use `flushOnce`. */
-  private async applyOldest(): Promise<boolean> {
+  /**
+   * Apply the oldest pending batch once. True when it landed. Applies are serialized: the flusher and `flushOnce`
+   * never hold the same batch at once, so no batch leaves the queue without having been applied, whatever
+   * `autoFlush` is. See specs/state-backend "Manual flush".
+   */
+  private applyOldest(): Promise<boolean> {
+    const run = this.applying.then(() => this.applyOldestNow());
+    this.applying = run.catch(() => undefined);
+    return run;
+  }
+
+  private async applyOldestNow(): Promise<boolean> {
     const batch = this.pending[0];
-    if (!batch || this.fatal) return false;
+    if (!batch || this.fatal || this.abandoned) return false;
     try {
       await this.sink.applyBatch(batch.ops);
     } catch (err) {
+      // The sink was closed on purpose at shutdown: `abandon` counted the batch; it is not reported as fenced.
+      if (this.abandoned) return false;
       if (isFenced(err)) this.die('fenced', err);
       // Refused for its content: every retry fails the same way, and every later batch waits behind it.
       else if (isRejected(err)) this.die('rejected', err);
@@ -363,6 +379,8 @@ export class JournaledStore implements Store {
       return false;
     }
     if (this.fatal) return false;
+    // Serialized applies make this hold; the check keeps a batch from ever leaving the queue unapplied.
+    if (this.pending[0] !== batch) return true;
     this.pending.shift();
     this.flushed = batch.no;
     this.durableEventSeq = batch.eventSeq;
@@ -378,9 +396,8 @@ export class JournaledStore implements Store {
     return true;
   }
 
-  /** Manual pump: apply at most one pending batch. Resolves true when one landed. */
-  async flushOnce(): Promise<boolean> {
-    if (this.flushing) await this.flushing;
+  /** Manual pump: apply at most one pending batch, after any apply in flight. Resolves true when one landed. */
+  flushOnce(): Promise<boolean> {
     return this.applyOldest();
   }
 
@@ -405,7 +422,7 @@ export class JournaledStore implements Store {
   }
 
   private die(reason: FatalInfo['reason'], error?: unknown): void {
-    if (this.fatal) return;
+    if (this.fatal || this.abandoned) return;
     this.fatal = { reason, unflushedBatches: this.pending.length, error };
     if (reason === 'rejected' && isRejected(error)) {
       const { table, key, sqlstate } = error.refusal;
@@ -435,6 +452,20 @@ export class JournaledStore implements Store {
   /** Stop at once with reason `fenced`: the sink reported the run lock lost while no batch was in flight. */
   fence(error?: unknown): void {
     this.die('fenced', error);
+  }
+
+  /**
+   * Stop flushing, for a shutdown that will not wait any longer, before the sink is closed: an apply that fails from
+   * here on (the sink closing under it) is neither retried nor reported as fenced, and no deadline fires. Returns the
+   * committed batches that never reached the sink; the caller logs the count and exits non-zero.
+   * See specs/state-backend "Shutdown with unflushed batches".
+   */
+  abandon(): number {
+    if (this.fatal) return this.fatal.unflushedBatches;
+    this.abandoned = true;
+    if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
+    this.deadlineTimer = undefined;
+    return this.pending.length;
   }
 
   /** The fatal condition, once one occurred. */

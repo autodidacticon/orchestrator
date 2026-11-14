@@ -244,7 +244,7 @@ describe.skipIf(!pgAvailable)('daemon on store.kind postgres', () => {
 
   it.skipIf(pgSource !== 'cluster')('with its Postgres session stopped the daemon exits non-zero after flushDeadlineMs and logs the unflushed batch count', async () => {
     const deadline = 1_500;
-    const run = await makeRun([...STORE(deadline), `leaseTtlMs: ${deadline}`]);
+    const run = await makeRun([...STORE(deadline), `leaseTtlMs: ${3 * deadline}`]);
     runIds.push(runIdOfRepo(run));
     const d = foreground(run);
     const url = await urlOfFg(run, d);
@@ -277,8 +277,38 @@ describe.skipIf(!pgAvailable)('daemon on store.kind postgres', () => {
     }
   }, 60_000);
 
+  it.skipIf(pgSource !== 'cluster')('SIGTERM while its Postgres session is stopped exits non-zero and logs the unflushed batch count, not fenced', async () => {
+    const deadline = 60_000;
+    const run = await makeRun([...STORE(deadline), `leaseTtlMs: ${3 * deadline}`]);
+    runIds.push(runIdOfRepo(run));
+    const d = foreground(run);
+    const url = await urlOfFg(run, d);
+    const lines = () =>
+      d
+        .stderr()
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const pid = Number(lines().find((l) => l['msg'] === 'store opened')?.['backendPid']);
+    expect(pid).toBeGreaterThan(0);
+    process.kill(pid, 'SIGSTOP');
+    try {
+      void fetch(`${url}/v1/pause`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 300));
+      d.child.kill('SIGTERM');
+      const { code } = await d.exited;
+      expect(code).toBe(1);
+      const lost = lines().find((l) => typeof l['msg'] === 'string' && (l['msg'] as string).includes('unflushed batches'));
+      expect(lost).toMatchObject({ unflushedBatches: expect.any(Number) });
+      expect(Number(lost!['unflushedBatches'])).toBeGreaterThanOrEqual(1);
+      expect(lines().find((l) => l['msg'] === 'store fatal: exiting')).toBeUndefined();
+    } finally {
+      process.kill(pid, 'SIGCONT');
+    }
+  }, 60_000);
+
   it('when its lock-holding session is terminated the daemon exits at once', async () => {
-    const run = await makeRun([...STORE(600_000), 'leaseTtlMs: 600000']);
+    const run = await makeRun([...STORE(600_000), 'leaseTtlMs: 1800000']);
     runIds.push(runIdOfRepo(run));
     const d = foreground(run);
     await urlOfFg(run, d);
