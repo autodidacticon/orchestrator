@@ -5,11 +5,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyPgOps, PgSink } from '../../src/state/pg/index.js';
 import { canonical } from './backends.js';
 import { dropRun, freshRunId, pgAvailable, stopTestPostgres, testDatabase } from './pg-db.js';
-import { applyOps, dumpTables, type FatalInfo, FencedError, isRejected, JournaledStore, type JournalSink, RejectedBatchError, type Row, type RowOp, SqliteSink } from '../../src/state/journal.js';
+import { applyOps, dumpTables, type FatalInfo, FencedError, isRejected, JournaledStore, type JournalSink, RejectedBatchError, type Row, type RowOp, SqliteSink, TABLES } from '../../src/state/journal.js';
 import { closeJournaled } from '../../src/state/open.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
-import type { Launch } from '../../src/state/store.js';
+import type { Launch, Proposal, VerifierJob } from '../../src/state/store.js';
 
 let dir: string;
 beforeEach(() => {
@@ -98,6 +98,8 @@ class FlakySink implements JournalSink {
   failRate = 0;
   lastApplied: RowOp[] | undefined;
   accepted = 0;
+  /** Tables an accepted batch wrote to (upsert or delete). */
+  readonly written = new Set<string>();
   constructor(
     readonly inner: FuzzSink,
     private readonly rand: () => number,
@@ -108,6 +110,7 @@ class FlakySink implements JournalSink {
     await this.inner.apply(ops);
     this.lastApplied = [...ops];
     this.accepted++;
+    for (const op of ops) this.written.add(op.table);
   }
 }
 
@@ -125,6 +128,8 @@ function allStrings(v: unknown, out: string[] = []): string[] {
   return out;
 }
 
+const job = (id: string, n: number, output: string): VerifierJob => ({ jobId: id, taskId: `T${n % 3}`, launchId: `L${n}`, sealedSha: 's', baseSha: 'b', status: 'queued', output, applied: false, createdAt: n, updatedAt: n });
+const proposal = (id: string, n: number, text: string): Proposal => ({ id, taskId: 'T1', launchId: `L${n}`, status: 'pending', payload: { title: `p${n}`, description: text, acceptanceCriteria: [text] }, createdAt: n });
 const launch = (id: string, n: number): Launch => ({ launchId: id, taskId: `T${n % 4}`, attempt: 1, launchNo: n, status: 'preparing', token: `tok-${id}`, branch: 'b', worktree: 'w', baseSha: 's', graphRev: 'r', createdAt: n % 3 });
 
 async function runFuzz(seed: number, steps: number, sinkDb: FuzzSink): Promise<{ batches: number; crashes: number; flushes: number }> {
@@ -164,8 +169,16 @@ async function runFuzz(seed: number, steps: number, sinkDb: FuzzSink): Promise<{
     // A missing launch throws.
     else if (k < 0.86) store.updateLaunch(`L${Math.floor(rand() * (launchNo + 2))}`, { status: pick(['live', 'ended'] as const), pid: Math.floor(rand() * 100) });
     else if (k < 0.92) store.putDedup(`L${Math.floor(rand() * 3)}`, Math.floor(rand() * 3), { r: rand(), text: nasty() });
-    else if (k < 0.96) store.setSnapshot(`rev${Math.floor(rand() * 3)}`, `nodes: [] # ${nasty()}`);
-    else store.putReport({ launchId: `L${Math.floor(rand() * 4)}`, taskId: 'T1', kind: 'submit', body: { s: rand(), summary: nasty() }, createdAt: Math.floor(rand() * 10) });
+    else if (k < 0.94) store.setSnapshot(`rev${Math.floor(rand() * 3)}`, `nodes: [] # ${nasty()}`);
+    else if (k < 0.96) store.putReport({ launchId: `L${Math.floor(rand() * 4)}`, taskId: 'T1', kind: 'submit', body: { s: rand(), summary: nasty() }, createdAt: Math.floor(rand() * 10) });
+    // A duplicate job or proposal id is a failing statement; a missing one throws on update.
+    else if (k < 0.975) {
+      if (rand() < 0.5) store.createJob(job(`J${Math.floor(rand() * 6)}`, Math.floor(rand() * 10), nasty()));
+      else store.updateJob(`J${Math.floor(rand() * 7)}`, { status: pick(['checking', 'verified', 'failed', 'published'] as const), applied: rand() < 0.5, output: nasty(), updatedAt: Math.floor(rand() * 10) });
+    } else if (k < 0.99) {
+      if (rand() < 0.5) store.createProposal(proposal(`T1-p${Math.floor(rand() * 6)}`, Math.floor(rand() * 10), nasty()));
+      else store.updateProposal(`T1-p${Math.floor(rand() * 7)}`, { status: pick(['accepted', 'rejected'] as const), note: nasty(), decidedAt: Math.floor(rand() * 10) });
+    } else store.setPayloadOverlay(`T${Math.floor(rand() * 3)}`, `rev${Math.floor(rand() * 2)}`, { description: nasty(), [nasty()]: rand() });
   };
 
   const level = (depth: number) => {
@@ -241,6 +254,8 @@ async function runFuzz(seed: number, steps: number, sinkDb: FuzzSink): Promise<{
   expect(strings.some((s) => s.includes('�'))).toBe(true);
   store.close();
   await sinkDb.close();
+  // Every journaled table took part: a table the run never writes is a table it never checks.
+  expect([...sink.written].sort()).toEqual(TABLES.map((t) => t.name).sort());
   return { batches, crashes, flushes };
 }
 

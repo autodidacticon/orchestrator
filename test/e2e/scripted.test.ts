@@ -57,7 +57,7 @@ describe('e2e with scripted agents', () => {
       await run.stop(child);
       expect(readFileSync(run.daemonLog, 'utf8')).toContain('shutting down');
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   }, 120_000);
 
@@ -78,7 +78,7 @@ describe('e2e with scripted agents', () => {
       expect((await runCli(['status', '--url', url])).body).toMatchObject({ proposals: [] });
       await run.stop(child);
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   }, 120_000);
 
@@ -109,7 +109,7 @@ describe('e2e with scripted agents', () => {
       s2.close();
       expect(reaped).toBe(true);
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   }, 120_000);
 });

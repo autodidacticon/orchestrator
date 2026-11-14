@@ -12,15 +12,12 @@ import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { daemonCommand, health } from '../../src/runs/lifecycle.js';
 import { readDaemonJson, runIdFor, runIdForOrigin, runPaths } from '../../src/runs/runDir.js';
-import { adminClient, dropRun, pgAvailable, pgSource, stopTestPostgres, testDatabase } from '../state/pg-db.js';
+import { adminClient, dropRun, pgAvailable, pgSkipReason, stopTestPostgres, testDatabase } from '../state/pg-db.js';
 import { freePort, gitIn, makeRepo, scriptedAgent, tsxLoader } from '../slice/harness.js';
 
 const PASSWORD = 'pw-Orc87-s3cret';
 
-if (!pgAvailable) {
-  // Criterion: skipped when Postgres is not available, with the reason printed.
-  console.warn(`deployment-identity: skipped: no Postgres for tests (${process.env['ORCH_TEST_PG'] === 'off' ? 'ORCH_TEST_PG=off' : 'TEST_DATABASE_URL unset and initdb/pg_ctl not on PATH'})`);
-}
+// Skipped when Postgres is not available; the run's global setup prints the reason once (test/setup/postgres.ts).
 
 let dirs: string[] = [];
 let children: ChildProcess[] = [];
@@ -345,5 +342,5 @@ describe.skipIf(!pgAvailable)('deployment identity on store.kind postgres', () =
 });
 
 describe.skipIf(pgAvailable)('deployment identity on store.kind postgres (skipped)', () => {
-  it.skip(`skipped: no Postgres for tests (${pgSource ?? 'none'})`, () => undefined);
+  it.skip(`skipped: no Postgres for tests (${pgSkipReason ?? 'none'})`, () => undefined);
 });

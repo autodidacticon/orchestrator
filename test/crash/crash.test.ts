@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CRASH_POINTS } from '../../src/crash.js';
 import { runCli } from '../../src/operator/cli.js';
@@ -36,7 +36,7 @@ describe('crash suite', () => {
       await run.stop(child);
       await assertConverged(run, 'no-crash');
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   }, 120_000);
 
@@ -54,7 +54,7 @@ describe('crash suite', () => {
       await new Promise((r) => setTimeout(r, 300));
       await assertConverged(run, point);
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   }, 240_000);
 });
@@ -63,6 +63,20 @@ describe('crash suite', () => {
 const CASCADE_STATUS = { done: ['T1', 'T2'], submitted: ['MVP'] };
 const CASCADE_TRAILERS = { T1: 2, T2: 1 };
 const CASCADE_OUTBOX = { T1: ['inProgress', 'done', 'inProgress', 'done'], T2: ['inProgress', 'done'], MVP: ['inProgress', 'comment', 'comment'] };
+
+/** Resolve once the file has not grown for `quietMs` (at most 20s). */
+async function logQuiet(file: string, quietMs: number): Promise<void> {
+  let size = statSync(file).size;
+  let since = Date.now();
+  for (const deadline = Date.now() + 20_000; Date.now() - since < quietMs && Date.now() < deadline; ) {
+    await new Promise((r) => setTimeout(r, 100));
+    const now = statSync(file).size;
+    if (now !== size) {
+      size = now;
+      since = Date.now();
+    }
+  }
+}
 
 async function runCascadeScenario(point?: string): Promise<void> {
   const run = await setupCrashRun({ scenario: 'cascade' });
@@ -73,18 +87,28 @@ async function runCascadeScenario(point?: string): Promise<void> {
       return e.get('T1')?.status.kind === 'done' && e.get('MVP')?.status.kind === 'submitted' && e.get('T2')?.status.kind === 'running';
     });
     const v1 = run.entries().get('MVP')!;
-    if (point) run.armCrash(point);
-    try {
-      await runCli(['reopen', 'T1', '--cascade', '--url', run.url()]);
-    } catch {
-      /* the daemon may die inside the request */
-    }
     let resumed = child;
-    if (point) {
-      const code = await run.waitExit(child, 60_000);
+    // A tick still running when the point is armed (the one that admitted T2) can reach the point
+    // before the reopen arrives. Then the crash tested nothing: restart and try again, until the
+    // reopen is recorded before the crash (every point here lies after that record).
+    for (let attempt = 1; ; attempt++) {
+      // This scenario ticks only on wake: a log quiet for a while means no tick is running (a restarted daemon's startup ticks included).
+      if (point) await logQuiet(run.daemonLog, 1_500);
+      if (point) run.armCrash(point);
+      try {
+        await runCli(['reopen', 'T1', '--cascade', '--url', run.url()]);
+      } catch {
+        /* the daemon may die inside the request */
+      }
+      if (!point) break;
+      const code = await run.waitExit(resumed, 60_000);
       expect(code, `daemon did not crash at ${point}; log:\n${readFileSync(run.daemonLog, 'utf8').slice(-2000)}`).toBe(CRASH_EXIT_CODE);
       run.disarmCrash();
+      const reopened = run.events('operator.reopen').length > 0;
       resumed = run.start();
+      if (reopened) break;
+      expect(attempt, `the crash at ${point} came before the reopen five times; log:\n${readFileSync(run.daemonLog, 'utf8').slice(-2000)}`).toBeLessThan(5);
+      await run.waitUntil(() => run.entries().get('T2')?.status.kind === 'running');
     }
     await run.waitTerminal(120_000);
     await run.stop(resumed);
@@ -107,7 +131,7 @@ async function runCascadeScenario(point?: string): Promise<void> {
     expect(gitIn(run.repo, 'rev-parse', 'milestone/MVP/v2^{commit}'), ctx).toBe(mvp.integrationSha);
     expect(mvp.integrationSha, ctx).not.toBe(v1.integrationSha);
   } finally {
-    run.cleanup();
+    await run.cleanup();
   }
 }
 
@@ -136,7 +160,7 @@ describe('pull-mode crash matrix', () => {
       expect(launches.size).toBeGreaterThan(0);
       expect(readFileSync(run.dir + '/worker-events.log', 'utf8')).toMatch(/report T1 200/);
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   }, 180_000);
 
@@ -152,7 +176,7 @@ describe('pull-mode crash matrix', () => {
       await new Promise((r) => setTimeout(r, 300));
       await assertConverged(run, `pull ${point}`);
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   }, 300_000);
 });

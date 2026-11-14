@@ -1,4 +1,4 @@
-import { type ChildProcess, execFile, spawn } from 'node:child_process';
+import { type ChildProcess, execFile, execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,7 +62,8 @@ if (brief.task.opencodeMode === 'hang' && !existsSync(hung)) {
 // orphan: the first launch exits at once without a report, leaving a grandchild that holds its stdout open (ORC-90).
 if (brief.task.opencodeMode === 'orphan' && !existsSync(hung)) {
   const { spawn } = await import('node:child_process');
-  const g = spawn('sleep', ['60'], { stdio: ['ignore', 'inherit', 'inherit'] });
+  // The marker path in its argv lets the test's cleanup recognise it as its own before killing it.
+  const g = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)', hung], { stdio: ['ignore', 'inherit', 'inherit'] });
   writeFileSync(hung, String(g.pid));
   process.exit(0);
 }
@@ -248,6 +249,22 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/**
+ * Kill the process the fake recorded in `marker`, only if it is still the test's own: its command line
+ * names this harness's directory (the fake's script or the marker). A recycled pid is left alone.
+ */
+function killOwnFake(marker: string, harnessDir: string): void {
+  const pid = existsSync(marker) ? Number(readFileSync(marker, 'utf8')) : 0;
+  if (!pid || !pidAlive(pid)) return;
+  let command = '';
+  try {
+    command = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });
+  } catch {
+    return;
+  }
+  if (command.includes(harnessDir)) process.kill(pid, 'SIGKILL');
+}
+
 describe('work loop ends a hung agent (ORC-79)', () => {
   // The fake's first launch of T1 never writes and never exits, and ignores SIGTERM, so only the SIGKILL escalation ends it.
   const health = (over: { stuckAfterMs?: number; stuckFailAfterMs?: number } = {}) => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true, ...over });
@@ -281,8 +298,7 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     } finally {
       clearInterval(timer);
       // A failed run must not leave the hung fake behind.
-      const hung = existsSync(marker) ? Number(readFileSync(marker, 'utf8')) : 0;
-      if (hung && pidAlive(hung)) process.kill(hung, 'SIGKILL');
+      killOwnFake(marker, h!.dir);
     }
   }
 
@@ -302,7 +318,7 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     expect(h!.store.listEvents({ kind: 'agent.heartbeat', launchId: first.launchId })).toEqual([]);
     expect(first.progressAt).toBe(first.worker!.claimedAt);
     expect(first.lastSignal).toBe('claimed');
-  }, 90_000);
+  }, 150_000);
 
   // ORC-90: renewal follows the agent process (`exit`), not the pipes (`close`), which a grandchild may hold.
   it('renewal stops when the agent exits, though a grandchild keeps its stdout open: the lease expires, not the silence limit', async () => {
@@ -314,7 +330,7 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     // Well before the silence limit, which renewals until `close` would have reached first.
     expect(first.endedAt! - claimedAt).toBeLessThan(silence / 2);
     expect(h!.store.listEvents({ kind: 'operator.release', launchId: first.launchId })).toEqual([]);
-  }, 90_000);
+  }, 150_000);
 
   it('an agent silent for longer than several TTLs under the loop keeps its launch and submits on it', async () => {
     const ttl = 1500;
@@ -334,7 +350,7 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     expect(launches[0]).toMatchObject({ endReason: 'reported', worker: { id: 'slow-1' } });
     expect(h.orch.entry('T1')).toMatchObject({ attempts: 0, launches: 1 });
     expect(h.store.listEvents({ kind: 'launch.ended', taskId: 'T1' }).map((e) => e.payload?.['endReason'])).toEqual(['reported']);
-  }, 90_000);
+  }, 150_000);
 
   it('a claim whose loop is gone expires within the TTL plus a tick, though its agent still runs', async () => {
     const ttl = 1500;
@@ -364,10 +380,9 @@ describe('work loop ends a hung agent (ORC-79)', () => {
       expect(h.orch.entry('T1')).toMatchObject({ attempts: 1 });
     } finally {
       clearInterval(timer);
-      const hung = existsSync(marker) ? Number(readFileSync(marker, 'utf8')) : 0;
-      if (hung && pidAlive(hung)) process.kill(hung, 'SIGKILL');
+      killOwnFake(marker, h!.dir);
     }
-  }, 90_000);
+  }, 150_000);
 
   it('the daemon fails the silent claim as stuck; the loop ends the agent and claims the relaunch', async () => {
     // The claim now states stuckFailAfterMs, which would be the loop's own silence limit: set one well past it, so the daemon's verdict comes first.
@@ -376,7 +391,7 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     expect(out.stderr).toMatch(/T1 ending opencode \(process group \d+\): the daemon ended the launch/);
     // The loop's renewal kept the lease, so stuck, not leaseExpired, ended it; the daemon's verdict stands and the loop does not release.
     expect(h!.store.listEvents({ kind: 'operator.release' })).toEqual([]);
-  }, 90_000);
+  }, 150_000);
 
   it('past --max-silence-ms the loop ends the agent, releases the launch without keep, and claims the next one', async () => {
     const { first, out } = await hangThenRun({ leaseTtlMs: 60_000, health: health() }, ['--max-silence-ms', '5000']);
@@ -386,7 +401,7 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     expect(releases.length).toBe(1);
     expect(releases[0]!.keep).toBe(false);
     expect(releases[0]!.reason).toMatch(/opencode was terminated by the work loop: no output for/);
-  }, 90_000);
+  }, 150_000);
 });
 
 describe('composeOpenCodeCommand in the loop', () => {

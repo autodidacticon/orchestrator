@@ -38,7 +38,7 @@ describe('e2e: mixed mode with a scripted worker', () => {
       }
       expect(readFileSync(path.join(run.dir, 'worker-events.log'), 'utf8')).toMatch(/report T\d 200/);
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   }, 150_000);
 });

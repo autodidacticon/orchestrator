@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +11,7 @@ import { Orchestrator } from '../../src/loop/orchestrator.js';
 import { registerOperatorRoutes } from '../../src/operator/routes.js';
 import { CodexRunner } from '../../src/runner/codex.js';
 import { DEFAULT_CODEX_COMMAND } from '../../src/runner/command.js';
-import { SubprocessRunner } from '../../src/runner/subprocess.js';
+import { pidAlive, SubprocessRunner } from '../../src/runner/subprocess.js';
 import { JournaledStore, type JournalOptions, type JournalSink, SqliteSink } from '../../src/state/journal.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import type { Launch, Store, VerifierJob } from '../../src/state/store.js';
@@ -198,8 +198,36 @@ export async function makeSlice(opts: { graph: string; config?: ConfigInput; ver
       await orch.stop({ reap: true }).catch(() => undefined);
       await server.close().catch(() => undefined);
       store.close();
-      // A reaped agent may still be writing into its worktree for a moment; retry rather than fail on ENOTEMPTY.
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      // A reaped agent may still be writing into its worktree for a moment (longer on a loaded machine):
+      // wait for the agents in the pid log to be gone, then retry rather than fail on ENOTEMPTY.
+      const realDir = realpathSync(dir);
+      const alive = () => [...new Set(h.pidEvents().map((l) => Number(l.split(' ')[0])).filter((p) => p > 0))].filter((p) => pidAlive(p));
+      for (const deadline = Date.now() + 3_000; alive().length > 0 && Date.now() < deadline; ) await new Promise((r) => setTimeout(r, 100));
+      // An agent this harness's own orchestrator spawned around the stop (a relaunch) outlives the reap:
+      // end it, but only when its command line is under this harness's directory (never a recycled pid).
+      for (const pid of alive()) {
+        let command = '';
+        try {
+          command = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });
+        } catch {
+          continue;
+        }
+        if (command.includes(dir) || command.includes(realDir)) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            /* gone */
+          }
+        }
+      }
+      for (const deadline = Date.now() + 15_000; ; await new Promise((r) => setTimeout(r, 250))) {
+        try {
+          rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+          break;
+        } catch (e) {
+          if (Date.now() > deadline) throw e;
+        }
+      }
     },
   };
   return h;

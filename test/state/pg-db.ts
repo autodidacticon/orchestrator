@@ -1,72 +1,65 @@
 /**
- * Postgres for the tests: `TEST_DATABASE_URL` when set; otherwise a throwaway cluster started with
- * `initdb` and `pg_ctl` when both are on PATH (listening only on a Unix socket in a temp directory,
- * so parallel test files never contend for a port); otherwise the Postgres suites are skipped.
- * `ORCH_TEST_PG=off` forces the skip. One cluster per test file: call `stopTestPostgres` in `afterAll`.
+ * Postgres for the tests. Where it comes from is decided once per run by the global setup
+ * (test/setup/postgres.ts): `TEST_DATABASE_URL`, else one throwaway cluster shared by every test file
+ * of the run, else none (the Postgres suites are skipped and the run says so in one line;
+ * `ORCH_TEST_PG=required` fails the run instead, `ORCH_TEST_PG=off` forces the skip).
+ *
+ * On the run's cluster each test file gets its own database, created on first use and dropped by
+ * `stopTestPostgres` (call it in `afterAll`); the cluster itself is stopped by the global setup.
  */
-import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { accessSync, constants, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { promisify } from 'node:util';
 import pg from 'pg';
+import { inject } from 'vitest';
 import { TABLES } from '../../src/state/journal.js';
+import type { TestPostgres } from '../setup/postgres.js';
 
-const run = promisify(execFile);
+const provided: TestPostgres = inject('testPostgres') ?? { source: 'none', reason: 'the global setup test/setup/postgres.ts did not run' };
 
-function onPath(bin: string): boolean {
-  for (const dir of (process.env['PATH'] ?? '').split(path.delimiter)) {
-    if (!dir) continue;
-    try {
-      accessSync(path.join(dir, bin), constants.X_OK);
-      return true;
-    } catch {
-      /* next */
-    }
-  }
-  return false;
-}
-
-const forcedOff = process.env['ORCH_TEST_PG'] === 'off';
-const url = process.env['TEST_DATABASE_URL'];
-
-/** How the Postgres suites get a database, decided when the test file is collected. */
-export const pgSource: 'url' | 'cluster' | undefined = forcedOff ? undefined : url ? 'url' : onPath('initdb') && onPath('pg_ctl') ? 'cluster' : undefined;
+/**
+ * How the Postgres suites get a database: a URL, or the cluster this run started (only then are its
+ * server processes this run's own, to stop or signal).
+ */
+export const pgSource: 'url' | 'cluster' | undefined = provided.source === 'none' ? undefined : provided.source;
 export const pgAvailable = pgSource !== undefined;
+/** Why there is no Postgres, when there is none. */
+export const pgSkipReason: string | undefined = provided.source === 'none' ? provided.reason : undefined;
 
 let started: Promise<string | pg.ClientConfig> | undefined;
-let clusterDir: string | undefined;
+let fileDatabase: string | undefined;
 
-async function startCluster(): Promise<pg.ClientConfig> {
-  // A short base keeps the socket path under the 104-byte limit.
-  const dir = mkdtempSync(path.join(tmpdir(), 'opg-'));
-  clusterDir = dir;
-  const data = path.join(dir, 'data');
-  await run('initdb', ['-D', data, '-A', 'trust', '-U', 'postgres', '-E', 'UTF8', '--locale=C', '--no-sync'], { timeout: 60_000 });
-  await run('pg_ctl', ['-D', data, '-l', path.join(dir, 'log'), '-w', '-t', '60', '-o', `-k ${dir} -c listen_addresses='' -F -c max_connections=200`, 'start'], { timeout: 90_000 });
-  return { host: dir, port: 5432, user: 'postgres', database: 'postgres' };
+async function onCluster(base: pg.ClientConfig, sql: string): Promise<void> {
+  const c = new pg.Client(base);
+  c.on('error', () => undefined);
+  await c.connect();
+  try {
+    await c.query(sql);
+  } finally {
+    await c.end().catch(() => undefined);
+  }
 }
 
-/** The connection for this file's database, starting the cluster on first use. */
+async function createFileDatabase(base: pg.ClientConfig): Promise<pg.ClientConfig> {
+  const name = `t_${randomBytes(6).toString('hex')}`;
+  // template0: no other session can be connected to it, so concurrent creates never collide.
+  await onCluster(base, `CREATE DATABASE ${name} TEMPLATE template0`);
+  fileDatabase = name;
+  return { ...base, database: name };
+}
+
+/** The connection for this file's database, creating it on the run's cluster on first use. */
 export function testDatabase(): Promise<string | pg.ClientConfig> {
-  if (!pgSource) return Promise.reject(new Error('no Postgres for tests'));
-  started ??= pgSource === 'url' ? Promise.resolve(url!) : startCluster();
+  if (provided.source === 'none') return Promise.reject(new Error(`no Postgres for tests: ${provided.reason}`));
+  started ??= provided.source === 'url' ? Promise.resolve(provided.conn) : createFileDatabase(provided.conn);
   return started;
 }
 
-/** Stop this file's cluster, if it started one. */
+/** Drop this file's database on the run's cluster, if it made one. The cluster stays up for other files. */
 export async function stopTestPostgres(): Promise<void> {
-  if (!started || !clusterDir) return;
-  const dir = clusterDir;
+  if (provided.source !== 'cluster' || !started) return;
+  const name = fileDatabase;
   started = undefined;
-  clusterDir = undefined;
-  try {
-    await run('pg_ctl', ['-D', path.join(dir, 'data'), '-m', 'immediate', '-w', 'stop'], { timeout: 60_000 });
-  } catch {
-    /* already gone */
-  }
-  rmSync(dir, { recursive: true, force: true });
+  fileDatabase = undefined;
+  if (name) await onCluster(provided.conn, `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`).catch(() => undefined);
 }
 
 /** A run id no other test uses, even against a shared `TEST_DATABASE_URL`. */

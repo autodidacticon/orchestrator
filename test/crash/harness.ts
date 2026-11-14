@@ -3,7 +3,7 @@
  * named crash point via ORCH_CRASH_AT, restarts it, and checks convergence.
  */
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,9 +59,11 @@ export interface CrashRun {
   waitExit(child: ChildProcess, timeoutMs?: number): Promise<number | null>;
   stop(child: ChildProcess): Promise<void>;
   entries(): Map<string, Entry>;
+  /** Stored events of one kind. */
+  events(kind: string): unknown[];
   terminal(): boolean;
   waitTerminal(timeoutMs?: number): Promise<void>;
-  cleanup(): void;
+  cleanup(): Promise<void>;
 }
 
 export interface CrashRunOptions {
@@ -118,6 +120,30 @@ export async function setupCrashRun(opts: CrashRunOptions = {}): Promise<CrashRu
 
   const workers: ChildProcess[] = [];
   const daemons: ChildProcess[] = [];
+  /** A launch's row, for diagnostics. */
+  const launchRow = (launchId: string): unknown => {
+    const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
+    try {
+      const l = store.getLaunch(launchId);
+      return l && { taskId: l.taskId, status: l.status, endReason: l.endReason, pid: l.pid, worker: l.worker?.id };
+    } finally {
+      store.close();
+    }
+  };
+  /** Tags `milestone/<id>/v<reviewVersion>` of submitted milestones that the repository lacks. */
+  const missingTags = (): string[] => {
+    const missing: string[] = [];
+    for (const [id, e] of run.entries()) {
+      if (graph.nodes.get(id)?.kind !== 'milestone' || e.status.kind !== 'submitted') continue;
+      const tag = `milestone/${id}/v${e.reviewVersion ?? 1}`;
+      try {
+        gitIn(repo, 'rev-parse', '--verify', '--quiet', `${tag}^{commit}`);
+      } catch {
+        missing.push(tag);
+      }
+    }
+    return missing;
+  };
   const run: CrashRun = {
     dir,
     scenario,
@@ -198,6 +224,14 @@ export async function setupCrashRun(opts: CrashRunOptions = {}): Promise<CrashRu
         store.close();
       }
     },
+    events: (kind) => {
+      const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
+      try {
+        return store.listEvents({ kind });
+      } finally {
+        store.close();
+      }
+    },
     terminal: () => {
       if (!existsSync(path.join(dataDir, 'store.sqlite'))) return false;
       const e = run.entries();
@@ -211,30 +245,34 @@ export async function setupCrashRun(opts: CrashRunOptions = {}): Promise<CrashRu
     waitTerminal: async (timeoutMs = 60_000) => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        if (run.terminal()) return;
+        // A done task's worktree is removed after the transition is stored (not awaited by the tick):
+        // wait for that too, or a stop right after reads a worktree that is about to go.
+        // Likewise a submitted milestone's tag, written after its transition.
+        if (run.terminal() && launchWorktrees(repo).length === 0 && missingTags().length === 0) return;
         await new Promise((r) => setTimeout(r, 200));
       }
-      throw new Error(`terminal state not reached; daemon log:\n${readFileSync(daemonLog, 'utf8').slice(-4000)}`);
+      throw new Error(`terminal state not reached (terminal: ${run.terminal()}, worktrees left: ${JSON.stringify(launchWorktrees(repo).map((w) => ({ w, exists: existsSync(w), files: existsSync(w) ? listTree(w) : [], launch: launchRow(path.basename(w)), pids: existsSync(pidlog) ? readFileSync(pidlog, 'utf8').split('\n').filter((l) => l.includes(path.basename(w))) : [] })))}, tags missing: ${JSON.stringify(run.terminal() ? missingTags() : [])}); daemon log:\n${readFileSync(daemonLog, 'utf8').slice(-4000)}`);
     },
-    cleanup: () => {
-      // A failed assertion skips run.stop(); never leave a daemon behind.
-      for (const d of daemons) {
-        if (d.exitCode === null) {
-          try {
-            d.kill('SIGKILL');
-          } catch {
-            /* gone */
-          }
-        }
-      }
-      for (const w of workers) {
+    cleanup: async () => {
+      // A failed assertion skips run.stop(); never leave a daemon behind. Wait for each to exit, so
+      // none is still writing into the directory while it is removed (ENOTEMPTY).
+      const ours = [...daemons, ...workers].filter((c) => c.exitCode === null && c.signalCode === null);
+      for (const c of ours) {
         try {
-          w.kill('SIGKILL');
+          c.kill('SIGKILL');
         } catch {
           /* gone */
         }
       }
-      rmSync(dir, { recursive: true, force: true });
+      await Promise.all(ours.map((c) => run.waitExit(c, 10_000)));
+      // Agents the daemon spawned outlive a killed daemon briefly (they are its children, not the
+      // test's: wait for them, do not signal them).
+      const agentPids = () =>
+        existsSync(pidlog)
+          ? [...new Set(readFileSync(pidlog, 'utf8').split('\n').map((l) => Number(l.split(' ')[0])).filter((p) => p > 0))].filter((p) => pidAlive(p))
+          : [];
+      for (const deadline = Date.now() + 15_000; agentPids().length > 0 && Date.now() < deadline; ) await new Promise((r) => setTimeout(r, 100));
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     },
   };
   return run;
@@ -267,11 +305,7 @@ export async function checkInvariants(run: CrashRun): Promise<InvariantReport> {
     if (!task || !t['Orchestrator-Launch']) foreign.push(sha);
     else perTask[task] = (perTask[task] ?? 0) + 1;
   }
-  const worktrees = gitIn(run.repo, 'worktree', 'list', '--porcelain')
-    .split('\n')
-    .filter((l) => l.startsWith('worktree '))
-    .map((l) => l.slice(9))
-    .filter((p) => realpathSync(p) !== realpathSync(run.repo));
+  const worktrees = launchWorktrees(run.repo);
   const verifyDir = path.join(run.dataDir, 'verify');
   const tempDirs = existsSync(verifyDir) ? readdirSafe(verifyDir) : [];
 
@@ -321,9 +355,27 @@ export async function checkInvariants(run: CrashRun): Promise<InvariantReport> {
   return { trailerCommitsPerTask: perTask, foreign, worktrees, tempDirs, liveLaunches, pidOverlaps, alivePids, byStatus, outboxSummary, outboxOrphans };
 }
 
+/** Up to 40 paths under `dir`, for diagnostics. */
+function listTree(dir: string): string[] {
+  try {
+    return (readdirSync(dir, { recursive: true }) as string[]).slice(0, 40);
+  } catch (e) {
+    return [String(e)];
+  }
+}
+
+/** The repository's worktrees other than its main one. */
+function launchWorktrees(repo: string): string[] {
+  return gitIn(repo, 'worktree', 'list', '--porcelain')
+    .split('\n')
+    .filter((l) => l.startsWith('worktree '))
+    .map((l) => l.slice(9))
+    .filter((p) => realpathSync(p) !== realpathSync(repo));
+}
+
 function readdirSafe(p: string): string[] {
   try {
-    return require('node:fs').readdirSync(p) as string[];
+    return readdirSync(p);
   } catch {
     return [];
   }

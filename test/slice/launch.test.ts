@@ -360,6 +360,8 @@ describe('slice: launch, API, recovery', () => {
     h = await makeSlice({ graph: single('commitAndSubmit') });
     await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');
     const l = h.store.listLaunches({ taskId: 'T1' })[0]!;
+    // The task is done before its worktree is removed; under load the removal lands later, so wait for it before planting the stray.
+    await h.waitFor(() => !existsSync(l.worktree));
     mkdirSync(path.dirname(l.worktree), { recursive: true });
     gitIn(h.repo, 'worktree', 'add', '--detach', l.worktree, 'main');
     expect(await h.workspace.listWorktrees()).toEqual([l.launchId]);

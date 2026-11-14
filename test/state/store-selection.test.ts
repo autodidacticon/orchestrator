@@ -15,7 +15,7 @@ import { type FatalInfo, JournaledStore, type JournalSink, type RowOp } from '..
 import { openStore, type OpenedStore } from '../../src/state/open.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { backends } from './backends.js';
-import { adminClient, dropRun, freshRunId, pgAvailable, stopTestPostgres, testDatabase } from './pg-db.js';
+import { adminClient, dropRun, freshRunId, pgAvailable, pgSource, stopTestPostgres, testDatabase } from './pg-db.js';
 
 const G1 = 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n';
 const G2 = 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n  - { id: T2, deps: [T1], description: d, acceptanceCriteria: [a] }\n';
@@ -232,7 +232,8 @@ describe.skipIf(!pgAvailable)('openStore over Postgres', () => {
     expect(o.store.readiness?.()[0]).toContain('the run lock was lost');
   });
 
-  it('a stalled server is fatal once the flush deadline passes, with the unflushed batch count', async () => {
+  // Stalls the server by stopping its backend process: only on the cluster this run started, never a TEST_DATABASE_URL server (maybe remote, maybe someone else's).
+  it.skipIf(pgSource !== 'cluster')('a stalled server is fatal once the flush deadline passes, with the unflushed batch count', async () => {
     const runId = freshRunId('sel');
     runs.push(runId);
     const fatal: FatalInfo[] = [];
