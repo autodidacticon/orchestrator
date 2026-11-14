@@ -134,6 +134,8 @@ deploy/smoke.sh --fresh             # delete and recreate the kind cluster first
 deploy/smoke.sh --break pvc         # falsify one restart-drill assertion on purpose (pvc or claimable); exits 1
 ```
 
+These are the only arguments: `--dry-run`, `--fresh` and `--break pvc|claimable`. Anything else, or another `--break` value, prints usage and exits 2.
+
 The steps run in this order:
 
 1. `docker build -t orchestrator:dev .`
@@ -148,22 +150,34 @@ The steps run in this order:
 It asserts:
 
 - M1: `runner.mode` is `pull` and `claimable` is non-empty. The daemon runs in the cluster in pull mode and has parked a launch for the overlay's `SMOKE` task.
-- M2: `kubectl get pvc` lists no claim of the daemon's. Postgres and `git-origin` keep their own claims.
+- M2: no volume of the daemon pod is backed by a claim (`persistentVolumeClaim` or `ephemeral`), whatever the claim is called. The script reads the pod's volumes, not the claim names in the namespace. Postgres and `git-origin` keep their own claims.
 - M2 restart drill. The graph has `SMOKE` and `SMOKE-PARKED`, which depends on it. The script works `SMOKE` itself as a pull-mode worker: it claims the launch, commits in the pod's worktree with `kubectl exec`, and submits with the launch token. It waits until the in-pod verifier has published `SMOKE` to origin and `SMOKE-PARKED` is claimable. It then records three things:
-  - from the API: the claimable set, the task states, `latestSeq`, and the integration head (the `publishedSha` of `SMOKE`'s transition to `done`);
-  - through `psql` on the CloudNativePG pod: `select status, count(*) from launches where run_id = ... group by 1`, the claimable launches, and the task states;
+  - from the API: the claimable launches as launch id and task id, the task states, `latestSeq`, the integration head (the `publishedSha` of `SMOKE`'s transition to `done`), and the daemon pod's uid. `/v1/status` lists claimable tasks only, so the launch ids come from `/v1/events`: a launch is claimable when its latest `launch.claimable`, `launch.claimed`, `launch.released`, `launch.ended`, `launch.revoked` or `launch.failed` event is `launch.claimable`, and those launches' tasks must equal `/v1/status` `claimable`;
+  - through `psql` on the CloudNativePG pod: `select status, count(*) from launches where run_id = ... group by 1`, the claimable launches as launch id, task id and `md5(token)`, and the task states;
   - a check that the API and `psql` agree.
 
-  Then it deletes the daemon pod. After the rollout, the new pod runs on a fresh clone and an empty run directory. The script asserts that:
-  - the same `graphRev` is served;
-  - the claimable set and the task states are unchanged, from both the API and `psql`, and so are the launch counts;
+  Then it deletes the daemon pod. After the rollout, the new pod runs on a fresh clone and an empty run directory. `/readyz` passes before the daemon's startup recovery runs, so the script first waits until every recorded claimable launch has a recovery event (`launch.reprepared`, `launch.ended`, `launch.revoked` or `launch.failed`) after the recorded sequence. It asserts that:
+  - the pod's uid is new, and the same `graphRev` is served;
+  - the claimable launches are unchanged by launch id (API) and by launch id and token (`psql`), and so are the task states and the launch counts. A launch replaced by a new one for the same task fails `drill: claimable set unchanged (API)`;
   - origin's `main` and the clone are at the recorded head, and origin's history carries the `Orchestrator-Task: SMOKE` commit;
   - exactly one `launch.reprepared` event per claimable launch follows the recorded sequence;
-  - there is still no orchestrator claim.
-- M2 Postgres-outage drill. The script freezes every `postgres` process in the instance pod with SIGSTOP for `OUTAGE_S` seconds (default 10). One write stays pending meanwhile: a claim for a task that does not exist, whose response waits for durability. While Postgres is frozen, `/readyz` must fail, and `/v1/status` must answer with `storeLagMs` rising. After SIGCONT, the lag must return to zero, `/readyz` must pass, the write must complete, and the daemon pod's uid and restart count must be unchanged.
+  - the new daemon pod still mounts no claim.
+- M2 Postgres-outage drill. The script freezes every `postgres` process in the instance pod with SIGSTOP for `OUTAGE_S` seconds (default 10). One write stays pending meanwhile: a claim for a task that does not exist, whose response waits for durability. Just before the thaw, the script checks that this request is still running with no answer and that `storePendingBatches` is above zero. While Postgres is frozen, `/readyz` must answer 503 at least once, and only 200 or 503; curl's `000` (no answer) fails the assertion. `/v1/status` must answer with `storeLagMs` rising. After SIGCONT, the lag must return to zero, `/readyz` must pass, the write must answer 404, and the daemon pod's uid and restart count must be unchanged.
 
   The drill freezes Postgres rather than scaling it to zero. The journal sink never reconnects, and a lost session is fatal, so scale-to-zero restarts the daemon by design. A NetworkPolicy does not stall the session either, because kindnet enforces policies only on new connections. Keep `OUTAGE_S` well under 30: CloudNativePG's liveness probe (3 × 10s) restarts a frozen Postgres, which ends the session and so the daemon.
+- M2 Postgres-restart drill. The script records the claimable launches and task states (API and `psql`), the daemon pod's uid and its restart count, then deletes the Postgres pod and waits until it is gone. CloudNativePG's smart shutdown waits for open sessions, the daemon's included, for up to the Cluster's `smartShutdownTimeout` (180s by default), so this step takes about three minutes. The daemon then loses its session and the run lock and exits. The script asserts that:
+  - the daemon container restarts within `PG_EXIT_TIMEOUT_S` (default 60) seconds of the old Postgres pod being gone;
+  - within `PG_READY_TIMEOUT_S` (default 120) seconds of that, the pod is Ready and `/readyz` answers 200 through a new port-forward (measured on kind: about 12s);
+  - after `SETTLE_S` (default 5) seconds, it is the same pod, and the claimable launches (ids, and tokens through `psql`) and the task states are unchanged.
+- Last, a claim of `SMOKE-PARKED` must return a launch id and token (compared by md5 in `psql`) recorded before the first restart. The script then releases that launch.
+
+`--break` falsifies one assertion on purpose. The script must then fail at that assertion, with every earlier one passing:
+
+- `--break pvc` creates a claim named `data-smoke-break` and mounts it into the daemon container with a Deployment patch. It waits for that rollout's recovery and then takes the snapshot. The restart drill fails with `smoke: FAIL: drill: the daemon pod mounts no volume claim`. On exit the script removes the volume and the mount from the Deployment, which rolls the daemon again, and deletes the claim.
+- `--break claimable` claims `SMOKE-PARKED`'s launch after the snapshot and before the restart. Recovery ends that launch and parks a new one for the same task, so the run fails with `smoke: FAIL: drill: claimable set unchanged (API)`.
 
 Each assertion prints `smoke: pass: <name>`. The first one that does not hold prints `smoke: FAIL: <name>`, and the script exits 1. A full pass ends with `smoke: ok`. On a kept cluster, a rerun skips the worker step when `SMOKE` is already done. `PUBLISH_TIMEOUT_S` (default 300) bounds the wait for the publish.
 
-Every `kubectl` call passes `--context "$KUBE_CONTEXT"`, default `kind-$KIND_CLUSTER`, so the script never touches whatever context is current. `IMAGE`, `ROLLOUT_TIMEOUT` (default `300s`) and `CNPG_MANIFEST` (the operator release to install) can also be overridden. The script exits non-zero at the first step that fails. `test/host/smoke.test.ts` runs the dry run, with every tool stubbed out, and checks the order of the steps.
+Every `kubectl` call that talks to a cluster passes `--context "$KUBE_CONTEXT"`. Its only accepted value is `kind-$KIND_CLUSTER`, the default. Any other value exits 2 before the first step, so the image always goes to the cluster being tested. The script leaves the current kubectl context as it found it. The exception is `kind create cluster` under `--fresh`, which makes the new cluster current. So `--fresh` reads `kubectl config current-context` first, and afterwards runs `kubectl config use-context` with that value, or `kubectl config unset current-context` if none was set. These three `kubectl config` calls are the only ones without `--context`.
+
+`--break claimable` costs `SMOKE-PARKED` one attempt: recovery fails the task whose claimed launch lost its worktree. After a few such runs on a kept cluster the task runs out of attempts and `drill: SMOKE-PARKED claimable` fails; start again with `--fresh`. The final claim releases its launch without progress, which spends no attempt. `IMAGE`, `ROLLOUT_TIMEOUT` (default `300s`) and `CNPG_MANIFEST` (the operator release to install) can also be overridden. The script exits non-zero at the first step that fails. `test/host/smoke.test.ts` runs the dry run, with every tool stubbed out, and checks the order of the steps.

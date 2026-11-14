@@ -19,8 +19,20 @@ for (const tool of ['docker', 'kind', 'kubectl', 'curl', 'jq']) {
 }
 afterAll(() => rmSync(stubs, { recursive: true, force: true }));
 
-function dryRun(env: Record<string, string> = {}) {
-  return spawnSync(bash, [script, '--dry-run'], { encoding: 'utf8', env: { PATH: `${stubs}:/usr/bin:/bin`, ...env } });
+function dryRun(env: Record<string, string> = {}, args: string[] = []) {
+  return spawnSync(bash, [script, '--dry-run', ...args], { encoding: 'utf8', env: { PATH: `${stubs}:/usr/bin:/bin`, ...env } });
+}
+
+const stepsOf = (out: string) => out.split('\n').filter((l) => l.startsWith('+ '));
+
+// Each expected step must appear after the one before it (a step may repeat, so search on from the last match).
+function expectInOrder(steps: string[], expected: string[]) {
+  let from = 0;
+  for (const e of expected) {
+    const i = steps.findIndex((s, j) => j >= from && s.includes(e));
+    expect(i, `"${e}" missing after step ${from} in:\n${steps.join('\n')}`).toBeGreaterThanOrEqual(0);
+    from = i + 1;
+  }
 }
 
 describe('deploy/smoke.sh', () => {
@@ -36,8 +48,8 @@ describe('deploy/smoke.sh', () => {
     const r = dryRun();
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
-    const steps = r.stdout.split('\n').filter((l) => l.startsWith('+ '));
-    const expected = [
+    const steps = stepsOf(r.stdout);
+    expectInOrder(steps, [
       'docker build -t orchestrator:dev .',
       'kind load docker-image orchestrator:dev --name orch',
       'kubectl --context kind-orch apply --server-side -f https://raw.githubusercontent.com/cloudnative-pg/',
@@ -49,15 +61,103 @@ describe('deploy/smoke.sh', () => {
       'curl -fsS -o /dev/null http://127.0.0.1:18080/healthz',
       'retry 30 put_graph',
       'status_is .runner.mode == "pull" and (.claimable | length > 0)',
-      'no_orchestrator_claim',
+      'daemon_mounts_no_claim',
       'kubectl --context kind-orch -n orch delete pod -l app.kubernetes.io/name=orchestrator',
       'kubectl --context kind-orch -n orch wait --for=condition=Ready pod -l app.kubernetes.io/name=orchestrator',
+      'differs dry-run daemon_uid',
       'status_is .graphRev == "unknown" and (.claimable | length > 0)',
-    ];
-    const at = expected.map((e) => steps.findIndex((s) => s.includes(e)));
-    expect(at.every((i) => i >= 0), `missing steps in:\n${steps.join('\n')}`).toBe(true);
-    expect([...at].sort((a, b) => a - b)).toEqual(at);
+      'recovery_settled',
+      'same  api_claimable',
+      'same  pg_claimable_tokens',
+      'reprepared_once_each',
+      'daemon_mounts_no_claim',
+      'freeze_postgres',
+      'sample_outage',
+      'note_write_pending',
+      'thaw_postgres',
+      'write_was_pending',
+      'readyz_503_during_outage',
+      'outage_write_completed',
+      'delete_postgres_pod',
+      'daemon_restarted_since',
+      'ready_within_limit',
+      'same dry-run daemon_uid',
+      'same  api_claimable',
+      'same  pg_claimable_tokens',
+      'claim_returns_recorded_launch',
+    ]);
+    expect(steps.some((s) => s.includes('kind delete cluster') || s.includes('save_context'))).toBe(false);
     expect(existsSync(calls)).toBe(false);
+  });
+
+  it('--fresh saves the current context, recreates the cluster, and restores the context', () => {
+    const r = dryRun({}, ['--fresh']);
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expectInOrder(stepsOf(r.stdout), ['save_context', 'kind delete cluster --name orch', 'kind create cluster --name orch', 'restore_context', 'docker build']);
+    expect(existsSync(calls)).toBe(false);
+  });
+
+  it('--break pvc mounts the claim before the snapshot; --break claimable claims after it', () => {
+    const pvc = stepsOf(dryRun({}, ['--break', 'pvc']).stdout);
+    expectInOrder(pvc, ['retry 120 status_is .claimable | index("SMOKE-PARKED")', 'mount_break_claim', 'recovery_settled', 'same  pg_claimable', 'delete pod -l app.kubernetes.io/name=orchestrator']);
+    const claimable = stepsOf(dryRun({}, ['--break', 'claimable']).stdout);
+    expectInOrder(claimable, ['same  pg_claimable', '"taskId":"SMOKE-PARKED"', 'delete pod -l app.kubernetes.io/name=orchestrator']);
+    expect(existsSync(calls)).toBe(false);
+  });
+
+  // Not a dry run: kind succeeds, kubectl logs its arguments, docker fails, so the script stops at the build.
+  function freshWithContext(current: string | undefined) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-ctx-'));
+    const log = path.join(dir, 'log');
+    const ctx = current === undefined ? 'exit 1' : `echo ${current}`;
+    const tools: Record<string, string> = {
+      kubectl: `echo "kubectl $*" >> '${log}'\nif [ "$1 $2" = "config current-context" ]; then ${ctx}; fi\nexit 0`,
+      kind: `echo "kind $*" >> '${log}'\nexit 0`,
+      docker: `echo "docker $*" >> '${log}'\nexit 1`,
+    };
+    for (const [tool, body] of Object.entries(tools)) {
+      writeFileSync(path.join(dir, tool), `#!/bin/sh\n${body}\n`);
+      chmodSync(path.join(dir, tool), 0o755);
+    }
+    try {
+      const r = spawnSync(bash, [script, '--fresh'], { encoding: 'utf8', env: { PATH: `${dir}:/usr/bin:/bin`, LOCAL_PORT: '18999' } });
+      return { status: r.status, calls: readFileSync(log, 'utf8').trim().split('\n') };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('--fresh puts back the context that was current before kind create cluster', () => {
+    const r = freshWithContext('prod');
+    expect(r.status).not.toBe(0);
+    expect(r.calls).toEqual([
+      'kubectl config current-context',
+      'kind delete cluster --name orch',
+      'kind create cluster --name orch',
+      'kubectl config use-context prod',
+      'docker build -t orchestrator:dev .',
+    ]);
+  });
+
+  it('--fresh unsets the context kind made current when none was current before', () => {
+    const r = freshWithContext(undefined);
+    expect(r.calls).toEqual([
+      'kubectl config current-context',
+      'kind delete cluster --name orch',
+      'kind create cluster --name orch',
+      'kubectl config unset current-context',
+      'docker build -t orchestrator:dev .',
+    ]);
+  });
+
+  it('refuses a KUBE_CONTEXT that does not name the kind cluster', () => {
+    const r = dryRun({ KIND_CLUSTER: 'dev', KUBE_CONTEXT: 'kind-orch' });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain('KUBE_CONTEXT=kind-orch');
+    expect(r.stderr).toContain('KIND_CLUSTER=dev');
+    expect(stepsOf(r.stdout)).toEqual([]);
+    expect(dryRun({ KIND_CLUSTER: 'dev', KUBE_CONTEXT: 'kind-dev' }).status).toBe(0);
   });
 
   it('loads into and targets the cluster named by KIND_CLUSTER', () => {
@@ -68,7 +168,11 @@ describe('deploy/smoke.sh', () => {
     for (const l of kubectl) expect(l).toContain('--context kind-other');
   });
 
-  it('rejects unknown arguments', () => {
-    expect(spawnSync(bash, [script, '--nope'], { encoding: 'utf8' }).status).toBe(2);
+  it('rejects unknown arguments and unknown --break values', () => {
+    for (const args of [['--nope'], ['--break', 'nothing'], ['--break']]) {
+      const r = spawnSync(bash, [script, ...args], { encoding: 'utf8' });
+      expect(r.status, args.join(' ')).toBe(2);
+      expect(r.stderr).toContain('usage:');
+    }
   });
 });
