@@ -6,9 +6,10 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { alwaysValid, type BriefValidator, noRemediation, type Remediator } from '../brief/validate.js';
 import { renewEveryMsOf } from '../brief/compose.js';
+import { scrubCarry } from '../brief/lost.js';
 import { checkSubmission } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
-import { type Config, DEFAULT_CONTENDED_RETRIES } from '../config.js';
+import { type Config, DEFAULT_CONTENDED_RETRIES, storeDurabilityWarning } from '../config.js';
 import { classifyReload, type ReloadReason } from '../graph/diff.js';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
 import type { Graph, GraphNode, Id } from '../graph/model.js';
@@ -286,6 +287,11 @@ export class Orchestrator implements OrchestratorCore {
    * later resolution pass. See specs/crash-recovery "Origin lookup before commit lost".
    */
   readonly deferredJobs = new Set<string>();
+  /**
+   * Launch branches and commits startup recovery found missing from the clone (a fresh clone). No brief names them.
+   * See specs/crash-recovery "Context naming lost work".
+   */
+  readonly lostRefs = new Set<string>();
   private deferredTriedAt = Number.NEGATIVE_INFINITY;
   /** The integration branch's remote when `git.pushIntegration` is on; shared by the workspace and the verifier. */
   readonly origin: Origin | undefined;
@@ -636,7 +642,8 @@ export class Orchestrator implements OrchestratorCore {
       launch,
       node: { id: node.id, kind: node.kind, payload: this.payloadOf(node), deps: node.deps },
       depReports,
-      carry: entry.carry as Record<string, unknown> | undefined,
+      // Recovery already scrubbed stored carries; this catches a context composed since. See specs/crash-recovery "Context naming lost work".
+      carry: scrubCarry(entry.carry, (ref) => this.lostRefs.has(ref)).carry as Record<string, unknown> | undefined,
       apiBaseUrl: this.apiBaseUrl,
       retryWindowMs: this.config.retryWindowMs,
       // The lease line is for a launch a worker claims. A spawned launch's lease is renewed by the tick while its process
@@ -742,7 +749,9 @@ export class Orchestrator implements OrchestratorCore {
       const snap = this.store.getSnapshot();
       if (snap) this._graph = parseGraph(snap.content);
     }
-    let polled: { content: string; graph: Graph } | undefined;
+    // A stored proposal rejected earlier, by this daemon or one before it, is reported as rejected though it is not evaluated again.
+    if (!this._graphRejected) this._graphRejected = this.graphSource.standingRejection?.();
+    let polled: { content: string; graph: Graph; stamp?: number } | undefined;
     try {
       polled = await this.graphSource.poll(this._graph?.rev);
     } catch (err) {
@@ -756,6 +765,8 @@ export class Orchestrator implements OrchestratorCore {
       cls = classifyReload(this._graph, polled.graph, this.overlay());
       if (!cls.compatible) {
         this._graphRejected = { reasons: cls.reasons.map((r: ReloadReason) => r.message) };
+        // A stored proposal stays rejected until sent again, across restarts. See specs/graph-import "Rejected proposal stays rejected".
+        if (polled.stamp !== undefined) this.graphSource.rejected?.(polled.stamp, this._graphRejected.reasons);
         this.store.appendEvent({ kind: 'graph.rejected', payload: { rev: polled.graph.rev, reasons: this._graphRejected.reasons } }, this.now());
         this.log.warn('graph reload rejected', { reasons: this._graphRejected.reasons });
         return;
@@ -771,6 +782,7 @@ export class Orchestrator implements OrchestratorCore {
       }
       if (reasons.length) {
         this._graphRejected = { reasons };
+        if (polled.stamp !== undefined) this.graphSource.rejected?.(polled.stamp, reasons);
         this.store.appendEvent({ kind: 'graph.rejected', payload: { rev: polled.graph.rev, reasons } }, this.now());
         this.log.warn('graph rejected at ingest: insufficient briefs', { reasons });
         return;
@@ -1280,6 +1292,19 @@ export class Orchestrator implements OrchestratorCore {
 
   answer(taskId: Id, text: string): { ok: true } | { ok: false; reason: string } {
     const entry = this.entry(taskId);
+    const leased = entry.lease ? this.store.getLaunch(entry.lease.launchId) : undefined;
+    if (entry.status.kind === 'waiting' && (!leased || leased.status === 'ended' || leased.status === 'revoked')) {
+      // Its launch ended while it waited (a claimed launch whose worktree a fresh clone lost): nothing can resume, so the
+      // answer goes into a retry at no cost. See specs/crash-recovery "Waiting claim with a lost worktree".
+      const { question } = entry.status;
+      this.store.transaction(() => {
+        this.operatorEvent('answer', taskId, { text });
+        this.transition(taskId, { kind: 'blocked', reason: { ...question, answer: text } }, 'orchestrator', 'maxWaitOrDead');
+        this.unblock(taskId, { answer: text });
+      });
+      this.wake();
+      return { ok: true };
+    }
     if (entry.status.kind === 'waiting') {
       this.store.transaction(() => {
         this.operatorEvent('answer', taskId, { text });
@@ -1330,8 +1355,9 @@ export class Orchestrator implements OrchestratorCore {
       cause,
       ...(upstream ? { upstream } : {}),
       priorLaunchId: prior.launchId,
-      priorBranch: prior.branch,
-      ...(published?.publishedSha ? { priorPublishedSha: published.publishedSha } : {}),
+      // A branch lost with a previous clone is not named. See specs/crash-recovery "Context naming lost work".
+      ...(this.lostRefs.has(prior.branch) ? {} : { priorBranch: prior.branch }),
+      ...(published?.publishedSha && !this.lostRefs.has(published.publishedSha) ? { priorPublishedSha: published.publishedSha } : {}),
       ...(report ? { priorReportSummary: String(report.body['summary'] ?? '') } : {}),
     };
   }
@@ -1982,6 +2008,12 @@ export class Orchestrator implements OrchestratorCore {
   }
 
   async start(): Promise<void> {
+    // See specs/state-backend "Postgres store without push integration".
+    const durability = this.config.store && this.config.git ? storeDurabilityWarning(this.config) : undefined;
+    if (durability) {
+      this.log.warn(durability, { storeKind: this.config.store.kind, pushIntegration: this.config.git.pushIntegration });
+      this.store.appendEvent({ kind: 'config.warning', payload: { code: 'postgresWithoutPushIntegration', message: durability } }, this.now());
+    }
     await this.loadGraph();
     const { recover } = await import('../launch/recovery.js');
     await recover(this);

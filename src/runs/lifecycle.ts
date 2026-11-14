@@ -294,10 +294,12 @@ export async function reviveDaemon(opts: StartOptions = {}): Promise<StartResult
   const repo = await resolveRepoPath({ repo: opts.repo, cwd: opts.cwd, env });
   const paths = runPaths(repo, env);
   if (!existsSync(path.join(paths.runDir, 'store.sqlite'))) {
-    // A Postgres run has no store file: it exists, but remotely, and is not revived from here. See specs/state-backend "Store selection".
+    // A Postgres run has no store file. One a daemon started from this run directory (it left daemon.json) is revived
+    // like any local run; one never started here is remote and is not revived from here.
+    // See specs/operator-control "Revive on demand" and specs/state-backend "Store selection".
     if (runStoreKind(paths.runDir, repo) !== 'postgres') return undefined;
     if ((await daemonState(paths.runDir)).healthy) return undefined;
-    throw remoteRunError(`for ${repo}`);
+    if (!readDaemonJson(paths.runDir)) throw remoteRunError(`for ${repo}`);
   }
   const state = await daemonState(paths.runDir);
   if (state.healthy) return undefined;

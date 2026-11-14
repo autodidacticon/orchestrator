@@ -4,7 +4,7 @@
  * queued verifier job whose sealed commit the new clone lacks fails its task with a retryable reason that spends no
  * attempt. Real git: a bare origin, and the clone re-made at the same path. See specs/crash-recovery "Startup on a fresh clone".
  */
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -102,6 +102,138 @@ describe('startup on a fresh clone', () => {
     expect(entry.carry?.priorFailure).toMatchObject({ kind: 'commitLost' });
     expect(entry.carry?.priorFailure?.message).toContain(job.sealedSha);
     expect(h.store.listEvents({ kind: 'verify.commitLost', taskId: 'T1' })).toMatchObject([{ payload: { sealedSha: job.sealedSha, jobId: job.jobId } }]);
+  }, 60_000);
+
+  it('a waiting claim whose answer arrived is retried with the answer in its brief; an unanswered one keeps waiting and its answer retries it (ORC-91)', async () => {
+    const o = withOrigin();
+    const graph = 'nodes:\n  - { id: T1, deps: [], behavior: hang }\n  - { id: T2, deps: [], behavior: hang }\n';
+    h = await makeSlice({ graph, dir: o.dir, repo: o.repo, config: { ...pull, git: { pushIntegration: true, originUrl: o.origin, fetchIntervalMs: 0 } } });
+    await h.orch.tick();
+    const launches: Record<string, { launchId: string; token: string }> = {};
+    for (const [worker, task] of [['w1', 'T1'], ['w2', 'T2']] as const) {
+      const c = await h.orch.claim({ workerId: worker, taskId: task });
+      const l = h.store.getLaunch(String(c.body['launchId']))!;
+      launches[task] = l;
+      // block long-polls for the answer; the restart ends the wait.
+      void h.orch.agentCall(l.launchId, l.token, 'block', { seq: 1, kind: 'needsDecision', message: `${task}: which way?` });
+    }
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'waiting' && h!.orch.entry('T2').status.kind === 'waiting');
+    expect(h.orch.answer('T1', 'left')).toEqual({ ok: true });
+    expect(h.orch.entry('T1').status).toMatchObject({ kind: 'waiting', answer: 'left' });
+
+    freshClone(h, o.origin);
+    await h.restart();
+
+    // Answered: retried at no cost, the answer carried into the next brief.
+    expect(h.store.getLaunch(launches['T1']!.launchId)).toMatchObject({ status: 'ended', endReason: 'worktreeLost' });
+    const e1 = h.orch.entry('T1');
+    expect(e1.status.kind).toBe('unstarted');
+    expect(e1.attempts).toBe(0);
+    expect(e1.carry).toMatchObject({ question: { message: 'T1: which way?' }, answer: 'left' });
+    // Unanswered: still waiting for its answer, its launch ended.
+    expect(h.store.getLaunch(launches['T2']!.launchId)).toMatchObject({ status: 'ended', endReason: 'worktreeLost' });
+    expect(h.orch.entry('T2').status).toMatchObject({ kind: 'waiting', question: { message: 'T2: which way?' } });
+    await h.orch.tick();
+    expect(h.orch.entry('T2').status.kind).toBe('waiting');
+
+    const next1 = h.store.listLaunches({ taskId: 'T1' }).sort((a, b) => a.launchNo - b.launchNo).at(-1)!;
+    expect(next1).toMatchObject({ status: 'claimable', launchNo: 2 });
+    const brief1 = readFileSync(path.join(next1.worktree, '.orchestrator', 'brief.md'), 'utf8');
+    expect(brief1).toContain('Human answer: left');
+
+    // The answer to the waiting task retries it with the answer.
+    expect(h.orch.answer('T2', 'right')).toEqual({ ok: true });
+    expect(h.orch.entry('T2')).toMatchObject({ attempts: 0, status: { kind: 'unstarted' }, carry: { answer: 'right' } });
+    await h.orch.tick();
+    const next2 = h.store.listLaunches({ taskId: 'T2' }).sort((a, b) => a.launchNo - b.launchNo).at(-1)!;
+    expect(next2).toMatchObject({ status: 'claimable', launchNo: 2 });
+    expect(readFileSync(path.join(next2.worktree, '.orchestrator', 'brief.md'), 'utf8')).toContain('Human answer: right');
+  }, 60_000);
+
+  it.each([
+    { relaunch: 'parked' as const, journal: false },
+    // A journaled store (as under Postgres) gates the workspace behind a proxy; a relaunch caught in `preparing` is briefed by recovery's own relaunch.
+    { relaunch: 'preparing' as const, journal: true },
+  ])('kept work on a branch the fresh clone lacks is recorded as an event, and no brief names that branch or its commit (ORC-91; relaunch $relaunch, journal $journal)', async ({ relaunch, journal }) => {
+    const o = withOrigin();
+    h = await makeSlice({ graph: 'nodes:\n  - { id: T1, deps: [], behavior: hang }\n', dir: o.dir, repo: o.repo, ...(journal ? { journal: {} } : {}), config: { ...pull, git: { pushIntegration: true, originUrl: o.origin, fetchIntervalMs: 0 } } });
+    await h.orch.tick();
+    const c = await h.orch.claim({ workerId: 'w1', taskId: 'T1' });
+    const first = h.store.getLaunch(String(c.body['launchId']))!;
+    writeFileSync(path.join(first.worktree, 'work.txt'), 'progress\n');
+    gitIn(first.worktree, 'add', 'work.txt');
+    gitIn(first.worktree, 'commit', '-q', '-m', 'progress');
+    const head = gitIn(first.worktree, 'rev-parse', 'HEAD');
+    expect((await h.orch.release(first.launchId, 'session ending', { keep: true })).status).toBe(200);
+    expect(h.orch.entry('T1').carry?.interrupted).toMatchObject({ priorBranch: first.branch, headSha: head });
+    // The relaunch is parked with the context still on the entry; its brief names the kept branch.
+    await h.orch.tick();
+    const second = h.store.listLaunches({ taskId: 'T1', status: 'claimable' })[0]!;
+    expect(readFileSync(path.join(second.worktree, '.orchestrator', 'brief.md'), 'utf8')).toContain(first.branch);
+    if (relaunch === 'preparing') h.store.updateLaunch(second.launchId, { status: 'preparing' });
+    await h.store.durable();
+
+    freshClone(h, o.origin);
+    await h.restart();
+
+    expect(h.store.listEvents({ kind: 'recovery.workLost', taskId: 'T1' })).toMatchObject([
+      { payload: { field: 'interrupted', priorLaunchId: first.launchId, priorBranch: first.branch, headSha: head, reason: 'session ending' } },
+    ]);
+    const carry = h.orch.entry('T1').carry;
+    expect(carry?.interrupted).toBeUndefined();
+    expect(carry?.lostWork).toEqual({ priorLaunchId: first.launchId, reason: 'session ending' });
+    // Parked: the same launch is briefed again. Preparing: recovery revokes it and relaunches the same attempt. Either
+    // way the brief names neither the lost branch nor its commit.
+    let briefed = second;
+    if (relaunch === 'parked') {
+      expect(h.store.getLaunch(second.launchId)?.status).toBe('claimable');
+    } else {
+      expect(h.store.getLaunch(second.launchId)?.status).toBe('revoked');
+      briefed = h.store.listLaunches({ taskId: 'T1', status: 'claimable' })[0]!;
+      expect(briefed.launchNo).toBe(3);
+    }
+    const md = readFileSync(path.join(briefed.worktree, '.orchestrator', 'brief.md'), 'utf8');
+    const json = readFileSync(path.join(briefed.worktree, '.orchestrator', 'brief.json'), 'utf8');
+    for (const text of [md, json]) {
+      expect(text).not.toContain(first.branch);
+      expect(text).not.toContain(head);
+    }
+    expect(md).toContain(`Your previous launch \`${first.launchId}\` was interrupted (session ending)`);
+    expect(md).toContain('lost with the orchestrator\'s previous clone');
+    expect(h.orch.lostRefs.has(first.branch)).toBe(true);
+  }, 60_000);
+
+  it('a parked launch whose base commit the clone lacks fails its task with a retryable reason, and the daemon keeps running (ORC-91)', async () => {
+    const o = withOrigin();
+    const graph = 'nodes:\n  - { id: T1, deps: [], behavior: hang }\n  - { id: T2, deps: [], behavior: hang }\n';
+    h = await makeSlice({ graph, dir: o.dir, repo: o.repo, config: { ...pull, git: { pushIntegration: true, originUrl: o.origin, fetchIntervalMs: 0 } } });
+    await h.orch.tick();
+    const t1 = h.store.listLaunches({ taskId: 'T1', status: 'claimable' })[0]!;
+    const t2 = h.store.listLaunches({ taskId: 'T2', status: 'claimable' })[0]!;
+    // T1: a base commit made only in the old clone. T2: a base that names an object which is not a commit, so preparing throws.
+    const lostBase = '1'.repeat(40);
+    h.store.updateLaunch(t1.launchId, { baseSha: lostBase });
+    h.store.updateLaunch(t2.launchId, { baseSha: gitIn(h.repo, 'rev-parse', 'HEAD^{tree}') });
+
+    freshClone(h, o.origin);
+    await h.restart();
+
+    expect(h.store.getLaunch(t1.launchId)).toMatchObject({ status: 'ended', endReason: 'baseLost' });
+    const e1 = h.orch.entry('T1');
+    expect(e1).toMatchObject({ attempts: 0, status: { kind: 'unstarted' } });
+    expect(e1.carry?.priorFailure).toMatchObject({ kind: 'worktreeLost', detail: { baseSha: lostBase, baseLost: true } });
+    expect(e1.carry?.priorFailure?.message).toContain(lostBase);
+    expect(h.store.getLaunch(t2.launchId)).toMatchObject({ status: 'ended', endReason: 'prepareFailed' });
+    expect(h.orch.entry('T2')).toMatchObject({ attempts: 0, status: { kind: 'unstarted' }, carry: { priorFailure: { kind: 'worktreeLost' } } });
+
+    // Both are admitted again from the clone's integration head.
+    await h.orch.tick();
+    const head = gitIn(h.repo, 'rev-parse', 'main');
+    for (const task of ['T1', 'T2']) {
+      const next = h.store.listLaunches({ taskId: task, status: 'claimable' })[0]!;
+      expect(next).toMatchObject({ launchNo: 2, baseSha: head });
+      expect(existsSync(path.join(next.worktree, '.orchestrator', 'brief.json'))).toBe(true);
+    }
   }, 60_000);
 
   it('only a definitely missing object counts as lost', async () => {

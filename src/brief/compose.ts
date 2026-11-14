@@ -188,11 +188,22 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     if (c['verifierOutput']) lines.push('- Verifier output:', '', '```', String(c['verifierOutput']).slice(0, 8000), '```');
     if (c['conflict']) {
       const k = c['conflict'] as { files?: string[]; since?: string[]; previousBranch?: string };
-      lines.push(`- Your previous branch \`${k.previousBranch ?? ''}\` conflicted on rebase in: ${(k.files ?? []).join(', ')}. Tasks published since your base: ${(k.since ?? []).join(', ') || 'none'}. ${
-          daemonCommits
-            ? 'Inspect that branch with `git show`/`git diff` and reapply its changes as file edits on the new base, or start over.'
-            : 'Rebase that branch or start over from the new base.'
-        }`);
+      // A branch lost with a previous clone is not named. See specs/crash-recovery "Context naming lost work".
+      lines.push(
+        k.previousBranch
+          ? `- Your previous branch \`${k.previousBranch}\` conflicted on rebase in: ${(k.files ?? []).join(', ')}. Tasks published since your base: ${(k.since ?? []).join(', ') || 'none'}. ${
+              daemonCommits
+                ? 'Inspect that branch with `git show`/`git diff` and reapply its changes as file edits on the new base, or start over.'
+                : 'Rebase that branch or start over from the new base.'
+            }`
+          : `- Your previous branch conflicted on rebase in: ${(k.files ?? []).join(', ')}. Tasks published since your base: ${(k.since ?? []).join(', ') || 'none'}. That branch was lost with the orchestrator's previous clone; start over from the new base.`,
+      );
+    }
+    if (c['lostWork']) {
+      const k = c['lostWork'] as import('../state/status.js').LostWorkContext;
+      lines.push(
+        `- Your previous launch \`${k.priorLaunchId}\` was interrupted (${k.reason}) and its work was kept on its branch, but that branch was lost with the orchestrator's previous clone and nothing of it remains. Start from your base commit.`,
+      );
     }
     if (c['interrupted']) {
       const k = c['interrupted'] as import('../state/status.js').InterruptedContext;
@@ -217,8 +228,10 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
         ? `- This task is being revised because its upstream task \`${revision.upstream ?? ''}\` was reopened and its work may change.`
         : '- This task was reopened for revision.',
     );
+    // A prior branch lost with a previous clone is not named. See specs/crash-recovery "Context naming lost work".
+    const where = revision.priorBranch ? `worked on branch \`${revision.priorBranch}\`` : "worked on a branch that was lost with the orchestrator's previous clone";
     lines.push(
-      `- Your prior launch \`${revision.priorLaunchId}\` worked on branch \`${revision.priorBranch}\`${
+      `- Your prior launch \`${revision.priorLaunchId}\` ${where}${
         revision.priorPublishedSha
           ? ` and published commit \`${revision.priorPublishedSha}\`, which remains on \`${input.integrationBranch}\` and is contained in your base commit \`${launch.baseSha}\``
           : ' and did not publish'
@@ -227,7 +240,9 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     if (revision.priorReportSummary) lines.push(`- Prior report: ${revision.priorReportSummary}`);
     lines.push(
       daemonCommits
-        ? '- Revise the prior work rather than redoing it: build on what the base commit already contains, inspect the prior branch with `git show`/`git diff` and reapply changes as file edits, and leave the delta in the worktree for the orchestrator to commit.'
+        ? revision.priorBranch
+          ? '- Revise the prior work rather than redoing it: build on what the base commit already contains, inspect the prior branch with `git show`/`git diff` and reapply changes as file edits, and leave the delta in the worktree for the orchestrator to commit.'
+          : '- Revise the prior work rather than redoing it: build on what the base commit already contains, and leave the delta in the worktree for the orchestrator to commit.'
         : '- Revise the prior work rather than redoing it: build on what the base commit already contains, and commit the delta.',
       '',
     );

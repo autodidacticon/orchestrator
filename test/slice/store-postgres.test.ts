@@ -217,7 +217,8 @@ describe.skipIf(!pgAvailable)('daemon on store.kind postgres', () => {
     expect(after.claimable).toEqual(before.claimable);
     expect(after.launches).toEqual(before.launches);
     expect(after.byStatus).toEqual(before.byStatus);
-    // The rejected proposal is still the proposed one, evaluated again and rejected again; the accepted graph is unchanged.
+    // The rejected proposal is still the proposed one and still reported rejected, without being evaluated again
+    // (specs/graph-import "Rejected proposal stays rejected"); the accepted graph is unchanged.
     const st = (await api(again.url, 'GET', '/v1/status')).body;
     expect(st['graphRev']).toBe(acceptedRev);
     expect(st['graphRejected']).toMatchObject({ reasons: expect.any(Array) });

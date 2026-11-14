@@ -343,6 +343,18 @@ export function storeConfigError(cfg: Pick<Config, 'store' | 'leaseTtlMs'>): str
   return undefined;
 }
 
+/**
+ * The startup warning for a Postgres store with `git.pushIntegration` off, or undefined. The state then outlives the
+ * clone, but the integration branch lives only in the clone: on a clone without a volume a restart loses every
+ * publication while the store still records the tasks done. The daemon cannot tell a volume from an emptyDir, and a
+ * locally started Postgres run keeps its clone on disk, so this warns rather than refuses.
+ * See specs/state-backend "Postgres store without push integration".
+ */
+export function storeDurabilityWarning(cfg: Pick<Config, 'store' | 'git'>): string | undefined {
+  if (cfg.store.kind !== 'postgres' || cfg.git.pushIntegration) return undefined;
+  return 'store.kind is postgres but git.pushIntegration is off: the integration branch and launch branches live only in this clone, so unless the clone is on a persistent volume a restart loses every publication while the store still records those tasks done; set git.pushIntegration: true (and git.originUrl) to make origin the source of truth';
+}
+
 /** The store block as printed: the URL without its password. */
 export function redactedStore(store: Config['store']): Config['store'] {
   return { ...store, ...(store.url !== undefined ? { url: redactUrl(store.url) } : {}) };

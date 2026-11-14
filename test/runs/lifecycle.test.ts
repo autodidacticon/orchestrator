@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pidAlive } from '../../src/runner/subprocess.js';
 import { daemonState, health, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
-import { readDaemonJson, resolveRepoPath, resolveRunConfig, runDirFor, runPaths } from '../../src/runs/runDir.js';
+import { ensureRunDir, readDaemonJson, resolveRepoPath, resolveRunConfig, runDirFor, runPaths, writeDaemonJson } from '../../src/runs/runDir.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { makeRepo, scriptedAgent, tsxLoader } from '../slice/harness.js';
 
@@ -214,6 +214,29 @@ describe('run directory and daemon lifecycle', () => {
     await expect(reviveDaemon({ repo, env })).rejects.toThrow(/stopped at .*start/);
     expect(await reviveDaemon({ repo: realpathSync(makeRepo(fresh())), env })).toBeUndefined(); // no store: nothing to revive
   }, 90_000);
+
+  // ORC-91: a Postgres run keeps no store file; one started from this run directory is revived like a local run.
+  it('a Postgres run never started here is remote; one a local daemon left stopped is refused as stopped, and one that exited idle is started again', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home, ORCH_URL: undefined, DATABASE_URL: undefined };
+    const repo = realpathSync(makeRepo(fresh()));
+    configFor(repo);
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), `${readFileSync(path.join(repo, 'orchestrator.yaml'), 'utf8')}store:\n  kind: postgres\n`);
+    const paths = ensureRunDir(repo, env);
+    await expect(reviveDaemon({ repo, env })).rejects.toThrow(/keeps its state in Postgres and is remote/);
+
+    const info = { pid: 2 ** 22 + 7, url: 'http://127.0.0.1:9', port: 9, startedAt: 1, repo };
+    writeDaemonJson(paths.runDir, { ...info, exit: { at: 1_000, reason: 'stop', reap: false, digest: {} } });
+    await expect(reviveDaemon({ repo, env })).rejects.toThrow(/was stopped at .*\(stop\); call start/);
+
+    // Idle: revived by starting the daemon, which here refuses for want of a database URL, not as a remote run.
+    writeDaemonJson(paths.runDir, { ...info, exit: { at: 1_000, reason: 'idle', reap: false, digest: {} } });
+    const err = await reviveDaemon({ repo, env, timeoutMs: 15_000 }).then(
+      () => undefined,
+      (e: unknown) => String(e),
+    );
+    expect(err).toMatch(/daemon did not become healthy[\s\S]*no database URL is set/);
+  }, 60_000);
 
   // See specs/operator-control "Start arguments".
   it('passes configuration arguments as --set flags, applies them through the route on a running daemon, and rejects start-only keys there', async () => {

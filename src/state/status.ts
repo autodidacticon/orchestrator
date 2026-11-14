@@ -182,7 +182,8 @@ export interface ConflictContext {
   files: string[];
   /** Tasks published since this task's base. */
   since: Id[];
-  previousBranch: string;
+  /** Absent when the branch was lost with a previous clone. See specs/crash-recovery "Context naming lost work". */
+  previousBranch?: string;
 }
 
 /** Why a task is relaunched after reopen, uncancel, or a cascade reset. See specs/agent-protocol "Revision context in the brief". */
@@ -190,7 +191,8 @@ export interface RevisionContext {
   cause: 'reopened' | 'upstreamReopened';
   upstream?: Id;
   priorLaunchId: string;
-  priorBranch: string;
+  /** Absent when the branch was lost with a previous clone. See specs/crash-recovery "Context naming lost work". */
+  priorBranch?: string;
   priorPublishedSha?: string;
   priorReportSummary?: string;
 }
@@ -205,6 +207,14 @@ export interface AttemptContext {
   revision?: RevisionContext;
   /** A kept release handed the launch back with its branch intact. See specs/pull-runner "Release". */
   interrupted?: InterruptedContext;
+  /** Kept work a previous clone held and the current clone lacks: replaces `interrupted`. See specs/crash-recovery "Context naming lost work". */
+  lostWork?: LostWorkContext;
+}
+
+/** What remains of an `interrupted` context whose branch or commits were lost with the previous clone. */
+export interface LostWorkContext {
+  priorLaunchId: string;
+  reason: string;
 }
 
 /** Context for the launch after a release with keep: where the previous launch's work sits. */

@@ -3,10 +3,12 @@
  */
 import type { Orchestrator } from '../loop/orchestrator.js';
 import { applyPendingCascade, recordTagPush, tagSafely } from '../loop/tick.js';
+import { scrubCarry } from '../brief/lost.js';
 import { startLaunch } from './launch.js';
 import type { Launch, VerifierJob } from '../state/store.js';
 import { TRAILER_LAUNCH } from '../verify/verifier.js';
 import { findTrailer, git } from '../workspace/git.js';
+import { GitWorkspace } from '../workspace/git-workspace.js';
 import { OriginConfigError } from '../workspace/origin.js';
 
 /** Jobs recovery decides against origin: every unapplied job that has not reached a verdict. */
@@ -105,6 +107,10 @@ export async function recover(o: Orchestrator): Promise<void> {
     o.log.warn('recovery: could not read the integration head', { err: String(err) });
   }
 
+  // Before any brief is composed (a relaunch below, a parked launch prepared again): context naming a branch or commit
+  // the clone lacks is rewritten, and lost kept work recorded. See specs/crash-recovery "Context naming lost work".
+  await scrubLostRefs(o);
+
   for (const launch of store.listLaunches({ status: ['preparing', 'launching'] })) {
     const entry = o.entry(launch.taskId);
     const owns = entry.lease?.launchId === launch.launchId && entry.status.kind === 'running';
@@ -127,7 +133,22 @@ export async function recover(o: Orchestrator): Promise<void> {
     }
     if (!(await workspace.exists(launch))) {
       await workspace.remove(launch);
-      await workspace.prepare(launch, o.briefInput(launch));
+      // A base the clone lacks (or any failure to prepare) fails the task at no cost instead of ending the daemon,
+      // which would crash-loop on the same durable state. See specs/crash-recovery "Re-preparing a parked launch".
+      let error: string | undefined;
+      const baseLost = await commitMissing(o.config.repoPath, launch.baseSha);
+      if (!baseLost) {
+        try {
+          await workspace.prepare(launch, o.briefInput(launch));
+        } catch (err) {
+          error = String(err);
+        }
+      }
+      if (baseLost || error !== undefined) {
+        failUnpreparable(o, launch, baseLost, error);
+        await workspace.remove(launch).catch(() => undefined);
+        continue;
+      }
       store.appendEvent({ kind: 'launch.reprepared', taskId: launch.taskId, launchId: launch.launchId, payload: {} }, o.now());
     }
   }
@@ -231,19 +252,87 @@ export async function recover(o: Orchestrator): Promise<void> {
     const l = store.getLaunch(id);
     if (l) await workspace.remove(l);
   }
+
+  // Launches recovery ended above (a lost claim, a parked launch that could not be prepared) were in flight at the first
+  // scan; their branches join the lost refs now, so a later revision does not name them.
+  await scrubLostRefs(o);
 }
 
-/** End a claimed launch whose worktree is gone and retry its task at no cost (a waiting one is blocked, as on release). */
+/**
+ * End a claimed launch whose worktree is gone. A running task is retried at no cost. A waiting task whose answer has
+ * arrived is retried with the answer in its brief; one still unanswered stays waiting, and its answer retries it then.
+ * See specs/crash-recovery "Waiting claim with a lost worktree".
+ */
 function endLostClaim(o: Orchestrator, launch: Launch): void {
   const entry = o.entry(launch.taskId);
   const message = `the worktree of claimed launch ${launch.launchId} is gone (a fresh clone); retried without waiting for lease expiry`;
+  let outcome = 'retried' as 'retried' | 'retriedWithAnswer' | 'waitingForAnswer';
   o.store.transaction(() => {
+    o.endLaunch(launch, 'worktreeLost', { workerId: launch.worker?.id });
     if (entry.status.kind === 'running') {
       o.fail(launch.taskId, { kind: 'worktreeLost', message, detail: { launchId: launch.launchId, workerId: launch.worker?.id } }, 'orchestrator', 'worktreeLost');
+    } else if (entry.status.kind === 'waiting' && entry.status.answer !== undefined) {
+      const { question, answer } = entry.status;
+      o.transition(launch.taskId, { kind: 'blocked', reason: { ...question, answer } }, 'orchestrator', 'maxWaitOrDead');
+      o.unblock(launch.taskId, { answer });
+      outcome = 'retriedWithAnswer';
     } else if (entry.status.kind === 'waiting') {
-      o.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead');
+      outcome = 'waitingForAnswer';
     }
-    o.endLaunch(launch, 'worktreeLost', { workerId: launch.worker?.id });
   });
-  o.log.warn('recovery: claimed launch lost its worktree; task retried', { taskId: launch.taskId, launchId: launch.launchId });
+  o.log.warn(
+    outcome === 'waitingForAnswer'
+      ? 'recovery: claimed launch lost its worktree; the task keeps waiting, and its answer retries it'
+      : 'recovery: claimed launch lost its worktree; task retried',
+    { taskId: launch.taskId, launchId: launch.launchId, outcome },
+  );
+}
+
+/** Fail a parked launch's task at no cost when its worktree cannot be prepared again: its base is not in the clone, or preparing threw. */
+function failUnpreparable(o: Orchestrator, launch: Launch, baseLost: boolean, error: string | undefined): void {
+  const message = baseLost
+    ? `base commit ${launch.baseSha} of parked launch ${launch.launchId} is not in the clone (lost with the previous clone); retried from the current integration head without spending an attempt`
+    : `the worktree of parked launch ${launch.launchId} could not be prepared again (${error ?? 'unknown error'}); retried without spending an attempt`;
+  const detail = { launchId: launch.launchId, baseSha: launch.baseSha, ...(baseLost ? { baseLost: true } : {}), ...(error !== undefined ? { error } : {}) };
+  o.store.transaction(() => {
+    o.endLaunch(launch, baseLost ? 'baseLost' : 'prepareFailed', detail);
+    o.fail(launch.taskId, { kind: 'worktreeLost', message, detail }, 'orchestrator', 'worktreeLost');
+  });
+  o.log.warn('recovery: parked launch could not be prepared again; task retried', { taskId: launch.taskId, ...detail });
+}
+
+/**
+ * Find the launch branches and context commits the clone lacks (a fresh clone: launch branches live only in the clone)
+ * and rewrite every stored attempt context that names one, recording each rewrite as `recovery.workLost`. The refs found
+ * stay in `o.lostRefs`, so a context composed later (a reopen's revision) does not name them either. Only a git
+ * workspace is inspected. See specs/crash-recovery "Context naming lost work".
+ */
+async function scrubLostRefs(o: Orchestrator): Promise<void> {
+  if (!(o.workspace instanceof GitWorkspace)) return;
+  const repo = o.workspace.repo;
+  const heads = await git(repo, ['for-each-ref', '--format=%(refname)', 'refs/heads'], { allowFail: true });
+  if (heads.code !== 0) return;
+  const present = new Set(heads.stdout.split('\n').map((l) => l.trim()).filter(Boolean));
+  // A launch still in flight gets its branch made again when it is prepared; only an ended launch's branch is lost.
+  const inFlight = new Set(o.store.listLaunches({ status: ['preparing', 'claimable', 'launching', 'live'] }).map((l) => l.branch));
+  for (const l of o.store.listLaunches({})) {
+    if (!inFlight.has(l.branch) && !present.has(`refs/heads/${l.branch}`)) o.lostRefs.add(l.branch);
+  }
+  const carried = [...o.overlay()].filter(([, e]) => e.carry);
+  const shas = new Set<string>();
+  for (const [, e] of carried) {
+    const c = e.carry!;
+    for (const sha of [c.interrupted?.headSha, c.interrupted?.wipCommit, c.revision?.priorPublishedSha]) if (sha) shas.add(sha);
+  }
+  for (const sha of shas) if (await commitMissing(repo, sha)) o.lostRefs.add(sha);
+  if (!o.lostRefs.size) return;
+  for (const [id, e] of carried) {
+    const { carry, lost } = scrubCarry(e.carry, (ref) => o.lostRefs.has(ref));
+    if (!lost) continue;
+    o.store.transaction(() => {
+      o.store.setEntry(id, { ...o.entry(id), carry, updatedAt: o.now() });
+      for (const part of lost) o.store.appendEvent({ kind: 'recovery.workLost', taskId: id, payload: { ...part } }, o.now());
+    });
+    o.log.warn('recovery: context named work lost with the previous clone; rewritten', { taskId: id, lost });
+  }
 }
