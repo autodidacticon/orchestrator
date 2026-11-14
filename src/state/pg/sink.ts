@@ -14,7 +14,7 @@
  */
 import { createHash } from 'node:crypto';
 import pg from 'pg';
-import { applyOps, FencedError, type JournalSink, type Row, type RowOp, TABLES } from '../journal.js';
+import { applyOps, FencedError, type JournalSink, RejectedBatchError, type Row, type RowOp, TABLES } from '../journal.js';
 import { SqliteStore } from '../sqlite.js';
 import { COLUMNS, MIGRATIONS } from './schema.js';
 
@@ -59,6 +59,27 @@ function isConnectionLoss(err: unknown): boolean {
   if (!isSqlState(err)) return true; // a client-side error: "Connection terminated", "not queryable"
   const code = (err as { code: string }).code;
   return code.startsWith('08') || code === '57P01' || code === '57P02' || code === '57P03';
+}
+
+/** SQLSTATE classes 22 (data exception) and 23 (integrity constraint violation): the server refused the rows themselves. */
+function isContentRefusal(err: unknown): boolean {
+  if (!isSqlState(err)) return false;
+  const code = (err as { code: string }).code;
+  return code.startsWith('22') || code.startsWith('23');
+}
+
+/**
+ * The error for a refused batch: the table, the key and the SQLSTATE, never the row contents nor the server's message
+ * and detail, which can quote them (a token, a value). The statement is undefined when COMMIT itself was refused
+ * (a deferred constraint).
+ */
+function rejection(op: RowOp | undefined, sqlstate: string, cause: unknown): RejectedBatchError {
+  if (!op) return new RejectedBatchError({ sqlstate }, cause);
+  const keyCols = KEYS.get(op.table) ?? [];
+  const src = op.op === 'delete' ? op.key : op.row;
+  const key: Record<string, unknown> = {};
+  for (const c of keyCols) key[c] = src[c];
+  return new RejectedBatchError({ table: op.table, key, sqlstate }, cause);
 }
 
 function quoteIdent(name: string): string {
@@ -270,8 +291,9 @@ export class PgSink implements JournalSink {
       } catch (err) {
         throw isConnectionLoss(err) || this.lost !== undefined ? this.fence(err) : err;
       }
+      let at = -1;
       try {
-        for (const q of statements) await this.client.query(q);
+        for (at = 0; at < statements.length; at++) await this.client.query(statements[at]!);
         await this.client.query('COMMIT');
       } catch (err) {
         if (this.lost !== undefined || isConnectionLoss(err)) throw this.fence(err);
@@ -280,6 +302,8 @@ export class PgSink implements JournalSink {
         } catch (rollbackErr) {
           throw this.fence(rollbackErr);
         }
+        // A data or constraint error refuses the batch for its content: retrying it can never succeed.
+        if (isContentRefusal(err)) throw rejection(ops[at], (err as { code: string }).code, err);
         throw err;
       }
     });

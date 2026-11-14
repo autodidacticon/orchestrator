@@ -29,6 +29,7 @@ import type {
   VerifierJob,
 } from './store.js';
 import { readProposedGraph, writeProposedGraph } from './store.js';
+import { bindRow } from './storable.js';
 
 // Armed after `node:sqlite` has evaluated, so its queued warning is handled before the fallback restore.
 releaseSqliteWarningFilter();
@@ -167,7 +168,7 @@ export class SqliteStore implements Store {
   setEntry(id: Id, entry: Entry): void {
     this.db
       .prepare('INSERT INTO overlay (id, entry) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET entry = excluded.entry')
-      .run(id, JSON.stringify(entry));
+      .run(...bindRow('overlay', { id, entry }));
   }
 
   allEntries(): Map<Id, Entry> {
@@ -178,7 +179,7 @@ export class SqliteStore implements Store {
   appendEvent(ev: EventInput, ts: number): number {
     const res = this.db
       .prepare('INSERT INTO events (ts, kind, task_id, launch_id, payload) VALUES (?, ?, ?, ?, ?)')
-      .run(ts, ev.kind, ev.taskId ?? null, ev.launchId ?? null, ev.payload ? JSON.stringify(ev.payload) : null);
+      .run(...bindRow('events', { ts, kind: ev.kind, task_id: ev.taskId ?? null, launch_id: ev.launchId ?? null, payload: ev.payload || undefined }));
     return Number(res.lastInsertRowid);
   }
 
@@ -240,13 +241,13 @@ export class SqliteStore implements Store {
   putDedup(launchId: string, seq: number, response: unknown): void {
     this.db
       .prepare('INSERT OR REPLACE INTO dedup (launch_id, seq, response) VALUES (?, ?, ?)')
-      .run(launchId, seq, JSON.stringify(response ?? null));
+      .run(...bindRow('dedup', { launch_id: launchId, seq, response: response ?? null }));
   }
 
   createLaunch(l: Launch): void {
     this.db
       .prepare('INSERT INTO launches (launch_id, task_id, status, token, created_at, doc) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(l.launchId, l.taskId, l.status, l.token, l.createdAt, JSON.stringify(l));
+      .run(...bindRow('launches', { launch_id: l.launchId, task_id: l.taskId, status: l.status, token: l.token, created_at: l.createdAt, doc: l }));
   }
 
   updateLaunch(launchId: string, patch: Partial<Launch>): void {
@@ -255,7 +256,7 @@ export class SqliteStore implements Store {
     const next = { ...cur, ...patch };
     this.db
       .prepare('UPDATE launches SET status = ?, token = ?, doc = ? WHERE launch_id = ?')
-      .run(next.status, next.token, JSON.stringify(next), launchId);
+      .run(...bindRow('launches', { status: next.status, token: next.token, doc: next, launch_id: launchId }));
   }
 
   getLaunch(launchId: string): Launch | undefined {
@@ -287,7 +288,7 @@ export class SqliteStore implements Store {
   createJob(j: VerifierJob): void {
     this.db
       .prepare('INSERT INTO verifier_jobs (job_id, task_id, status, applied, created_at, doc) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(j.jobId, j.taskId, j.status, j.applied ? 1 : 0, j.createdAt, JSON.stringify(j));
+      .run(...bindRow('verifier_jobs', { job_id: j.jobId, task_id: j.taskId, status: j.status, applied: j.applied ? 1 : 0, created_at: j.createdAt, doc: j }));
   }
 
   updateJob(jobId: string, patch: Partial<VerifierJob>): void {
@@ -296,7 +297,7 @@ export class SqliteStore implements Store {
     const next = { ...cur, ...patch };
     this.db
       .prepare('UPDATE verifier_jobs SET status = ?, applied = ?, doc = ? WHERE job_id = ?')
-      .run(next.status, next.applied ? 1 : 0, JSON.stringify(next), jobId);
+      .run(...bindRow('verifier_jobs', { status: next.status, applied: next.applied ? 1 : 0, doc: next, job_id: jobId }));
   }
 
   getJob(jobId: string): VerifierJob | undefined {
@@ -331,14 +332,14 @@ export class SqliteStore implements Store {
   createProposal(p: Proposal): void {
     this.db
       .prepare('INSERT INTO proposals (id, task_id, launch_id, status, created_at, doc) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(p.id, p.taskId, p.launchId, p.status, p.createdAt, JSON.stringify(p));
+      .run(...bindRow('proposals', { id: p.id, task_id: p.taskId, launch_id: p.launchId, status: p.status, created_at: p.createdAt, doc: p }));
   }
 
   updateProposal(id: string, patch: Partial<Proposal>): void {
     const cur = this.getProposal(id);
     if (!cur) throw new Error(`proposal ${id} not found`);
     const next = { ...cur, ...patch };
-    this.db.prepare('UPDATE proposals SET status = ?, doc = ? WHERE id = ?').run(next.status, JSON.stringify(next), id);
+    this.db.prepare('UPDATE proposals SET status = ?, doc = ? WHERE id = ?').run(...bindRow('proposals', { status: next.status, doc: next, id }));
   }
 
   getProposal(id: string): Proposal | undefined {
@@ -364,7 +365,7 @@ export class SqliteStore implements Store {
   putReport(r: StoredReport): void {
     this.db
       .prepare('INSERT OR REPLACE INTO reports (launch_id, task_id, kind, created_at, doc) VALUES (?, ?, ?, ?, ?)')
-      .run(r.launchId, r.taskId, r.kind, r.createdAt, JSON.stringify(r));
+      .run(...bindRow('reports', { launch_id: r.launchId, task_id: r.taskId, kind: r.kind, created_at: r.createdAt, doc: r }));
   }
 
   getReport(launchId: string): StoredReport | undefined {
@@ -389,7 +390,7 @@ export class SqliteStore implements Store {
   setPayloadOverlay(taskId: Id, graphRev: string, payload: Record<string, unknown>): void {
     this.db
       .prepare('INSERT OR REPLACE INTO payload_overlays (task_id, graph_rev, payload) VALUES (?, ?, ?)')
-      .run(taskId, graphRev, JSON.stringify(payload));
+      .run(...bindRow('payload_overlays', { task_id: taskId, graph_rev: graphRev, payload }));
   }
 
   getSnapshot(): { rev: string; content: string } | undefined {
@@ -401,7 +402,7 @@ export class SqliteStore implements Store {
   setSnapshot(rev: string, content: string): void {
     this.db
       .prepare('INSERT INTO graph_snapshot (id, rev, content) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET rev = excluded.rev, content = excluded.content')
-      .run(rev, content);
+      .run(...bindRow('graph_snapshot', { rev, content }));
   }
 
   getProposedGraph(): ProposedGraph | undefined {
@@ -418,7 +419,7 @@ export class SqliteStore implements Store {
   }
 
   setKv(key: string, value: string): void {
-    this.db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(key, value);
+    this.db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(...bindRow('kv', { key, value }));
   }
 
   listAttachments(): Attachment[] {
@@ -431,7 +432,7 @@ export class SqliteStore implements Store {
   }
 
   deleteAttachment(id: string): void {
-    this.db.prepare('DELETE FROM kv WHERE key = ?').run(`attachment:${id}`);
+    this.db.prepare('DELETE FROM kv WHERE key = ?').run(...bindRow('kv', { key: `attachment:${id}` }));
   }
 
   insertOutbox(e: NewOutboxEffect): number | undefined {
@@ -439,7 +440,7 @@ export class SqliteStore implements Store {
       .prepare(
         "INSERT OR IGNORE INTO outbox (source_seq, task_id, kind, payload, status, attempts, created_at) VALUES (?, ?, ?, ?, 'pending', 0, ?)",
       )
-      .run(e.sourceSeq, e.taskId, e.kind, JSON.stringify(e.payload), e.createdAt);
+      .run(...bindRow('outbox', { source_seq: e.sourceSeq, task_id: e.taskId, kind: e.kind, payload: e.payload, created_at: e.createdAt }));
     return res.changes ? Number(res.lastInsertRowid) : undefined;
   }
 
@@ -470,7 +471,7 @@ export class SqliteStore implements Store {
     if (cur.status === 'applied') return cur;
     this.db
       .prepare("UPDATE outbox SET status = 'applied', result = ?, error = NULL, applied_at = ? WHERE id = ?")
-      .run(JSON.stringify(result ?? null), now, id);
+      .run(...bindRow('outbox', { result: result ?? null, applied_at: now, id }));
     return this.getOutbox(id);
   }
 
@@ -480,7 +481,7 @@ export class SqliteStore implements Store {
     if (cur.status === 'applied') return cur;
     const attempts = cur.attempts + 1;
     const status: EffectStatus = attempts >= maxAttempts ? 'failed' : 'pending';
-    this.db.prepare('UPDATE outbox SET status = ?, attempts = ?, error = ? WHERE id = ?').run(status, attempts, error, id);
+    this.db.prepare('UPDATE outbox SET status = ?, attempts = ?, error = ? WHERE id = ?').run(...bindRow('outbox', { status, attempts, error, id }));
     return this.getOutbox(id);
   }
 

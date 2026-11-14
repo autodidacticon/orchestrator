@@ -5,7 +5,7 @@ import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyPgOps, PgSink } from '../../src/state/pg/index.js';
 import { canonical } from './backends.js';
 import { dropRun, freshRunId, pgAvailable, stopTestPostgres, testDatabase } from './pg-db.js';
-import { applyOps, dumpTables, type FatalInfo, FencedError, JournaledStore, type JournalSink, type Row, type RowOp, SqliteSink } from '../../src/state/journal.js';
+import { applyOps, dumpTables, type FatalInfo, FencedError, isRejected, JournaledStore, type JournalSink, RejectedBatchError, type Row, type RowOp, SqliteSink } from '../../src/state/journal.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
 import type { Launch } from '../../src/state/store.js';
@@ -110,6 +110,20 @@ class FlakySink implements JournalSink {
   }
 }
 
+const UNSTORABLE = /\u0000|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/** Every string in a value, object keys included. */
+function allStrings(v: unknown, out: string[] = []): string[] {
+  if (typeof v === 'string') out.push(v);
+  else if (Array.isArray(v)) for (const x of v) allStrings(x, out);
+  else if (v && typeof v === 'object')
+    for (const [k, x] of Object.entries(v)) {
+      out.push(k);
+      allStrings(x, out);
+    }
+  return out;
+}
+
 const launch = (id: string, n: number): Launch => ({ launchId: id, taskId: `T${n % 4}`, attempt: 1, launchNo: n, status: 'preparing', token: `tok-${id}`, branch: 'b', worktree: 'w', baseSha: 's', graphRev: 'r', createdAt: n % 3 });
 
 async function runFuzz(seed: number, steps: number, sinkDb: FuzzSink): Promise<{ batches: number; crashes: number; flushes: number }> {
@@ -126,23 +140,31 @@ async function runFuzz(seed: number, steps: number, sinkDb: FuzzSink): Promise<{
   let crashes = 0;
   let flushes = 0;
 
+  // Strings Postgres cannot store as they are: NUL, lone surrogates of both halves, a pair cut at either end. See specs/state-backend "Storable values".
+  const nasty = (): string => {
+    const parts = ['ok', '\u0000', '\uD83D', '\uDE00', '😀', 'é', '\\u0000', 'x'];
+    let s = '';
+    for (let i = Math.floor(rand() * 5); i > 0; i--) s += pick(parts);
+    return s;
+  };
+
   const write = () => {
     const k = rand();
-    if (k < 0.12) store.setEntry(`T${Math.floor(rand() * 6)}`, { ...defaultEntry(), launches: Math.floor(rand() * 5) });
-    else if (k < 0.26) store.appendEvent({ kind: pick(['a', 'b', 'transition']), taskId: `T${Math.floor(rand() * 4)}`, payload: { n: Math.floor(rand() * 100) } }, Math.floor(rand() * 1000));
+    if (k < 0.12) store.setEntry(`T${Math.floor(rand() * 6)}`, { ...defaultEntry(), launches: Math.floor(rand() * 5), ...(rand() < 0.3 ? { carry: [{ kind: 'checkFailed', output: nasty() }] } : {}) } as never);
+    else if (k < 0.26) store.appendEvent({ kind: pick(['a', 'b', 'transition']), taskId: `T${Math.floor(rand() * 4)}`, payload: { n: Math.floor(rand() * 100), s: nasty(), [nasty()]: [nasty()] } }, Math.floor(rand() * 1000));
     else if (k < 0.38) store.insertOutbox({ sourceSeq: Math.floor(rand() * 10), taskId: `T${Math.floor(rand() * 3)}`, kind: pick(['setState', 'comment'] as const), payload: { state: 'x' }, createdAt: 1 });
     else if (k < 0.44) store.ackOutbox(1 + Math.floor(rand() * 20), { ok: true }, 5);
-    else if (k < 0.5) store.nackOutbox(1 + Math.floor(rand() * 20), 'no', 3);
-    else if (k < 0.58) store.setKv(`k${Math.floor(rand() * 5)}`, String(rand()));
+    else if (k < 0.5) store.nackOutbox(1 + Math.floor(rand() * 20), `no${nasty()}`, 3);
+    else if (k < 0.58) store.setKv(`k${Math.floor(rand() * 5)}`, `${rand()}${nasty()}`);
     else if (k < 0.64) store.putAttachment({ id: `a${Math.floor(rand() * 3)}`, pids: [1, 2], since: 1 });
     else if (k < 0.69) store.deleteAttachment(`a${Math.floor(rand() * 3)}`);
     // A duplicate launch id is a failing statement.
     else if (k < 0.78) store.createLaunch(launch(`L${rand() < 0.3 ? Math.floor(rand() * Math.max(1, launchNo)) : launchNo++}`, launchNo));
     // A missing launch throws.
     else if (k < 0.86) store.updateLaunch(`L${Math.floor(rand() * (launchNo + 2))}`, { status: pick(['live', 'ended'] as const), pid: Math.floor(rand() * 100) });
-    else if (k < 0.92) store.putDedup(`L${Math.floor(rand() * 3)}`, Math.floor(rand() * 3), { r: rand() });
-    else if (k < 0.96) store.setSnapshot(`rev${Math.floor(rand() * 3)}`, 'nodes: []');
-    else store.putReport({ launchId: `L${Math.floor(rand() * 4)}`, taskId: 'T1', kind: 'submit', body: { s: rand() }, createdAt: Math.floor(rand() * 10) });
+    else if (k < 0.92) store.putDedup(`L${Math.floor(rand() * 3)}`, Math.floor(rand() * 3), { r: rand(), text: nasty() });
+    else if (k < 0.96) store.setSnapshot(`rev${Math.floor(rand() * 3)}`, `nodes: [] # ${nasty()}`);
+    else store.putReport({ launchId: `L${Math.floor(rand() * 4)}`, taskId: 'T1', kind: 'submit', body: { s: rand(), summary: nasty() }, createdAt: Math.floor(rand() * 10) });
   };
 
   const level = (depth: number) => {
@@ -212,6 +234,10 @@ async function runFuzz(seed: number, steps: number, sinkDb: FuzzSink): Promise<{
   await sinkDb.loadInto(fresh);
   expect(sinkDb.canon(dumpTables(fresh.database()))).toEqual(sinkDb.canon(dumpTables(image.database())));
   fresh.close();
+  // No row holds a string Postgres refuses; the replacement character is there in their place.
+  const strings = allStrings(canonical(dumpTables(image.database())));
+  expect(strings.filter((s) => UNSTORABLE.test(s))).toEqual([]);
+  expect(strings.some((s) => s.includes('�'))).toBe(true);
   store.close();
   await sinkDb.close();
   return { batches, crashes, flushes };
@@ -413,4 +439,125 @@ describe.skipIf(!pgAvailable)('journal over PgSink', () => {
     expect(totals.flushes).toBeGreaterThan(500);
     expect(totals.crashes).toBeGreaterThan(50);
   }, 180_000);
+
+  it('a batch Postgres rejects with a data error calls onFatal once, at once, with reason rejected, the table, the key and the SQLSTATE', async () => {
+    const sink = await PgSink.open({ connection: await testDatabase(), runId: freshRunId('rejected') });
+    const fatal: Array<{ info: FatalInfo; at: number }> = [];
+    const image = new SqliteStore(':memory:');
+    // The deadline is ten minutes away: only the rejection can stop the journal within this test.
+    const store = new JournaledStore(image, sink, { flushDeadlineMs: 600_000, retryBaseMs: 2, retryMaxMs: 5, onFatal: (info) => fatal.push({ info, at: Date.now() }) });
+    try {
+      store.setKv('before', '1');
+      await store.durable();
+      const started = Date.now();
+      // Past the storable-value boundary on purpose: a row written straight into the image, as a bug would.
+      let seq = 0;
+      store.transaction(() => {
+        image.database().prepare('INSERT INTO events (ts, kind, payload) VALUES (?, ?, ?)').run(1, 'secret-kind', '{"text":"tok-SECRET\\u0000"}');
+        seq = image.latestEventSeq();
+      });
+      store.setKv('after', '1');
+      await until(() => fatal.length > 0, 5_000);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(fatal).toHaveLength(1);
+      const { info, at } = fatal[0]!;
+      expect(at - started).toBeLessThan(2_000);
+      expect(info).toMatchObject({ reason: 'rejected', table: 'events', key: { seq }, sqlstate: '22P05', unflushedBatches: 2 });
+      const message = String(info.error);
+      expect(message).toMatch(/table events/);
+      expect(message).toMatch(new RegExp(`"seq":${seq}`));
+      expect(message).toMatch(/SQLSTATE 22P05/);
+      // No row contents in what the daemon logs.
+      expect(message).not.toMatch(/SECRET|secret-kind|unsupported Unicode/);
+      expect(store.readiness()).toEqual([expect.stringMatching(/rejected a batch.*table events/)]);
+      // Nothing of the refused batch reached Postgres; the earlier one did.
+      const rows = await sink.tables();
+      expect(rows['events']).toEqual([]);
+      expect(rows['kv']!.map((r) => r['key'])).toEqual(['before']);
+    } finally {
+      store.close();
+      await sink.close();
+      await dropRun(sink.runId);
+    }
+  });
+
+  // What Postgres refuses as the boundary would otherwise let through, sent to the sink directly; each is a rejected batch with its SQLSTATE.
+  const refused: Array<{ what: string; op: RowOp; key: Record<string, unknown>; sqlstate: RegExp }> = [
+    { what: 'a NUL escape in jsonb', op: { op: 'upsert', table: 'overlay', row: { id: 'T1', entry: '{"o":"a\\u0000"}' } }, key: { id: 'T1' }, sqlstate: /^22P05$/ },
+    { what: 'a lone surrogate escape in jsonb', op: { op: 'upsert', table: 'overlay', row: { id: 'T1', entry: '{"o":"\\ud800"}' } }, key: { id: 'T1' }, sqlstate: /^22P02$/ },
+    { what: 'a NUL character in text', op: { op: 'upsert', table: 'kv', row: { key: 'k', value: 'a\u0000b' } }, key: { key: 'k' }, sqlstate: /^22021$/ },
+    { what: '1.5 in bigint', op: { op: 'upsert', table: 'dedup', row: { launch_id: 'L1', seq: 1.5, response: 'null' } }, key: { launch_id: 'L1', seq: 1.5 }, sqlstate: /^22P02$/ },
+    { what: '1e30 in bigint', op: { op: 'upsert', table: 'dedup', row: { launch_id: 'L1', seq: 1e30, response: 'null' } }, key: { launch_id: 'L1', seq: 1e30 }, sqlstate: /^22(P02|003)$/ },
+  ];
+  for (const r of refused) {
+    it(`Postgres refuses ${r.what}: a rejected batch with SQLSTATE ${r.sqlstate.source}, and the sink still writes`, async () => {
+      const sink = await PgSink.open({ connection: await testDatabase(), runId: freshRunId('refused') });
+      try {
+        const err = await sink.applyBatch([r.op]).then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+        expect(isRejected(err)).toBe(true);
+        expect((err as RejectedBatchError).refusal).toMatchObject({ table: r.op.table, key: r.key });
+        expect((err as RejectedBatchError).refusal.sqlstate).toMatch(r.sqlstate);
+        await sink.applyBatch([{ op: 'upsert', table: 'kv', row: { key: 'ok', value: '1' } }]);
+        expect(sink.fenced).toBe(false);
+      } finally {
+        await sink.close();
+        await dropRun(sink.runId);
+      }
+    });
+  }
+
+  it('a batch Postgres refuses for a non-integer in a bigint column is rejected at once with SQLSTATE 22P02', async () => {
+    const sink = await PgSink.open({ connection: await testDatabase(), runId: freshRunId('rejected-int') });
+    const fatal: FatalInfo[] = [];
+    const image = new SqliteStore(':memory:');
+    const store = new JournaledStore(image, sink, { flushDeadlineMs: 600_000, onFatal: (f) => fatal.push(f) });
+    try {
+      store.transaction(() => image.database().prepare('INSERT INTO dedup (launch_id, seq, response) VALUES (?, ?, ?)').run('L1', 1.5, 'null'));
+      await until(() => fatal.length > 0, 5_000);
+      expect(fatal).toEqual([expect.objectContaining({ reason: 'rejected', table: 'dedup', key: { launch_id: 'L1', seq: 1.5 }, sqlstate: '22P02' })]);
+    } finally {
+      store.close();
+      await sink.close();
+      await dropRun(sink.runId);
+    }
+  });
+});
+
+describe('rejected batches', () => {
+  it('a sink that rejects a batch for its content calls onFatal once, at once, with reason rejected, well before flushDeadlineMs', async () => {
+    const fatal: FatalInfo[] = [];
+    let applies = 0;
+    const sink: JournalSink = {
+      applyBatch: async () => {
+        applies++;
+        throw new RejectedBatchError({ table: 'events', key: { seq: 1 }, sqlstate: '22P05' });
+      },
+    };
+    const store = new JournaledStore(new SqliteStore(':memory:'), sink, { flushDeadlineMs: 600_000, retryBaseMs: 2, retryMaxMs: 5, onFatal: (f) => fatal.push(f) });
+    store.appendEvent({ kind: 'x' }, 1);
+    store.setKv('b', '1');
+    await until(() => fatal.length > 0, 1_000);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(applies).toBe(1);
+    expect(fatal).toEqual([expect.objectContaining({ reason: 'rejected', table: 'events', key: { seq: 1 }, sqlstate: '22P05', unflushedBatches: 2 })]);
+    expect(String(fatal[0]!.error)).toBe('RejectedBatchError: batch rejected by the sink: table events, key {"seq":1}, SQLSTATE 22P05');
+    store.close();
+  });
+
+  it('a sink error that is not a rejection still retries until it lands', async () => {
+    const fatal: FatalInfo[] = [];
+    let fails = 3;
+    const inner = new SqliteSink(path.join(dir, 'sink.sqlite'));
+    const sink: JournalSink = { applyBatch: async (ops) => (fails-- > 0 ? Promise.reject(Object.assign(new Error('could not serialize'), { code: '40001' })) : inner.applyBatch(ops)) };
+    const store = new JournaledStore(new SqliteStore(':memory:'), sink, { flushDeadlineMs: 600_000, retryBaseMs: 2, retryMaxMs: 5, onFatal: (f) => fatal.push(f) });
+    store.setKv('a', '1');
+    await store.durable();
+    expect(fatal).toEqual([]);
+    expect(inner.tables()['kv']).toHaveLength(1);
+    store.close();
+    inner.close();
+  });
 });

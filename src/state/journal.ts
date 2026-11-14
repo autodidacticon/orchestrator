@@ -57,6 +57,33 @@ export class FencedError extends Error {
   }
 }
 
+/** Where a sink refused a batch for its content: the table and key of the refused row, and the SQLSTATE. No row contents. */
+export interface Refusal {
+  table?: string;
+  key?: Record<string, unknown>;
+  sqlstate: string;
+}
+
+/**
+ * Thrown by a sink that refused a batch for its content (Postgres SQLSTATE classes 22 and 23): applying it again can
+ * never succeed, so the journal stops at once with reason `rejected`. The message names the table, the key and the
+ * SQLSTATE and nothing of the row. See specs/state-backend "Fatal flush".
+ */
+export class RejectedBatchError extends Error {
+  readonly retryable = false;
+  readonly refusal: Refusal;
+  constructor(refusal: Refusal, cause?: unknown) {
+    const where = refusal.table ? `table ${refusal.table}, key ${JSON.stringify(refusal.key ?? {})}` : 'at commit';
+    super(`batch rejected by the sink: ${where}, SQLSTATE ${refusal.sqlstate}`, cause === undefined ? undefined : { cause });
+    this.name = 'RejectedBatchError';
+    this.refusal = refusal;
+  }
+}
+
+export function isRejected(err: unknown): err is RejectedBatchError {
+  return err instanceof RejectedBatchError || (typeof err === 'object' && err !== null && (err as { retryable?: unknown }).retryable === false && typeof (err as { refusal?: unknown }).refusal === 'object');
+}
+
 export function isFenced(err: unknown): boolean {
   return err instanceof FencedError || (typeof err === 'object' && err !== null && (err as { fenced?: unknown }).fenced === true);
 }
@@ -79,16 +106,21 @@ export const TABLES: ReadonlyArray<{ name: string; key: readonly string[] }> = [
 const KEYS = new Map(TABLES.map((t) => [t.name, t.key]));
 
 export interface FatalInfo {
-  reason: 'deadline' | 'fenced';
+  /** `rejected`: the sink refused the oldest batch for its content (see `RejectedBatchError`). */
+  reason: 'deadline' | 'fenced' | 'rejected';
   /** Committed batches that never reached the sink. */
   unflushedBatches: number;
   error?: unknown;
+  /** Under `rejected`: the refused row's table and key, and the SQLSTATE. */
+  table?: string;
+  key?: Record<string, unknown>;
+  sqlstate?: string;
 }
 
 export interface JournalOptions {
   /** When the oldest unflushed batch is older than this, `onFatal` is called. Default 30s. */
   flushDeadlineMs?: number;
-  /** Called once, when the deadline passes or the sink reports fenced. Wired to process exit in ORC-20. */
+  /** Called once: when the deadline passes, the sink reports fenced, or the sink rejects a batch for its content. Wired to process exit in ORC-20. */
   onFatal?: (info: FatalInfo) => void;
   /** First retry delay after a failed apply; doubles up to `retryMaxMs`. */
   retryBaseMs?: number;
@@ -325,6 +357,8 @@ export class JournaledStore implements Store {
       await this.sink.applyBatch(batch.ops);
     } catch (err) {
       if (isFenced(err)) this.die('fenced', err);
+      // Refused for its content: every retry fails the same way, and every later batch waits behind it.
+      else if (isRejected(err)) this.die('rejected', err);
       else this.checkDeadline(err);
       return false;
     }
@@ -373,6 +407,10 @@ export class JournaledStore implements Store {
   private die(reason: FatalInfo['reason'], error?: unknown): void {
     if (this.fatal) return;
     this.fatal = { reason, unflushedBatches: this.pending.length, error };
+    if (reason === 'rejected' && isRejected(error)) {
+      const { table, key, sqlstate } = error.refusal;
+      Object.assign(this.fatal, { sqlstate, ...(table !== undefined ? { table } : {}), ...(key !== undefined ? { key } : {}) });
+    }
     if (this.deadlineTimer) clearTimeout(this.deadlineTimer);
     this.deadlineTimer = undefined;
     // Waiters never resolve: an effect behind an unflushed record must not happen.
@@ -384,7 +422,10 @@ export class JournaledStore implements Store {
    * longer than one flush retry. See specs/state-backend "Store readiness".
    */
   readiness(): string[] {
-    if (this.fatal) return [`store: ${this.fatal.reason === 'fenced' ? 'the run lock was lost' : 'the flush deadline passed'}; ${this.fatal.unflushedBatches} batches unflushed`];
+    if (this.fatal) {
+      const why = { fenced: 'the run lock was lost', deadline: 'the flush deadline passed', rejected: `the sink rejected a batch (${String((this.fatal.error as Error | undefined)?.message ?? 'rejected')})` }[this.fatal.reason];
+      return [`store: ${why}; ${this.fatal.unflushedBatches} batches unflushed`];
+    }
     if (this.sink.lockLost) return ['store: the session holding the run lock was lost'];
     const d = this.durability();
     if (d.lagMs > this.opts.retryMaxMs) return [`store: ${d.pendingBatches} batches unflushed for ${d.lagMs}ms, longer than one flush retry (${this.opts.retryMaxMs}ms)`];

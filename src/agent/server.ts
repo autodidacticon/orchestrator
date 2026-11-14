@@ -8,6 +8,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { AgentOp, ApiResponse, Orchestrator } from '../loop/orchestrator.js';
+import { isUnstorable } from '../state/storable.js';
 
 export type RouteHandler = (req: http.IncomingMessage, body: Record<string, unknown>, params: string[]) => Promise<ApiResponse>;
 
@@ -84,7 +85,9 @@ export class ApiServer {
         send(res, out.status, out.body, headers);
       } catch (err) {
         if (writes) await this.orch.store.durable();
-        send(res, 500, { error: String(err) });
+        // A value the store cannot hold: the write did not happen. See specs/agent-protocol "Integer fields".
+        if (isUnstorable(err)) send(res, 400, { error: err.message, field: err.field });
+        else send(res, 500, { error: String(err) });
       } finally {
         this.orch.requestEnded(probe);
       }

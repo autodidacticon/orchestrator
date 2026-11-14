@@ -27,7 +27,7 @@ export interface OpenStoreOptions {
   dataDir: string;
   /** The run the lock and the rows are keyed by. */
   runId: string;
-  /** The journal's fatal condition (deadline, or the run lock lost), called once. The daemon logs it and exits. */
+  /** The journal's fatal condition (deadline, the run lock lost, or a batch rejected for its content), called once. The daemon logs it and exits. */
   onFatal: (info: FatalInfo) => void;
   /** Journal retry tuning, for tests. */
   retryBaseMs?: number;

@@ -82,7 +82,27 @@ export const submitBodySchema = z.object({
   proposals: z.array(proposalSchema).default([]),
 });
 
-const count = z.number().int().nonnegative();
+// `.int()` admits 1e30; a count must be a safe integer. See specs/agent-protocol "Integer fields".
+const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+/**
+ * A 400 naming the field when an agent call's integer field is present and not a safe non-negative integer; undefined
+ * otherwise. Checked before the call writes anything. See specs/agent-protocol "Integer fields".
+ */
+export function agentIntegerError(body: Record<string, unknown>): ApiResponse | undefined {
+  const s = body['seq'];
+  if (s === undefined) return undefined;
+  if (typeof s === 'number' && Number.isSafeInteger(s) && s >= 0) return undefined;
+  return { status: 400, body: { error: `seq must be a non-negative safe integer, got ${typeof s === 'number' ? String(s) : typeof s}`, field: 'seq' } };
+}
+
+/** A 400 naming the first bad field of a worker usage body, or undefined when it parses. Checked before anything is written. */
+export function workerUsageError(body: unknown): ApiResponse | undefined {
+  const parsed = workerUsageBodySchema.safeParse(body);
+  if (parsed.success) return undefined;
+  const first = parsed.error.issues[0]!;
+  return { status: 400, body: { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '), field: first.path.join('.') } };
+}
 
 /** The body of `POST /v1/launches/:id/usage`. See specs/pull-runner "Worker usage". */
 export const workerUsageBodySchema = z.object({
@@ -952,9 +972,9 @@ export class Orchestrator implements OrchestratorCore {
    * the runner as the sole source; the first usage recorded wins. See specs/pull-runner "Worker usage".
    */
   recordWorkerUsage(launchId: string, body: unknown): ApiResponse {
-    const parsed = workerUsageBodySchema.safeParse(body);
-    if (!parsed.success) return { status: 400, body: { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') } };
-    const { workerId, usage } = parsed.data;
+    const bad = workerUsageError(body);
+    if (bad) return bad;
+    const { workerId, usage } = workerUsageBodySchema.parse(body);
     const cur = this.store.getLaunch(launchId);
     if (!cur) return { status: 404, body: { ok: false, reason: `no launch ${launchId}` } };
     if (cur.pid !== undefined || !cur.worker) return { status: 409, body: { ok: false, reason: `launch ${launchId} is not a claimed launch; its runner reports its usage` } };
@@ -992,6 +1012,9 @@ export class Orchestrator implements OrchestratorCore {
   async agentCall(launchId: string, token: string, op: AgentOp, body: Record<string, unknown> = {}): Promise<ApiResponse> {
     const launch = this.authenticate(launchId, token);
     if (!launch) return { status: 401, body: { error: 'unauthorized' } };
+    // Integer fields are checked before anything is written, the lease renewal included. See specs/agent-protocol "Integer fields".
+    const bad = op === 'inbox' ? undefined : agentIntegerError(body);
+    if (bad) return bad;
     this.renewLease(launch);
     this.recordProgress(launch, op, body);
     switch (op) {
@@ -1004,7 +1027,7 @@ export class Orchestrator implements OrchestratorCore {
         return { status: 200, body: { notices } };
       }
       case 'log': {
-        const seq = typeof body['seq'] === 'number' ? (body['seq'] as number) : undefined;
+        const seq = this.seqOf(body);
         if (seq !== undefined) {
           const dup = this.store.getDedup(launchId, seq);
           if (dup) return dup as ApiResponse;
@@ -1025,7 +1048,7 @@ export class Orchestrator implements OrchestratorCore {
 
   private seqOf(body: Record<string, unknown>): number | undefined {
     const s = body['seq'];
-    return typeof s === 'number' && Number.isInteger(s) && s >= 0 ? s : undefined;
+    return typeof s === 'number' && Number.isSafeInteger(s) && s >= 0 ? s : undefined;
   }
 
   private async handleReport(launch: Launch, body: Record<string, unknown>): Promise<ApiResponse> {

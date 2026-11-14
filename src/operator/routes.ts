@@ -2,7 +2,7 @@
  * Operator HTTP routes. Every action is an event (recorded by the orchestrator).
  */
 import type { ApiServer } from '../agent/server.js';
-import type { ApiResponse, Orchestrator } from '../loop/orchestrator.js';
+import { type ApiResponse, type Orchestrator, workerUsageError } from '../loop/orchestrator.js';
 import { constants as fsc } from 'node:fs';
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -296,6 +296,9 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
   });
   // A claimed launch has no log: its worker posts the usage it read after the agent exited. See specs/pull-runner "Worker usage".
   server.addRoute('POST', /^\/v1\/launches\/([^/]+)\/usage$/, async (_req, body, [id]) => {
+    // A malformed body (a token count that is not a safe integer) is refused before anything is written. See specs/agent-protocol "Integer fields".
+    const bad = workerUsageError(body);
+    if (bad) return bad;
     orch.store.appendEvent({ kind: 'operator.usage', launchId: id as string, payload: { ...body } }, orch.now());
     return orch.recordWorkerUsage(id as string, body);
   });

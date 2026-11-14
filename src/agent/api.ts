@@ -10,7 +10,7 @@ export const AGENT_OPS = ['heartbeat', 'report', 'block', 'inbox', 'log'] as con
 
 export const fallbackFileSchema = z.object({
   launchId: z.string(),
-  seq: z.number().int().nonnegative(),
+  seq: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   kind: z.enum(['submit', 'fail', 'block']),
   body: z.record(z.unknown()),
 });

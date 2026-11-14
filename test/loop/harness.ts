@@ -38,12 +38,12 @@ export interface Harness {
   cleanup(): void;
 }
 
-export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: string; briefValidator?: BriefValidator; stuckDiagnoser?: StuckDiagnoser } = {}): Harness {
+export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: string; briefValidator?: BriefValidator; stuckDiagnoser?: StuckDiagnoser; store?: Store } = {}): Harness {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-'));
   // checkCommand has no default any more; in-process scenarios verify with the fake backend and must not be held. See specs/integration-pipeline "Check and verified tree".
   // Fake processes never exit by themselves, so in-process scenarios reap on the tick after submit. See specs/health-monitoring "Usage accounting".
   const config = defaultConfig({ dataDir: dir, capacity: 4, maxWaiting: 4, checkCommand: 'true', health: { reportGraceMs: 0, ...(opts.config?.health ?? {}) }, ...opts.config });
-  const store = harnessStore(path.join(dir, 'store.sqlite'));
+  const store = opts.store ?? harnessStore(path.join(dir, 'store.sqlite'));
   const runners: Record<RunnerKind, InprocRunner> = { 'claude-code': new InprocRunner(), codex: new InprocRunner(), opencode: new InprocRunner() };
   const runner = runners['claude-code'];
   const workspace = new FakeWorkspace();

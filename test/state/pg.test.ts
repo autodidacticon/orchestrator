@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { type FatalInfo, FencedError, isFenced, JournaledStore, type RowOp } from '../../src/state/journal.js';
+import { type FatalInfo, FencedError, isFenced, isRejected, JournaledStore, type RejectedBatchError, type RowOp } from '../../src/state/journal.js';
 import { MIGRATIONS, migrate, PgSink, RunLockedError } from '../../src/state/pg/index.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
@@ -204,7 +204,11 @@ describe.skipIf(!pgAvailable)('PgSink', () => {
       () => undefined,
       (e: unknown) => e,
     );
-    expect(err).toMatchObject({ code: '23505' });
+    // A constraint error refuses the batch for its content: not retryable, naming the row's table and key and the SQLSTATE (ORC-88).
+    expect(isRejected(err)).toBe(true);
+    expect((err as RejectedBatchError).refusal).toEqual({ table: 'launches', key: { launch_id: 'L2' }, sqlstate: '23505' });
+    expect((err as Error).cause).toMatchObject({ code: '23505' });
+    expect(String(err)).not.toMatch(/tok-L1/);
     expect(isFenced(err)).toBe(false);
     expect(await sink.tables({ raw: true })).toEqual(before);
     // The session is still the lock holder and still writes.
