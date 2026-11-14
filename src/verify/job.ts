@@ -10,8 +10,12 @@ export type VerifierOutcome =
   | { kind: 'published'; publishedSha: string; verifiedSha: string; changedFiles?: string[] }
   | { kind: 'failed'; reason: FailedReason }
   | { kind: 'conflict'; files: string[]; since: Id[] }
-  /** Compare-and-swap lost: the integration head moved. The job goes back to queued. */
-  | { kind: 'requeue'; reason?: string };
+  /**
+   * Compare-and-swap or lease lost: the integration head moved. The job goes back to queued. With `retry`, origin
+   * refused the push or could not be reached: the job waits a backoff first, and refusals are counted against
+   * `git.pushRefusalLimit`. See specs/integration-pipeline "Push failures are classified".
+   */
+  | { kind: 'requeue'; reason?: string; retry?: { kind: 'refused' | 'unreachable'; message: string } };
 
 export interface VerifierProgress {
   /** Persist intermediate job state (checking, verified, publishing) durably. */
@@ -37,7 +41,7 @@ export interface VerifierContext {
 export interface VerifierBackend {
   run(job: VerifierJob, ctx: VerifierContext): Promise<VerifierOutcome>;
   /** Resolve a job found in `publishing` after a restart by inspecting the integration branch. */
-  recoverPublishing?(job: VerifierJob): Promise<'published' | 'requeue'>;
+  recoverPublishing?(job: VerifierJob, opts?: { originUnreachable?: boolean }): Promise<'published' | 'requeue'>;
   /** Commits on the integration branch without an Orchestrator-Launch trailer. */
   foreignCommits?(): Promise<string[]>;
   /** Remove temporary verification worktrees left by a crash. Called at recovery. */

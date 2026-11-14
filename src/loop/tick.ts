@@ -15,6 +15,7 @@ import type { Launch, VerifierJob } from '../state/store.js';
 import type { TagPushResult } from '../workspace/workspace.js';
 import type { Orchestrator } from './orchestrator.js';
 import { admit } from './schedule.js';
+import { PUSH_REFUSED } from '../verify/push-retry.js';
 import { ceilingUsd, checkTimeBudget, runCostUsd } from '../health/budgets.js';
 import { observeFingerprint, recordSignal } from '../health/progress.js';
 import { checkStuck } from '../health/stuck.js';
@@ -218,6 +219,10 @@ export function drainVerification(o: Orchestrator): void {
           } else {
             o.fail(job.taskId, { kind: 'integrationCapExceeded', message: `conflicted ${entry.integrationRetries + 1} times`, detail: { files: job.conflictFiles } }, 'verifier', 'verificationFailed');
           }
+        } else if (job.status === 'failed' && job.failureKind === PUSH_REFUSED) {
+          // Origin refused the push git.pushRefusalLimit times: block with origin's text; no attempt is spent.
+          const message = job.output ?? 'origin refused the publication push';
+          o.transition(job.taskId, { kind: 'blocked', reason: { kind: 'pushRefused', message } }, 'verifier', 'pushRefused', undefined, { jobId: job.jobId });
         } else if (job.status === 'failed') {
           o.fail(job.taskId, { kind: (job.failureKind as FailedKind | undefined) ?? 'checkFailed', message: job.failureKind, output: job.output }, 'verifier', 'verificationFailed');
         }
@@ -272,7 +277,7 @@ export async function completeMilestones(o: Orchestrator): Promise<void> {
           summary: String(o.store.getCompletionReport(t)?.body['summary'] ?? ''),
         }));
       const entry = o.transition(c.id, { kind: 'submitted' }, 'orchestrator', 'milestoneGated', { integrationSha: c.integrationSha }, { integrationSha: sha, diffStat, closure });
-      const result = await o.workspace.tagMilestone(c.id, entry.reviewVersion, c.integrationSha ?? head);
+      const result = await tagSafely(o, c.id, entry.reviewVersion, c.integrationSha ?? head);
       crashPoint('milestone.afterTag');
       o.store.setKv(`tagged:${c.id}:${entry.reviewVersion}`, c.integrationSha ?? head);
       if (result) recordTagPush(o, c.id, entry.reviewVersion, c.integrationSha ?? head, result);
@@ -295,7 +300,7 @@ export async function pushMilestoneTags(o: Orchestrator): Promise<void> {
     const sha = entry.integrationSha;
     if (!sha || entry.reviewVersion < 1) continue;
     if (o.store.getKv(`tagPushed:${id}:${entry.reviewVersion}`)) continue;
-    const result = await o.workspace.tagMilestone(id, entry.reviewVersion, sha);
+    const result = await tagSafely(o, id, entry.reviewVersion, sha);
     if (!o.store.getKv(`tagged:${id}:${entry.reviewVersion}`)) {
       o.store.setKv(`tagged:${id}:${entry.reviewVersion}`, sha);
       o.store.appendEvent({ kind: 'milestone.tagged', taskId: id, payload: { version: entry.reviewVersion, sha } }, o.now());
@@ -304,15 +309,29 @@ export async function pushMilestoneTags(o: Orchestrator): Promise<void> {
   }
 }
 
-/** Record a tag push outcome: landed, a conflict reported once and never retried, or a failure left for the next tick. */
-function recordTagPush(o: Orchestrator, id: Id, version: number, sha: string, result: TagPushResult): void {
+/** Tag a milestone; a workspace that throws anyway is a failed push, retried on a later tick, never a failed tick. */
+export async function tagSafely(o: Orchestrator, id: Id, version: number, sha: string): Promise<TagPushResult | void> {
+  try {
+    return await o.workspace.tagMilestone(id, version, sha);
+  } catch (err) {
+    return { pushed: false, error: String(err) };
+  }
+}
+
+/**
+ * Record a tag outcome: landed, a conflict (in the clone or on origin) reported once and never retried, or a failure
+ * left for the next tick. See specs/integration-pipeline "Milestone tag conflicts never throw".
+ */
+export function recordTagPush(o: Orchestrator, id: Id, version: number, sha: string, result: TagPushResult): void {
   const key = `tagPushed:${id}:${version}`;
   if (result.pushed) {
     o.store.setKv(key, sha);
   } else if (result.conflict) {
+    if (o.store.getKv(key)?.startsWith('conflict:')) return;
+    const where = result.conflict.where ?? 'origin';
     o.store.setKv(key, `conflict:${result.conflict.remoteSha}`);
-    o.store.appendEvent({ kind: 'milestone.tagConflict', taskId: id, payload: { version, sha, remoteSha: result.conflict.remoteSha } }, o.now());
-    o.log.error('milestone tag exists on origin at another sha; not moved', { milestone: id, version, sha, remoteSha: result.conflict.remoteSha });
+    o.store.appendEvent({ kind: 'milestone.tagConflict', taskId: id, payload: { version, sha, remoteSha: result.conflict.remoteSha, where } }, o.now());
+    o.log.error(`milestone tag exists in the ${where === 'clone' ? 'clone' : 'origin'} at another sha; not moved`, { milestone: id, version, sha, remoteSha: result.conflict.remoteSha, where });
   } else {
     o.log.warn('milestone tag push failed; retrying', { milestone: id, version, err: result.error });
   }

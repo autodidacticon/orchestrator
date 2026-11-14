@@ -2,7 +2,7 @@
  * Startup recovery, run before the first tick. Idempotent. See specs/crash-recovery.
  */
 import type { Orchestrator } from '../loop/orchestrator.js';
-import { applyPendingCascade } from '../loop/tick.js';
+import { applyPendingCascade, recordTagPush, tagSafely } from '../loop/tick.js';
 import { startLaunch } from './launch.js';
 import type { Launch, VerifierJob } from '../state/store.js';
 import { TRAILER_LAUNCH } from '../verify/verifier.js';
@@ -100,7 +100,7 @@ export async function recover(o: Orchestrator): Promise<void> {
   // With origin as the source of truth, a fresh clone (no volume) learns origin's integration head before anything is
   // prepared or checked. Without an origin this reads the clone's head. See specs/crash-recovery "Startup on a fresh clone".
   try {
-    await workspace.integrationHead();
+    await workspace.integrationHead({ awaitFetch: true });
   } catch (err) {
     o.log.warn('recovery: could not read the integration head', { err: String(err) });
   }
@@ -191,10 +191,11 @@ export async function recover(o: Orchestrator): Promise<void> {
     store.updateJob(job.jobId, { status: 'queued', updatedAt: o.now() });
   }
   for (const job of store.listJobs({ status: 'publishing' })) {
-    const resolved =
-      lookup.kind === 'unreachable'
-        ? 'requeue'
-        : await (o.verifier as { recoverPublishing?: (j: typeof job) => Promise<'published' | 'requeue'> }).recoverPublishing?.(job);
+    // With origin unreachable the backend decides nothing, but still undoes the job's local swap, so no later job
+    // pushes the squash as a catch-up. See specs/crash-recovery "Publishing recovery while origin is unreachable".
+    const resolved = await (o.verifier as { recoverPublishing?: (j: typeof job, opts?: { originUnreachable?: boolean }) => Promise<'published' | 'requeue'> }).recoverPublishing?.(job, {
+      originUnreachable: lookup.kind === 'unreachable',
+    });
     if (resolved === 'published') {
       store.updateJob(job.jobId, { status: 'published', publishedSha: job.squashSha, verifiedSha: job.verifiedSha, updatedAt: o.now() });
     } else {
@@ -215,8 +216,10 @@ export async function recover(o: Orchestrator): Promise<void> {
     if (!node || node.kind !== 'milestone' || entry.status.kind !== 'submitted') continue;
     if (store.getKv(`tagged:${id}:${entry.reviewVersion}`)) continue;
     if (entry.integrationSha) {
-      await workspace.tagMilestone(id, entry.reviewVersion, entry.integrationSha);
+      // Never throws: a tag held at another sha is recorded once as a conflict. See specs/integration-pipeline "Milestone tag conflicts never throw".
+      const result = await tagSafely(o, id, entry.reviewVersion, entry.integrationSha);
       store.setKv(`tagged:${id}:${entry.reviewVersion}`, entry.integrationSha);
+      if (result) recordTagPush(o, id, entry.reviewVersion, entry.integrationSha, result);
     }
   }
 

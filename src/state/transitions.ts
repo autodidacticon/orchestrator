@@ -40,6 +40,8 @@ export const TRANSITIONS: readonly TransitionRow[] = [
   { from: 'submitted', to: 'done', actor: 'verifier', nodeKind: 'task', trigger: 'published', effects: [] },
   { from: 'submitted', to: 'failed', actor: 'verifier', nodeKind: 'task', trigger: 'verificationFailed', effects: ['attempts++'] },
   { from: 'submitted', to: 'unstarted', actor: 'verifier', nodeKind: 'task', trigger: 'conflict', effects: ['integrationRetries++'] },
+  // Origin refused the publication push git.pushRefusalLimit times: a person must act; no attempt is spent. See specs/integration-pipeline "Push refusal limit".
+  { from: 'submitted', to: 'blocked', actor: 'verifier', nodeKind: 'task', trigger: 'pushRefused', effects: [] },
   // A queued job whose sealed commit a fresh clone lost: retried without spending an attempt.
   { from: 'submitted', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'commitLost', effects: [] },
   { from: 'failed', to: 'unstarted', actor: 'orchestrator', nodeKind: 'task', trigger: 'retry', effects: [] },

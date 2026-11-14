@@ -130,6 +130,12 @@ export const configSchema = z.object({
       pushIntegration: z.boolean().default(false),
       /** How often base selection and milestone pinning may fetch origin; 0 fetches on every read. The verifier fetches at every job. */
       fetchIntervalMs: z.number().int().nonnegative().default(30_000),
+      /** Every git command that talks to origin (fetch, push, ls-remote) is killed after this long; 0 never kills. See specs/integration-pipeline "Remote commands are bounded". */
+      remoteTimeoutMs: z.number().int().nonnegative().default(120_000),
+      /** A publication push origin refuses (not a lost lease) this many times blocks its task with origin's message. See specs/integration-pipeline "Push refusal limit". */
+      pushRefusalLimit: z.number().int().positive().default(5),
+      /** The first wait before a refused or unreachable push is tried again; it doubles per retry, up to 32 times this. */
+      pushRetryBackoffMs: z.number().int().nonnegative().default(30_000),
     })
     .default({}),
   /**

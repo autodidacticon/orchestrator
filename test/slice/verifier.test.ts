@@ -174,7 +174,9 @@ describe('slice: verifier and publication', () => {
     expect(mvp.integrationSha).toBe(gitIn(h.repo, 'rev-parse', 'main'));
     expect(gitIn(h.repo, 'rev-parse', 'milestone/MVP/v1^{commit}')).toBe(mvp.integrationSha);
     await h.workspace.tagMilestone('MVP', 1, mvp.integrationSha!);
-    await expect(h.workspace.tagMilestone('MVP', 1, before)).rejects.toThrow(/exists/);
+    // A tag at another sha is never moved, and the conflict is returned rather than thrown.
+    await expect(h.workspace.tagMilestone('MVP', 1, before)).resolves.toMatchObject({ pushed: false, conflict: { remoteSha: mvp.integrationSha, where: 'clone' } });
+    expect(gitIn(h.repo, 'rev-parse', 'milestone/MVP/v1^{commit}')).toBe(mvp.integrationSha);
     expect(h.orch.acceptMilestone('MVP', mvp.integrationSha!, 1)).toEqual({ ok: true });
     expect(h.orch.status().finished).toBe(true);
   });

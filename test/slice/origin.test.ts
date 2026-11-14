@@ -296,7 +296,7 @@ describe('slice: origin as the source of truth', () => {
     // An origin whose transport leaves a marker when anything talks to it.
     gitIn(f.repo, 'config', 'protocol.ext.allow', 'always');
     gitIn(f.repo, 'remote', 'add', 'origin', `ext::sh -c touch% ${marker}% &&% exit% 1`);
-    expect(defaultConfig().git).toEqual({ pushIntegration: false, fetchIntervalMs: 30_000 });
+    expect(defaultConfig().git).toEqual({ pushIntegration: false, fetchIntervalMs: 30_000, remoteTimeoutMs: 120_000, pushRefusalLimit: 5, pushRetryBackoffMs: 30_000 });
     const graph = `nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit, description: d, acceptanceCriteria: [a] }\n  - { id: MVP, kind: milestone, gated: true, deps: [T1] }\n`;
     h = await makeSlice({ graph, realVerifier: true, dir: f.dir, repo: f.repo });
     await h.waitFor(() => h!.orch.entry('MVP').status.kind === 'submitted', 30_000);

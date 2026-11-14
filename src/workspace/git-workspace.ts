@@ -8,7 +8,7 @@ import { composeBrief } from '../brief/compose.js';
 import type { Id } from '../graph/model.js';
 import type { Launch } from '../state/store.js';
 import { existsSync } from 'node:fs';
-import { dirtyFiles, git, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeRemove } from './git.js';
+import { dirtyFiles, git, LocalTagConflictError, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeRemove } from './git.js';
 import { type Origin, TagConflictError } from './origin.js';
 import type { BriefInput, FallbackReport, SealOptions, SealResult, TagPushResult, Workspace } from './workspace.js';
 
@@ -34,11 +34,11 @@ export class GitWorkspace implements Workspace {
    * interval allows); the clone's head instead while it holds publications origin has not received yet, so a base
    * always contains every published dependency.
    */
-  async integrationHead(): Promise<string> {
+  async integrationHead(opts: { awaitFetch?: boolean } = {}): Promise<string> {
     const local = await revParse(this.repo, this.integrationBranch);
     const origin = this.origin;
     if (!origin) return local;
-    await origin.maybeFetch();
+    await origin.maybeFetch(opts);
     const remote = await origin.head();
     // A swap whose push is in flight is not yet published: its lease may still fail.
     if (remote !== undefined && local === origin.inFlight) return remote;
@@ -135,16 +135,27 @@ export class GitWorkspace implements Workspace {
     return out;
   }
 
-  /** Tag locally (idempotent); with an origin, push the tag without force, so an existing tag on origin is never moved. */
+  /**
+   * Tag locally (idempotent); with an origin, push the tag without force, so an existing tag on origin is never moved.
+   * Never throws: a tag the clone already holds at another sha (one `git clone` brought from origin, say) is a conflict
+   * and is not pushed; a remote that is busy with another command is left for a later tick.
+   * See specs/integration-pipeline "Milestone tag conflicts never throw".
+   */
   async tagMilestone(id: Id, version: number, sha: string): Promise<TagPushResult | void> {
     const name = `milestone/${id}/v${version}`;
-    await tagIdempotent(this.repo, name, sha);
-    if (!this.origin) return;
     try {
-      await this.origin.pushTag(name, sha);
+      await tagIdempotent(this.repo, name, sha);
+    } catch (err) {
+      if (err instanceof LocalTagConflictError) return { pushed: false, error: err.message, conflict: { remoteSha: err.existingSha, where: 'clone' } };
+      return { pushed: false, error: String(err) };
+    }
+    if (!this.origin) return;
+    if (this.origin.busy) return { pushed: false, error: `${this.origin.remote} is busy with another command; the tag is pushed on a later tick` };
+    try {
+      if (!(await this.origin.pushTagFromTick(name, sha))) return { pushed: false, error: `the push of ${name} to ${this.origin.remote} is still running; it is confirmed on a later tick` };
       return { pushed: true };
     } catch (err) {
-      if (err instanceof TagConflictError) return { pushed: false, error: err.message, conflict: { remoteSha: err.remoteSha } };
+      if (err instanceof TagConflictError) return { pushed: false, error: err.message, conflict: { remoteSha: err.remoteSha, where: 'origin' } };
       return { pushed: false, error: String(err) };
     }
   }

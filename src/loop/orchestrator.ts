@@ -53,6 +53,7 @@ import { bashPatterns } from '../runner/opencode.js';
 import { composeAllowedTools } from '../toolchain/tools.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
+import { PUSH_REFUSED, pushRetryDue, recordPushRetry } from '../verify/push-retry.js';
 
 export const questionSchema = z.object({
   kind: z.enum(['needsDecision', 'needsAccess', 'impossible', 'dependencyCancelled', 'outOfScope', 'insufficientSpec', 'milestoneRejected']),
@@ -312,7 +313,7 @@ export class Orchestrator implements OrchestratorCore {
     // Durability before effects: every call out waits until what was committed before it is durable. See specs/state-backend.
     // Origin as the source of truth: one shared remote for the workspace and the verifier. See specs/integration-pipeline "Origin as source of truth".
     const origin = this.config.git.pushIntegration
-      ? new Origin({ repo: this.config.repoPath, integrationBranch: this.config.integrationBranch, url: this.config.git.originUrl, fetchIntervalMs: this.config.git.fetchIntervalMs })
+      ? new Origin({ repo: this.config.repoPath, integrationBranch: this.config.integrationBranch, url: this.config.git.originUrl, fetchIntervalMs: this.config.git.fetchIntervalMs, remoteTimeoutMs: this.config.git.remoteTimeoutMs })
       : undefined;
     (deps.workspace as { useOrigin?: (o: Origin | undefined) => void }).useOrigin?.(origin);
     (deps.verifier as { useOrigin?: (o: Origin | undefined) => void }).useOrigin?.(origin);
@@ -1838,6 +1839,7 @@ export class Orchestrator implements OrchestratorCore {
     const checkCommand = this.effective().config.checkCommand;
     const job = this.store.listJobs({ status: 'queued' }).find((j) => {
       if (this.deferredJobs.has(j.jobId)) return false;
+      if (!pushRetryDue(this.store, j.jobId, this.now())) return false;
       if (checkCommand !== undefined || j.sealedSha === j.baseSha) return true;
       if (!this.heldJobsLogged.has(j.jobId)) {
         this.heldJobsLogged.add(j.jobId);
@@ -1896,8 +1898,15 @@ export class Orchestrator implements OrchestratorCore {
     if (outcome.kind === 'published') {
       this.store.updateJob(job.jobId, { status: 'published', publishedSha: outcome.publishedSha, verifiedSha: outcome.verifiedSha, changedFiles: outcome.changedFiles, updatedAt: this.now() });
     } else if (outcome.kind === 'requeue') {
-      if (outcome.reason) this.log.warn('verifier job requeued', { jobId: job.jobId, taskId: job.taskId, reason: outcome.reason });
-      this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, ...(outcome.reason ? { reason: outcome.reason } : {}) } }, this.now());
+      // A refused or unreachable push waits a backoff; refusals up to git.pushRefusalLimit, then the task is blocked. See specs/integration-pipeline "Push failures are classified".
+      const retry = outcome.retry ? recordPushRetry(this.store, job.jobId, outcome.retry, this.config.git, this.now()) : undefined;
+      if (retry?.blocked && outcome.retry) {
+        this.log.error('publication push refused; task blocked', { jobId: job.jobId, taskId: job.taskId, refusals: retry.state.refusals, reason: outcome.retry.message });
+        this.store.updateJob(job.jobId, { status: 'failed', failureKind: PUSH_REFUSED, output: outcome.retry.message, updatedAt: this.now() });
+        return;
+      }
+      if (outcome.reason) this.log.warn('verifier job requeued', { jobId: job.jobId, taskId: job.taskId, reason: outcome.reason, ...(retry ? { retryInMs: retry.delayMs } : {}) });
+      this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, ...(outcome.reason ? { reason: outcome.reason } : {}), ...(retry && outcome.retry ? { retry: outcome.retry.kind, retryAt: retry.state.retryAt, retryInMs: retry.delayMs, refusals: retry.state.refusals } : {}) } }, this.now());
       this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, updatedAt: this.now() });
     } else if (outcome.kind === 'failed') {
       this.store.updateJob(job.jobId, { status: 'failed', failureKind: outcome.reason.kind, output: outcome.reason.output ?? outcome.reason.message, updatedAt: this.now() });

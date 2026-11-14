@@ -96,6 +96,13 @@ async function main(): Promise<void> {
       await api('report', submitBody());
       break;
     }
+    case 'twoCommitsOneFile': {
+      // Two commits that edit the same file: replaying them onto their own squash conflicts.
+      writeAndCommit(`${brief.taskId}.txt`, `${brief.taskId} first\n`);
+      writeAndCommit(`${brief.taskId}.txt`, `${brief.taskId} first\n${brief.taskId} second\n`);
+      await api('report', submitBody());
+      break;
+    }
     case 'slowSubmit': {
       await sleep(Number(param ?? 1500));
       writeAndCommit();

@@ -1,7 +1,7 @@
 /**
  * Thin git wrapper over execFile. Every call names its cwd explicitly.
  */
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileP = promisify(execFile);
@@ -26,7 +26,20 @@ export class GitError extends Error {
  */
 const baseEnv = { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_OPTIONAL_LOCKS: '0' };
 
-export async function git(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string> } = {}): Promise<{ stdout: string; stderr: string; code: number }> {
+export interface GitResult {
+  stdout: string;
+  stderr: string;
+  code: number;
+  /** Killed because it did not finish within `timeoutMs`. */
+  timedOut?: boolean;
+}
+
+export async function git(cwd: string, args: string[], opts: { allowFail?: boolean; env?: Record<string, string>; timeoutMs?: number } = {}): Promise<GitResult> {
+  if (opts.timeoutMs !== undefined && opts.timeoutMs > 0) {
+    const r = await gitBounded(cwd, args, opts.env, opts.timeoutMs);
+    if (r.code !== 0 && !opts.allowFail) throw new GitError(args, r.stdout, r.stderr, r.code);
+    return r;
+  }
   try {
     const { stdout, stderr } = await execFileP('git', args, { cwd, env: { ...baseEnv, ...opts.env }, maxBuffer: 64 * 1024 * 1024 });
     return { stdout, stderr, code: 0 };
@@ -35,6 +48,40 @@ export async function git(cwd: string, args: string[], opts: { allowFail?: boole
     if (opts.allowFail) return { stdout: e.stdout ?? '', stderr: e.stderr ?? '', code: typeof e.code === 'number' ? e.code : 1 };
     throw new GitError(args, e.stdout ?? '', e.stderr ?? '', e.code ?? null);
   }
+}
+
+/**
+ * A git command that talks to a remote, bounded by `timeoutMs`. It runs in its own process group, and on timeout the
+ * whole group is killed, so the transport helpers it started (ssh, a remote-helper, a local upload-pack) die with it
+ * and nothing holds its pipes open. See specs/integration-pipeline "Remote commands are bounded".
+ */
+function gitBounded(cwd: string, args: string[], env: Record<string, string> | undefined, timeoutMs: number): Promise<GitResult> {
+  return new Promise((resolve) => {
+    const child = spawn('git', args, { cwd, env: { ...baseEnv, ...env }, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    child.stdout?.on('data', (c: Buffer) => (stdout += c.toString('utf8')));
+    child.stderr?.on('data', (c: Buffer) => (stderr += c.toString('utf8')));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        process.kill(-(child.pid as number), 'SIGKILL');
+      } catch {
+        child.kill('SIGKILL');
+      }
+    }, timeoutMs);
+    const done = (code: number) => {
+      clearTimeout(timer);
+      if (timedOut) resolve({ stdout, stderr: `${stderr}${stderr && !stderr.endsWith('\n') ? '\n' : ''}git ${args[0]} timed out after ${timeoutMs}ms and was killed`, code: code || 1, timedOut });
+      else resolve({ stdout, stderr, code });
+    };
+    child.on('close', (code) => done(code ?? 1));
+    child.on('error', (err) => {
+      stderr += String(err);
+      done(1);
+    });
+  });
 }
 
 export async function revParse(cwd: string, ref: string): Promise<string> {
@@ -87,12 +134,24 @@ export async function worktreeList(repo: string): Promise<string[]> {
     .map((l) => l.slice('worktree '.length).trim());
 }
 
-/** Create or confirm a tag. Idempotent when it already points at `sha`. */
+/** The clone already holds a tag under the same name at another sha. */
+export class LocalTagConflictError extends Error {
+  constructor(
+    public readonly tag: string,
+    public readonly existingSha: string,
+    public readonly sha: string,
+  ) {
+    super(`tag ${tag} exists in the clone at ${existingSha}, not ${sha}; it is never moved`);
+    this.name = 'LocalTagConflictError';
+  }
+}
+
+/** Create or confirm a tag. Idempotent when it already points at `sha`; throws LocalTagConflictError when it points elsewhere. */
 export async function tagIdempotent(repo: string, name: string, sha: string): Promise<void> {
   const existing = await git(repo, ['rev-parse', '--verify', '--quiet', `refs/tags/${name}^{commit}`], { allowFail: true });
   if (existing.code === 0) {
     if (existing.stdout.trim() === sha) return;
-    throw new Error(`tag ${name} exists at ${existing.stdout.trim()}, not ${sha}`);
+    throw new LocalTagConflictError(name, existing.stdout.trim(), sha);
   }
   await git(repo, ['tag', name, sha]);
 }

@@ -31,7 +31,9 @@ export type BlockedKind =
   | 'dependencyCancelled'
   | 'outOfScope'
   | 'insufficientSpec'
-  | 'milestoneRejected';
+  | 'milestoneRejected'
+  /** Set by the verifier only: origin refused the publication push git.pushRefusalLimit times. Agents cannot block with it. */
+  | 'pushRefused';
 
 export const BLOCKED_KINDS: readonly BlockedKind[] = [
   'needsDecision',
@@ -41,6 +43,7 @@ export const BLOCKED_KINDS: readonly BlockedKind[] = [
   'outOfScope',
   'insufficientSpec',
   'milestoneRejected',
+  'pushRefused',
 ];
 
 /** A question an agent asks while blocking (live or via fallback). */

@@ -47,11 +47,15 @@ export interface BriefRunner {
   permission?: { mode: OpenCodePermission; bashPatterns?: string[] };
 }
 
-/** A milestone tag push to origin: landed, failed (retry later), or refused because origin holds the tag at another sha. */
-export type TagPushResult = { pushed: true } | { pushed: false; error: string; conflict?: { remoteSha: string } };
+/**
+ * A milestone tag push to origin: landed, failed (retry later), or a conflict because the clone or origin holds the
+ * tag at another sha (`remoteSha` is that sha, wherever it was found).
+ */
+export type TagPushResult = { pushed: true } | { pushed: false; error: string; conflict?: { remoteSha: string; where?: 'clone' | 'origin' } };
 
 export interface Workspace {
-  integrationHead(): Promise<string>;
+  /** With `awaitFetch` (startup recovery), a fetch it starts is awaited in full, bounded only by git.remoteTimeoutMs; the tick waits at most a short bound. */
+  integrationHead(opts?: { awaitFetch?: boolean }): Promise<string>;
   /** Create the worktree for a launch at baseSha and write the brief. */
   prepare(launch: Launch, brief: BriefInput): Promise<void>;
   /** Clean check plus head sha; with `autoCommit`, a dirty worktree is committed first. */
@@ -61,7 +65,7 @@ export interface Workspace {
   remove(launch: Launch): Promise<void>;
   /** Launch ids that currently have a worktree. */
   listWorktrees(): Promise<string[]>;
-  /** Create the tag locally (idempotent). With an origin, also push it; the push outcome is returned, never thrown. */
+  /** Create the tag locally (idempotent). With an origin, also push it; the outcome (a conflict in the clone included) is returned, never thrown. */
   tagMilestone(id: Id, version: number, sha: string): Promise<TagPushResult | void>;
   /** `git diff --stat from..to`, or an empty string when unavailable. */
   diffStat(from: string, to: string): Promise<string>;

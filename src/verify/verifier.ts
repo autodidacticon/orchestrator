@@ -20,7 +20,7 @@ import {
   worktreeList,
   worktreeRemove,
 } from '../workspace/git.js';
-import { type Origin, OriginConfigError } from '../workspace/origin.js';
+import { type Origin, OriginConfigError, type PushResult } from '../workspace/origin.js';
 import type { VerifierBackend, VerifierContext, VerifierOutcome } from './job.js';
 
 export const TRAILER_TASK = 'Orchestrator-Task';
@@ -135,10 +135,11 @@ export class GitVerifierBackend implements VerifierBackend {
       if (this.origin) {
         this.origin.inFlight = squashSha;
         try {
-          if (!(await this.origin.pushBranch(squashSha, expectedHead))) {
-            // Origin moved (its lease failed) or could not be reached: undo the local swap and verify again on origin's new head.
+          const pushed = await this.origin.pushBranch(squashSha, expectedHead);
+          if (!pushed.ok) {
+            // Undo the local swap, whatever the cause: the clone never keeps a squash origin did not take.
             await updateRefCas(repo, this.ref, expectedHead, squashSha);
-            return { kind: 'requeue', reason: `push to ${this.origin.remote} was rejected or failed (lease on ${expectedHead})` };
+            return pushRequeue(this.origin.remote, `push of ${squashSha} (lease on ${expectedHead})`, pushed);
           }
         } finally {
           this.origin.inFlight = undefined;
@@ -168,7 +169,7 @@ export class GitVerifierBackend implements VerifierBackend {
       await origin.fetch();
     } catch (err) {
       if (err instanceof OriginConfigError) throw err;
-      return { kind: 'done', outcome: { kind: 'requeue', reason: String(err) } };
+      return { kind: 'done', outcome: { kind: 'requeue', reason: String(err), retry: { kind: 'unreachable', message: String(err) } } };
     }
     const remote = await origin.head();
     if (remote) {
@@ -185,9 +186,7 @@ export class GitVerifierBackend implements VerifierBackend {
       return { kind: 'head', head: remote as string };
     }
     if (rel === 'ahead' || rel === 'noRemoteBranch') {
-      // Publications made before pushing was on, or by a daemon that never reached origin: push them first.
-      if (!(await origin.pushBranch(local, remote))) return { kind: 'done', outcome: { kind: 'requeue', reason: `catch-up push of ${local} to ${origin.remote} was rejected or failed` } };
-      return { kind: 'head', head: local };
+      return this.catchUp(job, local, remote);
     }
     if (rel === 'diverged') {
       const diverged = `the clone's ${this.opts.integrationBranch} (${local}) and ${origin.trackingRef} (${remote}) have diverged; reconcile them by hand`;
@@ -202,6 +201,42 @@ export class GitVerifierBackend implements VerifierBackend {
     return { kind: 'head', head: local };
   }
 
+  /**
+   * The clone is ahead of origin: publications made before pushing was on. Only commits that are publications (a
+   * launch trailer, or older than the baseline) are pushed; a commit made in the clone by hand is never published by a
+   * catch-up and stays reported as foreign. This job's own squash at the clone's tip (left by a daemon that died before
+   * its push) is published by the catch-up itself, so the sealed branch is never rebased onto its own squash.
+   * See specs/integration-pipeline "Catch-up push publishes publications only".
+   */
+  private async catchUp(job: VerifierJob, local: string, remote: string | undefined): Promise<{ kind: 'head'; head: string } | { kind: 'done'; outcome: VerifierOutcome }> {
+    const origin = this.origin as Origin;
+    const range = remote ? [local, `^${remote}`] : [local];
+    if (this.opts.baselineSha) range.push(`^${this.opts.baselineSha}`);
+    const ahead = (await git(this.opts.repo, ['rev-list', '--first-parent', ...range], { allowFail: true })).stdout.trim().split('\n').filter(Boolean);
+    const foreign: string[] = [];
+    let own: string | undefined;
+    for (const sha of ahead) {
+      const launch = (await commitTrailers(this.opts.repo, sha))[TRAILER_LAUNCH];
+      if (!launch) foreign.push(sha);
+      else if (launch === job.launchId) own = sha;
+    }
+    if (foreign.length) {
+      const message = `the clone's ${this.opts.integrationBranch} holds ${foreign.length} commit(s) that ${origin.remote} lacks and that carry no ${TRAILER_LAUNCH} trailer (${foreign.slice(0, 5).join(', ')}); they are not pushed. Push or drop them by hand.`;
+      return { kind: 'done', outcome: { kind: 'requeue', reason: message, retry: { kind: 'refused', message } } };
+    }
+    if (own && own !== local) {
+      const message = `launch ${job.launchId}'s squash ${own} is in the clone below other unpushed commits (tip ${local}); reconcile the clone with ${origin.remote} by hand`;
+      return { kind: 'done', outcome: { kind: 'requeue', reason: message, retry: { kind: 'refused', message } } };
+    }
+    const pushed = await origin.pushBranch(local, remote);
+    if (!pushed.ok) return { kind: 'done', outcome: pushRequeue(origin.remote, `catch-up push of ${local}`, pushed) };
+    if (own) {
+      await this.syncPrimaryWorktree();
+      return { kind: 'done', outcome: { kind: 'published', publishedSha: own, verifiedSha: job.verifiedSha ?? own } };
+    }
+    return { kind: 'head', head: local };
+  }
+
   /** Move the clone's integration branch forward to `sha` and bring the primary worktree along. */
   private async fastForwardTo(sha: string): Promise<void> {
     const local = await revParse(this.opts.repo, this.opts.integrationBranch);
@@ -210,8 +245,8 @@ export class GitVerifierBackend implements VerifierBackend {
     if (await updateRefCas(this.opts.repo, this.ref, sha, local)) await this.syncPrimaryWorktree();
   }
 
-  async recoverPublishing(job: VerifierJob): Promise<'published' | 'requeue'> {
-    if (this.origin) return this.recoverPublishingFromOrigin(job);
+  async recoverPublishing(job: VerifierJob, opts: { originUnreachable?: boolean } = {}): Promise<'published' | 'requeue'> {
+    if (this.origin) return this.recoverPublishingFromOrigin(job, opts.originUnreachable === true);
     const found = await findTrailer(this.opts.repo, this.opts.integrationBranch, TRAILER_LAUNCH, job.launchId);
     if (found) {
       await this.syncPrimaryWorktree();
@@ -222,14 +257,23 @@ export class GitVerifierBackend implements VerifierBackend {
 
   /**
    * Origin first: the launch trailer on origin means published. On the clone alone means the daemon died between
-   * its compare-and-swap and the push: push the recorded squash once, with the lease the job started from. A lost
-   * lease undoes the local swap and requeues; an unreachable origin requeues, and the next run finds a landed push.
+   * its compare-and-swap and the push: push the recorded squash once, with the lease the job started from. Any other
+   * end (a lost lease, a refusal, an unreachable origin) undoes the local swap and requeues: the clone never keeps an
+   * unpushed squash at its tip, and the next run finds a push that did land on origin by its trailer.
+   * See specs/crash-recovery "Publishing recovery while origin is unreachable".
    */
-  private async recoverPublishingFromOrigin(job: VerifierJob): Promise<'published' | 'requeue'> {
+  private async recoverPublishingFromOrigin(job: VerifierJob, unreachable: boolean): Promise<'published' | 'requeue'> {
     const origin = this.origin as Origin;
-    try {
-      await origin.fetch();
-    } catch {
+    let fetched = !unreachable;
+    if (fetched) {
+      try {
+        await origin.fetch();
+      } catch {
+        fetched = false;
+      }
+    }
+    if (!fetched) {
+      await this.undoSwap(job);
       return 'requeue';
     }
     const remote = await origin.head();
@@ -243,14 +287,20 @@ export class GitVerifierBackend implements VerifierBackend {
     }
     const expected = job.expectedHead;
     if (expected && remote === expected) {
-      if (await origin.pushBranch(job.squashSha, remote)) {
+      if ((await origin.pushBranch(job.squashSha, remote)).ok) {
         await this.syncPrimaryWorktree();
         return 'published';
       }
     }
-    // Origin moved past the job's expected head: the squash cannot land as is. Undo the swap if it is still the tip.
-    if (expected) await updateRefCas(this.opts.repo, this.ref, expected, job.squashSha);
+    // Origin moved past the job's expected head, or refused or did not answer: undo the swap if it is still the tip.
+    await this.undoSwap(job);
     return 'requeue';
+  }
+
+  /** Put the clone's integration branch back on the job's expected head when the job's squash is still its tip. */
+  private async undoSwap(job: VerifierJob): Promise<void> {
+    if (!job.expectedHead || !job.squashSha) return;
+    if (await updateRefCas(this.opts.repo, this.ref, job.expectedHead, job.squashSha)) await this.syncPrimaryWorktree();
   }
 
   async sweepTemp(): Promise<void> {
@@ -284,6 +334,13 @@ export class GitVerifierBackend implements VerifierBackend {
   private get maxOut(): number {
     return this.opts.maxOutputBytes ?? 64 * 1024;
   }
+}
+
+/** The outcome of a failed push: a lost lease requeues at once; a refusal or an unreachable origin requeues after a backoff. */
+function pushRequeue(remote: string, what: string, pushed: Exclude<PushResult, { ok: true }>): VerifierOutcome {
+  if (pushed.kind === 'lease') return { kind: 'requeue', reason: `${what} to ${remote}: lease failed, origin moved` };
+  const reason = pushed.kind === 'refused' ? `${what} was refused by ${remote}: ${pushed.message}` : `${what} could not reach ${remote}: ${pushed.message}`;
+  return { kind: 'requeue', reason, retry: { kind: pushed.kind, message: reason } };
 }
 
 function tail(text: string, max: number): string {
