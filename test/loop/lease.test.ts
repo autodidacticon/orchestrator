@@ -176,6 +176,79 @@ describe('claimed-launch leases', () => {
     expect(h.orch.entry('T1').interruptions ?? 0).toBe(0);
   });
 
+  // ORC-90: see specs/pull-runner "Silence limit in the claim".
+  it('the claim states the daemon\'s stuck-fail threshold as health.stuckFailAfterMs', async () => {
+    const h = harness({ stuckFailAfterMs: 1_800_000 });
+    const { body } = await claimT1(h);
+    expect(body['health']).toEqual({ stuckFailAfterMs: 1_800_000 });
+  });
+
+  // ORC-90: see specs/agent-protocol "No lease line for a spawned launch".
+  it('only a launch prepared for a claim is briefed with the lease; a spawned one, also one spawned after parking, is not', async () => {
+    const pulled = harness();
+    const { launch } = await claimT1(pulled);
+    expect(pulled.workspace.briefs.get(launch.launchId)?.leaseTtlMs).toBe(TTL);
+    const pulledBrief = composeBrief(pulled.workspace.briefs.get(launch.launchId)!, { fallbackPath: '/tmp/f.json', openspec: false }).markdown;
+    expect(pulledBrief).toContain('- Lease:');
+    expect(pulledBrief).toContain('a new file you have not staged is not kept');
+
+    const spawned = makeHarness({ config: { leaseTtlMs: TTL, tickIntervalMs: TICK } });
+    open.push(spawned);
+    await spawned.orch.tick();
+    const s = spawned.launchOf('T1');
+    expect(s.pid).toBeDefined();
+    expect(spawned.workspace.briefs.get(s.launchId)?.leaseTtlMs).toBeUndefined();
+
+    const mixed = makeHarness({ config: { leaseTtlMs: TTL, tickIntervalMs: TICK, runner: { mode: 'mixed', claimWindowMs: 1000 } } });
+    open.push(mixed);
+    await mixed.orch.tick();
+    const [parked] = mixed.store.listLaunches({ taskId: 'T1', status: 'claimable' });
+    expect(mixed.workspace.briefs.get(parked!.launchId)?.leaseTtlMs).toBe(TTL);
+    mixed.advance(1001);
+    await mixed.orch.tick();
+    const live = mixed.launchOf('T1');
+    expect(live.launchId).toBe(parked!.launchId);
+    expect(live.pid).toBeDefined();
+    expect(mixed.workspace.briefs.get(live.launchId)?.leaseTtlMs).toBeUndefined();
+    const { markdown } = composeBrief(mixed.workspace.briefs.get(live.launchId)!, { fallbackPath: '/tmp/f.json', openspec: false });
+    expect(markdown).not.toContain('- Lease:');
+  });
+
+  // ORC-90: see specs/pull-runner "Lease expiry".
+  it('a failed work-in-progress commit keeps a branch that has commits, without a wipCommit, at no attempt cost', async () => {
+    const h = harness();
+    const { launch } = await claimT1(h);
+    h.workspace.markProgress(launch.launchId, 'c1', true);
+    h.workspace.preserveError = new Error('fatal: Unable to create index.lock: File exists');
+    await settleSilent(h);
+    expect(h.store.listEvents({ kind: 'launch.ended', launchId: launch.launchId }).map((e) => e.payload)).toEqual([{ endReason: 'leaseExpired', kept: true }]);
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 0, interruptions: 1 });
+    const interrupted = h.orch.entry('T1').carry?.interrupted;
+    expect(interrupted).toMatchObject({ headSha: 'c1', priorBranch: launch.branch, reason: 'leaseExpired' });
+    expect(interrupted?.wipCommit).toBeUndefined();
+  });
+
+  it('a failed work-in-progress commit on a branch without commits spends the attempt', async () => {
+    const h = harness();
+    const { launch } = await claimT1(h);
+    h.workspace.markProgress(launch.launchId, launch.baseSha, true);
+    h.workspace.preserveError = new Error('fatal: Unable to create index.lock: File exists');
+    await settleSilent(h);
+    expect(h.store.getLaunch(launch.launchId)).toMatchObject({ status: 'ended', endReason: 'leaseExpired' });
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 1 });
+  });
+
+  it('an untracked file alone does not make an expiry a kept release', async () => {
+    const h = harness();
+    const { launch } = await claimT1(h);
+    h.workspace.untracked.add(launch.launchId);
+    h.workspace.fingerprints.set(launch.launchId, `${launch.baseSha}:untracked`);
+    await settleSilent(h);
+    expect(h.store.getLaunch(launch.launchId)).toMatchObject({ status: 'ended', endReason: 'leaseExpired' });
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 1 });
+    expect(h.orch.entry('T1').interruptions ?? 0).toBe(0);
+  });
+
   it('kept expiries are bounded by daemon.maxKeptReleases; past the bound an expiry with progress spends the attempt', async () => {
     const h = harness({}, { daemon: { maxKeptReleases: 1 } });
     const { launch } = await claimT1(h);

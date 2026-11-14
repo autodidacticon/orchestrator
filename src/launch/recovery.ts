@@ -143,11 +143,12 @@ export async function recover(o: Orchestrator): Promise<void> {
         await workspace.remove(launch);
         continue;
       }
-      // A claimed launch is judged by its lease, never as a dead process, and has no fallback file.
+      // A claimed launch is judged by its lease, never as a dead process, and has no fallback file. One whose lease ran
+      // out while the daemon was down is expired as the tick would: kept with progress, failed without.
+      // See specs/crash-recovery "Claimed lease expired while the daemon was down".
       if (entry.status.kind === 'running' && entry.lease && entry.lease.expiresAt <= o.now()) {
-        o.fail(launch.taskId, { kind: 'leaseExpired', message: 'worker lease expired while the daemon was down' }, 'orchestrator', 'deadOrExpired');
-        o.endLaunch(launch, 'leaseExpired');
-        await workspace.remove(launch);
+        const outcome = await o.expireClaim(launch);
+        o.log.info('recovery: claimed launch lease expired while the daemon was down', { taskId: launch.taskId, launchId: launch.launchId, outcome });
       }
       continue;
     }

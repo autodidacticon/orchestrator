@@ -1,6 +1,6 @@
 import type { Id } from '../graph/model.js';
 import type { Launch } from '../state/store.js';
-import type { BriefInput, FallbackReport, SealOptions, SealResult, Workspace } from './workspace.js';
+import type { BriefInput, FallbackReport, PreserveOptions, SealOptions, SealResult, Workspace } from './workspace.js';
 
 /** In-memory workspace for logic tests. Scriptable seal results and fallback files. */
 export class FakeWorkspace implements Workspace {
@@ -14,6 +14,10 @@ export class FakeWorkspace implements Workspace {
   readonly fingerprints = new Map<string, string>();
   /** Launches with uncommitted changes, which `preserve` turns into a synthetic WIP commit. */
   readonly dirty = new Set<string>();
+  /** Launches whose only uncommitted change is an untracked file: progress for a release with keep, not for a lease expiry. */
+  readonly untracked = new Set<string>();
+  /** When set, `preserve` throws it (a work-in-progress commit that fails, say on a held index.lock). */
+  preserveError: Error | undefined;
   /** Commits made by `seal` with `autoCommit`. */
   readonly autoCommits: Array<{ launchId: string; sha: string; message: string }> = [];
   private counter = 0;
@@ -71,10 +75,13 @@ export class FakeWorkspace implements Workspace {
     return this.worktrees.has(launch.launchId);
   }
 
-  async preserve(launch: Launch): Promise<{ headSha: string; wipCommit?: string }> {
+  async preserve(launch: Launch, opts: PreserveOptions = {}): Promise<{ headSha: string; wipCommit?: string }> {
+    if (this.preserveError) throw this.preserveError;
     const head = (this.fingerprints.get(launch.launchId) ?? `${this.head}:clean`).split(':')[0] ?? this.head;
-    if (!this.dirty.has(launch.launchId)) return { headSha: head };
+    const untracked = opts.untracked !== false && this.untracked.has(launch.launchId);
+    if (!this.dirty.has(launch.launchId) && !untracked) return { headSha: head };
     this.dirty.delete(launch.launchId);
+    this.untracked.delete(launch.launchId);
     const wipCommit = `wip-${launch.launchId.slice(0, 8)}`;
     this.fingerprints.set(launch.launchId, `${wipCommit}:clean`);
     return { headSha: wipCommit, wipCommit };

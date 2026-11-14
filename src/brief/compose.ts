@@ -51,7 +51,7 @@ const seconds = (ms: number): string => (ms % 1000 === 0 ? `${ms / 1000}s` : `${
 /** The brief's heartbeat interval line. See specs/agent-protocol "Heartbeat interval". */
 export function leaseRule(leaseTtlMs: number): string {
   const every = renewEveryMsOf(leaseTtlMs);
-  return `- Lease: your lease lasts ${seconds(leaseTtlMs)} (\`leaseTtlMs\` ${leaseTtlMs}; a claim response states it as \`lease.ttlMs\` with the expiry). Every call renews it. Call an operation (\`heartbeat\` with a short progress text will do) at least every ${seconds(every)} (\`lease.renewEveryMs\` ${every}, a third of the lease). Run any command expected to take longer than that in the background and call \`heartbeat\` while it runs: you cannot call while a foreground command runs, and a lease that expires ends your launch.`;
+  return `- Lease: your lease lasts ${seconds(leaseTtlMs)} (\`leaseTtlMs\` ${leaseTtlMs}; a claim response states it as \`lease.ttlMs\` with the expiry). Every call renews it. Call an operation (\`heartbeat\` with a short progress text will do) at least every ${seconds(every)} (\`lease.renewEveryMs\` ${every}, a third of the lease). Run any command expected to take longer than that in the background and call \`heartbeat\` while it runs: you cannot call while a foreground command runs, and a lease that expires ends your launch. An expiry keeps your commits, changes to tracked files and files you staged (\`git add\`) on your branch; a new file you have not staged is not kept.`;
 }
 
 export function acceptanceCriteriaOf(payload: Record<string, unknown>): string[] {

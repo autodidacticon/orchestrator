@@ -14,6 +14,11 @@ export interface SealOptions {
   autoCommit?: { message: string };
 }
 
+export interface PreserveOptions {
+  /** Whether untracked files count as progress and go into the work-in-progress commit. Default true (a release with keep). */
+  untracked?: boolean;
+}
+
 export interface FallbackReport {
   launchId: string;
   seq: number;
@@ -73,6 +78,10 @@ export interface Workspace {
   fingerprint(launch: Launch): Promise<string>;
   /** Whether the launch's worktree and brief are present. */
   exists(launch: Launch): Promise<boolean>;
-  /** Commit uncommitted changes as a work-in-progress commit on the launch branch; the head afterwards. See specs/pull-runner "Release". */
-  preserve(launch: Launch): Promise<{ headSha: string; wipCommit?: string }>;
+  /**
+   * Commit uncommitted changes as a work-in-progress commit on the launch branch; the head afterwards. See specs/pull-runner "Release".
+   * With `untracked: false` (a lease expiry) untracked files are neither progress nor committed: only changes to tracked files and
+   * paths the worker staged are. See specs/pull-runner "Lease expiry".
+   */
+  preserve(launch: Launch, opts?: PreserveOptions): Promise<{ headSha: string; wipCommit?: string }>;
 }

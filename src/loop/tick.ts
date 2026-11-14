@@ -436,7 +436,14 @@ export async function spawnDueLaunches(o: Orchestrator): Promise<void> {
     if (o.now() - (launch.claimableAt ?? launch.createdAt) < window) continue;
     const entry = o.entry(launch.taskId);
     if (entry.status.kind !== 'running' || entry.lease?.launchId !== launch.launchId) continue;
-    await spawnLaunch(o, launch);
+    // Leave `claimable` before any await, so no claim lands while the brief is recomposed. The parked brief was written
+    // for a worker that claims, with a lease line; a spawned launch's brief has none. A crash here leaves a `launching`
+    // launch, which recovery revokes and relaunches. See specs/agent-protocol "No lease line for a spawned launch".
+    o.store.updateLaunch(launch.launchId, { status: 'launching' });
+    const launching = { ...launch, status: 'launching' as const };
+    await o.workspace.remove(launching);
+    await o.workspace.prepare(launching, o.briefInput(launching));
+    await spawnLaunch(o, launching);
   }
 }
 

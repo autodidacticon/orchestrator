@@ -59,6 +59,13 @@ if (brief.task.opencodeMode === 'hang' && !existsSync(hung)) {
   setInterval(() => {}, 1 << 30);
   await new Promise(() => {});
 }
+// orphan: the first launch exits at once without a report, leaving a grandchild that holds its stdout open (ORC-90).
+if (brief.task.opencodeMode === 'orphan' && !existsSync(hung)) {
+  const { spawn } = await import('node:child_process');
+  const g = spawn('sleep', ['60'], { stdio: ['ignore', 'inherit', 'inherit'] });
+  writeFileSync(hung, String(g.pid));
+  process.exit(0);
+}
 // slow: one long silent step (a full test suite in the foreground), then the normal run.
 if (brief.task.opencodeMode === 'slow') await new Promise((r) => setTimeout(r, Number(brief.task.slowMs)));
 const lines = readFileSync(${JSON.stringify(path.join(events, 'H1.jsonl'))}, 'utf8').trimEnd().split('\\n');
@@ -245,8 +252,8 @@ describe('work loop ends a hung agent (ORC-79)', () => {
   // The fake's first launch of T1 never writes and never exits, and ignores SIGTERM, so only the SIGKILL escalation ends it.
   const health = (over: { stuckAfterMs?: number; stuckFailAfterMs?: number } = {}) => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true, ...over });
 
-  async function hangThenRun(config: Record<string, unknown>, args: string[] = []) {
-    h = await makeSlice({ graph: one(', opencodeMode: hang'), config: { ...opencodePull, ...config } });
+  async function hangThenRun(config: Record<string, unknown>, args: string[] = [], mode: 'hang' | 'orphan' = 'hang') {
+    h = await makeSlice({ graph: one(`, opencodeMode: ${mode}`), config: { ...opencodePull, ...config } });
     await h.waitFor(() => h!.store.listLaunches({ status: 'claimable' }).length === 1);
     const loop = startLoop(h, binDir(h), ['--runner', 'opencode', '--workers', '1', '--run-tag', 'hg', '--idle-exit-ms', '20000', ...args]);
     const marker = path.join(captureDir(h), 'hung-T1');
@@ -295,6 +302,18 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     expect(h!.store.listEvents({ kind: 'agent.heartbeat', launchId: first.launchId })).toEqual([]);
     expect(first.progressAt).toBe(first.worker!.claimedAt);
     expect(first.lastSignal).toBe('claimed');
+  }, 90_000);
+
+  // ORC-90: renewal follows the agent process (`exit`), not the pipes (`close`), which a grandchild may hold.
+  it('renewal stops when the agent exits, though a grandchild keeps its stdout open: the lease expires, not the silence limit', async () => {
+    const ttl = 1500;
+    const silence = 20_000;
+    const { first } = await hangThenRun({ leaseTtlMs: ttl, health: health() }, ['--max-silence-ms', String(silence)], 'orphan');
+    expect(first).toMatchObject({ status: 'ended', endReason: 'leaseExpired' });
+    const claimedAt = h!.store.listEvents({ kind: 'launch.claimed', launchId: first.launchId })[0]!.ts;
+    // Well before the silence limit, which renewals until `close` would have reached first.
+    expect(first.endedAt! - claimedAt).toBeLessThan(silence / 2);
+    expect(h!.store.listEvents({ kind: 'operator.release', launchId: first.launchId })).toEqual([]);
   }, 90_000);
 
   it('an agent silent for longer than several TTLs under the loop keeps its launch and submits on it', async () => {
@@ -351,7 +370,8 @@ describe('work loop ends a hung agent (ORC-79)', () => {
   }, 90_000);
 
   it('the daemon fails the silent claim as stuck; the loop ends the agent and claims the relaunch', async () => {
-    const { first, out } = await hangThenRun({ leaseTtlMs: 60_000, health: health({ stuckFailAfterMs: 1500 }) });
+    // The claim now states stuckFailAfterMs, which would be the loop's own silence limit: set one well past it, so the daemon's verdict comes first.
+    const { first, out } = await hangThenRun({ leaseTtlMs: 60_000, health: health({ stuckFailAfterMs: 1500 }) }, ['--max-silence-ms', '60000']);
     expect(first).toMatchObject({ status: 'ended', endReason: 'stuck' });
     expect(out.stderr).toMatch(/T1 ending opencode \(process group \d+\): the daemon ended the launch/);
     // The loop's renewal kept the lease, so stuck, not leaseExpired, ended it; the daemon's verdict stands and the loop does not release.
@@ -505,5 +525,31 @@ describe('work.mjs lease renewal (ORC-85)', () => {
     expect(rule).toMatch(/run any command expected to take longer than 200000ms .* in the background and call launch_heartbeat while it runs/);
     expect(leaseRule({ leaseTtlMs: 9000 })).toContain('at least every 3000ms');
     expect(leaseRule({})).not.toMatch(/\d+ms/);
+  });
+
+  // ORC-90: run the workflow script itself with stub agents, so the path from the claimer's output to the worker prompt is exercised, not string-matched.
+  it('the Claude Code workflow asks the claimer for lease.ttlMs and lease.renewEveryMs and gives the claimed numbers to the worker', async () => {
+    const src = readFileSync(path.resolve(here, '../../hosts/claude-code/workflows/work.js'), 'utf8').replace(/^export const meta/m, 'const meta');
+    const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (...a: string[]) => (...v: unknown[]) => Promise<unknown>;
+    const run = new AsyncFunction('args', 'agent', 'parallel', 'log', src);
+    const prompts: Array<{ label: string; prompt: string; schema?: { properties?: Record<string, unknown> } }> = [];
+    let claims = 0;
+    const agent = async (prompt: string, opts: { label: string; schema?: { properties?: Record<string, unknown> } }) => {
+      prompts.push({ label: opts.label, prompt, schema: opts.schema });
+      if (opts.label.startsWith('claim')) {
+        return claims++ === 0
+          ? { claimed: true, stop: false, launchId: 'L1', taskId: 'T1', token: 'tok', worktree: '/wt', briefPath: '/wt/b.md', briefMarkdown: 'brief', leaseTtlMs: 90_000, renewEveryMs: 30_000 }
+          : { claimed: false, stop: true };
+      }
+      return { taskId: 'T1', outcome: 'submitted', summary: 's' };
+    };
+    const parallel = async (fns: Array<() => Promise<unknown>>) => Promise.all(fns.map((f) => f()));
+    await run({ workers: 1 }, agent, parallel, () => {});
+    const claim = prompts.find((p) => p.label.startsWith('claim'))!;
+    expect(claim.prompt).toContain('leaseTtlMs: lease.ttlMs, renewEveryMs: lease.renewEveryMs');
+    expect(claim.schema?.properties).toMatchObject({ leaseTtlMs: { type: 'number' }, renewEveryMs: { type: 'number' } });
+    const work = prompts.find((p) => p.label.startsWith('work'))!;
+    expect(work.prompt).toContain('Your lease lasts 90000ms');
+    expect(work.prompt).toContain('at least every 30000ms');
   });
 });

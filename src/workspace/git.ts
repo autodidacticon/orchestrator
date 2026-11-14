@@ -108,8 +108,9 @@ export function parsePorcelain(out: string): string[] {
   return files;
 }
 
-export async function dirtyFiles(worktree: string): Promise<string[]> {
-  const { stdout } = await git(worktree, ['status', '--porcelain=v1', '-z', '--untracked-files=all']);
+/** Changed paths in the worktree; with `untracked: false`, only tracked files and staged paths. */
+export async function dirtyFiles(worktree: string, opts: { untracked?: boolean } = {}): Promise<string[]> {
+  const { stdout } = await git(worktree, ['status', '--porcelain=v1', '-z', `--untracked-files=${opts.untracked === false ? 'no' : 'all'}`]);
   return parsePorcelain(stdout);
 }
 

@@ -136,7 +136,9 @@ export function stopVerdict(s, quietSinceMs, now, idleExitMs, kind = DEFAULT_RUN
 
 /**
  * The silence limit for one claimed launch: --max-silence-ms when given, else the daemon's stuck-fail
- * threshold when the claim carries one (`health.stuckFailAfterMs`), else DEFAULT_MAX_SILENCE_MS; 0 is off.
+ * threshold when the claim carries a positive one (`health.stuckFailAfterMs`, which every claim response states),
+ * else DEFAULT_MAX_SILENCE_MS: a daemon that never fails a stuck launch (0) still gets a bound on a hung agent that the
+ * loop keeps renewing. --max-silence-ms 0 is off.
  */
 export function silenceLimitMs(optMs, claim) {
   if (optMs !== undefined) return optMs;
@@ -413,6 +415,13 @@ export async function runWork(opts, mods) {
       child.stderr.on('data', take);
       child.on('error', (err) => {
         spawnError = err;
+      });
+      // Renewal follows the agent process itself: it stops at `exit`, not at `close`, which waits for every holder of
+      // the output pipes; a grandchild that keeps stdout open must not keep the lease alive. While the watcher is ending
+      // the process group the loop holds the launch until the group is gone and then releases it, so renewal goes on
+      // until `close` there. See specs/host-integration "Work loop renews the lease".
+      child.on('exit', () => {
+        if (!terminated) renewal?.stop();
       });
       child.on('close', (code, signal) => {
         closed = true;

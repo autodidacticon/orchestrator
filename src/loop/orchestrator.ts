@@ -639,7 +639,10 @@ export class Orchestrator implements OrchestratorCore {
       carry: entry.carry as Record<string, unknown> | undefined,
       apiBaseUrl: this.apiBaseUrl,
       retryWindowMs: this.config.retryWindowMs,
-      leaseTtlMs: this.config.leaseTtlMs,
+      // The lease line is for a launch a worker claims. A spawned launch's lease is renewed by the tick while its process
+      // lives, so its brief carries no lease line: one composed in `spawn` mode, or recomposed when a parked launch is
+      // spawned (status `launching`). See specs/agent-protocol "No lease line for a spawned launch".
+      ...(this.effectiveMode() === 'spawn' || launch.status === 'launching' ? {} : { leaseTtlMs: this.config.leaseTtlMs }),
       checkCommand: eff.config.checkCommand,
       integrationBranch: this.config.integrationBranch,
       // Only a launch the daemon spawns gets the list; in pull mode every launch is claimed and the worker runs under its own permissions.
@@ -847,8 +850,9 @@ export class Orchestrator implements OrchestratorCore {
   }
 
   /**
-   * A running claimed launch whose lease expired. With progress in the worktree since the claim (a
-   * commit on the launch branch or a dirty file) and the task's kept releases under
+   * A running claimed launch whose lease expired, seen by the tick or by startup recovery. With progress in the
+   * worktree since the claim (a commit on the launch branch, a changed tracked file or a staged path; an untracked
+   * file alone is not progress) and the task's kept releases under
    * `daemon.maxKeptReleases`, it ends as a kept release: uncommitted work is committed on the branch,
    * the branch is kept, the attempt is not spent, and the next brief names the branch. Otherwise it is a
    * failed attempt (`leaseExpired`). See specs/pull-runner "Lease expiry".
@@ -865,10 +869,24 @@ export class Orchestrator implements OrchestratorCore {
     let preserved: { headSha: string; wipCommit?: string } | undefined;
     if (bound === 0 || interruptions < bound) {
       try {
-        // A clean tree at the base sha is left as it is, so this is also the progress test.
-        preserved = await this.workspace.preserve(launch);
+        // A clean tree at the base sha is left as it is, so this is also the progress test. Untracked files are not
+        // progress and are not committed: a check command's artefact must not turn an idle claim into a kept release.
+        preserved = await this.workspace.preserve(launch, { untracked: false });
       } catch (err) {
-        this.log.warn('could not inspect or preserve the worktree of an expired claim; failing the attempt', { launchId: launch.launchId, err: String(err) });
+        // The work-in-progress commit failed (a worker holding index.lock, say). Commits already on the branch are
+        // still progress: keep the branch at its head without the uncommitted part. See specs/pull-runner "Lease expiry".
+        let head: string | undefined;
+        try {
+          head = (await this.workspace.fingerprint(launch)).split(':')[0];
+        } catch {
+          /* no readable head */
+        }
+        if (head && head !== launch.baseSha) {
+          preserved = { headSha: head };
+          this.log.warn('could not commit the uncommitted work of an expired claim; keeping its branch at the head', { launchId: launch.launchId, headSha: head, err: String(err) });
+        } else {
+          this.log.warn('could not inspect or preserve the worktree of an expired claim; failing the attempt', { launchId: launch.launchId, err: String(err) });
+        }
       }
     }
     // A call that arrived while git ran renewed the lease: the launch lives on (any WIP commit stays on its branch).
@@ -1541,6 +1559,8 @@ export class Orchestrator implements OrchestratorCore {
       effort: launch.effort,
       // The lease: a worker must not go longer than renewEveryMs between calls. See specs/pull-runner "Lease facts in the claim".
       ...(lease ? { leaseTtlMs: lease.ttlMs, leaseExpiresAt: lease.expiresAt, lease } : {}),
+      // The daemon's stuck-fail threshold, which a work loop takes as its silence limit (0: off). See specs/pull-runner "Silence limit in the claim".
+      health: { stuckFailAfterMs: this.config.health.stuckFailAfterMs },
       // A codex worker loop composes the same `codex exec` as a spawned launch: the effective runner.codex keys, the long-poll ceiling, and the agent environment. See specs/pull-runner "Claim".
       ...(runnerOf(launch) === 'codex' ? { codex: { settings: this.effective().config.runner.codex, maxWaitMs: this.config.maxWaitMs, retryWindowMs: this.config.retryWindowMs, env: this.agentEnv(launch) } } : {}),
       // An opencode loop likewise composes the same `opencode run` and per-launch config; `allowedTools` are the rules the derived permission ruleset comes from.

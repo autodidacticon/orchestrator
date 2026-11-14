@@ -10,7 +10,7 @@ import type { Launch } from '../state/store.js';
 import { existsSync } from 'node:fs';
 import { dirtyFiles, git, LocalTagConflictError, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeRemove } from './git.js';
 import { type Origin, TagConflictError } from './origin.js';
-import type { BriefInput, FallbackReport, SealOptions, SealResult, TagPushResult, Workspace } from './workspace.js';
+import type { BriefInput, FallbackReport, PreserveOptions, SealOptions, SealResult, TagPushResult, Workspace } from './workspace.js';
 
 export const ORCH_DIR = '.orchestrator';
 export const FALLBACK_FILE = 'report.json';
@@ -89,9 +89,10 @@ export class GitWorkspace implements Workspace {
   }
 
   /** Commit every change outside `.orchestrator/` as the orchestrator, skipping hooks. */
-  private async commitAll(launch: Launch, message: string): Promise<void> {
+  private async commitAll(launch: Launch, message: string, opts: PreserveOptions = {}): Promise<void> {
     // The brief directory is git-ignored in every worktree; `add -A` skips it, and the reset is a guard for a repository that tracks it.
-    await git(launch.worktree, ['add', '-A']);
+    // Without untracked files, `add -u` stages changes to tracked files; paths the worker staged itself are already in the index.
+    await git(launch.worktree, ['add', opts.untracked === false ? '-u' : '-A']);
     await git(launch.worktree, ['rm', '-r', '-q', '--cached', '--ignore-unmatch', ORCH_DIR], { allowFail: true });
     await git(launch.worktree, ['-c', 'user.name=orchestrator', '-c', 'user.email=orchestrator@localhost', 'commit', '-q', '--no-verify', '-m', message]);
   }
@@ -169,11 +170,12 @@ export class GitWorkspace implements Workspace {
     return existsSync(path.join(launch.worktree, ORCH_DIR, 'brief.json'));
   }
 
-  async preserve(launch: Launch): Promise<{ headSha: string; wipCommit?: string }> {
-    const dirty = (await dirtyFiles(launch.worktree)).filter((f) => !f.startsWith(`${ORCH_DIR}/`));
+  async preserve(launch: Launch, opts: PreserveOptions = {}): Promise<{ headSha: string; wipCommit?: string }> {
+    const untracked = opts.untracked ?? true;
+    const dirty = (await dirtyFiles(launch.worktree, { untracked })).filter((f) => !f.startsWith(`${ORCH_DIR}/`));
     let wipCommit: string | undefined;
     if (dirty.length) {
-      await this.commitAll(launch, 'WIP: uncommitted work preserved by the orchestrator at release');
+      await this.commitAll(launch, 'WIP: uncommitted work preserved by the orchestrator at release', { untracked });
       wipCommit = await revParse(launch.worktree, 'HEAD');
     }
     return { headSha: await revParse(launch.worktree, 'HEAD'), wipCommit };
