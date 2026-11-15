@@ -130,6 +130,15 @@ export async function setupCrashRun(opts: CrashRunOptions = {}): Promise<CrashRu
       store.close();
     }
   };
+  /** Launch rows not yet ended. A reported launch stays live until the daemon sees its process exit (report grace). */
+  const unendedLaunches = (): unknown[] => {
+    const store = new SqliteStore(path.join(dataDir, 'store.sqlite'));
+    try {
+      return store.listLaunches({ status: ['preparing', 'launching', 'live'] }).map((l) => ({ launchId: l.launchId, taskId: l.taskId, status: l.status, pid: l.pid, reportedAt: l.reportedAt }));
+    } finally {
+      store.close();
+    }
+  };
   /** Tags `milestone/<id>/v<reviewVersion>` of submitted milestones that the repository lacks. */
   const missingTags = (): string[] => {
     const missing: string[] = [];
@@ -247,11 +256,13 @@ export async function setupCrashRun(opts: CrashRunOptions = {}): Promise<CrashRu
       while (Date.now() < deadline) {
         // A done task's worktree is removed after the transition is stored (awaited by the same tick, retried on
         // later ticks when left behind): wait for that too, or a stop right after reads a worktree that is about to go.
-        // Likewise a submitted milestone's tag, written after its transition.
-        if (run.terminal() && launchWorktrees(repo).length === 0 && missingTags().length === 0) return;
+        // Likewise a submitted milestone's tag, written after its transition. And every launch ended: a reported agent
+        // that has not exited yet keeps its launch live (report grace) until a later tick sees it gone, so a stop right
+        // after a terminal state could leave a live row (openspec/changes/suite-flake-causes).
+        if (run.terminal() && launchWorktrees(repo).length === 0 && missingTags().length === 0 && unendedLaunches().length === 0) return;
         await new Promise((r) => setTimeout(r, 200));
       }
-      throw new Error(`terminal state not reached (terminal: ${run.terminal()}, worktrees left: ${JSON.stringify(launchWorktrees(repo).map((w) => ({ w, exists: existsSync(w), files: existsSync(w) ? listTree(w) : [], launch: launchRow(path.basename(w)), pids: existsSync(pidlog) ? readFileSync(pidlog, 'utf8').split('\n').filter((l) => l.includes(path.basename(w))) : [] })))}, tags missing: ${JSON.stringify(run.terminal() ? missingTags() : [])}); daemon log:\n${readFileSync(daemonLog, 'utf8').slice(-4000)}`);
+      throw new Error(`terminal state not reached (terminal: ${run.terminal()}, worktrees left: ${JSON.stringify(launchWorktrees(repo).map((w) => ({ w, exists: existsSync(w), files: existsSync(w) ? listTree(w) : [], launch: launchRow(path.basename(w)), pids: existsSync(pidlog) ? readFileSync(pidlog, 'utf8').split('\n').filter((l) => l.includes(path.basename(w))) : [] })))}, tags missing: ${JSON.stringify(run.terminal() ? missingTags() : [])}, launches not ended: ${JSON.stringify(unendedLaunches())}); daemon log:\n${readFileSync(daemonLog, 'utf8').slice(-4000)}`);
     },
     cleanup: async () => {
       // A failed assertion skips run.stop(); never leave a daemon behind. Wait for each to exit, so

@@ -269,8 +269,67 @@ describe('work loop ends a hung agent (ORC-79)', () => {
   // The fake's first launch of T1 never writes and never exits, and ignores SIGTERM, so only the SIGKILL escalation ends it.
   const health = (over: { stuckAfterMs?: number; stuckFailAfterMs?: number } = {}) => ({ stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0, baseMovedNotice: true, ...over });
 
+  /**
+   * Each launch row as it was when the daemon began removing its worktree. A tick that read the launch as live
+   * before it ended can still record a progress signal on the ended row afterwards: its worktree fingerprint,
+   * taken while `git worktree remove` has deleted tracked files but not yet `.git`, differs from the claim's
+   * baseline (openspec/changes/suite-flake-causes). The row at removal is what the run decided on.
+   */
+  function rowsAtRemoval(h: SliceHarness): Map<string, Launch> {
+    const rows = new Map<string, Launch>();
+    const ws = h.orch.workspace;
+    const remove = ws.remove.bind(ws);
+    ws.remove = async (launch, opts) => {
+      const row = h.store.getLaunch(launch.launchId);
+      if (row && !rows.has(launch.launchId)) rows.set(launch.launchId, { ...row });
+      return remove(launch, opts);
+    };
+    return rows;
+  }
+
+  /**
+   * ORCH_TEST_REPRO=silent-agent-progress makes that race happen on demand (see openspec/changes/suite-flake-causes):
+   * the first tick fingerprint of T1's first launch after its baseline is held until the release has ended the
+   * launch and its worktree removal is part way, in the state `git worktree remove` passes through (it deletes
+   * entries in directory order, `.git` last: a tracked file gone, `.git` still there). The held read then runs,
+   * and the real removal follows.
+   */
+  function injectRemovalRace(h: SliceHarness): { hit: () => boolean } {
+    const ws = h.orch.workspace;
+    const fingerprint = ws.fingerprint.bind(ws);
+    const remove = ws.remove.bind(ws);
+    let releasing = false;
+    let held: Promise<unknown> | undefined;
+    let midway!: () => void;
+    const reached = new Promise<void>((r) => (midway = r));
+    let hit = false;
+    const release = h.orch.release.bind(h.orch);
+    h.orch.release = (...a: Parameters<typeof release>) => {
+      releasing = true;
+      return release(...a);
+    };
+    ws.fingerprint = (launch) => {
+      // The claim's baseline (no fingerprint stored yet) and the release's own read pass through.
+      if (held || releasing || !h.store.getLaunch(launch.launchId)?.fingerprint) return fingerprint(launch);
+      const p = reached.then(() => fingerprint(launch));
+      held = p.then(() => (hit = true), () => undefined);
+      return p;
+    };
+    ws.remove = async (launch, opts) => {
+      if (held && !hit && existsSync(launch.worktree)) {
+        execFileSync('rm', ['-f', path.join(launch.worktree, 'shared.txt')]);
+        midway();
+        await held;
+      }
+      return remove(launch, opts);
+    };
+    return { hit: () => hit };
+  }
+
   async function hangThenRun(config: Record<string, unknown>, args: string[] = [], mode: 'hang' | 'orphan' = 'hang') {
     h = await makeSlice({ graph: one(`, opencodeMode: ${mode}`), config: { ...opencodePull, ...config } });
+    const repro = process.env['ORCH_TEST_REPRO'] === 'silent-agent-progress' ? injectRemovalRace(h) : undefined;
+    const atRemoval = rowsAtRemoval(h);
     await h.waitFor(() => h!.store.listLaunches({ status: 'claimable' }).length === 1);
     const loop = startLoop(h, binDir(h), ['--runner', 'opencode', '--workers', '1', '--run-tag', 'hg', '--idle-exit-ms', '20000', ...args]);
     const marker = path.join(captureDir(h), 'hung-T1');
@@ -294,7 +353,7 @@ describe('work loop ends a hung agent (ORC-79)', () => {
       expect(second.worker?.id).toBe('hg-1');
       const result = JSON.parse(out.stdout.trim().split('\n').pop()!) as { outcomes: Array<{ launchId: string; result: string }> };
       expect(result.outcomes.map((o) => o.result)).toEqual(['hung', 'started']);
-      return { first, second, out };
+      return { first, second, out, atRemoval, repro };
     } finally {
       clearInterval(timer);
       // A failed run must not leave the hung fake behind.
@@ -306,18 +365,31 @@ describe('work loop ends a hung agent (ORC-79)', () => {
   it('the loop renews the lease of a silent agent: the claim outlives several TTLs and the renewals are not progress', async () => {
     const ttl = 1500;
     const silence = 4 * ttl;
-    const { first, out } = await hangThenRun({ leaseTtlMs: ttl, health: health() }, ['--max-silence-ms', String(silence)]);
+    const { first, out, atRemoval, repro } = await hangThenRun({ leaseTtlMs: ttl, health: health() }, ['--max-silence-ms', String(silence)]);
     // The loop, not the lease, ended the launch, after its silence limit of four TTLs.
     expect(first).toMatchObject({ status: 'ended', endReason: 'released' });
     expect(h!.store.listEvents({ kind: 'launch.ended', launchId: first.launchId }).map((e) => e.payload)).toEqual([{ endReason: 'released' }]);
     const claimedAt = h!.store.listEvents({ kind: 'launch.claimed', launchId: first.launchId })[0]!.ts;
-    const releasedAt = h!.store.listEvents({ kind: 'launch.released', launchId: first.launchId })[0]!.ts;
-    expect(releasedAt - claimedAt).toBeGreaterThanOrEqual(silence);
+    const [released] = h!.store.listEvents({ kind: 'launch.released', launchId: first.launchId });
+    expect(released!.ts - claimedAt).toBeGreaterThanOrEqual(silence);
     expect(out.stderr).toMatch(/no output for \d+s \(limit 6000ms\)/);
-    // No call from the agent and no worktree change: the renewals left the progress clock at the claim.
+    // No call from the agent and no worktree change: the renewals left the progress clock at the claim,
+    // so the release found no progress and the task went back unstarted at no cost.
     expect(h!.store.listEvents({ kind: 'agent.heartbeat', launchId: first.launchId })).toEqual([]);
-    expect(first.progressAt).toBe(first.worker!.claimedAt);
-    expect(first.lastSignal).toBe('claimed');
+    expect(released!.payload).toMatchObject({ progressed: false, kept: false });
+    expect(h!.orch.entry('T1').attempts).toBe(0);
+    // Read as the row stood when the release removed the worktree, not after: a tick that read the launch as live
+    // before the release may record a worktree signal on the ended row from a half-removed worktree (product defect,
+    // proposal in openspec/changes/suite-flake-causes).
+    const row = atRemoval.get(first.launchId)!;
+    expect(row).toMatchObject({ status: 'ended', endReason: 'released' });
+    expect(row.progressAt).toBe(first.worker!.claimedAt);
+    expect(row.lastSignal).toBe('claimed');
+    if (repro) {
+      // The injected race took place: the ended row's progress clock moved after the release.
+      expect(repro.hit()).toBe(true);
+      expect(h!.store.getLaunch(first.launchId)).toMatchObject({ lastSignal: 'worktree' });
+    }
   }, 150_000);
 
   // ORC-90: renewal follows the agent process (`exit`), not the pipes (`close`), which a grandchild may hold.

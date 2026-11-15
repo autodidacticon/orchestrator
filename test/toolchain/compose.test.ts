@@ -16,11 +16,22 @@ afterEach(() => {
   dirs = [];
 });
 
+/**
+ * The file's text once the command has written its line. The shell creates the file for `>` before `echo` writes,
+ * so a file that exists can still be empty (openspec/changes/suite-flake-causes): wait for the newline `echo` ends with.
+ */
 async function waitForFile(file: string): Promise<string> {
   const deadline = Date.now() + 5000;
-  while (!existsSync(file) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 30));
+  const written = () => existsSync(file) && readFileSync(file, 'utf8').endsWith('\n');
+  while (!written() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 30));
   return readFileSync(file, 'utf8').trim();
 }
+
+/**
+ * ORCH_TEST_REPRO=compose-partial-read holds `echo` 300ms after the shell has created the output file, the window
+ * the old wait (file exists) read an empty file in.
+ */
+const slowWrite = (cmd: string) => (process.env['ORCH_TEST_REPRO'] === 'compose-partial-read' ? cmd.replace(/^echo (.*) > (\S+)$/, '{ sleep 0.3; echo $1; } > $2') : cmd);
 
 // See specs/toolchain-discovery "Runner command composition".
 describe('runner command composition', () => {
@@ -52,7 +63,7 @@ describe('runner command composition', () => {
     mkdirSync(path.join(worktree, '.orchestrator'), { recursive: true });
     const launch = { launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'launching', token: 't', branch: 'task/T1/l1', worktree, baseSha: 'b', graphRev: 'r', createdAt: 1 } as unknown as Launch;
     let rules = ['Bash(git:*)', 'Bash(npm test:*)'];
-    const withSlot = new SubprocessRunner({ command: () => 'echo {allowedTools} > {worktree}/.orchestrator/tools.txt', allowedTools: () => rules, logDir: path.join(dir, 'logs') });
+    const withSlot = new SubprocessRunner({ command: () => slowWrite('echo {allowedTools} > {worktree}/.orchestrator/tools.txt'), allowedTools: () => rules, logDir: path.join(dir, 'logs') });
     await withSlot.spawn(launch, {});
     expect(await waitForFile(path.join(worktree, '.orchestrator', 'tools.txt'))).toBe('Bash(git:*) Bash(npm test:*)');
     rules = ['Bash(docker:*)'];
@@ -60,7 +71,7 @@ describe('runner command composition', () => {
     mkdirSync(path.join(again.worktree, '.orchestrator'), { recursive: true });
     await withSlot.spawn(again, {});
     expect(await waitForFile(path.join(again.worktree, '.orchestrator', 'tools.txt'))).toBe('Bash(docker:*)');
-    const verbatim = new SubprocessRunner({ command: 'echo verbatim "{launchId}" > {worktree}/.orchestrator/out.txt', allowedTools: () => rules, logDir: path.join(dir, 'logs') });
+    const verbatim = new SubprocessRunner({ command: slowWrite('echo verbatim "{launchId}" > {worktree}/.orchestrator/out.txt'), allowedTools: () => rules, logDir: path.join(dir, 'logs') });
     const third = { ...launch, launchId: 'L3', worktree: path.join(dir, 'wt3') } as Launch;
     mkdirSync(path.join(third.worktree, '.orchestrator'), { recursive: true });
     await verbatim.spawn(third, {});

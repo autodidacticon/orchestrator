@@ -42,9 +42,11 @@ function compose(settings: Partial<CodexSettings> = {}, worktree = '/wt/L1'): st
   });
 }
 
+/** The file's text once its writer ended the line: the shell creates a `>` target before `echo` writes (openspec/changes/suite-flake-causes). */
 async function waitForFile(file: string): Promise<string> {
   const deadline = Date.now() + 5000;
-  while (!existsSync(file) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 30));
+  const written = () => existsSync(file) && readFileSync(file, 'utf8').endsWith('\n');
+  while (!written() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 30));
   return readFileSync(file, 'utf8');
 }
 

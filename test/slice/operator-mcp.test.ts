@@ -27,6 +27,22 @@ async function tool(name: string, args: Record<string, unknown> = {}) {
   return parse(await client!.callTool({ name, arguments: args }));
 }
 
+/**
+ * An import tool call, judged by what the daemon adopted. The import route can answer `accepted: false` with no
+ * reasons when the daemon's own tick reloaded the written file alongside it and adopted it first (product defect,
+ * reproduced by test/slice/import-reload-race.test.ts; openspec/changes/suite-flake-causes). Such an answer counts
+ * as accepted only once the daemon's active graph is the written rev; a rejection with reasons stays a rejection.
+ */
+async function importAdopted(name: 'import_graph' | 'import_issues', args: Record<string, unknown>) {
+  const res = await tool(name, args);
+  if (res['accepted'] !== false || (res['reasons'] as unknown[] | undefined)?.length || typeof res['rev'] !== 'string') return res;
+  for (let i = 0; i < 50; i++) {
+    if ((await tool('status'))['graphRev'] === res['rev']) return { ...res, accepted: true };
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return res;
+}
+
 afterEach(async () => {
   await client?.close().catch(() => undefined);
   client = undefined;
@@ -98,7 +114,7 @@ describe('operator MCP server', () => {
     expect(await tool('start', { effort: 'high' })).toMatchObject({ started: false, applied: ['effort'], config: { effort: { value: 'high', source: 'argument', applied: false }, model: { value: 'claude-sonnet-5-5', source: 'argument' } } });
     expect(await tool('configure', { model: null, effort: null })).toMatchObject({ status: 200, ok: true, config: { model: { value: 'claude-opus-5-5', source: 'default' }, effort: { value: 'medium', source: 'default' } } });
 
-    const imported = await tool('import_graph', {
+    const imported = await importAdopted('import_graph', {
       content: ['nodes:',
         '  - { id: T1, deps: [], behavior: "blockAndWait:pick", description: d, acceptanceCriteria: [a] }',
         '  - { id: T2, deps: [T1], behavior: commitAndSubmit, description: d, acceptanceCriteria: [b] }',
@@ -154,7 +170,7 @@ describe('operator MCP server', () => {
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
     const started = await tool('start');
     expect(started).toMatchObject({ status: 200, started: true, mode: 'pull' });
-    expect(await tool('import_graph', { content: 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n' })).toMatchObject({ accepted: true });
+    expect(await importAdopted('import_graph', { content: 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n' })).toMatchObject({ accepted: true });
     for (let i = 0; i < 50 && ((await tool('status'))['claimable'] as string[]).length === 0; i++) await new Promise((r) => setTimeout(r, 100));
     expect((await tool('status'))['claimable']).toEqual(['T1']);
     expect(await tool('start')).toMatchObject({ started: false, mode: 'pull' });
@@ -441,7 +457,7 @@ describe('operator MCP server', () => {
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
     await tool('start');
 
-    const imported = await tool('import_issues', {
+    const imported = await importAdopted('import_issues', {
       root: 'E-1',
       issues: [
         { id: 'E-1', title: 'Epic', state: 'open', url: 'https://tracker.example/E-1' },
@@ -487,7 +503,7 @@ describe('operator MCP server', () => {
     client = new Client({ name: 'test', version: '0' });
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
     await tool('start');
-    expect(await tool('import_graph', {
+    expect(await importAdopted('import_graph', {
       content: ['nodes:',
         '  - { id: T1, deps: [], behavior: commitAndSubmit, description: d, acceptanceCriteria: [a] }',
         '  - { id: T2, deps: [T1], behavior: hang, description: d, acceptanceCriteria: [a] }',
@@ -537,7 +553,7 @@ describe('operator MCP server', () => {
     client = new Client({ name: 'test', version: '0' });
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
     await tool('start');
-    expect(await tool('import_graph', { content: 'nodes:\n  - { id: T1, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }\n' })).toMatchObject({ accepted: true });
+    expect(await importAdopted('import_graph', { content: 'nodes:\n  - { id: T1, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }\n' })).toMatchObject({ accepted: true });
     const t0 = Date.now();
     const w = await tool('wait', { afterSeq: 0, until: 'any', timeoutMs: 20_000 });
     expect(w).toMatchObject({ matched: true });

@@ -23,7 +23,10 @@ describe('slice: launch, API, recovery', () => {
     expect(existsSync(l.worktree)).toBe(true);
     expect(existsSync(path.join(l.worktree, '.orchestrator', 'brief.md'))).toBe(true);
     await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');
-    expect(h.store.getLaunch(l.launchId)?.status).toBe('ended');
+    // The task can be done before the agent process has exited: within the report grace a tick leaves the launch live
+    // until its process is gone, then ends it and removes its worktree (openspec/changes/suite-flake-causes).
+    await h.waitFor(() => h!.store.getLaunch(l.launchId)?.status === 'ended' && !existsSync(l.worktree));
+    expect(h.store.getLaunch(l.launchId)).toMatchObject({ status: 'ended', endReason: 'reported' });
     expect(existsSync(l.worktree)).toBe(false);
     expect(gitIn(h.repo, 'rev-parse', '--verify', l.branch)).toMatch(/^[0-9a-f]{40}$/);
     expect(gitIn(h.repo, 'log', '--format=%s', l.branch)).toContain('T1: T1.txt');
@@ -361,7 +364,9 @@ describe('slice: launch, API, recovery', () => {
     await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');
     const l = h.store.listLaunches({ taskId: 'T1' })[0]!;
     // The task is done before its worktree is removed; under load the removal lands later, so wait for it before planting the stray.
-    await h.waitFor(() => !existsSync(l.worktree));
+    // Also wait for the launch to end: an agent that has not exited after its report keeps it live (report grace),
+    // and recovery rightly leaves a live launch's worktree alone (openspec/changes/suite-flake-causes).
+    await h.waitFor(() => !existsSync(l.worktree) && h!.store.getLaunch(l.launchId)?.status === 'ended');
     mkdirSync(path.dirname(l.worktree), { recursive: true });
     gitIn(h.repo, 'worktree', 'add', '--detach', l.worktree, 'main');
     expect(await h.workspace.listWorktrees()).toEqual([l.launchId]);

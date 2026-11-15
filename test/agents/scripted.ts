@@ -231,6 +231,10 @@ async function main(): Promise<void> {
     default:
       throw new Error(`unknown behavior ${behaviorRaw}`);
   }
+  // Reproduction knob (openspec/changes/suite-flake-causes): stay alive this long after the behaviour, as a
+  // process on a loaded machine does after its report, so the daemon still sees it alive within the report grace.
+  const exitDelayMs = Number(process.env['ORCH_TEST_AGENT_EXIT_DELAY_MS'] ?? 0);
+  if (exitDelayMs > 0) await sleep(exitDelayMs);
   pidlog('exit');
 }
 

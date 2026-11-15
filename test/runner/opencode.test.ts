@@ -31,9 +31,11 @@ function launchIn(worktree: string, over: Partial<Launch> = {}): Launch {
   return { launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'launching', token: TOKEN, branch: 'task/T1/l1', worktree, baseSha: 'b', graphRev: 'r', createdAt: 1, runner: 'opencode', model: 'opencode/big-pickle', effort: 'high', ...over } as Launch;
 }
 
-async function waitForFile(file: string): Promise<string> {
+/** The file's text once `ready` holds for it: a file that exists may not be written yet (openspec/changes/suite-flake-causes). */
+async function waitForFile(file: string, ready: (text: string) => boolean = () => true): Promise<string> {
   const deadline = Date.now() + 5000;
-  while (!existsSync(file) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 30));
+  const done = () => existsSync(file) && ready(readFileSync(file, 'utf8'));
+  while (!done() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 30));
   return readFileSync(file, 'utf8');
 }
 
@@ -250,7 +252,8 @@ describe('OpenCode runner spawn', () => {
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(cfg);
     // The fake echoes its stdin into the launch log.
-    expect(await waitForFile(path.join(logDir, 'L1.log'))).toContain('do the task');
+    // The runner opens the log at spawn, before the fake writes to it.
+    expect(await waitForFile(path.join(logDir, 'L1.log'), (t) => t.includes('do the task'))).toContain('do the task');
   });
 
   it('follows toolTimeoutMs, dataDir: launch, and ignoreUserConfig', async () => {
