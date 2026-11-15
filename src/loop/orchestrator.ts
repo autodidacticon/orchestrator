@@ -37,7 +37,7 @@ import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
 import { Origin } from '../workspace/origin.js';
-import { gateOnDurable, RUNNER_METHODS, storeLag, VERIFIER_METHODS, WORKSPACE_METHODS } from '../state/gate.js';
+import { gateOnDurable, RUNNER_METHODS, StoreFatalError, storeLag, VERIFIER_METHODS, waitDurable, WORKSPACE_METHODS } from '../state/gate.js';
 import type { BriefInput, FallbackReport, SealResult, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
 import { chainPolicy, type Deferral, type Policy } from './schedule.js';
@@ -125,13 +125,10 @@ export type ReopenResult =
 /** How often a resolution pass for deferred verifier jobs is tried while origin cannot be fetched. */
 const DEFERRED_RETRY_MS = 1000;
 
-/** Thrown while waiting for durability when the store went fatal: the waiting effect must not happen. */
-export class StoreFatalError extends Error {
-  constructor() {
-    super('the store is fatal; the effect waiting for durability does not happen');
-    this.name = 'StoreFatalError';
-  }
-}
+/** The inbox's answer to a caller that went away during its durable wait: nobody reads it, and nothing was removed. */
+const INBOX_CALLER_GONE: ApiResponse = { status: 499, body: { error: 'the caller went away; the notices stay for the next read' } };
+
+export { StoreFatalError };
 
 /** Thrown by the verifier progress callback when its job was dropped mid-flight. */
 export class JobDroppedError extends Error {
@@ -1048,7 +1045,11 @@ export class Orchestrator implements OrchestratorCore {
     return u;
   }
 
-  async agentCall(launchId: string, token: string, op: AgentOp, body: Record<string, unknown> = {}): Promise<ApiResponse> {
+  /**
+   * One agent operation. `opts.connected` tells whether the caller is still there to read the answer (the HTTP route
+   * passes its socket's state); without it the caller is taken to be there.
+   */
+  async agentCall(launchId: string, token: string, op: AgentOp, body: Record<string, unknown> = {}, opts: { connected?: () => boolean } = {}): Promise<ApiResponse> {
     const launch = this.authenticate(launchId, token);
     if (!launch) return { status: 401, body: { error: 'unauthorized' } };
     // Integer fields are checked before anything is written, the lease renewal included. See specs/agent-protocol "Integer fields".
@@ -1061,7 +1062,7 @@ export class Orchestrator implements OrchestratorCore {
         this.store.appendEvent({ kind: 'agent.heartbeat', taskId: launch.taskId, launchId, payload: body }, this.now());
         return { status: 200, body: { ok: true } };
       case 'inbox':
-        return this.handleInbox(launchId);
+        return this.handleInbox(launchId, opts.connected ?? (() => true));
       case 'log': {
         const seq = this.seqOf(body);
         if (seq !== undefined) {
@@ -1086,12 +1087,14 @@ export class Orchestrator implements OrchestratorCore {
    * The inbox hands out only durable notices and answers only once its own writes are durable, although it is a GET.
    * The notices held now are taken, then everything committed so far (those notices' records, the lease renewal and
    * the progress signal) is awaited; only the taken notices are then removed from the row, so a notice queued during
-   * the wait stays for the next call, and the removal is awaited too. See specs/state-backend "Durable inbox".
+   * the wait stays for the next call, and the removal is awaited too. A caller that went away during a wait gets
+   * nothing removed: gone before the removal, the notices stay; gone after it, they are put back at the front. The
+   * next read hands them out again. See specs/agent-protocol "Durable inbox" and "Inbox notices handed out once".
    */
-  private handleInbox(launchId: string): Promise<ApiResponse> {
+  private handleInbox(launchId: string, connected: () => boolean): Promise<ApiResponse> {
     // One inbox read per launch at a time, so two concurrent reads never hand out the same notice.
     const prev = this.inboxReads.get(launchId) ?? Promise.resolve();
-    const run = prev.then(() => this.readInbox(launchId));
+    const run = prev.then(() => this.readInbox(launchId, connected));
     const settled = run.then(
       () => undefined,
       () => undefined,
@@ -1103,9 +1106,10 @@ export class Orchestrator implements OrchestratorCore {
     return run;
   }
 
-  private async readInbox(launchId: string): Promise<ApiResponse> {
+  private async readInbox(launchId: string, connected: () => boolean): Promise<ApiResponse> {
     const taken = this.store.getLaunch(launchId)?.notices ?? [];
     await this.waitDurable();
+    if (taken.length && !connected()) return INBOX_CALLER_GONE;
     if (taken.length) {
       const handed = new Map<string, number>();
       for (const n of taken) handed.set(JSON.stringify(n), (handed.get(JSON.stringify(n)) ?? 0) + 1);
@@ -1117,8 +1121,14 @@ export class Orchestrator implements OrchestratorCore {
         handed.set(k, left - 1);
         return false;
       });
-      if (rest.length !== cur.length) this.store.updateLaunch(launchId, { notices: rest });
+      const removed = cur.filter((n) => !rest.includes(n));
+      if (removed.length) this.store.updateLaunch(launchId, { notices: rest });
       await this.waitDurable();
+      if (!connected()) {
+        // Reads of one launch are serialized and notices are only appended meanwhile, so the front is where they were.
+        if (removed.length && this.store.getLaunch(launchId)) this.store.updateLaunch(launchId, { notices: [...removed, ...(this.store.getLaunch(launchId)?.notices ?? [])] });
+        return INBOX_CALLER_GONE;
+      }
     }
     return { status: 200, body: { notices: taken } };
   }
@@ -2015,20 +2025,8 @@ export class Orchestrator implements OrchestratorCore {
    * Wait until everything committed so far is durable. A journal that went fatal never resolves `durable()`; this
    * notices and throws StoreFatalError so the caller stops with no outside effect. See specs/integration-pipeline "Durable publishing record".
    */
-  async waitDurable(): Promise<void> {
-    const fatal = () => (this.store as { fatalReason?: () => unknown }).fatalReason?.();
-    if (this.store.durability().pendingBatches === 0 && !fatal()) return;
-    const done = this.store.durable().then(() => true);
-    for (;;) {
-      if (fatal()) throw new StoreFatalError();
-      let timer: NodeJS.Timeout | undefined;
-      const ok = await Promise.race([done, new Promise<false>((r) => (timer = setTimeout(() => r(false), 100)))]);
-      clearTimeout(timer);
-      if (ok) {
-        if (fatal()) throw new StoreFatalError();
-        return;
-      }
-    }
+  waitDurable(): Promise<void> {
+    return waitDurable(this.store);
   }
 
   /** Decide the jobs recovery deferred, now that origin may answer. */

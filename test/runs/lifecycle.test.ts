@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { pidAlive } from '../../src/runner/subprocess.js';
 import { daemonState, health, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
-import { ensureRunDir, readDaemonJson, resolveRepoPath, resolveRunConfig, runDirFor, runPaths, writeDaemonJson } from '../../src/runs/runDir.js';
+import { cleanExit, describeExit, ensureRunDir, exitStoreFields, readDaemonJson, resolveRepoPath, resolveRunConfig, runDirFor, runPaths, writeDaemonJson } from '../../src/runs/runDir.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { makeRepo, scriptedAgent, tsxLoader } from '../slice/harness.js';
 
@@ -109,6 +109,11 @@ describe('run directory and daemon lifecycle', () => {
     const state = await daemonState(paths.runDir);
     expect(state.exit).toMatchObject({ reason: 'stop', reap: false, by: { attachment: 'a1', userAgent: 'lifecycle-test' } });
     expect(String(state.exit?.by?.remote)).toMatch(/127\.0\.0\.1|::1/);
+    // The store closed with nothing unflushed: a clean record, written after the close, with the digest taken before it.
+    expect(cleanExit(state.exit!)).toBe(true);
+    expect(state.exit).not.toHaveProperty('unflushedBatches');
+    expect(state.exit).not.toHaveProperty('storeClosed');
+    expect(state.exit?.digest).toMatchObject({ graphLoaded: expect.any(Boolean) });
     const store = new SqliteStore(path.join(paths.runDir, 'store.sqlite'));
     try {
       const ev = store.listEvents({ kind: 'operator.shutdown' });
@@ -228,6 +233,9 @@ describe('run directory and daemon lifecycle', () => {
     const info = { pid: 2 ** 22 + 7, url: 'http://127.0.0.1:9', port: 9, startedAt: 1, repo };
     writeDaemonJson(paths.runDir, { ...info, exit: { at: 1_000, reason: 'stop', reap: false, digest: {} } });
     await expect(reviveDaemon({ repo, env })).rejects.toThrow(/was stopped at .*\(stop\); call start/);
+    // A stop that lost batches is not described as a clean one.
+    writeDaemonJson(paths.runDir, { ...info, exit: { at: 1_000, reason: 'stop', reap: false, digest: {}, unflushedBatches: 3 } });
+    await expect(reviveDaemon({ repo, env })).rejects.toThrow(/was stopped at .*\(stop, losing 3 unflushed batches\); call start/);
 
     // Idle: revived by starting the daemon, which here refuses for want of a database URL, not as a remote run.
     writeDaemonJson(paths.runDir, { ...info, exit: { at: 1_000, reason: 'idle', reap: false, digest: {} } });
@@ -290,4 +298,32 @@ describe('run directory and daemon lifecycle', () => {
     expect((await startDaemon({ repo: configured, env, defaultMode: 'pull' })).mode).toBe('spawn'); // the file wins
     await stopDaemon({ repo: configured, env });
   }, 90_000);
+});
+
+// See specs/operator-control "Exit record": a clean record only after the store closed with nothing unflushed.
+describe('exit record store fields', () => {
+  const base = { at: 1, reason: 'signal' as const, reap: false, digest: {} };
+  it('a close with nothing unflushed adds nothing, and the record is clean', () => {
+    const fields = exitStoreFields({ closed: true, unflushedBatches: 0 });
+    expect(fields).toEqual({});
+    expect(cleanExit({ ...base, ...fields })).toBe(true);
+    expect(describeExit({ ...base, ...fields })).toBe('signal');
+  });
+  it('a close that lost batches records the count', () => {
+    const fields = exitStoreFields({ closed: true, unflushedBatches: 4 });
+    expect(fields).toEqual({ unflushedBatches: 4 });
+    expect(cleanExit({ ...base, ...fields })).toBe(false);
+    expect(describeExit({ ...base, ...fields })).toBe('signal, losing 4 unflushed batches');
+  });
+  it('a grace exit before the store closed is never clean, even with nothing pending', () => {
+    expect(exitStoreFields({ closed: false, unflushedBatches: 0 })).toEqual({ unflushedBatches: 0, storeClosed: false });
+    expect(cleanExit({ ...base, ...exitStoreFields({ closed: false, unflushedBatches: 0 }) })).toBe(false);
+    expect(describeExit({ ...base, ...exitStoreFields({ closed: false, unflushedBatches: 2 }) })).toBe('signal, losing 2 unflushed batches, before the store closed');
+  });
+  it('a batch rejected at shutdown is recorded with its cause', () => {
+    const rejected = { error: 'batch rejected by the sink: table kv, key {"key":"a"}, SQLSTATE 22021', sqlstate: '22021', table: 'kv', key: { key: 'a' } };
+    const fields = exitStoreFields({ closed: true, unflushedBatches: 1, rejected });
+    expect(fields).toEqual({ unflushedBatches: 1, rejected });
+    expect(describeExit({ ...base, ...fields })).toContain('a batch rejected: batch rejected by the sink');
+  });
 });

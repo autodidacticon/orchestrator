@@ -6,6 +6,7 @@ import { applyPgOps, PgSink } from '../../src/state/pg/index.js';
 import { canonical } from './backends.js';
 import { dropRun, freshRunId, pgAvailable, stopTestPostgres, testDatabase } from './pg-db.js';
 import { applyOps, dumpTables, type FatalInfo, FencedError, isRejected, JournaledStore, type JournalSink, RejectedBatchError, type Row, type RowOp, SqliteSink, TABLES } from '../../src/state/journal.js';
+import { gateOnDurable, StoreFatalError, waitDurable } from '../../src/state/gate.js';
 import { closeJournaled } from '../../src/state/open.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
@@ -578,6 +579,40 @@ describe('rejected batches', () => {
   });
 });
 
+describe('durability gate on a fatal journal', () => {
+  /** A journal fenced while `pending` batches wait behind a sink that never answers. */
+  function fatalStore(pending: number): JournaledStore {
+    const store = new JournaledStore(new SqliteStore(':memory:'), { applyBatch: () => new Promise<void>(() => undefined) }, { flushDeadlineMs: 600_000, onFatal: () => undefined });
+    for (let i = 0; i < pending; i++) store.setKv(`k${i}`, '1');
+    store.fence(new FencedError('lost'));
+    return store;
+  }
+
+  for (const pending of [0, 2]) {
+    it(`a gated call answers at once with StoreFatalError and does not run (${pending} batches pending)`, async () => {
+      const store = fatalStore(pending);
+      let ran = 0;
+      const target = gateOnDurable(store, { act: async () => void ran++ }, ['act']);
+      const t0 = Date.now();
+      await expect(target.act()).rejects.toBeInstanceOf(StoreFatalError);
+      await expect(waitDurable(store)).rejects.toBeInstanceOf(StoreFatalError);
+      // A hang (the old behavior) never settles; the bound only rules that out.
+      expect(Date.now() - t0).toBeLessThan(5_000);
+      expect(ran).toBe(0);
+    });
+  }
+
+  it('a gated call waiting when the journal turns fatal rejects and does not run', async () => {
+    const store = new JournaledStore(new SqliteStore(':memory:'), { applyBatch: () => new Promise<void>(() => undefined) }, { flushDeadlineMs: 600_000, onFatal: () => undefined });
+    store.setKv('a', '1');
+    let ran = 0;
+    const call = gateOnDurable(store, { act: async () => void ran++ }, ['act']).act();
+    setTimeout(() => store.fence(new FencedError('lost')), 20);
+    await expect(call).rejects.toBeInstanceOf(StoreFatalError);
+    expect(ran).toBe(0);
+  });
+});
+
 describe('manual flush and shutdown', () => {
   /** A sink that records the batches it applied, and holds every apply until released. */
   function gatedSink(inner: SqliteSink) {
@@ -661,6 +696,39 @@ describe('manual flush and shutdown', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(fatal).toEqual([]);
     expect(store.fatalReason()).toBeUndefined();
+  });
+
+  it('a batch the sink rejects for its content after abandon is logged with its cause and returned by closeJournaled, and is not fatal', async () => {
+    const fatal: FatalInfo[] = [];
+    const logged: Array<{ msg: string; fields?: Record<string, unknown> }> = [];
+    const waiting: Array<(err: Error) => void> = [];
+    const sink: JournalSink = { applyBatch: () => new Promise<void>((_r, reject) => waiting.push(reject)) };
+    const store = new JournaledStore(new SqliteStore(':memory:'), sink, { flushDeadlineMs: 600_000, onFatal: (f) => fatal.push(f), log: { error: (msg, fields) => logged.push({ msg, fields }) } });
+    store.setKv('a', '1');
+    store.setKv('b', '1');
+    await until(() => waiting.length > 0, 1_000);
+    // The sink answers the apply in flight with a rejection only once the close has stopped the flusher.
+    const out = await closeJournaled(store, async () => {
+      for (const w of waiting.splice(0)) setTimeout(() => w(new RejectedBatchError({ table: 'kv', key: { key: 'a' }, sqlstate: '22021' })), 10);
+    }, 30);
+    const cause = { error: 'batch rejected by the sink: table kv, key {"key":"a"}, SQLSTATE 22021', sqlstate: '22021', table: 'kv', key: { key: 'a' } };
+    expect(out).toEqual({ unflushedBatches: 2, rejected: cause });
+    expect(logged).toEqual([{ msg: 'store: the sink rejected a batch at shutdown; its records are lost', fields: cause }]);
+    expect(fatal).toEqual([]);
+  });
+
+  it('a sink failing after abandon for a reason other than its content is not logged as a rejection', async () => {
+    const logged: string[] = [];
+    const waiting: Array<(err: Error) => void> = [];
+    const sink: JournalSink = { applyBatch: () => new Promise<void>((_r, reject) => waiting.push(reject)) };
+    const store = new JournaledStore(new SqliteStore(':memory:'), sink, { flushDeadlineMs: 600_000, log: { error: (msg) => logged.push(msg) } });
+    store.setKv('a', '1');
+    await until(() => waiting.length > 0, 1_000);
+    const out = await closeJournaled(store, async () => {
+      for (const w of waiting.splice(0)) w(new FencedError('connection ended'));
+    }, 20);
+    expect(out).toEqual({ unflushedBatches: 1 });
+    expect(logged).toEqual([]);
   });
 
   it('closeJournaled with a sink that keeps up returns zero', async () => {

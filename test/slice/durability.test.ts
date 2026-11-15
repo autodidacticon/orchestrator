@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Config } from '../../src/config.js';
-import { RUNNER_METHODS, VERIFIER_METHODS, WORKSPACE_METHODS } from '../../src/state/gate.js';
-import { type JournalSink, type RowOp, SqliteSink } from '../../src/state/journal.js';
+import { RUNNER_METHODS, StoreFatalError, VERIFIER_METHODS, WORKSPACE_METHODS } from '../../src/state/gate.js';
+import { JournaledStore, type JournalSink, type RowOp, SqliteSink } from '../../src/state/journal.js';
 import type { StoredEvent } from '../../src/state/store.js';
 import { makeSlice, type SliceHarness } from './harness.js';
 
@@ -24,9 +24,15 @@ afterEach(async () => {
 
 class StallSink implements JournalSink {
   stalled = false;
+  /** When set, a batch it matches stalls the sink before it is applied. */
+  stallIf: ((ops: readonly RowOp[]) => boolean) | undefined;
   private readonly waiting: Array<() => void> = [];
   constructor(readonly inner: SqliteSink) {}
   async applyBatch(ops: readonly RowOp[]): Promise<void> {
+    if (this.stallIf?.(ops)) {
+      this.stallIf = undefined;
+      this.stalled = true;
+    }
     while (this.stalled) await new Promise<void>((r) => this.waiting.push(r));
     await this.inner.applyBatch(ops);
   }
@@ -54,6 +60,15 @@ async function http(method: 'GET' | 'POST', route: string, body?: Record<string,
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Wait for a condition without ticking: a tick waits for durability, which a stalled sink withholds. */
+async function poll(pred: () => boolean, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!pred()) {
+    if (Date.now() > deadline) throw new Error('condition not reached');
+    await sleep(10);
+  }
+}
 
 interface Call {
   name: string;
@@ -201,6 +216,87 @@ describe('reads that write, and the event cursor, under a stalled sink', () => {
     sink!.release();
     const got = [...(await a.res).body.notices, ...(await b.res).body.notices].map((n) => n.message);
     expect(got).toEqual(['once']);
+  }, 30_000);
+
+  /** Capture the `connected` probe the HTTP route hands to the inbox, so a test can see the server notice a disconnect. */
+  function captureProbe(): { probe: (() => boolean) | undefined } {
+    const seen: { probe: (() => boolean) | undefined } = { probe: undefined };
+    const orch = h!.orch;
+    const real = orch.agentCall.bind(orch);
+    orch.agentCall = (launchId, token, op, body, opts) => {
+      if (op === 'inbox' && opts?.connected) seen.probe = opts.connected;
+      return real(launchId, token, op, body, opts);
+    };
+    return seen;
+  }
+
+  it('an inbox read abandoned during the durable wait removes nothing: the next read delivers the notice', async () => {
+    const launch = await liveLaunch();
+    h!.orch.queueNotice(launch.launchId, { kind: 'nudge', message: 'kept' });
+    await h!.store.durable();
+    const seen = captureProbe();
+
+    // The sink stalls; the read waits for its own writes (the lease renewal and the progress signal).
+    sink!.stall();
+    const abort = new AbortController();
+    const abandoned = fetch(`${h!.orch.apiBaseUrl}/v1/launches/${launch.launchId}/inbox`, { headers: { authorization: `Bearer ${launch.token}` }, signal: abort.signal }).then(
+      () => 'answered',
+      () => 'aborted',
+    );
+    await poll(() => seen.probe !== undefined);
+    expect(seen.probe!()).toBe(true);
+    // The caller gives up (a client timeout) while the sink is stalled; wait until the server has seen it go.
+    abort.abort();
+    expect(await abandoned).toBe('aborted');
+    await poll(() => seen.probe!() === false);
+
+    sink!.release();
+    await h!.store.durable();
+    expect(h!.store.getLaunch(launch.launchId)?.notices?.map((n) => n['message'])).toEqual(['kept']);
+    const next = inbox(launch);
+    expect((await next.res).body.notices.map((n) => n.message)).toEqual(['kept']);
+    expect((await inbox(launch).res).body.notices).toEqual([]);
+  }, 30_000);
+
+  it('an inbox caller gone while the removal waits for durability gets the notices put back, in order, ahead of later ones', async () => {
+    const launch = await liveLaunch();
+    h!.orch.queueNotice(launch.launchId, { kind: 'nudge', message: 'r1' });
+    h!.orch.queueNotice(launch.launchId, { kind: 'nudge', message: 'r2' });
+    await h!.store.durable();
+    // Stall on the batch that removes the taken notices: its launch row no longer carries them.
+    sink!.stallIf = (ops) => ops.some((o) => o.table === 'launches') && !JSON.stringify(ops).includes('r1');
+    let open = true;
+    const read = h!.orch.agentCall(launch.launchId, launch.token, 'inbox', {}, { connected: () => open });
+    await poll(() => sink!.stalled);
+    expect(h!.store.getLaunch(launch.launchId)?.notices ?? []).toEqual([]);
+    // A notice queued meanwhile, then the caller goes away before the removal is durable.
+    h!.orch.queueNotice(launch.launchId, { kind: 'nudge', message: 'r3' });
+    open = false;
+    sink!.release();
+    expect((await read).status).toBe(499);
+    await h!.store.durable();
+    expect((await inbox(launch).res).body.notices.map((n) => n.message)).toEqual(['r1', 'r2', 'r3']);
+  }, 30_000);
+
+  it('on a journal already fatal, a request gated on durability answers at once with the fatal error and no effect runs', async () => {
+    const launch = await liveLaunch();
+    const calls: Call[] = [];
+    record(h!.workspace, WORKSPACE_METHODS, calls);
+    record(h!.runner, RUNNER_METHODS, calls);
+    // The run lock is lost; nothing is pending and the sink would accept a batch, so only the fatal check refuses.
+    (h!.store as JournaledStore).fence(new Error('lock lost'));
+    const t0 = Date.now();
+    const pause = await http('POST', '/v1/pause');
+    const heartbeat = await fetch(`${h!.orch.apiBaseUrl}/v1/launches/${launch.launchId}/heartbeat`, { method: 'POST', headers: { authorization: `Bearer ${launch.token}`, 'content-type': 'application/json' }, body: '{}' });
+    const read = await inbox(launch).res;
+    // A hang (the old behavior) never answers; the bound only rules that out.
+    expect(Date.now() - t0).toBeLessThan(10_000);
+    for (const r of [pause, { status: heartbeat.status, body: (await heartbeat.json()) as Record<string, unknown> }, read as { status: number; body: unknown }]) {
+      expect(r).toMatchObject({ status: 503, body: { code: 'storeFatal', error: expect.stringContaining('the store is fatal') } });
+    }
+    // A gated effect refuses at once and does not reach the workspace.
+    await expect((h!.orch as unknown as { workspace: { integrationHead(): Promise<string> } }).workspace.integrationHead()).rejects.toBeInstanceOf(StoreFatalError);
+    expect(calls.filter((c) => c.name === 'integrationHead')).toEqual([]);
   }, 30_000);
 
   it('the status cursor is durable, and /v1/events never answers a seq below the after it was given', async () => {

@@ -11,7 +11,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { daemonCommand, health, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
-import { readDaemonJson, runPaths } from '../../src/runs/runDir.js';
+import { cleanExit, readDaemonJson, runPaths } from '../../src/runs/runDir.js';
 import { adminClient, dropRun, pgAvailable, pgSource, stopTestPostgres, testDatabase } from '../state/pg-db.js';
 import { gitIn, makeRepo, tsxLoader } from './harness.js';
 
@@ -302,6 +302,10 @@ describe.skipIf(!pgAvailable)('daemon on store.kind postgres', () => {
       expect(lost).toMatchObject({ unflushedBatches: expect.any(Number) });
       expect(Number(lost!['unflushedBatches'])).toBeGreaterThanOrEqual(1);
       expect(lines().find((l) => l['msg'] === 'store fatal: exiting')).toBeUndefined();
+      // The exit record carries the loss, with the count the log gave; it is not a clean stop. See specs/operator-control "Exit record".
+      const exit = readDaemonJson(runPaths(run.repo, run.env()).runDir)?.exit;
+      expect(exit).toMatchObject({ reason: 'signal', unflushedBatches: Number(lost!['unflushedBatches']) });
+      expect(cleanExit(exit!)).toBe(false);
     } finally {
       process.kill(pid, 'SIGCONT');
     }

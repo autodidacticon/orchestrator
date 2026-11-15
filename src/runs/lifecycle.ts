@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { pidAlive } from '../runner/subprocess.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { type ConfigReport, type OverridableKey, type Overrides, overridesSchema, START_ONLY_KEYS } from './resolve.js';
-import { DAEMON_PID, ensureRunDir, orchHome, readDaemonJson, readRepoFile, remoteRunError, resolveRepoPath, runPaths, runStoreKind, type DaemonInfo, type ExitRecord, type RunPaths } from './runDir.js';
+import { DAEMON_PID, describeExit, ensureRunDir, orchHome, readDaemonJson, readRepoFile, remoteRunError, resolveRepoPath, runPaths, runStoreKind, type DaemonInfo, type ExitRecord, type RunPaths } from './runDir.js';
 
 export interface DaemonState {
   runDir: string;
@@ -306,7 +306,7 @@ export async function reviveDaemon(opts: StartOptions = {}): Promise<StartResult
   if (state.exit && state.exit.reason !== 'idle') {
     const by = state.exit.by;
     const who = by?.attachment ? ` by attachment ${by.attachment}` : by?.remote ? ` by a client at ${by.remote}` : '';
-    throw new Error(`the daemon for ${repo} was stopped at ${new Date(state.exit.at).toISOString()} (${state.exit.reason}${who}); call start to run it again`);
+    throw new Error(`the daemon for ${repo} was stopped at ${new Date(state.exit.at).toISOString()} (${describeExit(state.exit)}${who}); call start to run it again`);
   }
   return startDaemon(opts);
 }

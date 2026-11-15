@@ -6,7 +6,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { type Config, redactUrl } from '../config.js';
-import { type FatalInfo, JournaledStore } from './journal.js';
+import { type FatalInfo, JournaledStore, type JournalOptions, type ShutdownRejection } from './journal.js';
 import { PgSink, RunLockedError } from './pg/sink.js';
 import { SqliteStore } from './sqlite.js';
 import type { Store } from './store.js';
@@ -28,7 +28,12 @@ export interface OpenedStore {
 export interface CloseOutcome {
   /** Committed batches dropped by the close: their records are lost. Non-zero means the daemon exits non-zero. */
   unflushedBatches: number;
+  /** A batch the sink rejected for its content while the store closed, with its cause (also logged by the journal). */
+  rejected?: ShutdownRejection;
 }
+
+/** How long a close waits for the apply in flight to settle once the sink is closed under it. */
+const SETTLE_MS = 1_000;
 
 export interface OpenStoreOptions {
   store: Config['store'];
@@ -37,6 +42,8 @@ export interface OpenStoreOptions {
   runId: string;
   /** The journal's fatal condition (deadline, the run lock lost, or a batch rejected for its content), called once. The daemon logs it and exits. */
   onFatal: (info: FatalInfo) => void;
+  /** Where the journal reports a batch the sink rejects after the shutdown stopped the flusher. */
+  log?: JournalOptions['log'];
   /** Journal retry tuning, for tests. */
   retryBaseMs?: number;
   retryMaxMs?: number;
@@ -87,6 +94,7 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
   journal = new JournaledStore(image, sink, {
     flushDeadlineMs: opts.store.flushDeadlineMs,
     onFatal: opts.onFatal,
+    ...(opts.log ? { log: opts.log } : {}),
     ...(opts.retryBaseMs !== undefined ? { retryBaseMs: opts.retryBaseMs } : {}),
     ...(opts.retryMaxMs !== undefined ? { retryMaxMs: opts.retryMaxMs } : {}),
   });
@@ -114,7 +122,15 @@ export async function closeJournaled(j: JournaledStore, closeSink: () => Promise
   const unflushedBatches = j.abandon();
   j.close();
   await closeSink();
-  return { unflushedBatches };
+  // An apply still in flight settles once the sink is closed under it; a rejection it reports is logged before the
+  // caller exits. Bounded, so a sink that never answers does not hold the exit.
+  if (unflushedBatches > 0) {
+    let timer: NodeJS.Timeout | undefined;
+    await Promise.race([j.settled(), new Promise<void>((r) => (timer = setTimeout(r, SETTLE_MS)))]);
+    if (timer) clearTimeout(timer);
+  }
+  const rejected = j.rejectionAtShutdown();
+  return { unflushedBatches, ...(rejected ? { rejected } : {}) };
 }
 
 /** Whether the run directory holds a SQLite store; a Postgres run has none. */

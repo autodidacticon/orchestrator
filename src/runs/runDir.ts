@@ -225,6 +225,41 @@ export interface ExitRecord {
   digest: Record<string, unknown>;
   /** Present for a `stop`: the caller the shutdown route recorded. */
   by?: ShutdownCaller;
+  /**
+   * Present when the exit lost committed records: the batches that never reached the store. Zero with `storeClosed`
+   * false means the grace period ended before the store closed, with nothing known to be lost.
+   */
+  unflushedBatches?: number;
+  /** False when the daemon exited before its store closed (the shutdown grace elapsed). Absent on a clean exit. */
+  storeClosed?: false;
+  /** The cause a batch was refused for at shutdown, when the sink rejected one. */
+  rejected?: { error: string; sqlstate?: string; table?: string; key?: Record<string, unknown> };
+}
+
+/** Whether an exit record describes a clean stop: the store closed with nothing unflushed. See specs/operator-control "Exit record". */
+export function cleanExit(exit: ExitRecord): boolean {
+  return !exit.unflushedBatches && exit.storeClosed !== false && !exit.rejected;
+}
+
+/**
+ * The exit record's store fields for how the store's close ended: nothing for a close with nothing unflushed, else
+ * the lost batches (and the rejection's cause). `closed` false is a grace exit before the close returned.
+ */
+export function exitStoreFields(outcome: { closed: boolean; unflushedBatches: number; rejected?: ExitRecord['rejected'] }): Pick<ExitRecord, 'unflushedBatches' | 'storeClosed' | 'rejected'> {
+  return {
+    ...(outcome.unflushedBatches > 0 || !outcome.closed ? { unflushedBatches: outcome.unflushedBatches } : {}),
+    ...(!outcome.closed ? { storeClosed: false as const } : {}),
+    ...(outcome.rejected ? { rejected: outcome.rejected } : {}),
+  };
+}
+
+/** How an exit record reads in a message: the reason, plus what the exit lost when it was not clean. */
+export function describeExit(exit: ExitRecord): string {
+  if (cleanExit(exit)) return exit.reason;
+  const lost = exit.unflushedBatches ? `, losing ${exit.unflushedBatches} unflushed batches` : '';
+  const open = exit.storeClosed === false ? ', before the store closed' : '';
+  const why = exit.rejected ? `, a batch rejected: ${exit.rejected.error}` : '';
+  return `${exit.reason}${lost}${open}${why}`;
 }
 
 export interface DaemonInfo {

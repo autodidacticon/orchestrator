@@ -128,6 +128,16 @@ export interface JournalOptions {
   /** Start applying batches as they commit. Tests that pump flushes by hand pass false and call `flushOnce`. */
   autoFlush?: boolean;
   clock?: () => number;
+  /** Where a batch the sink rejects after `abandon` is reported, with its cause. See specs/state-backend "Shutdown with unflushed batches". */
+  log?: { error(msg: string, fields?: Record<string, unknown>): void };
+}
+
+/** A batch the sink refused for its content after `abandon`. */
+export interface ShutdownRejection {
+  error: string;
+  sqlstate: string;
+  table?: string;
+  key?: Record<string, unknown>;
 }
 
 interface Batch {
@@ -256,7 +266,9 @@ export class JournaledStore implements Store {
   private durableOutboxId: number;
   private latestEventSeqSeen: number;
   private latestOutboxIdSeen: number;
-  private readonly opts: Required<Omit<JournalOptions, 'onFatal'>> & Pick<JournalOptions, 'onFatal'>;
+  private readonly opts: Required<Omit<JournalOptions, 'onFatal' | 'log'>> & Pick<JournalOptions, 'onFatal' | 'log'>;
+  /** A batch the sink rejected for its content after `abandon`: not fatal, but its cause is kept and logged. */
+  private rejectedAtShutdown: ShutdownRejection | undefined;
 
   /** `image` must already hold the sink's state (empty, or loaded with `SqliteSink.loadInto`). */
   constructor(
@@ -267,6 +279,7 @@ export class JournaledStore implements Store {
     this.opts = {
       flushDeadlineMs: opts.flushDeadlineMs ?? 30_000,
       onFatal: opts.onFatal,
+      log: opts.log,
       retryBaseMs: opts.retryBaseMs ?? 50,
       retryMaxMs: opts.retryMaxMs ?? 2_000,
       autoFlush: opts.autoFlush ?? true,
@@ -370,8 +383,12 @@ export class JournaledStore implements Store {
     try {
       await this.sink.applyBatch(batch.ops);
     } catch (err) {
-      // The sink was closed on purpose at shutdown: `abandon` counted the batch; it is not reported as fenced.
-      if (this.abandoned) return false;
+      // The sink was closed on purpose at shutdown: `abandon` counted the batch; it is not reported as fenced. A batch
+      // refused for its content is still logged with its cause, so the lost records say why.
+      if (this.abandoned) {
+        if (isRejected(err)) this.noteRejectedAtShutdown(err);
+        return false;
+      }
       if (isFenced(err)) this.die('fenced', err);
       // Refused for its content: every retry fails the same way, and every later batch waits behind it.
       else if (isRejected(err)) this.die('rejected', err);
@@ -394,6 +411,22 @@ export class JournaledStore implements Store {
       }
     }
     return true;
+  }
+
+  private noteRejectedAtShutdown(err: RejectedBatchError): void {
+    const { table, key, sqlstate } = err.refusal;
+    this.rejectedAtShutdown = { error: err.message, sqlstate, ...(table !== undefined ? { table } : {}), ...(key !== undefined ? { key } : {}) };
+    this.opts.log?.error('store: the sink rejected a batch at shutdown; its records are lost', { ...this.rejectedAtShutdown });
+  }
+
+  /** The batch the sink rejected after `abandon`, if one was. */
+  rejectionAtShutdown(): ShutdownRejection | undefined {
+    return this.rejectedAtShutdown;
+  }
+
+  /** Resolves once the apply in flight, if any, has settled. */
+  settled(): Promise<void> {
+    return this.applying.then(() => undefined);
   }
 
   /** Manual pump: apply at most one pending batch, after any apply in flight. Resolves true when one landed. */

@@ -8,6 +8,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { AgentOp, ApiResponse, Orchestrator } from '../loop/orchestrator.js';
+import { StoreFatalError, waitDurable } from '../state/gate.js';
 import { isUnstorable } from '../state/storable.js';
 
 export type RouteHandler = (req: http.IncomingMessage, body: Record<string, unknown>, params: string[]) => Promise<ApiResponse>;
@@ -31,7 +32,8 @@ export class ApiServer {
       return this.orch.agentCall(launchId as string, token, op as AgentOp, body);
     });
     this.addRoute('GET', /^\/v1\/launches\/([^/]+)\/inbox$/, async (req, _body, [launchId]) => {
-      return this.orch.agentCall(launchId as string, bearer(req), 'inbox', {});
+      // The inbox removes the notices it hands out only while the caller is still there to read them. See specs/agent-protocol "Inbox notices handed out once".
+      return this.orch.agentCall(launchId as string, bearer(req), 'inbox', {}, { connected: () => !req.socket.destroyed });
     });
   }
 
@@ -79,15 +81,23 @@ export class ApiServer {
       try {
         const body = writes ? await readJson(req) : Object.fromEntries(url.searchParams.entries());
         const out = await r.handler(req, body, m.slice(1));
-        if (writes) await this.orch.store.durable();
+        // A fatal journal answers at once with the fatal error instead of waiting for a durability that never comes.
+        if (writes) await waitDurable(this.orch.store);
         // The operation stands; the caller learns its attachment is unknown and registers again. See specs/operator-control "Session attachments".
         const headers = attachmentId && !this.orch.isLiveAttachment(attachmentId) ? { 'x-orch-attachment': 'unknown' } : undefined;
         send(res, out.status, out.body, headers);
       } catch (err) {
-        if (writes) await this.orch.store.durable();
-        // A value the store cannot hold: the write did not happen. See specs/agent-protocol "Integer fields".
-        if (isUnstorable(err)) send(res, 400, { error: err.message, field: err.field });
-        else send(res, 500, { error: String(err) });
+        if (err instanceof StoreFatalError) send(res, 503, { error: err.message, code: 'storeFatal' });
+        else {
+          try {
+            if (writes) await waitDurable(this.orch.store);
+            // A value the store cannot hold: the write did not happen. See specs/agent-protocol "Integer fields".
+            if (isUnstorable(err)) send(res, 400, { error: err.message, field: err.field });
+            else send(res, 500, { error: String(err) });
+          } catch (fatal) {
+            send(res, fatal instanceof StoreFatalError ? 503 : 500, { error: fatal instanceof Error ? fatal.message : String(fatal), ...(fatal instanceof StoreFatalError ? { code: 'storeFatal' } : {}) });
+          }
+        }
       } finally {
         this.orch.requestEnded(probe);
       }

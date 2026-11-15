@@ -24,7 +24,7 @@ import { OpenCodeRunner } from './runner/opencode.js';
 import { composeAllowedTools } from './toolchain/tools.js';
 import { openStore, type OpenedStore } from './state/open.js';
 import { GitVerifierBackend } from './verify/verifier.js';
-import { chooseRunId, CONFIG_FILE, DAEMON_PID, ensureRunDir, repoRunId, type RunIdChoice, runIdInputOf, runIdWarning, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, trackedInRepo, writeConfigJson, writeDaemonJson, writeExitRecord } from './runs/runDir.js';
+import { chooseRunId, CONFIG_FILE, DAEMON_PID, ensureRunDir, repoRunId, type RunIdChoice, runIdInputOf, runIdWarning, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, trackedInRepo, writeConfigJson, writeDaemonJson, writeExitRecord, type ExitRecord, exitStoreFields } from './runs/runDir.js';
 import { withholdStoreUrl } from './runs/childEnv.js';
 import { applyOverridePatch, configSummary, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved, resolveLayers } from './runs/resolve.js';
 import { digestOf } from './operator/routes.js';
@@ -164,6 +164,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     throw new Error(storeError);
   }
   let opened: OpenedStore;
+  /** Set once a shutdown begins: writes the exit record for a journal that turns fatal before the close returns. */
+  let fatalDuringShutdown: ((unflushedBatches: number) => void) | undefined;
   try {
     opened = await openStore({
       store: early.store,
@@ -172,8 +174,11 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       // A journal that cannot flush exits non-zero: the deadline passed, or the run lock was lost. See specs/state-backend "Fatal flush".
       onFatal: (info) => {
         stderrLogger.error('store fatal: exiting', { reason: info.reason, unflushedBatches: info.unflushedBatches, ...(info.error !== undefined ? { error: String(info.error) } : {}) });
+        // A shutdown already under way still leaves its exit record, with the batches lost; otherwise it is a crash.
+        fatalDuringShutdown?.(info.unflushedBatches);
         process.exit(1);
       },
+      log: stderrLogger,
     });
   } catch (err) {
     stderrLogger.error('could not open the store', { kind: early.store.kind, url: redactedStore(early.store).url, error: err instanceof Error ? err.message : String(err) });
@@ -321,13 +326,28 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const reap = Boolean(values['reap-on-exit']);
     // The exit record says why the daemon is gone; a dead pid without one is a crash. See specs/operator-control "Exit record".
     const reason = cause === 'idle' ? 'idle' : cause === 'route' ? 'stop' : 'signal';
-    const recordExit = () => {
+    // The exit record is written once the store's close says what was lost: a clean record only after the store
+    // closed with nothing unflushed. The digest reads the store, so it is taken before the close. See specs/operator-control "Exit record".
+    let digest: Record<string, unknown> | undefined;
+    const takeDigest = () => {
       try {
-        writeExitRecord(config.dataDir, { at: Date.now(), reason, reap, digest: digestOf(orch), ...(by ? { by } : {}) });
+        digest = digestOf(orch);
+      } catch (err) {
+        stderrLogger.warn('could not take the exit digest', { err: String(err) });
+      }
+      return digest ?? {};
+    };
+    let recorded = false;
+    const recordExit = (store: { closed: boolean; unflushedBatches: number; rejected?: ExitRecord['rejected'] }) => {
+      if (recorded) return;
+      recorded = true;
+      try {
+        writeExitRecord(config.dataDir, { at: Date.now(), reason, reap, digest: digest ?? takeDigest(), ...(by ? { by } : {}), ...exitStoreFields(store) });
       } catch (err) {
         stderrLogger.warn('could not write the exit record', { err: String(err) });
       }
     };
+    fatalDuringShutdown = (n) => recordExit({ closed: false, unflushedBatches: n });
     stderrLogger.info('shutting down', { cause, reap, ...(by ? { by } : {}) });
     // A container runtime kills the process after its grace period; a check still running past ours is abandoned and restarts from queued on the next start. See specs/crash-recovery.
     // Committed batches a shutdown leaves behind are lost records: they are counted and the exit is non-zero, as on the fatal path. See specs/state-backend "Shutdown with unflushed batches".
@@ -336,16 +356,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       process.exit(1);
     };
     setTimeout(() => {
+      // Pending batches are read first: the record carries the count, and is never a clean one before the store closed.
       const pending = store.durability().pendingBatches;
-      recordExit();
+      recordExit({ closed: false, unflushedBatches: pending });
       if (pending > 0) exitLosing(pending, 'shutdown grace elapsed with unflushed batches; their records are lost');
       stderrLogger.warn('shutdown grace elapsed; exiting with work in flight', { graceMs: SHUTDOWN_GRACE_MS });
       process.exit(0);
     }, SHUTDOWN_GRACE_MS).unref();
     await orch.stop({ reap });
     await server.close();
-    recordExit();
-    const { unflushedBatches } = await opened.close();
+    takeDigest();
+    const { unflushedBatches, rejected } = await opened.close();
+    recordExit({ closed: true, unflushedBatches, ...(rejected ? { rejected } : {}) });
     if (unflushedBatches > 0) exitLosing(unflushedBatches, 'stopped with unflushed batches; their records are lost');
     stderrLogger.info('stopped', { cause, reason });
     process.exit(0);
