@@ -75,9 +75,19 @@ Many runs can share one database: their rows are keyed by `run_id`, and each dae
 4. with `git.pushIntegration: true`, a hash of the clone's `origin` remote, which is `REPO_URL`. This is what the base manifest uses: each deployment cloning a different repository gets its own run id, with nothing to set. User information in the URL (a token) is left out of the hash, so rotating a credential keeps the id;
 5. otherwise the repository path hash, with one warning in the log. Every deployment on the same path and database would share that run.
 
+An origin hash follows the URL as written, apart from user information. The daemon parses the URL and rewrites it in a standard form, which lowercases the host and drops a default port, and it takes the string unchanged when it is not a URL. It does not strip a `.git` suffix or a trailing slash, so these spellings of one repository are three run ids, and so three runs in one database:
+
+```
+https://git.example.com/team/project.git
+https://git.example.com/team/project
+https://git.example.com/team/project/
+```
+
+So are `git@git.example.com:team/project.git` (an scp-like address, taken as written, user included) and `ssh://git@git.example.com/team/project.git` (a URL, whose user `git` is left out). The same spelling with another token (`https://x-access-token:...@git.example.com/team/project.git`), or none, keeps the id. `https://GIT.example.com:443/team/project.git` gives the same id as the first line above. Keep `REPO_URL` (or `git.originUrl`) spelled the same across redeployments. To make the id independent of the spelling, pin it with `store.runId` or `ORCH_RUN_ID`; a deployment that already has state keeps it by pinning the id it has now, which `/v1/status` shows as the last part of `runDir`.
+
 Set `store.runId` or `ORCH_RUN_ID` when two deployments clone the same repository into one database (for example a staging and a production run of one project), or when the id must survive a change of `REPO_URL`. An explicit id is 1 to 64 characters of `A-Z a-z 0-9 _ -`; any other value stops the daemon at startup with a message naming it. The run directory under `ORCH_HOME` is named after the id, and `deploy/smoke.sh` reads it from `/v1/status` (`runDir`).
 
-The store's connection does not reach check commands or agents (of every runner kind, nor what they start): they run without `DATABASE_URL`, `ORCH_RUN_ID`, and any variable whose value is the store URL. A `store.url` written in a config file that git tracks is refused at startup, because every worktree would carry it. The mounted `orchestrator.yaml` is excluded from the clone. The daemon's own git commands still inherit its environment. A project git hook they run, such as `pre-commit` on a kept-release WIP commit, can see `DATABASE_URL`.
+The store's connection does not reach check commands or agents (of every runner kind, nor what they start): they run without `DATABASE_URL`, `ORCH_RUN_ID`, and any variable whose value is the store URL. A `store.url` written in a config file that git tracks is refused at startup, because every worktree would carry it. The mounted `orchestrator.yaml` is excluded from the clone. The daemon's own git commands do not carry the store URL either: each one runs without `DATABASE_URL`, `ORCH_RUN_ID` and any variable whose value is the store URL, so a project git hook they run (such as `pre-commit` on a kept-release WIP commit, or one run by the verifier's rebase) does not see it.
 
 The init container `clone` clones `REPO_URL` into `/data/repo`. The daemon container then runs `orchestrator --repo /data/repo`, with `/healthz` as its liveness probe and `/readyz` as its readiness probe.
 
@@ -131,10 +141,10 @@ deploy/smoke.sh                     # against the cluster named by KIND_CLUSTER 
 KIND_CLUSTER=dev deploy/smoke.sh    # another cluster
 deploy/smoke.sh --dry-run           # print each step's command, execute nothing
 deploy/smoke.sh --fresh             # delete and recreate the kind cluster first
-deploy/smoke.sh --break pvc         # falsify one restart-drill assertion on purpose (pvc or claimable); exits 1
+deploy/smoke.sh --break pvc         # falsify one drill assertion on purpose (pvc, claimable or restart); exits 1
 ```
 
-These are the only arguments: `--dry-run`, `--fresh` and `--break pvc|claimable`. Anything else, or another `--break` value, prints usage and exits 2.
+These are the only arguments: `--dry-run`, `--fresh` and `--break pvc|claimable|restart`. Anything else, or another `--break` value, prints usage and exits 2.
 
 The steps run in this order:
 
@@ -165,18 +175,21 @@ It asserts:
 - M2 Postgres-outage drill. The script freezes every `postgres` process in the instance pod with SIGSTOP for `OUTAGE_S` seconds (default 10). One write stays pending meanwhile: a claim for a task that does not exist, whose response waits for durability. Just before the thaw, the script checks that this request is still running with no answer and that `storePendingBatches` is above zero. While Postgres is frozen, `/readyz` must answer 503 at least once, and only 200 or 503; curl's `000` (no answer) fails the assertion. `/v1/status` must answer with `storeLagMs` rising. After SIGCONT, the lag must return to zero, `/readyz` must pass, the write must answer 404, and the daemon pod's uid and restart count must be unchanged.
 
   The drill freezes Postgres rather than scaling it to zero. The journal sink never reconnects, and a lost session is fatal, so scale-to-zero restarts the daemon by design. A NetworkPolicy does not stall the session either, because kindnet enforces policies only on new connections. Keep `OUTAGE_S` well under 30: CloudNativePG's liveness probe (3 × 10s) restarts a frozen Postgres, which ends the session and so the daemon.
-- M2 Postgres-restart drill. The script records the claimable launches and task states (API and `psql`), the daemon pod's uid and its restart count, then deletes the Postgres pod and waits until it is gone. CloudNativePG's smart shutdown waits for open sessions, the daemon's included, for up to the Cluster's `smartShutdownTimeout` (180s by default), so this step takes about three minutes. The daemon then loses its session and the run lock and exits. The script asserts that:
+- M2 Postgres-restart drill. The script records `latestSeq`, the claimable launches and task states (API and `psql`), the daemon pod's uid and its restart count. A container restart keeps the pod's `emptyDir`, so the parked worktrees survive it and startup recovery would leave no trace. The script therefore removes `.orchestrator/brief.json` from each claimable launch's worktree in the pod; recovery prepares those launches again and records `launch.reprepared`, which is what the script waits for. It starts following the daemon container's log into a file (`kubectl logs -f`, which ends when that container exits), then deletes the Postgres pod and waits until it is gone. CloudNativePG's smart shutdown waits for open sessions, the daemon's included, for up to the Cluster's `smartShutdownTimeout` (180s by default), so this step takes about three minutes. The daemon then loses its session and the run lock and exits. The script asserts that:
   - the daemon container restarts within `PG_EXIT_TIMEOUT_S` (default 60) seconds of the old Postgres pod being gone;
-  - within `PG_READY_TIMEOUT_S` (default 120) seconds of that, the pod is Ready and `/readyz` answers 200 through a new port-forward (measured on kind: about 12s);
-  - after `SETTLE_S` (default 5) seconds, it is the same pod, and the claimable launches (ids, and tokens through `psql`) and the task states are unchanged.
+  - it restarted because the session was lost: the container's last termination, read when the restart is first seen, is exit code 1 with reason `Error` (an out-of-memory kill reads `OOMKilled`; a probe kill or a SIGTERM ends with 0, 137 or 143), and the last line the exited container logged is `store fatal: exiting` with `reason: fenced`. The log is followed from before the deletion because the container crash-loops until Postgres is back: `kubectl logs --previous` and the last termination may already describe a later start that could not connect;
+  - within `PG_READY_TIMEOUT_S` (default 120) seconds of the old Postgres pod being gone, the pod is Ready and `/readyz` answers 200 through a new port-forward (measured on kind: about 12s);
+  - within `STATUS_TIMEOUT_S`, recovery has recorded a `launch.reprepared` for every recorded claimable launch after the recorded sequence, and exactly one each. `/readyz` passes before recovery runs, so the comparisons wait for this and not for a fixed time;
+  - it is the same pod, and the claimable launches (ids, and tokens through `psql`) and the task states are unchanged.
 - Last, a claim of `SMOKE-PARKED` must return a launch id and token (compared by md5 in `psql`) recorded before the first restart. The script then releases that launch.
 
 `--break` falsifies one assertion on purpose. The script must then fail at that assertion, with every earlier one passing:
 
 - `--break pvc` creates a claim named `data-smoke-break` and mounts it into the daemon container with a Deployment patch. It waits for that rollout's recovery and then takes the snapshot. The restart drill fails with `smoke: FAIL: drill: the daemon pod mounts no volume claim`. On exit the script removes the volume and the mount from the Deployment, which rolls the daemon again, and deletes the claim.
 - `--break claimable` claims `SMOKE-PARKED`'s launch after the snapshot and before the restart. Recovery ends that launch and parks a new one for the same task, so the run fails with `smoke: FAIL: drill: claimable set unchanged (API)`.
+- `--break restart` stops the daemon with SIGTERM (`kill -TERM 1` in its container) in place of deleting the Postgres pod. The daemon shuts down cleanly, exits 0, and its container restarts, so the restart count rises as in a real drill. The run fails with `smoke: FAIL: pg-restart: the daemon exited because its Postgres session was lost`.
 
-Each assertion prints `smoke: pass: <name>`. The first one that does not hold prints `smoke: FAIL: <name>`, and the script exits 1. A full pass ends with `smoke: ok`. On a kept cluster, a rerun skips the worker step when `SMOKE` is already done. `PUBLISH_TIMEOUT_S` (default 300) bounds the wait for the publish.
+Each assertion prints `smoke: pass: <name>`. The first one that does not hold prints `smoke: FAIL: <name>`, and the script exits 1. A full pass ends with `smoke: ok`. Nothing is skipped without a line: a check or step that does not run prints `smoke: skip: <name> (<why>)`. Under `--dry-run` every assertion prints one such line after its command, on a kept cluster a rerun prints one for the worker step when `SMOKE` is already submitted or done, and `--break restart` prints one for the Postgres pod deletion it replaces. The script reads no `TEST_DATABASE_URL` (that variable belongs to `npm test`), and no environment variable turns a check off. `PUBLISH_TIMEOUT_S` (default 300) bounds the wait for the publish.
 
 Every `kubectl` call that talks to a cluster passes `--context "$KUBE_CONTEXT"`. Its only accepted value is `kind-$KIND_CLUSTER`, the default. Any other value exits 2 before the first step, so the image always goes to the cluster being tested. The script leaves the current kubectl context as it found it. The exception is `kind create cluster` under `--fresh`, which makes the new cluster current. So `--fresh` reads `kubectl config current-context` first, and afterwards runs `kubectl config use-context` with that value, or `kubectl config unset current-context` if none was set. These three `kubectl config` calls are the only ones without `--context`.
 

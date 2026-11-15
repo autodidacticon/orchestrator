@@ -6,14 +6,15 @@ set -euo pipefail
 #   deploy/smoke.sh                run against the kind cluster $KIND_CLUSTER (default orch)
 #   deploy/smoke.sh --fresh        delete and recreate the kind cluster first, then restore the current kubectl context
 #   deploy/smoke.sh --dry-run      print each step's command and execute nothing
-#   deploy/smoke.sh --break NAME   falsify one restart-drill assertion on purpose, to show the script fails:
-#                                  pvc (mount a claim named data-smoke-break into the daemon pod) or claimable (claim
-#                                  the parked launch just before the restart)
+#   deploy/smoke.sh --break NAME   falsify one drill assertion on purpose, to show the script fails: pvc (mount a
+#                                  claim named data-smoke-break into the daemon pod), claimable (claim the parked
+#                                  launch just before the restart) or restart (stop the daemon with SIGTERM in place of
+#                                  deleting the Postgres pod, so that its container restarts for another reason)
 #
 # Every assertion prints "smoke: pass: <name>" when it holds; the first that does not prints "smoke: FAIL: <name>" and
-# the script exits 1.
+# the script exits 1. An assertion or step that does not run prints "smoke: skip: <name> (<why>)".
 
-usage() { echo "usage: $0 [--dry-run] [--fresh] [--break pvc|claimable]" >&2; exit 2; }
+usage() { echo "usage: $0 [--dry-run] [--fresh] [--break pvc|claimable|restart]" >&2; exit 2; }
 
 KIND_CLUSTER="${KIND_CLUSTER:-orch}"
 # kind names a cluster's kubeconfig context kind-<name>; every kubectl call is pinned to it. KUBE_CONTEXT may be set,
@@ -40,9 +41,8 @@ OUTAGE_S="${OUTAGE_S:-10}"
 # 10s, 20s, 40s...). Measured on kind: about 12s.
 PG_EXIT_TIMEOUT_S="${PG_EXIT_TIMEOUT_S:-60}"
 PG_READY_TIMEOUT_S="${PG_READY_TIMEOUT_S:-120}"
-# How long a restarted daemon is given to finish its startup recovery before the state is compared, when recovery
-# leaves no event to wait for.
-SETTLE_S="${SETTLE_S:-5}"
+# How long the follower of the daemon's log may take to end once its container has restarted.
+PG_LOG_TIMEOUT_S="${PG_LOG_TIMEOUT_S:-30}"
 # The CloudNativePG operator, installed before the overlay, whose Cluster needs its CRD.
 CNPG_MANIFEST="${CNPG_MANIFEST:-https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml}"
 API="http://127.0.0.1:${LOCAL_PORT}"
@@ -62,7 +62,7 @@ while [ $# -gt 0 ]; do
     --fresh) FRESH=1 ;;
     --break)
       BREAK="${2:-}"; shift || true
-      case "$BREAK" in pvc | claimable) ;; *) usage ;; esac
+      case "$BREAK" in pvc | claimable | restart) ;; *) usage ;; esac
       ;;
     *) usage ;;
   esac
@@ -92,12 +92,15 @@ step() {
   if [ "$DRY_RUN" = 0 ]; then "$@"; fi
 }
 
+# A check or step that does not run says so, and why, on stdout.
+skip() { echo "smoke: skip: $1 ($2)"; }
+
 # One named assertion: print the command, run it unless this is a dry run, and name the outcome.
 check() {
   local name="$1"; shift
   local cmd="$*"
   echo "+ ${cmd//$'\n'/ }"
-  if [ "$DRY_RUN" = 1 ]; then return 0; fi
+  if [ "$DRY_RUN" = 1 ]; then skip "$name" 'dry run: nothing is executed'; return 0; fi
   if "$@"; then
     echo "smoke: pass: $name"
   else
@@ -112,8 +115,11 @@ PF_PID=''
 FROZEN=''
 OUTAGE_WRITE_PID=''
 BREAK_PATCHED=''
+PG_LOG_PID='' PG_LOG=''
 cleanup() {
   if [ -n "$FROZEN" ]; then thaw_postgres "$FROZEN" || true; fi
+  if [ -n "$PG_LOG_PID" ]; then kill "$PG_LOG_PID" 2>/dev/null || true; fi
+  if [ -n "$PG_LOG" ]; then rm -f "$PG_LOG"; fi
   if [ -n "$OUTAGE_WRITE_PID" ]; then kill "$OUTAGE_WRITE_PID" 2>/dev/null || true; fi
   if [ -n "$PF_PID" ]; then kill "$PF_PID" 2>/dev/null || true; fi
   if [ -n "$BREAK_PATCHED" ]; then unmount_break_claim || true; fi
@@ -245,7 +251,7 @@ published_sha() {
 # submitted or done (a rerun on a kept cluster) is left alone.
 work_one_task() {
   if status_is ".byStatus.done + .byStatus.submitted | index(\"$WORK_TASK\")"; then
-    echo "    $WORK_TASK is already submitted or done"
+    skip "working $WORK_TASK" 'it is already submitted or done on this kept cluster'
     return 0
   fi
   local claim launch token worktree
@@ -320,6 +326,7 @@ same() {
 # claimable rows read the same until it has.
 recovery_settled() {
   local done_ids id
+  if [ -z "$2" ]; then echo "    no recorded claimable launch to wait for"; return 1; fi
   done_ids="$(events_of launch.reprepared,launch.ended,launch.revoked,launch.failed "$1" | jq -r '.launchId')" || return 1
   for id in $(cut -d'|' -f1 <<<"$2"); do
     grep -qxF "$id" <<<"$done_ids" || return 1
@@ -437,10 +444,59 @@ outage_write_completed() {
 
 PG_T0=0
 PG_READY_S=''
-# Succeeds when the daemon container has restarted since the count $1 was read.
+PG_LAST_STATE=''
+# The daemon container's last termination as "<exit code> <reason>".
+daemon_last_termination() {
+  kc get pod -l app.kubernetes.io/name=orchestrator -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="orchestrator")].lastState.terminated.exitCode} {.items[0].status.containerStatuses[?(@.name=="orchestrator")].lastState.terminated.reason}'
+}
+# Succeeds when the daemon container has restarted since the count $1 was read, and records its last termination.
 daemon_restarted_since() {
   local n; n="$(daemon_restarts)" || return 1
-  [ -n "$n" ] && [ "$n" -gt "$1" ] && echo "    daemon container restart count: $1 -> $n"
+  { [ -n "$n" ] && [ "$n" -gt "$1" ]; } || return 1
+  PG_LAST_STATE="$(daemon_last_termination)" || return 1
+  echo "    daemon container restart count: $1 -> $n; last termination (exit code, reason): $PG_LAST_STATE"
+}
+# Follow the running daemon container's log into a file, in the background, from now on. The follower ends when that
+# container exits, so the file ends with its last lines. `kubectl logs --previous` and lastState would describe the
+# latest exit instead, which is a crash-looping start that could not reach Postgres yet, not the one that matters.
+follow_daemon_log() {
+  local pod; pod="$(daemon_pod)" || return 1
+  PG_LOG="$(mktemp -t smoke-daemon-log.XXXXXX)"
+  kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" logs -f "$pod" -c orchestrator --tail=0 >"$PG_LOG" 2>&1 &
+  PG_LOG_PID=$!
+}
+daemon_log_ended() { ! kill -0 "$PG_LOG_PID" 2>/dev/null; }
+# Succeeds when the daemon restarted because it lost its Postgres session. The container's last termination is exit
+# code 1 with reason Error: an out-of-memory kill reads OOMKilled, and a liveness-probe kill or a SIGTERM ends in a
+# clean shutdown (0) or a signal (137, 143). And the last line the exited container logged is the store's fatal exit
+# with reason fenced: the session, and with it the run lock, was lost.
+daemon_exited_on_lost_session() {
+  local last ok=1
+  retry "$PG_LOG_TIMEOUT_S" daemon_log_ended || { echo "    the log follower did not end within ${PG_LOG_TIMEOUT_S}s"; ok=0; }
+  PG_LOG_PID=''
+  last="$(jq -Rrc 'fromjson? | objects | "\(.msg) reason=\(.reason // "-")"' <"$PG_LOG" | tail -n 1)"
+  echo "    last termination (exit code, reason): $PG_LAST_STATE; the exited container's last log line: ${last:-(none)}"
+  [ "$PG_LAST_STATE" = '1 Error' ] || ok=0
+  [ "$last" = 'store fatal: exiting reason=fenced' ] || ok=0
+  [ "$ok" = 1 ]
+}
+# --break restart: stop the daemon with SIGTERM in place of deleting the Postgres pod. It shuts down cleanly, exits 0,
+# and its container restarts.
+stop_daemon_process() {
+  kc exec "$(daemon_pod)" -c orchestrator -- sh -c 'kill -TERM 1'
+  PG_T0=$(date +%s)
+}
+# Remove the brief of every claimable launch in $1 (launchId|... lines) from its worktree in the daemon pod. Startup
+# recovery then prepares each again and records launch.reprepared, the sign that it has dealt with that launch. A
+# container restart keeps the pod's emptyDir, so without this recovery would leave the worktrees alone and record nothing.
+remove_parked_briefs() {
+  local run_dir id
+  [ -n "$1" ] || { echo "    no claimable launch to remove the brief of"; return 1; }
+  run_dir="$(status_get .runDir)" || return 1
+  for id in $(cut -d'|' -f1 <<<"$1"); do
+    kc exec "$(daemon_pod)" -c orchestrator -- rm -f "$run_dir/worktrees/$id/.orchestrator/brief.json" || return 1
+    echo "    removed $run_dir/worktrees/$id/.orchestrator/brief.json"
+  done
 }
 # Wait until the daemon pod is Ready again and /readyz answers 200 through a new port-forward, then record how long
 # it took since the old Postgres pod was gone.
@@ -624,22 +680,33 @@ check 'outage: the daemon did not restart' same "$IDENTITY0" daemon_identity
 if [ "$DRY_RUN" = 0 ]; then rm -f "$OUTAGE_WRITE_OUT"; fi
 
 # M2 Postgres-restart drill: delete the Postgres pod. The daemon loses its session and the run lock, exits, and its
-# container restarts until Postgres is back; it then takes the lock again and serves the same state.
-PG_LAUNCHES1='' PG_STATES1='' API_CLAIMABLE1='' API_STATES1='' RESTARTS1=0 UID1=dry-run
+# container restarts until Postgres is back; it then takes the lock again, recovers, and serves the same state.
+PG_LAUNCHES1='' PG_STATES1='' API_CLAIMABLE1='' API_STATES1='' RESTARTS1=0 UID1=dry-run SEQ1=0
 if [ "$DRY_RUN" = 0 ]; then
+  SEQ1="$(status_get .latestSeq)"
   API_CLAIMABLE1="$(api_claimable)"
   API_STATES1="$(api_states)"
   PG_LAUNCHES1="$(pg_claimable_tokens)"
   PG_STATES1="$(pg_states)"
   RESTARTS1="$(daemon_restarts)"
   UID1="$(daemon_uid)"
-  echo "smoke: before the Postgres restart: daemon pod $UID1 with $RESTARTS1 restarts"
+  echo "smoke: before the Postgres restart: daemon pod $UID1 with $RESTARTS1 restarts, latest seq $SEQ1"
   echo "    claimable launches with token md5 (psql): $(tr '\n' ' ' <<<"$PG_LAUNCHES1")"
 fi
-step delete_postgres_pod
-check 'pg-restart: the daemon exited when its session was lost' retry "$PG_EXIT_TIMEOUT_S" daemon_restarted_since "$RESTARTS1"
+step remove_parked_briefs "$PG_LAUNCHES1"
+step follow_daemon_log
+if [ "$BREAK" = restart ]; then
+  echo "smoke: --break restart: stopping the daemon with SIGTERM in place of deleting the Postgres pod"
+  skip delete_postgres_pod '--break restart stops the daemon instead'
+  step stop_daemon_process
+else
+  step delete_postgres_pod
+fi
+check 'pg-restart: the daemon container restarted' retry "$PG_EXIT_TIMEOUT_S" daemon_restarted_since "$RESTARTS1"
+check 'pg-restart: the daemon exited because its Postgres session was lost' daemon_exited_on_lost_session
 check "pg-restart: the daemon is ready again within ${PG_READY_TIMEOUT_S}s of Postgres going away" ready_within_limit
-step sleep "$SETTLE_S"
+check 'pg-restart: startup recovery prepared every claimable launch again' retry "$STATUS_TIMEOUT_S" recovery_settled "$SEQ1" "$PG_LAUNCHES1"
+check 'pg-restart: one launch.reprepared per claimable launch' reprepared_once_each "$SEQ1" "$PG_LAUNCHES1"
 check 'pg-restart: the same daemon pod (its container restarted)' same "$UID1" daemon_uid
 check 'pg-restart: claimable set unchanged (API)' same "$API_CLAIMABLE1" api_claimable
 check 'pg-restart: claimable set unchanged (psql)' same "$PG_LAUNCHES1" pg_claimable_tokens
