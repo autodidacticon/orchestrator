@@ -6,6 +6,7 @@
  *   4 admit resumables, then validate briefs and launch
  *   5 evaluate
  */
+import { existsSync } from 'node:fs';
 import { crashPoint } from '../crash.js';
 import * as q from '../graph/query.js';
 import { spawnLaunch, startLaunch } from '../launch/launch.js';
@@ -27,7 +28,7 @@ export async function runTick(o: Orchestrator): Promise<void> {
   await reconcile(o);
   crashPoint('tick.afterPhase1');
 
-  drainVerification(o);
+  await drainVerification(o);
   crashPoint('tick.afterPhase2');
 
   await completeMilestones(o);
@@ -197,8 +198,20 @@ async function handleDeadLaunch(o: Orchestrator, launch: Launch, entry: Entry): 
   if (after.status.kind !== 'submitted') await o.workspace.remove(launch);
 }
 
-/** Phase 2: apply terminal job results, then start the worker if idle. */
-export function drainVerification(o: Orchestrator): void {
+/**
+ * Phase 2: apply terminal job results, remove the worktrees of their launches (awaited, retried on later ticks while
+ * left behind), then start the worker if idle. See specs/integration-pipeline "Worktree removal on publish".
+ */
+export async function drainVerification(o: Orchestrator): Promise<void> {
+  try {
+    await retryPendingRemovals(o);
+    await applyJobs(o);
+  } finally {
+    o.startVerifierIfIdle();
+  }
+}
+
+async function applyJobs(o: Orchestrator): Promise<void> {
   for (const job of o.store.listJobs({ applied: false })) {
     if (job.status === 'queued' || job.status === 'checking' || job.status === 'verified' || job.status === 'publishing') continue;
     const entry = o.entry(job.taskId);
@@ -230,14 +243,46 @@ export function drainVerification(o: Orchestrator): void {
       o.store.updateJob(job.jobId, { applied: true, updatedAt: o.now() });
     });
     const launch = o.store.getLaunch(job.launchId);
-    if (launch && launch.status === 'live') {
-      // The agent has nothing more to do; its process exits on its own and reconcile ends the launch.
-      void o.workspace.remove(launch).catch(() => undefined);
-    } else if (launch) {
-      void o.workspace.remove(launch).catch(() => undefined);
+    // A live launch's agent has nothing more to do; its process exits on its own and reconcile ends the launch. It may
+    // still be in the worktree, so it gets one attempt now and the rest on later ticks.
+    if (launch) await removeOrRetryLater(o, launch, launch.status === 'live' ? { attempts: 1 } : {});
+    // A done task's other ended launches (one relaunched while the task was submitted, say) keep no worktree either.
+    if (o.entry(job.taskId).status.kind === 'done') {
+      for (const other of o.store.listLaunches({ taskId: job.taskId, status: ['ended', 'revoked'] })) {
+        if (other.launchId === job.launchId) continue;
+        if (existsSync(other.worktree) || (await o.workspace.exists(other))) await removeOrRetryLater(o, other);
+      }
     }
   }
-  o.startVerifierIfIdle();
+}
+
+/** Remove a launch's worktree, awaited; one left behind joins the pending set and is retried on the next tick. */
+async function removeOrRetryLater(o: Orchestrator, launch: Launch, opts: { attempts?: number } = {}): Promise<void> {
+  let gone: boolean | void;
+  try {
+    gone = await o.workspace.remove(launch, opts);
+  } catch (err) {
+    o.log.warn('worktree removal failed; retried on the next tick', { taskId: launch.taskId, launchId: launch.launchId, err: String(err) });
+    gone = false;
+  }
+  if (gone === false) {
+    if (!o.pendingRemovals.has(launch.launchId)) o.log.warn('worktree left behind after removal; retried on the next tick', { taskId: launch.taskId, launchId: launch.launchId, worktree: launch.worktree });
+    o.pendingRemovals.add(launch.launchId);
+  } else {
+    o.pendingRemovals.delete(launch.launchId);
+  }
+}
+
+async function retryPendingRemovals(o: Orchestrator): Promise<void> {
+  for (const launchId of [...o.pendingRemovals]) {
+    const launch = o.store.getLaunch(launchId);
+    // A launch that is live again or parked owns its worktree; anything else (ended, revoked, gone) is retried.
+    if (!launch || launch.status === 'claimable' || launch.status === 'preparing' || launch.status === 'launching') {
+      o.pendingRemovals.delete(launchId);
+      continue;
+    }
+    await removeOrRetryLater(o, launch, launch.status === 'live' ? { attempts: 1 } : {});
+  }
 }
 
 /** Tell every other live launch that the integration head moved. Runs inside the publish transaction. */

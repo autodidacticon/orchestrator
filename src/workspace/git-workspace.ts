@@ -8,9 +8,9 @@ import { composeBrief } from '../brief/compose.js';
 import type { Id } from '../graph/model.js';
 import type { Launch } from '../state/store.js';
 import { existsSync } from 'node:fs';
-import { dirtyFiles, git, LocalTagConflictError, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeRemove } from './git.js';
+import { dirtyFiles, git, LocalTagConflictError, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeReattach, worktreeRemove } from './git.js';
 import { type Origin, TagConflictError } from './origin.js';
-import type { BriefInput, FallbackReport, PreserveOptions, SealOptions, SealResult, TagPushResult, Workspace } from './workspace.js';
+import type { BriefInput, FallbackReport, PreserveOptions, RemoveOptions, SealOptions, SealResult, TagPushResult, Workspace } from './workspace.js';
 
 export const ORCH_DIR = '.orchestrator';
 export const FALLBACK_FILE = 'report.json';
@@ -50,9 +50,7 @@ export class GitWorkspace implements Workspace {
     await mkdir(path.dirname(launch.worktree), { recursive: true });
     if (await refExists(this.repo, `refs/heads/${launch.branch}`)) {
       // Re-preparing a launch whose worktree vanished: reset its branch to the base and attach a new worktree.
-      await git(this.repo, ['worktree', 'prune'], { allowFail: true });
-      await git(this.repo, ['branch', '-f', launch.branch, launch.baseSha]);
-      await git(this.repo, ['worktree', 'add', launch.worktree, launch.branch]);
+      await worktreeReattach(this.repo, launch.worktree, launch.branch, launch.baseSha);
     } else {
       await worktreeAdd(this.repo, launch.worktree, launch.branch, launch.baseSha);
     }
@@ -120,9 +118,9 @@ export class GitWorkspace implements Workspace {
     }
   }
 
-  async remove(launch: Launch): Promise<void> {
-    await worktreeRemove(this.repo, launch.worktree);
-    await rm(launch.worktree, { recursive: true, force: true });
+  /** Never throws; false when the worktree is still on disk or registered after the attempts (see worktreeRemove). */
+  async remove(launch: Launch, opts: RemoveOptions = {}): Promise<boolean> {
+    return worktreeRemove(this.repo, launch.worktree, opts);
   }
 
   async listWorktrees(): Promise<string[]> {

@@ -245,8 +245,8 @@ export async function setupCrashRun(opts: CrashRunOptions = {}): Promise<CrashRu
     waitTerminal: async (timeoutMs = 60_000) => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        // A done task's worktree is removed after the transition is stored (not awaited by the tick):
-        // wait for that too, or a stop right after reads a worktree that is about to go.
+        // A done task's worktree is removed after the transition is stored (awaited by the same tick, retried on
+        // later ticks when left behind): wait for that too, or a stop right after reads a worktree that is about to go.
         // Likewise a submitted milestone's tag, written after its transition.
         if (run.terminal() && launchWorktrees(repo).length === 0 && missingTags().length === 0) return;
         await new Promise((r) => setTimeout(r, 200));

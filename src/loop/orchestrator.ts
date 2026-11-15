@@ -289,6 +289,11 @@ export class Orchestrator implements OrchestratorCore {
    */
   readonly deferredJobs = new Set<string>();
   /**
+   * Launch ids whose worktree removal after an applied verifier job left it behind; drainVerification retries each on
+   * every tick until it is gone. See specs/integration-pipeline "Worktree removal on publish".
+   */
+  readonly pendingRemovals = new Set<string>();
+  /**
    * Launch branches and commits startup recovery found missing from the clone (a fresh clone). No brief names them.
    * See specs/crash-recovery "Context naming lost work".
    */
@@ -1159,8 +1164,11 @@ export class Orchestrator implements OrchestratorCore {
     if (!seal.ok) return { status: 409, body: { error: 'dirtyWorktree', files: seal.dirty } };
 
     const res = this.store.transaction((): ApiResponse => {
+      // The seal awaited git: recovery or the tick may have revoked this launch and relaunched the task meanwhile.
+      // A revoked launch never changes task state. See specs/crash-recovery "Fencing".
+      if (!this.authenticate(launch.launchId, launch.token)) return { status: 401, body: { error: 'unauthorized' } };
       const cur = this.entry(launch.taskId);
-      if (cur.status.kind !== 'running') return { status: 409, body: { error: 'notRunning', status: cur.status.kind } };
+      if (cur.status.kind !== 'running' || cur.lease?.launchId !== launch.launchId) return { status: 409, body: { error: 'notRunning', status: cur.status.kind } };
       this.store.appendEvent({ kind: 'agent.report', taskId: launch.taskId, launchId: launch.launchId, payload: { kind: 'submit', seq, sealedSha: seal.sealedSha, ...(seal.committed ? { committedByOrchestrator: true } : {}) } }, this.now());
       const outcome = this.acceptSubmission(launch, parsed.data, seal.sealedSha);
       this.store.putDedup(launch.launchId, seq, outcome);

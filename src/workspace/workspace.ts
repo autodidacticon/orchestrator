@@ -19,6 +19,11 @@ export interface PreserveOptions {
   untracked?: boolean;
 }
 
+export interface RemoveOptions {
+  /** Removal attempts before giving up (default 3). One for a worktree whose agent may still be in it: the tick retries later. */
+  attempts?: number;
+}
+
 export interface FallbackReport {
   launchId: string;
   seq: number;
@@ -67,7 +72,11 @@ export interface Workspace {
   seal(launch: Launch, opts?: SealOptions): Promise<SealResult>;
   /** Read and remove the fallback report file if present. */
   readFallback(launch: Launch): Promise<FallbackReport | undefined>;
-  remove(launch: Launch): Promise<void>;
+  /**
+   * Remove the launch's worktree. Never throws. Resolves to false when it is still on disk or registered with the
+   * clone afterwards, so the caller can retry; any other value means it is gone.
+   */
+  remove(launch: Launch, opts?: RemoveOptions): Promise<boolean | void>;
   /** Launch ids that currently have a worktree. */
   listWorktrees(): Promise<string[]>;
   /** Create the tag locally (idempotent). With an origin, also push it; the outcome (a conflict in the clone included) is returned, never thrown. */

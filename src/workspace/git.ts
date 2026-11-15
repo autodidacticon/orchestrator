@@ -2,6 +2,9 @@
  * Thin git wrapper over execFile. Every call names its cwd explicitly.
  */
 import { execFile, spawn } from 'node:child_process';
+import { existsSync, realpathSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { basename, dirname, join as joinPath, resolve as resolvePath } from 'node:path';
 import { promisify } from 'node:util';
 import { withoutStore } from '../runs/childEnv.js';
 
@@ -126,21 +129,96 @@ export async function dirtyFiles(worktree: string, opts: { untracked?: boolean }
   return parsePorcelain(stdout);
 }
 
+/** The tail of each clone's chain of `git worktree` commands, keyed by the clone's real path. */
+const worktreeLocks = new Map<string, Promise<unknown>>();
+
+/** The real path; for a path that no longer exists, its real parent joined with its name (macOS /var is /private/var). */
+function canonical(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    try {
+      return joinPath(realpathSync(dirname(p)), basename(p));
+    } catch {
+      return resolvePath(p);
+    }
+  }
+}
+
+function lockKey(repo: string): string {
+  return canonical(repo);
+}
+
+/**
+ * Run `fn` after every `git worktree` command already queued for the same clone, so no two overlap: a `prune` or
+ * `remove` racing an `add` can drop the new worktree's administrative files or fail the add. Every worktree command
+ * of this module takes it; a caller holding it must not call them (the lock is not reentrant).
+ * See specs/integration-pipeline "Worktree commands are serialized per clone".
+ */
+export function withWorktreeLock<T>(repo: string, fn: () => Promise<T>): Promise<T> {
+  const key = lockKey(repo);
+  const prev = worktreeLocks.get(key) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  worktreeLocks.set(key, tail);
+  void tail.then(() => {
+    if (worktreeLocks.get(key) === tail) worktreeLocks.delete(key);
+  });
+  return run;
+}
+
 export async function worktreeAdd(repo: string, path: string, branch: string, baseSha: string): Promise<void> {
-  await git(repo, ['worktree', 'add', '-b', branch, path, baseSha]);
+  await withWorktreeLock(repo, () => git(repo, ['worktree', 'add', '-b', branch, path, baseSha]));
+}
+
+/** Re-attach an existing branch at `baseSha` in a new worktree (the branch's previous worktree is gone). */
+export async function worktreeReattach(repo: string, path: string, branch: string, baseSha: string): Promise<void> {
+  await withWorktreeLock(repo, async () => {
+    await git(repo, ['worktree', 'prune'], { allowFail: true });
+    await git(repo, ['branch', '-f', branch, baseSha]);
+    await git(repo, ['worktree', 'add', path, branch]);
+  });
 }
 
 export async function worktreeAddDetached(repo: string, path: string, sha: string): Promise<void> {
-  await git(repo, ['worktree', 'add', '--detach', path, sha]);
+  await withWorktreeLock(repo, () => git(repo, ['worktree', 'add', '--detach', path, sha]));
 }
 
-export async function worktreeRemove(repo: string, path: string): Promise<void> {
-  await git(repo, ['worktree', 'remove', '--force', path], { allowFail: true });
-  await git(repo, ['worktree', 'prune'], { allowFail: true });
+/**
+ * Remove a worktree: `worktree remove --force`, delete its directory, then `prune`, so a failed remove leaves no
+ * registration behind. Never throws; true when the path is afterwards neither on disk nor registered with the clone.
+ * Each attempt holds the clone's worktree lock; up to `attempts` attempts, with a short pause between them.
+ */
+export async function worktreeRemove(repo: string, path: string, opts: { attempts?: number } = {}): Promise<boolean> {
+  const attempts = Math.max(1, opts.attempts ?? 3);
+  const target = canonical(path);
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((r) => setTimeout(r, 100 * i));
+    const gone = await withWorktreeLock(repo, async () => {
+      await git(repo, ['worktree', 'remove', '--force', path], { allowFail: true });
+      await rm(path, { recursive: true, force: true }).catch(() => undefined);
+      await git(repo, ['worktree', 'prune'], { allowFail: true });
+      if (existsSync(path)) return false;
+      const listed = await git(repo, ['worktree', 'list', '--porcelain'], { allowFail: true });
+      if (listed.code !== 0) return false;
+      return !listed.stdout
+        .split('\n')
+        .filter((l) => l.startsWith('worktree '))
+        .some((l) => {
+          const p = l.slice('worktree '.length).trim();
+          return p === path || canonical(p) === target;
+        });
+    }).catch(() => false);
+    if (gone) return true;
+  }
+  return false;
 }
 
 export async function worktreeList(repo: string): Promise<string[]> {
-  const { stdout } = await git(repo, ['worktree', 'list', '--porcelain']);
+  const { stdout } = await withWorktreeLock(repo, () => git(repo, ['worktree', 'list', '--porcelain']));
   return stdout
     .split('\n')
     .filter((l) => l.startsWith('worktree '))

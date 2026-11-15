@@ -51,8 +51,17 @@ export class FakeWorkspace implements Workspace {
     return f;
   }
 
-  async remove(launch: Launch): Promise<void> {
+  /** Launch ids whose next removals fail (the worktree stays), one entry per failure. */
+  readonly failRemovals: string[] = [];
+
+  async remove(launch: Launch): Promise<boolean> {
+    const i = this.failRemovals.indexOf(launch.launchId);
+    if (i >= 0) {
+      this.failRemovals.splice(i, 1);
+      return false;
+    }
     this.worktrees.delete(launch.launchId);
+    return true;
   }
 
   async listWorktrees(): Promise<string[]> {

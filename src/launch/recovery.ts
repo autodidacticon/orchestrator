@@ -1,6 +1,7 @@
 /**
  * Startup recovery, run before the first tick. Idempotent. See specs/crash-recovery.
  */
+import { existsSync } from 'node:fs';
 import type { Orchestrator } from '../loop/orchestrator.js';
 import { applyPendingCascade, recordTagPush, tagSafely } from '../loop/tick.js';
 import { scrubCarry } from '../brief/lost.js';
@@ -247,10 +248,22 @@ export async function recover(o: Orchestrator): Promise<void> {
 
   // Sweep stray worktrees.
   const liveIds = new Set(store.listLaunches({ status: ['preparing', 'claimable', 'launching', 'live'] }).map((l) => l.launchId));
-  for (const id of await workspace.listWorktrees()) {
+  const registered = new Set(await workspace.listWorktrees());
+  for (const id of registered) {
     if (liveIds.has(id)) continue;
     const l = store.getLaunch(id);
-    if (l) await workspace.remove(l);
+    if (l && (await workspace.remove(l)) === false) o.pendingRemovals.add(l.launchId);
+  }
+  // An ended launch of a done task whose removal was cut short (a crash between publish and removal, a removal that
+  // failed) may have left its directory with no registration the sweep above sees: remove it too.
+  // See specs/crash-recovery "Worktrees of done tasks removed at startup".
+  for (const l of store.listLaunches({ status: ['ended', 'revoked'] })) {
+    if (registered.has(l.launchId) || o.entry(l.taskId).status.kind !== 'done') continue;
+    if (!existsSync(l.worktree)) continue;
+    if ((await workspace.remove(l)) === false) {
+      o.pendingRemovals.add(l.launchId);
+      o.log.warn('recovery: worktree of a done task left behind; retried on the next tick', { taskId: l.taskId, launchId: l.launchId, worktree: l.worktree });
+    }
   }
 
   // Launches recovery ended above (a lost claim, a parked launch that could not be prepared) were in flight at the first
