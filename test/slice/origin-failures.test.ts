@@ -2,7 +2,7 @@
  * Origin failure paths: recovery while origin is unreachable, refused pushes, stalled remote commands, and milestone
  * tags held at another sha. See openspec/changes/origin-failure-paths.
  */
-import { chmodSync, existsSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -12,7 +12,7 @@ import type { VerifierContext } from '../../src/verify/job.js';
 import { pushRetryDue, readPushRetry, recordPushRetry } from '../../src/verify/push-retry.js';
 import { GitVerifierBackend, TRAILER_TASK } from '../../src/verify/verifier.js';
 import { GitWorkspace } from '../../src/workspace/git-workspace.js';
-import { classifyPushFailure, Origin } from '../../src/workspace/origin.js';
+import { classifyFetchFailure, classifyPushFailure, Origin } from '../../src/workspace/origin.js';
 import { gitIn, makeRepo, makeSlice, single, type SliceHarness } from './harness.js';
 
 let h: SliceHarness | undefined;
@@ -141,7 +141,9 @@ describe('origin failure paths', () => {
     expect(requeued.map((e) => e.payload?.['retryInMs'])).toEqual([300, 600]);
     const r0 = Number(requeued[0]!.payload?.['retryAt']);
     expect(requeued[1]!.ts).toBeGreaterThanOrEqual(r0);
-    expect(readPushRetry(h.store, job.jobId)?.refusals).toBe(3);
+    // The job is applied: its push retry state is gone with it.
+    expect(readPushRetry(h.store, job.jobId)).toBeUndefined();
+    expect(h.store.getKv(`pushRetry:${job.jobId}`) ?? '').toBe('');
     // Nothing was published, and the clone's swap was undone every time.
     expect(gitIn(f.bare, 'rev-parse', 'main')).toBe(before);
     expect(gitIn(f.repo, 'rev-parse', 'main')).toBe(before);
@@ -375,6 +377,120 @@ describe('origin failure paths', () => {
     // The clone may lag origin until the next job fast-forwards it; base selection already reads the publication.
     expect(await h.workspace.integrationHead()).toBe(job.squashSha);
     expect(h.orch.status().foreignCommits).toEqual([]);
+  }, 60_000);
+
+  it('ORC-97 criterion 1: a fetch origin refuses for its credentials counts against git.pushRefusalLimit and blocks the task naming the refusal', async () => {
+    const f = fixture();
+    // Every fetch is refused as an expired credential would be.
+    gitIn(f.repo, 'config', 'remote.origin.uploadpack', `echo "fatal: Authentication failed for 'https://example.invalid/o.git/'" >&2; exit 1; :`);
+    const before = gitIn(f.bare, 'rev-parse', 'main');
+    h = await makeSlice({ graph: single('commitAndSubmit'), realVerifier: true, dir: f.dir, repo: f.repo, config: pushOn(f.bare, { pushRefusalLimit: 3, pushRetryBackoffMs: 100 }) });
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'blocked', 30_000);
+    const status = h.orch.entry('T1').status;
+    expect(status).toMatchObject({ kind: 'blocked', reason: { kind: 'pushRefused' } });
+    const message = (status as { reason: { message: string } }).reason.message;
+    expect(message).toContain('fetch from origin was refused');
+    expect(message).toContain('Authentication failed');
+    const requeued = h.store.listEvents({ kinds: ['verify.requeued'], taskId: 'T1' });
+    expect(requeued.map((e) => [e.payload?.['retry'], e.payload?.['refusals']])).toEqual([
+      ['refused', 1],
+      ['refused', 2],
+    ]);
+    expect(h.orch.entry('T1').attempts).toBe(0);
+    expect(gitIn(f.bare, 'rev-parse', 'main')).toBe(before);
+    // The credential is renewed and the task unblocked: it publishes.
+    gitIn(f.repo, 'config', '--unset', 'remote.origin.uploadpack');
+    expect(h.orch.unblock('T1')).toEqual({ ok: true });
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done', 30_000);
+    expect(taskCommits(f.bare, 'T1').length).toBe(1);
+  }, 60_000);
+
+  it('ORC-97 criterion 1: a fetch that cannot reach origin is retried past git.pushRefusalLimit and never blocks; the retry state goes when the job is applied', async () => {
+    const f = fixture();
+    const away = `${f.bare}.away`;
+    renameSync(f.bare, away);
+    h = await makeSlice({ graph: single('commitAndSubmit'), realVerifier: true, dir: f.dir, repo: f.repo, config: pushOn(f.bare, { pushRefusalLimit: 2, pushRetryBackoffMs: 50 }) });
+    await h.waitFor(() => h!.store.listEvents({ kinds: ['verify.requeued'], taskId: 'T1' }).length >= 4, 30_000);
+    const requeued = h.store.listEvents({ kinds: ['verify.requeued'], taskId: 'T1' });
+    expect(requeued.every((e) => e.payload?.['retry'] === 'unreachable' && e.payload?.['refusals'] === 0)).toBe(true);
+    expect(String(requeued[0]!.payload?.['reason'])).toContain('could not reach');
+    expect(h.orch.entry('T1').status.kind).toBe('submitted');
+    const job = h.store.listJobs({ taskId: 'T1' })[0]!;
+    expect(readPushRetry(h.store, job.jobId)?.failures).toBeGreaterThanOrEqual(4);
+    // Origin returns: the task publishes, and the job's retry state is removed once it is applied.
+    renameSync(away, f.bare);
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done', 30_000);
+    expect(h.store.getJob(job.jobId)).toMatchObject({ status: 'published', applied: true });
+    expect(readPushRetry(h.store, job.jobId)).toBeUndefined();
+    expect(h.store.getKv(`pushRetry:${job.jobId}`) ?? '').toBe('');
+    expect(taskCommits(f.bare, 'T1').length).toBe(1);
+  }, 60_000);
+
+  it('ORC-97: fetch failures are classified from git output: a refused credential or access, an unreachable origin', () => {
+    expect(classifyFetchFailure("fatal: Authentication failed for 'https://x/o/r.git/'\n")).toBe('refused');
+    expect(classifyFetchFailure("remote: Permission to o/r.git denied to someone.\nfatal: unable to access 'https://x/o/r.git/': The requested URL returned error: 403\n")).toBe('refused');
+    expect(classifyFetchFailure("fatal: could not read Username for 'https://github.com': terminal prompts disabled\n")).toBe('refused');
+    expect(classifyFetchFailure('git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n')).toBe('refused');
+    expect(classifyFetchFailure('ssh: connect to host x port 22: Connection refused\nfatal: Could not read from remote repository.\n')).toBe('unreachable');
+    expect(classifyFetchFailure("fatal: unable to access 'https://x/': Could not resolve host: x\n")).toBe('unreachable');
+    expect(classifyFetchFailure('Authentication failed', true)).toBe('unreachable');
+  });
+
+  it('ORC-97 criterion 2: a tag push slower than the tick wait is recorded as pushed once it completes, without pushing it again', async () => {
+    const f = fixture();
+    const count = path.join(f.dir, 'pushes');
+    // Every push takes 2s at the transport, longer than the tick's 1s wait, even one origin needs nothing from.
+    gitIn(f.repo, 'config', 'remote.origin.receivepack', `echo x >> ${count}; sleep 2; git receive-pack`);
+    h = await makeSlice({ graph: MILESTONE, realVerifier: true, dir: f.dir, repo: f.repo, config: pushOn(f.bare) });
+    await h.waitFor(() => h!.orch.entry('MVP').status.kind === 'submitted', 30_000);
+    await h.waitFor(() => h!.store.getKv('tagPushed:MVP:1') !== undefined, 30_000);
+    const mvp = h.orch.entry('MVP');
+    expect(h.store.getKv('tagPushed:MVP:1')).toBe(mvp.integrationSha);
+    expect(gitIn(f.bare, 'rev-parse', 'refs/tags/milestone/MVP/v1^{commit}')).toBe(mvp.integrationSha);
+    // Two pushes in all: T1's publication and the one tag push, which never finished inside a tick's wait.
+    expect(readFileSync(count, 'utf8').trim().split('\n').length).toBe(2);
+    for (let i = 0; i < 3; i++) await h.orch.tick();
+    expect(readFileSync(count, 'utf8').trim().split('\n').length).toBe(2);
+  }, 60_000);
+
+  it('ORC-97 criterion 2: a tick-started tag push that settles after the wait answers the next call from its outcome', async () => {
+    const f = fixture();
+    const count = path.join(f.dir, 'pushes');
+    gitIn(f.repo, 'remote', 'add', 'origin', f.bare);
+    // Every push takes 1s at the transport, even one origin needs nothing from.
+    gitIn(f.repo, 'config', 'remote.origin.receivepack', `echo x >> ${count}; sleep 1; git receive-pack`);
+    const origin = new Origin({ repo: f.repo, integrationBranch: 'main', tickWaitMs: 100 });
+    const sha = gitIn(f.repo, 'rev-parse', 'main');
+    gitIn(f.repo, 'tag', 'slow', sha);
+    expect(await origin.pushTagFromTick('slow', sha)).toBeUndefined();
+    // Still running: a second call waits on the same push and starts none.
+    expect(await origin.pushTagFromTick('slow', sha)).toBeUndefined();
+    await until(() => !origin.busy, 10_000);
+    expect(await origin.pushTagFromTick('slow', sha)).toBe('pushed');
+    expect(readFileSync(count, 'utf8').trim().split('\n')).toEqual(['x']);
+    expect(gitIn(f.bare, 'rev-parse', 'refs/tags/slow^{commit}')).toBe(sha);
+  }, 30_000);
+
+  it('ORC-97 criterion 3: with pushing off, a milestone tag that could not be created in the clone is created on a later tick', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-origin-fail-'));
+    const repo = makeRepo(dir);
+    // A stale lock makes `git tag` fail until it is removed.
+    const lock = path.join(repo, '.git', 'refs', 'tags', 'milestone', 'MVP', 'v1.lock');
+    mkdirSync(path.dirname(lock), { recursive: true });
+    writeFileSync(lock, '');
+    h = await makeSlice({ graph: MILESTONE, realVerifier: true, dir, repo });
+    await h.waitFor(() => h!.orch.entry('MVP').status.kind === 'submitted', 30_000);
+    for (let i = 0; i < 2; i++) await h.orch.tick();
+    const hasTag = () => gitIn(repo, 'tag', '--list', 'milestone/MVP/v1') !== '';
+    expect(hasTag()).toBe(false);
+    expect(h.store.getKv('tagLocal:MVP:1')).toBeUndefined();
+    rmSync(lock);
+    await h.orch.tick();
+    const sha = h.orch.entry('MVP').integrationSha;
+    expect(hasTag()).toBe(true);
+    expect(gitIn(repo, 'rev-parse', 'refs/tags/milestone/MVP/v1^{commit}')).toBe(sha);
+    expect(h.store.getKv('tagLocal:MVP:1')).toBe(sha);
+    expect(h.store.getKv('tagPushed:MVP:1')).toBeUndefined();
   }, 60_000);
 
   it("a job whose own squash is the clone's tip publishes it through the catch-up push, without a rebase", async () => {

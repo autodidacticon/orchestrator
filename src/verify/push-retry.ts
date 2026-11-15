@@ -5,7 +5,7 @@
 import type { Store } from '../state/store.js';
 
 export interface PushRetryState {
-  /** Pushes origin refused (a hook, a protected branch, missing permission, foreign commits held back). */
+  /** Pushes or fetches origin refused (a hook, a protected branch, a refused credential, missing permission, foreign commits held back). */
   refusals: number;
   /** Fetches or pushes that did not reach origin or timed out. Never counted against the limit. */
   failures: number;
@@ -36,6 +36,14 @@ export function readPushRetry(store: Pick<Store, 'getKv'>, jobId: string): PushR
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Drop a job's retry state once the job is applied. The store has no kv delete, so the entry is emptied, which every
+ * reader takes as no state. See specs/integration-pipeline "Push retry state ends with its job".
+ */
+export function clearPushRetry(store: Pick<Store, 'getKv' | 'setKv'>, jobId: string): void {
+  if (store.getKv(key(jobId))) store.setKv(key(jobId), '');
 }
 
 /** False while the job waits out its backoff. */

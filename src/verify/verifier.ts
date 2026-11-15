@@ -20,7 +20,7 @@ import {
   worktreeList,
   worktreeRemove,
 } from '../workspace/git.js';
-import { type Origin, OriginConfigError, type PushResult } from '../workspace/origin.js';
+import { type Origin, OriginConfigError, OriginFetchError, type PushResult } from '../workspace/origin.js';
 import type { VerifierBackend, VerifierContext, VerifierOutcome } from './job.js';
 
 export const TRAILER_TASK = 'Orchestrator-Task';
@@ -169,7 +169,16 @@ export class GitVerifierBackend implements VerifierBackend {
       await origin.fetch();
     } catch (err) {
       if (err instanceof OriginConfigError) throw err;
-      return { kind: 'done', outcome: { kind: 'requeue', reason: String(err), retry: { kind: 'unreachable', message: String(err) } } };
+      // A fetch origin refused (an expired or revoked credential, a missing permission) counts against
+      // git.pushRefusalLimit; one that did not reach origin is retried without a limit.
+      // See specs/integration-pipeline "Fetch failures are classified".
+      const detail = err instanceof Error ? err.message : String(err);
+      if (err instanceof OriginFetchError && err.kind === 'refused') {
+        const message = `fetch from ${origin.remote} was refused: ${detail}`;
+        return { kind: 'done', outcome: { kind: 'requeue', reason: message, retry: { kind: 'refused', message } } };
+      }
+      const message = `fetch from ${origin.remote} could not reach it: ${detail}`;
+      return { kind: 'done', outcome: { kind: 'requeue', reason: message, retry: { kind: 'unreachable', message } } };
     }
     const remote = await origin.head();
     if (remote) {

@@ -57,6 +57,29 @@ export function classifyPushFailure(stderr: string, timedOut = false): 'lease' |
   return 'unreachable';
 }
 
+/**
+ * Classify a failed fetch from git's stderr (read under LC_ALL=C). `refused`: origin answered and declined the
+ * credentials or the access (an expired or revoked credential, a missing permission): counted against
+ * `git.pushRefusalLimit` like a refused push. Anything else, a timeout included, is `unreachable`.
+ * See specs/integration-pipeline "Fetch failures are classified".
+ */
+export function classifyFetchFailure(stderr: string, timedOut = false): 'refused' | 'unreachable' {
+  if (timedOut) return 'unreachable';
+  if (/Authentication failed|Permission denied|access denied|denied to|returned error: 40[13]|could not read (Username|Password)|terminal prompts disabled|Invalid username or password/i.test(stderr)) return 'refused';
+  return 'unreachable';
+}
+
+/** A fetch that failed, with how: origin refused the credentials or access, or could not be reached in time. */
+export class OriginFetchError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: 'refused' | 'unreachable',
+  ) {
+    super(message);
+    this.name = 'OriginFetchError';
+  }
+}
+
 /** Environment for remote commands: messages in English, so failures can be classified. */
 const REMOTE_ENV = { LC_ALL: 'C' };
 
@@ -80,6 +103,12 @@ export class OriginConfigError extends Error {
   }
 }
 
+interface TagPush {
+  sha: string;
+  done: Promise<void>;
+  outcome?: 'pushed' | 'failed';
+}
+
 /** How the clone's integration branch relates to origin's. */
 export type Relation = 'equal' | 'behind' | 'ahead' | 'diverged' | 'noRemoteBranch';
 
@@ -92,6 +121,8 @@ export class Origin {
   private lastFetchAt = Number.NEGATIVE_INFINITY;
   /** The squash the verifier swapped into the clone and is pushing; not published until the push lands. */
   inFlight: string | undefined;
+  /** Tag pushes started from the tick, by tag name, with their outcome once settled. */
+  private readonly tagPushes = new Map<string, TagPush>();
 
   constructor(private readonly opts: OriginOptions) {
     this.remote = opts.remote ?? 'origin';
@@ -147,7 +178,7 @@ export class Origin {
     return this.ensured;
   }
 
-  /** Fetch origin's integration branch into the tracking ref. Throws when origin cannot be reached. */
+  /** Fetch origin's integration branch into the tracking ref. Throws `OriginFetchError` (refused or unreachable) when the fetch fails. */
   fetch(): Promise<void> {
     return this.serial(() => this.fetchNow());
   }
@@ -161,7 +192,7 @@ export class Origin {
         // An empty origin: no branch yet. The first publication creates it.
         await git(this.repo, ['update-ref', '-d', this.trackingRef], { allowFail: true });
       } else {
-        throw new Error(`git fetch ${this.remote} failed: ${r.stderr.trim() || r.stdout.trim()}`);
+        throw new OriginFetchError(`git fetch ${this.remote} failed: ${r.stderr.trim() || r.stdout.trim()}`, classifyFetchFailure(r.stderr, r.timedOut));
       }
     }
     this.lastFetchAt = this.now();
@@ -186,12 +217,40 @@ export class Origin {
   }
 
   /**
-   * Push a tag from the tick: waits at most `tickWaitMs`. Undefined when the push is still running; it runs on, and a
-   * later tick pushes again (a no-op once origin holds the tag at the same sha). Errors as `pushTag`.
+   * Push a tag from the tick: waits at most `tickWaitMs`. Undefined when the push is still running; it runs on and its
+   * outcome is kept, so a later call for the same tag answers `'pushed'` from it without pushing again, or waits on it
+   * while it still runs. A push that ended in a failure after the wait is pushed again by the next call. Errors as
+   * `pushTag`. See specs/integration-pipeline "A slow tag push is confirmed when it completes".
    */
   async pushTagFromTick(name: string, sha: string): Promise<'pushed' | undefined> {
-    const r = await within(this.pushTag(name, sha), this.tickWaitMs);
-    return r ? 'pushed' : undefined;
+    let push = this.tagPushes.get(name);
+    if (push && (push.sha !== sha || push.outcome === 'failed')) {
+      this.tagPushes.delete(name);
+      push = undefined;
+    }
+    if (push?.outcome === 'pushed') {
+      this.tagPushes.delete(name);
+      return 'pushed';
+    }
+    if (!push) {
+      const started: TagPush = { sha, done: this.pushTag(name, sha) };
+      started.done.then(
+        () => (started.outcome = 'pushed'),
+        () => (started.outcome = 'failed'),
+      );
+      this.tagPushes.set(name, started);
+      push = started;
+    }
+    let r: { value: void } | undefined;
+    try {
+      r = await within(push.done, this.tickWaitMs);
+    } catch (err) {
+      if (this.tagPushes.get(name) === push) this.tagPushes.delete(name);
+      throw err;
+    }
+    if (!r) return undefined;
+    if (this.tagPushes.get(name) === push) this.tagPushes.delete(name);
+    return 'pushed';
   }
 
   /** Origin's head as last fetched, or undefined when origin has no integration branch. */
