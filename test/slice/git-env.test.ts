@@ -6,14 +6,16 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearWithheldStoreUrls, withholdStoreUrl } from '../../src/runs/childEnv.js';
+import { clearWithheldStoreUrls, LIBPQ_VARS, withholdStoreUrl } from '../../src/runs/childEnv.js';
 import type { Launch } from '../../src/state/store.js';
 import { git } from '../../src/workspace/git.js';
 import { GitWorkspace } from '../../src/workspace/git-workspace.js';
 import { makeRepo } from './harness.js';
 
 const URL = 'postgres://orch:s3cret-pw@db.internal:5432/orch';
-const SAVED = ['DATABASE_URL', 'ORCH_RUN_ID', 'ORCH_STORE_COPY', 'ORCH_TEST_UNRELATED'] as const;
+const SAVED = ['DATABASE_URL', 'DATABASE_URL_FILE', 'ORCH_RUN_ID', 'ORCH_STORE_COPY', 'ORCH_TEST_UNRELATED', ...LIBPQ_VARS] as const;
+/** The libpq variables of a store URL built from parts (ORC-100): the password is in PGPASSWORD, matched by no URL. */
+const LIBPQ_PW = 'pg-pw-Qm4-s3cret';
 
 let dir: string | undefined;
 let saved: Record<string, string | undefined> = {};
@@ -24,6 +26,8 @@ beforeEach(() => {
   process.env.ORCH_RUN_ID = 'run-abc';
   process.env.ORCH_STORE_COPY = URL;
   process.env.ORCH_TEST_UNRELATED = 'kept';
+  process.env.DATABASE_URL_FILE = '/run/secrets/db/uri';
+  for (const k of LIBPQ_VARS) process.env[k] = k === 'PGPASSWORD' ? LIBPQ_PW : `v-${k}`;
   withholdStoreUrl(URL);
 });
 
@@ -52,6 +56,9 @@ const expectNoStore = (printed: string) => {
   expect(printed).not.toMatch(/^ORCH_RUN_ID=/m);
   expect(printed).not.toMatch(/^ORCH_STORE_COPY=/m);
   expect(printed).not.toContain('s3cret-pw');
+  expect(printed).not.toMatch(/^DATABASE_URL_FILE=/m);
+  expect(printed).not.toContain(LIBPQ_PW);
+  for (const k of LIBPQ_VARS) expect(printed, k).not.toMatch(new RegExp(`^${k}=`, 'm'));
   expect(printed).toMatch(/^GIT_TERMINAL_PROMPT=0$/m);
   expect(printed).toMatch(/^GIT_CONFIG_NOSYSTEM=1$/m);
   expect(printed).toMatch(/^GIT_OPTIONAL_LOCKS=0$/m);

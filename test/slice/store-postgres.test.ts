@@ -242,6 +242,65 @@ describe.skipIf(!pgAvailable)('daemon on store.kind postgres', () => {
     expect(d.stderr()).not.toContain(secretOf(String(run.env()['DATABASE_URL'])));
   }, 30_000);
 
+  it('the store URL read from a file (DATABASE_URL_FILE or store.urlFile in a tracked config) opens the store with no URL in the daemon environment; an unreadable file fails the start naming the file', async () => {
+    // DATABASE_URL_FILE: the daemon's environment holds the path, never the URL or the password.
+    const run = await makeRun([...STORE(), 'leaseTtlMs: 600000']);
+    runIds.push(runIdOfRepo(run));
+    const url = String(run.env()['DATABASE_URL']);
+    const secret = secretOf(url);
+    const secrets = fresh();
+    const file = path.join(secrets, 'uri');
+    writeFileSync(file, `${url}\n`, { mode: 0o600 });
+    const fileEnv = (): NodeJS.ProcessEnv => {
+      const e: NodeJS.ProcessEnv = { ...run.env(), DATABASE_URL_FILE: file };
+      delete e['DATABASE_URL'];
+      return e;
+    };
+    const fromEnvFile: Run = { ...run, env: fileEnv };
+    const d = foreground(fromEnvFile);
+    await urlOfFg(fromEnvFile, d);
+    // What another process of the daemon's user reads as the running daemon's environment: /proc/<pid>/environ
+    // where there is /proc, else `ps eww` (macOS), which prints the command line followed by the environment.
+    const procEnviron = `/proc/${d.child.pid}/environ`;
+    const seen = existsSync(procEnviron)
+      ? readFileSync(procEnviron, 'utf8').split('\0').join('\n')
+      : (await execFileP('ps', ['eww', '-o', 'command=', '-p', String(d.child.pid)])).stdout.split(' ').join('\n');
+    expect(seen).toContain(`DATABASE_URL_FILE=${file}`);
+    expect(seen).not.toContain(secret);
+    expect(seen).not.toMatch(/^DATABASE_URL=/m);
+    const opened = d
+      .stderr()
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((l) => l['msg'] === 'store opened');
+    expect(opened).toBeTruthy();
+    d.child.kill('SIGTERM');
+    await d.exited;
+    expect(d.stderr()).not.toContain(secret);
+
+    // store.urlFile in the committed orchestrator.yaml: a path is not the URL, so the tracked file is not refused.
+    const tracked = await makeRun([...STORE(), `  urlFile: ${JSON.stringify(file)}`, 'leaseTtlMs: 600000']);
+    runIds.push(runIdOfRepo(tracked));
+    const trackedEnv = (): NodeJS.ProcessEnv => {
+      const e: NodeJS.ProcessEnv = { ...tracked.env() };
+      delete e['DATABASE_URL'];
+      return e;
+    };
+    const started = await startDaemon({ repo: tracked.repo, env: trackedEnv() });
+    expect(started.store).toMatchObject({ kind: 'postgres', urlSource: 'urlFile' });
+    expect(JSON.stringify(started)).not.toContain(secret);
+    await stopDaemon({ repo: tracked.repo, env: trackedEnv() });
+
+    // A file that does not exist: the start fails naming the file and DATABASE_URL_FILE.
+    const missing = path.join(secrets, 'absent');
+    const broken: Run = { ...run, env: () => ({ ...fileEnv(), DATABASE_URL_FILE: missing }) };
+    const b = foreground(broken);
+    const { code } = await b.exited;
+    expect(code).not.toBe(0);
+    expect(b.stderr()).toContain(`cannot read the database URL file ${missing} (DATABASE_URL_FILE)`);
+  }, 90_000);
+
   it.skipIf(pgSource !== 'cluster')('with its Postgres session stopped the daemon exits non-zero after flushDeadlineMs and logs the unflushed batch count', async () => {
     const deadline = 1_500;
     const run = await makeRun([...STORE(deadline), `leaseTtlMs: ${3 * deadline}`]);

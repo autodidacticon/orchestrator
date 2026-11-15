@@ -3,7 +3,7 @@
  * document never selecting a store, the proposed-graph slot on every backend, the store graph source, journal
  * readiness, and opening Postgres with its fatal paths. See specs/state-backend and specs/graph-import.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import pg from 'pg';
@@ -44,6 +44,36 @@ describe('store block', () => {
     const fromFile = defaultConfig({ store: { kind: 'postgres', url: 'postgres://file@h/db' } });
     expect(withStoreEnv(fromFile, { DATABASE_URL: 'postgres://env@h/db' }).store.url).toBe('postgres://file@h/db');
     expect(withStoreEnv(d, {}).store.url).toBeUndefined();
+  });
+
+  it('a URL file (store.urlFile, else DATABASE_URL_FILE) fills an unset url; two sources at once and an unreadable or empty file are refused without the URL (ORC-100)', () => {
+    const file = path.join(dir, 'uri');
+    writeFileSync(file, '  postgres://u:pw-file@h/db\n');
+    const other = path.join(dir, 'other');
+    writeFileSync(other, 'postgres://u:pw-other@h/db');
+    // Under sqlite no URL file is read, not even a missing one.
+    expect(withStoreEnv(defaultConfig(), { DATABASE_URL_FILE: path.join(dir, 'absent') }).store.url).toBeUndefined();
+    const d = defaultConfig({ store: { kind: 'postgres' } });
+    expect(withStoreEnv(d, { DATABASE_URL_FILE: file }).store.url).toBe('postgres://u:pw-file@h/db');
+    // Read once per process: a later change to the file is not seen by a second resolution.
+    writeFileSync(file, 'postgres://u:pw-rotated@h/db');
+    expect(withStoreEnv(d, { DATABASE_URL_FILE: file }).store.url).toBe('postgres://u:pw-file@h/db');
+    const withFile = defaultConfig({ store: { kind: 'postgres', urlFile: file } });
+    expect(withStoreEnv(withFile, {}).store.url).toBe('postgres://u:pw-file@h/db');
+    // store.urlFile wins over both environment inputs; store.url wins over the environment's file.
+    expect(withStoreEnv(withFile, { DATABASE_URL_FILE: other, DATABASE_URL: 'postgres://env@h/db' }).store.url).toBe('postgres://u:pw-file@h/db');
+    const withUrl = defaultConfig({ store: { kind: 'postgres', url: 'postgres://cfg@h/db' } });
+    expect(withStoreEnv(withUrl, { DATABASE_URL_FILE: other }).store.url).toBe('postgres://cfg@h/db');
+    expect(() => withStoreEnv(defaultConfig({ store: { kind: 'postgres', url: 'postgres://cfg@h/db', urlFile: file } }), {})).toThrow('store.url and store.urlFile are both set');
+    expect(() => withStoreEnv(d, { DATABASE_URL: 'postgres://env@h/db', DATABASE_URL_FILE: file })).toThrow('DATABASE_URL and DATABASE_URL_FILE are both set');
+    // Not refused under sqlite (no file is read), nor when the config names its own source.
+    expect(withStoreEnv(defaultConfig(), { DATABASE_URL: 'postgres://env@h/db', DATABASE_URL_FILE: file }).store.url).toBe('postgres://env@h/db');
+    const missing = path.join(dir, 'absent');
+    expect(() => withStoreEnv(d, { DATABASE_URL_FILE: missing })).toThrow(`cannot read the database URL file ${missing} (DATABASE_URL_FILE): ENOENT`);
+    const empty = path.join(dir, 'empty');
+    writeFileSync(empty, '\n');
+    expect(() => withStoreEnv(defaultConfig({ store: { kind: 'postgres', urlFile: empty } }), {})).toThrow(`the database URL file ${empty} (store.urlFile) is empty`);
+    expect(storeConfigError({ leaseTtlMs: 600_000, store: { kind: 'postgres', flushDeadlineMs: 120_000 } })).toContain('DATABASE_URL_FILE');
   });
 
   it('removes the password from every URL form, and names every printed form of it as a secret', () => {

@@ -51,13 +51,13 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     expect(cfg.apiBaseUrl).toBe('http://orchestrator.orch.svc:8080');
     expect(cfg.graphPath).toBeUndefined();
     expect(Object.keys(cm.data ?? {})).toEqual(['orchestrator.yaml']);
-    // The URL comes from DATABASE_URL (the Secret), never from the ConfigMap; the default lease outlasts the deadline.
-    expect(cfg.store).toEqual({ kind: 'postgres', flushDeadlineMs: 120000 });
+    // The URL comes from the mounted Secret file (store.urlFile), never from the ConfigMap itself; the default lease outlasts the deadline.
+    expect(cfg.store).toEqual({ kind: 'postgres', urlFile: '/var/run/secrets/orchestrator/postgres/uri', flushDeadlineMs: 120000 });
     expect(cfg.leaseTtlMs ?? 600_000).toBeGreaterThanOrEqual(cfg.store.flushDeadlineMs);
     expect(cfg.git.pushIntegration).toBe(true);
   });
 
-  it('the daemon is Recreate, clones REPO_URL into an emptyDir, reads DATABASE_URL from the CloudNativePG Secret, and runs orchestrator --repo on the clone', () => {
+  it('the daemon is Recreate, clones REPO_URL into an emptyDir, reads the store URL from the mounted CloudNativePG Secret file, and runs orchestrator --repo on the clone', () => {
     const spec = find(base, 'Deployment', 'orchestrator').spec;
     expect(spec.strategy.type).toBe('Recreate');
     const [init] = spec.template.spec.initContainers;
@@ -70,12 +70,20 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     expect(env(daemon, 'ORCH_LOG_FORMAT')).toBe('json');
     expect(daemon.livenessProbe.httpGet.path).toBe('/healthz');
     expect(daemon.readinessProbe.httpGet.path).toBe('/readyz');
-    expect(daemon.volumeMounts.map((m: { mountPath: string }) => m.mountPath).sort()).toEqual(['/data', '/data/repo/orchestrator.yaml']);
+    expect(daemon.volumeMounts.map((m: { mountPath: string }) => m.mountPath).sort()).toEqual(['/data', '/data/repo/orchestrator.yaml', '/var/run/secrets/orchestrator/postgres']);
     const volumes = spec.template.spec.volumes as Array<Record<string, unknown>>;
     expect(volumes.find((v) => v['name'] === 'data')).toEqual({ name: 'data', emptyDir: {} });
     expect(volumes.some((v) => 'persistentVolumeClaim' in v)).toBe(false);
-    const db = daemon.env.find((e: { name: string }) => e.name === 'DATABASE_URL');
-    expect(db.valueFrom.secretKeyRef).toEqual({ name: 'postgres-app', key: 'uri' });
+    // The Secret's uri key is a file at store.urlFile; the daemon's environment holds no URL, no password and no
+    // libpq variable, and nothing in it is read from a Secret. See deploy/README.md "Store credentials".
+    const mount = daemon.volumeMounts.find((m: { mountPath: string }) => m.mountPath === '/var/run/secrets/orchestrator/postgres');
+    expect(mount.readOnly).toBe(true);
+    expect(volumes.find((v) => v['name'] === mount.name)).toEqual({ name: mount.name, secret: { secretName: 'postgres-app', defaultMode: 0o440, items: [{ key: 'uri', path: 'uri' }] } });
+    const names = (daemon.env as Array<{ name: string; valueFrom?: unknown }>).map((e) => e.name);
+    for (const n of ['DATABASE_URL', 'DATABASE_URL_FILE']) expect(names).not.toContain(n);
+    expect(names.filter((n) => n.startsWith('PG'))).toEqual([]);
+    expect((daemon.env as Array<{ valueFrom?: unknown }>).some((e) => e.valueFrom !== undefined)).toBe(false);
+    expect(daemon.envFrom).toBeUndefined();
     // No fixed run id: each deployment's id is the hash of its clone's origin. See deploy/README.md "The run id".
     expect(daemon.env.some((e: { name: string }) => e.name === 'ORCH_RUN_ID')).toBe(false);
     const cluster = find(base, 'Cluster', 'postgres');

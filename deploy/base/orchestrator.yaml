@@ -6,13 +6,15 @@ daemon:
 apiBind: 0.0.0.0
 apiPort: 8080
 apiBaseUrl: http://orchestrator.orch.svc:8080
-# The run's state is in Postgres; the URL is DATABASE_URL, from the CloudNativePG application Secret.
+# The run's state is in Postgres; the URL is read from the CloudNativePG application Secret, mounted as a file
+# (urlFile), so it is never in the daemon's environment. See deploy/README.md "Store credentials".
 # A worker lease (leaseTtlMs, 10 minutes by default) must be at least flushDeadlineMs.
 # No runId here: the run id is a hash of the clone's origin (REPO_URL, with git.pushIntegration on), so each
 # deployment of a different repository has its own run on a shared database. Set store.runId or ORCH_RUN_ID for
 # two deployments of one repository. See deploy/README.md "The run id".
 store:
   kind: postgres
+  urlFile: /var/run/secrets/orchestrator/postgres/uri
   flushDeadlineMs: 120000
 # The pod has no volume: origin holds the integration branch and the milestone tags, so a restarted daemon
 # on a fresh clone continues from them. The graph lives in the store; load it with PUT /v1/graph.

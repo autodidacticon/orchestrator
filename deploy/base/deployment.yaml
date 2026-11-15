@@ -49,12 +49,9 @@ spec:
             # The run directory (worktrees, logs, daemon.json) on the emptyDir; the store is in Postgres.
             - name: ORCH_HOME
               value: /data/home
-            # The CloudNativePG application Secret's connection URI. Printed only without its password.
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-app
-                  key: uri
+            # No DATABASE_URL and no PG* variable: the store URL is read from the mounted Secret file named by
+            # store.urlFile (orchestrator.yaml), so the daemon's environment (/proc/<pid>/environ) holds no URL or
+            # password. See deploy/README.md "Store credentials".
             # One JSON object per stderr line, for the cluster's log collector.
             - name: ORCH_LOG_FORMAT
               value: json
@@ -84,9 +81,21 @@ spec:
               mountPath: /data/repo/orchestrator.yaml
               subPath: orchestrator.yaml
               readOnly: true
+            # The CloudNativePG application Secret's connection URI, as a file; read once at startup and printed only without its password.
+            - name: store-url
+              mountPath: /var/run/secrets/orchestrator/postgres
+              readOnly: true
       volumes:
         - name: data
           emptyDir: {}
+        # Only the `uri` key, readable by the owner and the pod's fsGroup (the daemon's group).
+        - name: store-url
+          secret:
+            secretName: postgres-app
+            defaultMode: 0440
+            items:
+              - key: uri
+                path: uri
         - name: config
           configMap:
             name: orchestrator-config

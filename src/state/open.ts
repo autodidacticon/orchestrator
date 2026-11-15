@@ -70,7 +70,7 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
     };
   }
   const url = opts.store.url;
-  if (!url) throw new StoreOpenError('store.kind is postgres but no database URL is set: set store.url or DATABASE_URL', 'noUrl');
+  if (!url) throw new StoreOpenError('store.kind is postgres but no database URL is set: set store.url, store.urlFile, DATABASE_URL_FILE or DATABASE_URL', 'noUrl');
   let sink: PgSink;
   try {
     sink = await PgSink.open({ connection: url, runId: opts.runId });

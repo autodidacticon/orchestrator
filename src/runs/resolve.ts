@@ -5,7 +5,7 @@
  * "Resolution order and provenance".
  */
 import { z } from 'zod';
-import { type Config, configSchema, redactUrl, storeUrlSource } from '../config.js';
+import { type Config, configSchema, redactUrl, storeUrlSource, type StoreUrlSource } from '../config.js';
 import { hasAllowedToolsSlot, hasEffortSlot, hasModelSlot } from '../runner/command.js';
 import {
   anyModelSchema,
@@ -483,7 +483,7 @@ export interface ConfigReport {
 export interface StoreReport {
   kind: 'sqlite' | 'postgres';
   url?: string;
-  urlSource?: 'file' | 'environment';
+  urlSource?: StoreUrlSource;
   flushDeadlineMs: number;
 }
 

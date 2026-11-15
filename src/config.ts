@@ -150,6 +150,12 @@ export const configSchema = z.object({
       /** The Postgres connection URL; `DATABASE_URL` when unset. Printed only with its password removed. */
       url: z.string().min(1).optional(),
       /**
+       * A file holding the Postgres connection URL (a mounted secret), read once at startup; `DATABASE_URL_FILE`
+       * when unset. Used when `url` is unset; then the URL is never in the daemon's environment. A relative path
+       * resolves against the daemon's working directory. See specs/state-backend "Store URL from a file".
+       */
+      urlFile: z.string().min(1).optional(),
+      /**
        * postgres only: the run id, which keys the rows and the run lock. Unset: `ORCH_RUN_ID`, else a hash of
        * git.originUrl (or of the clone's origin while git.pushIntegration is on), else the repository path hash.
        * Checked at startup against 1 to 64 characters of [A-Za-z0-9_-]. See specs/state-backend "Run id per deployment".
@@ -259,6 +265,7 @@ export function defaultConfig(overrides: ConfigInput = {}): Config {
   return configSchema.parse(overrides);
 }
 
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
@@ -273,19 +280,69 @@ export async function loadConfig(file: string, env: NodeJS.ProcessEnv = process.
   return { ...cfg, repoPath: abs(cfg.repoPath), graphPath: abs(cfg.graphPath), dataDir: abs(cfg.dataDir) };
 }
 
-/** `store.url` from `DATABASE_URL` when the file leaves it unset. The only environment input of the store block. */
-export function withStoreEnv(cfg: Config, env: NodeJS.ProcessEnv = process.env): Config {
-  const fromEnv = env['DATABASE_URL']?.trim();
-  if (cfg.store.url || !fromEnv) return cfg;
-  return { ...cfg, store: { ...cfg.store, url: fromEnv } };
+/** A store URL source that cannot be used: two sources at once, or a URL file that cannot be read or is empty. Never carries the URL. */
+export class StoreUrlError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StoreUrlError';
+  }
 }
 
-/** Where `store.url` came from: the file, `DATABASE_URL`, or nowhere. */
-export function storeUrlSource(cfg: Config, fileRaw: Record<string, unknown> | undefined): 'file' | 'environment' | undefined {
+/** URL files already read by this process, by path: the daemon resolves its configuration more than once at startup, and every resolution sees the same URL. */
+const urlFileCache = new Map<string, string>();
+
+/** Forget the URL files read so far (tests). */
+export function clearStoreUrlFileCache(): void {
+  urlFileCache.clear();
+}
+
+/** The URL held by a store URL file: its content, trimmed. Read once per process and path; a failed read is not kept. */
+export function readStoreUrlFile(file: string, origin: string): string {
+  const cached = urlFileCache.get(path.resolve(file));
+  if (cached !== undefined) return cached;
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    throw new StoreUrlError(`cannot read the database URL file ${file} (${origin}): ${(err as NodeJS.ErrnoException).code ?? (err as Error).message}`);
+  }
+  const url = text.trim();
+  if (!url) throw new StoreUrlError(`the database URL file ${file} (${origin}) is empty`);
+  urlFileCache.set(path.resolve(file), url);
+  return url;
+}
+
+/**
+ * `store.url` when the file leaves it unset. Under `store.kind: postgres`, in this order: the file named by
+ * `store.urlFile`, else the file named by `DATABASE_URL_FILE`, else `DATABASE_URL`; `store.url` with
+ * `store.urlFile`, or `DATABASE_URL` with `DATABASE_URL_FILE`, is refused. Under `sqlite` no file is read and
+ * `DATABASE_URL` fills the unused url, as before. The only environment inputs of the store block besides
+ * `ORCH_RUN_ID`. See specs/state-backend "Store URL from a file".
+ */
+export function withStoreEnv(cfg: Config, env: NodeJS.ProcessEnv = process.env): Config {
+  const fromEnv = env['DATABASE_URL']?.trim();
+  const fileFromEnv = env['DATABASE_URL_FILE']?.trim();
+  if (cfg.store.url && cfg.store.urlFile) throw new StoreUrlError('store.url and store.urlFile are both set: set one');
+  if (cfg.store.url) return cfg;
+  if (cfg.store.kind !== 'postgres') return fromEnv ? { ...cfg, store: { ...cfg.store, url: fromEnv } } : cfg;
+  if (fromEnv && fileFromEnv && !cfg.store.urlFile) throw new StoreUrlError('DATABASE_URL and DATABASE_URL_FILE are both set: set one');
+  let url: string | undefined;
+  if (cfg.store.urlFile) url = readStoreUrlFile(cfg.store.urlFile, 'store.urlFile');
+  else if (fileFromEnv) url = readStoreUrlFile(fileFromEnv, 'DATABASE_URL_FILE');
+  else url = fromEnv || undefined;
+  if (!url) return cfg;
+  return { ...cfg, store: { ...cfg.store, url } };
+}
+
+/** Where `store.url` came from: the config file, a URL file (`store.urlFile` or `DATABASE_URL_FILE`), `DATABASE_URL`, or nowhere. */
+export function storeUrlSource(cfg: Config, fileRaw: Record<string, unknown> | undefined, env: NodeJS.ProcessEnv = process.env): StoreUrlSource | undefined {
   if (!cfg.store.url) return undefined;
   const fileStore = fileRaw?.['store'] as { url?: unknown } | undefined;
-  return typeof fileStore?.url === 'string' && fileStore.url ? 'file' : 'environment';
+  if (typeof fileStore?.url === 'string' && fileStore.url) return 'file';
+  return cfg.store.kind === 'postgres' && (cfg.store.urlFile || env['DATABASE_URL_FILE']?.trim()) ? 'urlFile' : 'environment';
 }
+
+export type StoreUrlSource = 'file' | 'urlFile' | 'environment';
 
 /**
  * A connection URL with its password removed: from the userinfo, from a `password` query parameter, and from a
@@ -354,7 +411,7 @@ export function minLeaseTtlMs(flushDeadlineMs: number): number {
  */
 export function storeConfigError(cfg: Pick<Config, 'store' | 'leaseTtlMs'>): string | undefined {
   if (cfg.store.kind !== 'postgres') return undefined;
-  if (!cfg.store.url) return 'store.kind is postgres but no database URL is set: set store.url or DATABASE_URL';
+  if (!cfg.store.url) return 'store.kind is postgres but no database URL is set: set store.url, store.urlFile, DATABASE_URL_FILE or DATABASE_URL';
   if (!leaseCoversFlushDeadline(cfg.leaseTtlMs, cfg.store.flushDeadlineMs)) {
     const min = minLeaseTtlMs(cfg.store.flushDeadlineMs);
     const every = renewEveryMsOf(cfg.leaseTtlMs);

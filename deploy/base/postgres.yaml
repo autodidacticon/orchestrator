@@ -1,6 +1,6 @@
 # The run's state: a CloudNativePG cluster. The operator must be installed first (deploy/smoke.sh does it).
 # CloudNativePG creates the Secret postgres-app (keys username, password, host, port, dbname, uri) for the
-# application user; the daemon reads its `uri` as DATABASE_URL. The data lives on the cluster's own claim
+# application user; the daemon mounts its `uri` as a file and reads it (store.urlFile). The data lives on the cluster's own claim
 # (postgres-1), not on the daemon's. See specs/state-backend "Store selection" and specs/cluster-runtime.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster

@@ -63,7 +63,7 @@ The `orchestrator` Deployment runs one daemon with strategy `Recreate`. It has n
 - `/data/repo`: the clone the daemon integrates into, made fresh by the init container on every start.
 - `/data/home`: `ORCH_HOME`, the run directory (worktrees, logs, `daemon.json`). Nothing in it has to survive a restart.
 
-The run's state (tasks, launches, events, outbox, the accepted and proposed graphs) is in Postgres: `store.kind: postgres`, with the connection URL in `DATABASE_URL`, read from the CloudNativePG application Secret `postgres-app` (key `uri`). The integration branch and the milestone tags are on origin (`git.pushIntegration: true`). A new pod therefore takes the run lock, loads the run from Postgres, fetches origin, and continues: a parked launch's worktree is prepared again, a claimed launch whose worktree is gone is ended and retried, and a queued verifier job whose sealed commit the new clone lacks fails its task without spending an attempt. Two daemons never write one run: the second one cannot take the run's Postgres lock and exits, and the pod restarts until the first is gone.
+The run's state (tasks, launches, events, outbox, the accepted and proposed graphs) is in Postgres: `store.kind: postgres`, with the connection URL read from the CloudNativePG application Secret `postgres-app` (key `uri`), which is mounted as the file `/var/run/secrets/orchestrator/postgres/uri` and named by `store.urlFile` (see "Store credentials" below). The integration branch and the milestone tags are on origin (`git.pushIntegration: true`). A new pod therefore takes the run lock, loads the run from Postgres, fetches origin, and continues: a parked launch's worktree is prepared again, a claimed launch whose worktree is gone is ended and retried, and a queued verifier job whose sealed commit the new clone lacks fails its task without spending an attempt. Two daemons never write one run: the second one cannot take the run's Postgres lock and exits, and the pod restarts until the first is gone.
 
 #### The run id
 
@@ -87,7 +87,36 @@ So are `git@git.example.com:team/project.git` (an scp-like address, taken as wri
 
 Set `store.runId` or `ORCH_RUN_ID` when two deployments clone the same repository into one database (for example a staging and a production run of one project), or when the id must survive a change of `REPO_URL`. An explicit id is 1 to 64 characters of `A-Z a-z 0-9 _ -`; any other value stops the daemon at startup with a message naming it. The run directory under `ORCH_HOME` is named after the id, and `deploy/smoke.sh` reads it from `/v1/status` (`runDir`).
 
-The store's connection does not reach check commands or agents (of every runner kind, nor what they start): they run without `DATABASE_URL`, `ORCH_RUN_ID`, and any variable whose value is the store URL. A `store.url` written in a config file that git tracks is refused at startup, because every worktree would carry it. The mounted `orchestrator.yaml` is excluded from the clone. The daemon's own git commands do not carry the store URL either: each one runs without `DATABASE_URL`, `ORCH_RUN_ID` and any variable whose value is the store URL, so a project git hook they run (such as `pre-commit` on a kept-release WIP commit, or one run by the verifier's rebase) does not see it.
+#### Store credentials
+
+**Where the daemon reads the URL.** With `store.kind: postgres` and no `store.url` in the config file, the daemon reads the URL from the first of these that is set:
+
+1. the file named by `store.urlFile`;
+2. the file named by `DATABASE_URL_FILE`;
+3. `DATABASE_URL`.
+
+A URL file holds the URL and nothing else; surrounding whitespace is trimmed. The daemon reads it once, at startup. A file that cannot be read, or is empty, stops the daemon with a message naming the file but never the URL. Two sources at once are refused: `store.url` with `store.urlFile`, or `DATABASE_URL` with `DATABASE_URL_FILE`. A `store.urlFile` in a tracked config file is allowed, since it is a path. A `store.url` in a tracked config file is refused at startup, because every worktree would carry it. The mounted `orchestrator.yaml` is excluded from the clone.
+
+**What the daemon removes from its children's environments.** Check commands, agents (of every runner kind, and what they start) and the daemon's own git commands, with any project git hook those run (such as `pre-commit` on a kept-release WIP commit, or one run by the verifier's rebase), run without these variables:
+
+- `DATABASE_URL`, `DATABASE_URL_FILE` and `ORCH_RUN_ID`;
+- every libpq connection variable in `LIBPQ_VARS` (`src/runs/childEnv.ts`), such as `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGPASSFILE`, `PGSERVICE`, `PGSERVICEFILE`, `PGSYSCONFDIR`, `PGSSLMODE`, `PGSSLKEY` and `PGSSLROOTCERT`;
+- any variable whose value is the store URL.
+
+The libpq names are removed whatever their values, so a URL built from parts (`postgres://host/db` plus `PGPASSWORD`) does not get through either. A check command that needs `PG*` variables of its own, for a test database say, must set them itself.
+
+**What the daemon cannot remove.** A check command always runs as the daemon's user, in the daemon's container. So does an agent the daemon spawns (`runner.mode: spawn` or `mixed`), and so does a pull-mode worker that works its worktree inside the daemon's container. With this manifest the worktrees are on the daemon pod's `emptyDir`, so a worker works there: the smoke script does it with `kubectl exec`. Any such process can still read:
+
+- the URL file. The Secret mount is mode 0440, readable through the pod's `fsGroup`, which is the daemon's group;
+- the daemon's environment as the daemon was started (`/proc/<daemon pid>/environ`). This holds the URL or the password if the deployment passes `DATABASE_URL` or a `PG*` variable to the daemon;
+- the daemon's memory, where the kernel lets a process of the same user read it. One example is `/proc/<daemon pid>/mem` when Yama `ptrace_scope` is 0.
+
+The daemon does not prevent these reads, and the spec claims nothing more (specs/state-backend "Store credentials a child can still reach"). A deployment limits them as follows:
+
+- **The daemon's environment.** Give the daemon the URL through a file, not through its environment. This manifest does: the daemon container has no `DATABASE_URL`, no `PG*` variable, no `envFrom` and no variable read from a Secret, so `/proc/<daemon pid>/environ` holds no URL or password.
+- **Agents.** In pull mode the daemon spawns no agent (`runner.mode: pull`, as here). A worker still reaches what a check command reaches when it works inside the daemon's container, and with this manifest that is the only place its worktree is. This manifest does not run workers anywhere else.
+- **The daemon's memory.** Yama `ptrace_scope` at 1 or more on the nodes keeps a child from attaching to its parent, and with that from reading the parent's memory through `/proc/<pid>/mem`. It limits ptrace-style reads only.
+- **The URL file.** Nothing in this manifest keeps it from a check command or a worker in the daemon's container. Give the run a database role with no more privileges than the run needs, and let only commands you trust with that role run there.
 
 The init container `clone` clones `REPO_URL` into `/data/repo`. The daemon container then runs `orchestrator --repo /data/repo`, with `/healthz` as its liveness probe and `/readyz` as its readiness probe.
 
@@ -97,6 +126,7 @@ The init container `clone` clones `REPO_URL` into `/data/repo`. The daemon conta
 - `daemon.idleExitMs: 0`: the daemon never exits on its own.
 - `apiBind: 0.0.0.0` and `apiPort: 8080`: the API listens where the Service sends traffic.
 - `apiBaseUrl: http://orchestrator.orch.svc:8080`: the URL advertised to agents.
+- `store.urlFile: /var/run/secrets/orchestrator/postgres/uri`: the mounted Secret file holding the URL (see "Store credentials").
 - `store.kind: postgres` and `store.flushDeadlineMs: 120000`: the daemon exits non-zero when a batch cannot reach Postgres within the deadline, or at once when its session (and the run lock) is lost. The worker lease (`leaseTtlMs`, 10 minutes by default) must be at least the deadline, or the daemon refuses to start.
 - `git.pushIntegration: true`: origin is the source of truth for the integration branch.
 

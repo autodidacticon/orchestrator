@@ -4,8 +4,11 @@
  * inside the run's data directory and the client-side daemon variables are
  * gone, so a client they run finds no daemon of the user's. The daemon's own
  * API stays reachable through `ORCH_API`. The store's connection is never
- * passed on: `DATABASE_URL`, `ORCH_RUN_ID` and any variable whose value is the
- * resolved store URL are removed. See specs/agent-protocol "Agent environment",
+ * passed on: `DATABASE_URL`, `DATABASE_URL_FILE`, `ORCH_RUN_ID`, every libpq
+ * connection variable (`LIBPQ_VARS`) and any variable whose value is the
+ * resolved store URL are removed. What a child running as the daemon's user can
+ * still reach (a mounted secret file, the daemon's memory) is stated in
+ * deploy/README.md "Store credentials". See specs/agent-protocol "Agent environment",
  * specs/integration-pipeline "Check environment" and specs/state-backend
  * "No store URL in child environments".
  */
@@ -17,7 +20,60 @@ export const CHILD_HOME = 'child-home';
 export const CLIENT_VARS = ['ORCH_URL', 'ORCH_REPO', 'ORCH_DATA_DIR'] as const;
 
 /** The store's inputs: a child that read them would reach the orchestrator's state database. Empty means delete. */
-export const STORE_VARS = ['DATABASE_URL', 'ORCH_RUN_ID'] as const;
+export const STORE_VARS = ['DATABASE_URL', 'DATABASE_URL_FILE', 'ORCH_RUN_ID'] as const;
+
+/**
+ * The libpq environment variables that choose a server, a database, a user, a password, a service or password
+ * file, or a TLS/GSS identity (the PostgreSQL client documentation's "Environment Variables", plus `PGSYSCONFDIR`,
+ * which locates `pg_service.conf`). A store URL built from parts (`postgres://host/db` plus `PGPASSWORD`) is not
+ * matched by value, so these names are removed whatever their values. The one list of them; a test asserts each
+ * name. Empty means delete.
+ */
+export const LIBPQ_VARS = [
+  'PGHOST',
+  'PGHOSTADDR',
+  'PGPORT',
+  'PGDATABASE',
+  'PGUSER',
+  'PGPASSWORD',
+  'PGPASSFILE',
+  'PGSERVICE',
+  'PGSERVICEFILE',
+  'PGSYSCONFDIR',
+  'PGOPTIONS',
+  'PGAPPNAME',
+  'PGSSLMODE',
+  'PGREQUIRESSL',
+  'PGSSLNEGOTIATION',
+  'PGSSLCOMPRESSION',
+  'PGSSLCERT',
+  'PGSSLKEY',
+  'PGSSLPASSWORD',
+  'PGSSLCERTMODE',
+  'PGSSLROOTCERT',
+  'PGSSLCRL',
+  'PGSSLCRLDIR',
+  'PGSSLSNI',
+  'PGSSLKEYLOGFILE',
+  'PGREQUIREPEER',
+  'PGSSLMINPROTOCOLVERSION',
+  'PGSSLMAXPROTOCOLVERSION',
+  'PGMINPROTOCOLVERSION',
+  'PGMAXPROTOCOLVERSION',
+  'PGGSSENCMODE',
+  'PGKRBSRVNAME',
+  'PGGSSLIB',
+  'PGGSSDELEGATION',
+  'PGCHANNELBINDING',
+  'PGREQUIREAUTH',
+  'PGCONNECT_TIMEOUT',
+  'PGTARGETSESSIONATTRS',
+  'PGLOADBALANCEHOSTS',
+] as const;
+
+/** Every name removed from a child environment whatever its value: the store's own inputs and libpq's. */
+export const WITHHELD_VARS: readonly string[] = [...STORE_VARS, ...LIBPQ_VARS];
+const withheldNames: ReadonlySet<string> = new Set(WITHHELD_VARS);
 
 /** Store URLs whose holders are removed from every child environment, whatever the variable's name. */
 const withheld = new Set<string>();
@@ -37,15 +93,15 @@ export function clearWithheldStoreUrls(): void {
 export function isolationEnv(dataDir: string): Record<string, string> {
   const out: Record<string, string> = { ORCH_HOME: path.join(dataDir, CHILD_HOME) };
   for (const k of CLIENT_VARS) out[k] = '';
-  for (const k of STORE_VARS) out[k] = '';
+  for (const k of WITHHELD_VARS) out[k] = '';
   return out;
 }
 
-/** The environment without the store's variables and without any variable holding a withheld store URL. */
+/** The environment without the store's variables, the libpq variables, and any variable holding a withheld store URL. */
 export function withoutStore<T extends string | undefined>(env: Record<string, T>): Record<string, T> {
   const out: Record<string, T> = {};
   for (const [k, v] of Object.entries(env)) {
-    if ((STORE_VARS as readonly string[]).includes(k)) continue;
+    if (withheldNames.has(k)) continue;
     if (typeof v === 'string' && withheld.has(v.trim())) continue;
     out[k] = v;
   }
