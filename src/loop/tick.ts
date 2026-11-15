@@ -458,7 +458,7 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
         if (candidate) {
           if (o.config.remediateMode === 'auto') {
             o.store.setPayloadOverlay(id, g.rev, { ...(o.store.getPayloadOverlay(id, g.rev) ?? {}), ...candidate });
-            await startLaunch(o, id);
+            await launchOrAbandon(o, id);
             continue;
           }
           o.transition(id, { kind: 'blocked', reason: { kind: 'needsDecision', message: `remediation candidate for: ${v.missing.join(', ')}`, missing: v.missing, candidate } }, 'orchestrator', 'briefValidationFailed');
@@ -468,7 +468,25 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
       o.transition(id, { kind: 'blocked', reason: { kind: 'insufficientSpec', message: `missing: ${v.missing.join(', ')}`, missing: v.missing } }, 'orchestrator', 'briefValidationFailed');
       continue;
     }
+    await launchOrAbandon(o, id);
+  }
+}
+
+/**
+ * Start a launch at admission. One whose row was created but whose prepare or spawn threw has no agent: it is ended and
+ * its attempt failed like a failed spawn of a parked launch, so the task is not left `running` on a `preparing` or
+ * `launching` row until a restart. A throw before the row exists (the integration head unreadable) leaves the task
+ * unstarted and propagates as before. See specs/pull-runner "Failed launch at admission".
+ */
+async function launchOrAbandon(o: Orchestrator, id: Id): Promise<void> {
+  const before = o.entry(id).lease?.launchId;
+  try {
     await startLaunch(o, id);
+  } catch (err) {
+    const leased = o.entry(id).lease?.launchId;
+    const row = leased !== undefined && leased !== before ? o.store.getLaunch(leased) : undefined;
+    if (!row || (row.status !== 'preparing' && row.status !== 'launching')) throw err;
+    await abandonSpawn(o, row, row.status === 'preparing' ? 'prepare' : 'spawn', err);
   }
 }
 
@@ -477,19 +495,62 @@ export async function spawnDueLaunches(o: Orchestrator): Promise<void> {
   const mode = o.effectiveMode();
   if (mode === 'pull') return;
   const window = mode === 'mixed' ? o.config.runner.claimWindowMs : 0;
-  for (const launch of o.store.listLaunches({ status: 'claimable' })) {
-    if (o.now() - (launch.claimableAt ?? launch.createdAt) < window) continue;
-    const entry = o.entry(launch.taskId);
-    if (entry.status.kind !== 'running' || entry.lease?.launchId !== launch.launchId) continue;
-    // Leave `claimable` before any await, so no claim lands while the brief is recomposed. The parked brief was written
-    // for a worker that claims, with a lease line; a spawned launch's brief has none. A crash here leaves a `launching`
-    // launch, which recovery revokes and relaunches. See specs/agent-protocol "No lease line for a spawned launch".
-    o.store.updateLaunch(launch.launchId, { status: 'launching' });
-    const launching = { ...launch, status: 'launching' as const };
-    await o.workspace.remove(launching);
-    await o.workspace.prepare(launching, o.briefInput(launching));
-    await spawnLaunch(o, launching);
+  for (const listed of o.store.listLaunches({ status: 'claimable' })) {
+    if (o.now() - (listed.claimableAt ?? listed.createdAt) < window) continue;
+    // The list is a snapshot, and a claim can land while an earlier launch of it is awaited: read the row and the
+    // task again and move the launch to `launching` in the same synchronous step, so a claimed launch keeps its worker,
+    // its worktree and its single agent. See specs/pull-runner "Spawn pass reads each launch before it spawns it".
+    // Leaving `claimable` before any await also keeps a claim from landing while the brief is recomposed. The parked
+    // brief was written for a worker that claims, with a lease line; a spawned launch's brief has none. A crash here
+    // leaves a `launching` launch, which recovery revokes and relaunches. See specs/agent-protocol "No lease line for a spawned launch".
+    const launching = o.store.transaction((): Launch | undefined => {
+      const current = o.store.getLaunch(listed.launchId);
+      if (current?.status !== 'claimable') return undefined;
+      const entry = o.entry(current.taskId);
+      if (entry.status.kind !== 'running' || entry.lease?.launchId !== current.launchId) return undefined;
+      o.store.updateLaunch(current.launchId, { status: 'launching' });
+      return { ...current, status: 'launching' };
+    });
+    if (!launching) continue;
+    let stage: 'remove' | 'prepare' | 'spawn' = 'remove';
+    try {
+      if ((await o.workspace.remove(launching)) === false) throw new Error(`the parked worktree ${launching.worktree} could not be removed`);
+      stage = 'prepare';
+      await o.workspace.prepare(launching, o.briefInput(launching));
+      stage = 'spawn';
+      await spawnLaunch(o, launching);
+    } catch (err) {
+      await abandonSpawn(o, launching, stage, err);
+    }
   }
+}
+
+/**
+ * A launch the spawn pass moved to `launching` whose worktree removal, prepare or spawn failed, or one admission created
+ * whose prepare or spawn threw, has no agent: end it with
+ * the stage and the error, and fail the task's attempt (charged, so a failure that repeats ends in `blocked` rather than
+ * looping), which retries it with a new launch. The store work comes first, before any await; killing a half-started
+ * process and removing the worktree are best effort, and a worktree left behind is retried on later ticks.
+ * See specs/pull-runner "Failed spawn of a parked launch".
+ */
+async function abandonSpawn(o: Orchestrator, launch: Launch, stage: 'remove' | 'prepare' | 'spawn', err: unknown): Promise<void> {
+  const error = err instanceof Error ? err.message : String(err);
+  const message = `launch ${launch.launchId} could not be started: ${stage} failed: ${error}`;
+  o.store.transaction(() => {
+    const current = o.store.getLaunch(launch.launchId);
+    if (current) o.endLaunch(current, 'spawnFailed', { stage, error });
+    const entry = o.entry(launch.taskId);
+    if (entry.status.kind === 'running' && entry.lease?.launchId === launch.launchId) {
+      o.fail(launch.taskId, { kind: 'exitedWithoutReport', message, detail: { launchId: launch.launchId, spawnFailed: true, stage, error } }, 'orchestrator', 'deadOrExpired');
+    }
+  });
+  o.log.warn('a launch could not be started; its attempt ended', { taskId: launch.taskId, launchId: launch.launchId, stage, err: error });
+  try {
+    await o.runner.killByLaunchId(launch.launchId);
+  } catch (killErr) {
+    o.log.warn('kill after a failed launch failed', { launchId: launch.launchId, err: String(killErr) });
+  }
+  await removeOrRetryLater(o, launch);
 }
 
 /** Phase 5. */

@@ -96,6 +96,175 @@ describe('runner modes', () => {
     expect(parked(pull)).toEqual(['T5']);
   });
 
+  it('mixed: a claim that lands while the spawn pass awaits another launch keeps its launch, worktree and single agent', async () => {
+    const h = harness({ mode: 'mixed', claimWindowMs: 2000 });
+    await h.orch.tick();
+    expect(parked(h)).toEqual(['T1', 'T5']);
+    h.advance(2500);
+
+    // Hold the first prepare of the pass open; record every remove and prepare the pass makes.
+    const prepare = h.workspace.prepare.bind(h.workspace);
+    const remove = h.workspace.remove.bind(h.workspace);
+    const prepared: string[] = [];
+    const removed: string[] = [];
+    let entered!: (launchId: string) => void;
+    const enteredP = new Promise<string>((r) => (entered = r));
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    h.workspace.prepare = async (launch, brief) => {
+      prepared.push(launch.launchId);
+      if (prepared.length === 1) {
+        entered(launch.launchId);
+        await released;
+      }
+      return prepare(launch, brief);
+    };
+    h.workspace.remove = async (launch) => {
+      removed.push(launch.launchId);
+      return remove(launch);
+    };
+
+    const tick = h.orch.tick();
+    const heldId = await enteredP;
+    const other = h.store.listLaunches({ status: 'claimable' }).find((l) => l.launchId !== heldId)!;
+    expect(other).toBeDefined();
+    const briefBefore = h.workspace.briefs.get(other.launchId);
+    const c = await h.orch.claim({ workerId: 'w1', taskId: other.taskId });
+    expect(c.status).toBe(200);
+    release();
+    await tick;
+
+    const claimed = h.store.getLaunch(other.launchId)!;
+    expect(claimed).toMatchObject({ status: 'live', worker: { id: 'w1' } });
+    expect(claimed.pid).toBeUndefined();
+    expect(removed).not.toContain(other.launchId);
+    expect(prepared).not.toContain(other.launchId);
+    expect(h.workspace.worktrees.has(other.launchId)).toBe(true);
+    expect(h.workspace.briefs.get(other.launchId)).toBe(briefBefore);
+    expect(h.store.listEvents({ launchId: other.launchId }).map((e) => e.kind)).toEqual(['launch.created', 'launch.claimable', 'launch.claimed']);
+    expect(h.runner.spawned.map((l) => l.launchId)).toEqual([heldId]);
+    expect(h.store.getLaunch(heldId)).toMatchObject({ status: 'live' });
+    expect(h.orch.entry(other.taskId)).toMatchObject({ status: { kind: 'running' }, lease: { launchId: other.launchId } });
+  });
+
+  it('mixed: a parked launch whose re-prepare fails does not stay launching; its attempt ends with a reason and the task is launched again', async () => {
+    const h = harness({ mode: 'mixed', claimWindowMs: 2000 }, { capacity: 1 });
+    await h.orch.tick();
+    expect(parked(h)).toEqual(['T1']);
+    const first = h.store.listLaunches({ status: 'claimable' })[0]!;
+    h.advance(2500);
+    const prepare = h.workspace.prepare.bind(h.workspace);
+    let failures = 1;
+    h.workspace.prepare = async (launch, brief) => {
+      if (failures-- > 0) throw new Error('disk full');
+      return prepare(launch, brief);
+    };
+    await h.orch.tick();
+
+    expect(h.store.listLaunches({ status: 'launching' })).toEqual([]);
+    expect(h.store.getLaunch(first.launchId)).toMatchObject({ status: 'ended', endReason: 'spawnFailed' });
+    const ended = h.store.listEvents({ kind: 'launch.ended', launchId: first.launchId });
+    expect(ended).toMatchObject([{ payload: { endReason: 'spawnFailed', stage: 'prepare', error: 'disk full' } }]);
+    expect(h.runner.spawned.map((l) => l.launchId)).not.toContain(first.launchId);
+    expect(h.workspace.worktrees.has(first.launchId)).toBe(false);
+    // The failed attempt is recorded and charged; the task is launched again on a new launch, parked for its window.
+    const e = h.orch.entry('T1');
+    expect(e.attempts).toBe(1);
+    expect(e.status.kind).toBe('running');
+    expect(e.lease?.launchId).not.toBe(first.launchId);
+    expect(h.store.getLaunch(e.lease!.launchId)).toMatchObject({ status: 'claimable', attempt: 2 });
+    expect(e.carry?.priorFailure).toMatchObject({ kind: 'exitedWithoutReport', detail: { spawnFailed: true, stage: 'prepare' } });
+
+    // After the new window the pass spawns it: one agent, live.
+    h.advance(2500);
+    await h.orch.tick();
+    expect(h.store.getLaunch(e.lease!.launchId)).toMatchObject({ status: 'live' });
+    expect(h.runner.spawned.map((l) => l.launchId)).toEqual([e.lease!.launchId]);
+  });
+
+  it('mixed: a parked worktree that cannot be removed fails the spawn instead of preparing over it', async () => {
+    const h = harness({ mode: 'mixed', claimWindowMs: 2000 }, { capacity: 1 });
+    await h.orch.tick();
+    const first = h.store.listLaunches({ status: 'claimable' })[0]!;
+    h.advance(2500);
+    h.workspace.failRemovals.push(first.launchId);
+    let prepares = 0;
+    const prepare = h.workspace.prepare.bind(h.workspace);
+    h.workspace.prepare = async (launch, brief) => {
+      if (launch.launchId === first.launchId) prepares++;
+      return prepare(launch, brief);
+    };
+    await h.orch.tick();
+    expect(prepares).toBe(0);
+    expect(h.store.listLaunches({ status: 'launching' })).toEqual([]);
+    expect(h.store.listEvents({ kind: 'launch.ended', launchId: first.launchId })).toMatchObject([{ payload: { endReason: 'spawnFailed', stage: 'remove' } }]);
+    expect(h.runner.spawned).toEqual([]);
+    expect(h.orch.entry('T1').lease?.launchId).not.toBe(first.launchId);
+    expect(h.workspace.worktrees.has(first.launchId)).toBe(false);
+  });
+
+  it('mixed: a prepare that always fails ends in blocked, never running on a preparing or launching row', async () => {
+    const h = harness({ mode: 'mixed', claimWindowMs: 2000 }, { capacity: 1, maxAttempts: 3 });
+    await h.orch.tick();
+    h.workspace.prepare = async () => {
+      throw new Error('disk full');
+    };
+    for (let i = 0; i < 4; i++) {
+      h.advance(2500);
+      await h.orch.tick(); // never throws out of the tick
+      expect(h.store.listLaunches({ status: ['preparing', 'launching'] })).toEqual([]);
+      const e = h.orch.entry('T1');
+      if (e.status.kind === 'running') expect(h.store.getLaunch(e.lease!.launchId)!.status).toBe('claimable');
+    }
+    const e = h.orch.entry('T1');
+    expect(e.attempts).toBe(3);
+    expect(e.status).toMatchObject({ kind: 'blocked', reason: { kind: 'impossible' } });
+    expect(String((e.status as { reason: { message: string } }).reason.message)).toContain('prepare failed: disk full');
+    // The parked launch failed in the spawn pass; the admission relaunches failed in their own prepare.
+    const ended = h.store.listEvents({ kind: 'launch.ended' }).filter((ev) => ev.taskId === 'T1');
+    expect(ended.map((ev) => [ev.payload?.['endReason'], ev.payload?.['stage']])).toEqual([
+      ['spawnFailed', 'prepare'],
+      ['spawnFailed', 'prepare'],
+      ['spawnFailed', 'prepare'],
+    ]);
+    expect(h.runner.spawned).toEqual([]);
+  });
+
+  it('a spawn that throws ends the launch at stage spawn, removes its prepared worktree and launches the task again', async () => {
+    const h = harness({ mode: 'mixed', claimWindowMs: 2000 }, { capacity: 1 });
+    await h.orch.tick();
+    const first = h.store.listLaunches({ status: 'claimable' })[0]!;
+    h.advance(2500);
+    const spawn = h.runner.spawn.bind(h.runner);
+    let failures = 1;
+    h.runner.spawn = async (launch) => {
+      if (failures-- > 0) throw new Error('exec failed');
+      return spawn(launch);
+    };
+    await h.orch.tick();
+    expect(h.store.listLaunches({ status: 'launching' })).toEqual([]);
+    expect(h.store.listEvents({ kind: 'launch.ended', launchId: first.launchId })).toMatchObject([{ payload: { endReason: 'spawnFailed', stage: 'spawn', error: 'exec failed' } }]);
+    expect(h.workspace.worktrees.has(first.launchId)).toBe(false);
+    const e = h.orch.entry('T1');
+    expect(e).toMatchObject({ attempts: 1, status: { kind: 'running' } });
+    expect(e.lease?.launchId).not.toBe(first.launchId);
+
+    // Spawn mode: a spawn that throws at admission ends the launch the same way instead of escaping the tick.
+    const s = harness({}, { capacity: 1 });
+    const sspawn = s.runner.spawn.bind(s.runner);
+    let sfail = 1;
+    s.runner.spawn = async (launch) => {
+      if (sfail-- > 0) throw new Error('exec failed');
+      return sspawn(launch);
+    };
+    await s.orch.tick();
+    expect(s.store.listLaunches({ status: ['preparing', 'launching'] })).toEqual([]);
+    expect(s.store.listEvents({ kind: 'launch.ended' })).toMatchObject([{ payload: { endReason: 'spawnFailed', stage: 'spawn' } }]);
+    expect(s.orch.entry('T1')).toMatchObject({ attempts: 1, status: { kind: 'unstarted' } });
+    await s.orch.tick();
+    expect(s.launchOf('T1').pid).toBeGreaterThan(0);
+  });
+
   it('claim semantics in-process: oldest first, named task, idempotent re-claim, one launch per worker, remote reserved', async () => {
     const h = harness({ mode: 'pull' });
     await h.orch.tick();
