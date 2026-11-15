@@ -38,6 +38,31 @@ export function storableString(s: string): string {
   return MAYBE.test(s) ? s.replace(UNSTORABLE, '�') : s;
 }
 
+/** True when `s` holds a NUL character or a lone surrogate: what `storableString` would rewrite. */
+export function hasUnstorable(s: string): boolean {
+  if (!MAYBE.test(s)) return false;
+  UNSTORABLE.lastIndex = 0;
+  const found = UNSTORABLE.test(s);
+  UNSTORABLE.lastIndex = 0;
+  return found;
+}
+
+/**
+ * Ids are refused, not rewritten (ORC-98): a task id, worker id or attachment id becomes a key the store looks rows up by,
+ * and a rewritten key would not be found by the raw id again (and `a\u0000` and `a�` would collide). The message
+ * names `field` and the id, escaped as JSON. Returns the message, or undefined for an id the store holds unchanged.
+ * See specs/state-backend "Storable ids".
+ */
+export function unstorableIdMessage(field: string, id: string): string | undefined {
+  return hasUnstorable(id) ? `${field} ${JSON.stringify(id)} holds a NUL character or a lone surrogate, which the store cannot hold in an id` : undefined;
+}
+
+/** Throws `UnstorableValueError` naming `field` when `id` is not storable unchanged. */
+export function assertStorableId(field: string, id: string): void {
+  const message = unstorableIdMessage(field, id);
+  if (message) throw new UnstorableValueError(field, message);
+}
+
 function clean(v: unknown): unknown {
   if (typeof v === 'string') return storableString(v);
   if (Array.isArray(v)) return v.map(clean);

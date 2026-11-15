@@ -15,6 +15,7 @@ import type { ShutdownCaller } from '../runs/runDir.js';
 import { logPath } from '../runner/subprocess.js';
 import { setTracker, trackerOf } from '../state/store.js';
 import { storeLag } from '../state/gate.js';
+import { assertStorableId } from '../state/storable.js';
 import { policyReport } from '../tracker/policy.js';
 import { git } from '../workspace/git.js';
 
@@ -279,6 +280,11 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
       // anything outside the kinds, null included; only an absent key means no filter. See specs/pull-runner "Claim".
       runner: body['runner'],
     };
+    // Ids the store would rewrite are refused before anything is written, the event included: a worker id kept rewritten
+    // would never match its own next claim. The server answers 400 naming the field. See specs/state-backend "Storable ids".
+    assertStorableId('workerId', args.workerId);
+    if (args.taskId !== undefined) assertStorableId('taskId', args.taskId);
+    if (args.attachment !== undefined) assertStorableId('attachment', args.attachment);
     orch.store.appendEvent({ kind: 'operator.claim', taskId: args.taskId, payload: { ...args } }, orch.now());
     return orch.claim(args);
   });
@@ -307,6 +313,8 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     const id = typeof body['id'] === 'string' ? body['id'].trim() : '';
     const pids = Array.isArray(body['pids']) ? (body['pids'] as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
     if (!id || !pids.length) return { status: 400, body: { error: 'id and a non-empty pids list are required' } };
+    // The id is the kv key attachment:<id>; one the store would rewrite is refused. See specs/state-backend "Storable ids".
+    assertStorableId('id', id);
     orch.attach({ id, pids });
     return { status: 200, body: { ok: true, id, pids } };
   });

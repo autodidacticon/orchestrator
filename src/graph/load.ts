@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { anyModelSchema, effortSchema, isModelNameFor, modelMessage, RUNNER_KINDS } from '../runner/selection.js';
+import { unstorableIdMessage } from '../state/storable.js';
 import { type Graph, type GraphNode, type Id, makeGraph } from './model.js';
 
 export class GraphValidationError extends Error {
@@ -17,7 +18,8 @@ export class GraphValidationError extends Error {
       | 'duplicateId'
       | 'unknownDependency'
       | 'selfLoop'
-      | 'cycle',
+      | 'cycle'
+      | 'unstorableId',
     public readonly details: Record<string, unknown> = {},
   ) {
     super(message);
@@ -69,6 +71,15 @@ export function parseGraph(content: string): Graph {
     );
   }
 
+  // An id the store would rewrite is refused where it enters: rows keyed by it would not be found by it again. See specs/state-backend "Storable ids".
+  for (const [i, n] of parsed.data.nodes.entries()) {
+    const ids: Array<[string, string]> = [[`nodes.${i}.id`, n.id], ...n.deps.map((d, j): [string, string] => [`nodes.${i}.deps.${j}`, d])];
+    for (const [field, id] of ids) {
+      const message = unstorableIdMessage('node id', id);
+      if (message) throw new GraphValidationError(`${field}: ${message}`, 'unstorableId', { field, id });
+    }
+  }
+
   const nodes = new Map<Id, GraphNode>();
   for (const n of parsed.data.nodes) {
     if (nodes.has(n.id)) {
@@ -109,7 +120,7 @@ function describeIssuePath(raw: unknown, issuePath: Array<string | number>): str
   const nodes = (raw as { nodes?: unknown })?.nodes;
   const node = Array.isArray(nodes) ? (nodes[index] as { id?: unknown } | undefined) : undefined;
   if (typeof node?.id !== 'string') return joined;
-  return `node "${node.id}" (nodes.${index})${rest.length ? `: ${rest.join('.')}` : ''}`;
+  return `node ${JSON.stringify(node.id)} (nodes.${index})${rest.length ? `: ${rest.join('.')}` : ''}`;
 }
 
 /** DFS with colors; returns the cycle path (first id repeated at the end) or undefined. */
