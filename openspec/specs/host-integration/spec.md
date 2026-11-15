@@ -2,9 +2,7 @@
 
 ## Purpose
 How the orchestrator is packaged for host sessions: the npm package's subpath exports and executables, thin per-host wrappers under `hosts/<host>/` such as the Claude Code plugin, the import, run, and review skills those wrappers ship, including how the import skill records the tracker and how the run skill mirrors the run back to it by draining the outbox, handles stuck tasks and budget pauses on the user's say, presents pending proposals for the user to accept or reject, creating the tracker issue first in a tracker-backed run, and offers `cascade` with its plan when a reopen is refused for its blockers, the `work` skill and the bundled `workflows/work.js` workflow through which a session fans out worker subagents that claim and work prepared launches in `pull` or `mixed` mode, and the marketplace manifest at the repository root through which the plugin is installed.
-
 ## Requirements
-
 ### Requirement: Package entrypoints
 The npm package SHALL declare subpath exports `.` for the core library, `./daemon`, `./operator-mcp`, and `./agent-shim`, and SHALL install the executables `orchestrator`, `orchestrator-ctl`, `orchestrator-mcp`, and `orchestrator-mcp-shim`. The package SHALL be publishable as `@autodidacticon/orchestrator`: not `private`, with `publishConfig.access` `public`, `prepublishOnly` running the build, and `files` covering `dist/src`, `hosts`, and `README.md`. Host wrappers SHALL NOT reference executables by name on PATH; they SHALL reach the package through the plugin launcher, which resolves a checkout or the published package.
 
@@ -217,7 +215,7 @@ The repository SHALL contain `.claude-plugin/marketplace.json` at its root listi
 - **THEN** it resolves to `npx` with the published package at the manifest's version and references nothing outside the copy
 
 ### Requirement: No native dependencies
-The npm package SHALL depend only on pure-JavaScript packages: no production dependency, direct or transitive, optional dependencies included, SHALL carry an `install`, `preinstall`, or `postinstall` script or a `binding.gyp`, so that an install with `--ignore-scripts`, such as a Claude Code plugin's automatic dependency install, yields a working package. The store SHALL use Node's built-in `node:sqlite` binding, and `engines.node` SHALL be `>=22.13.0`, the first release that loads `node:sqlite` without a flag. A host test SHALL assert the property from `package-lock.json` and the installed tree.
+The npm package SHALL depend only on pure-JavaScript packages: no production dependency, direct or transitive, optional dependencies included, SHALL carry an `install`, `preinstall`, or `postinstall` script or a `binding.gyp`, so that an install with `--ignore-scripts`, such as a Claude Code plugin's automatic dependency install, yields a working package. The Postgres driver `pg` is allowed because it is pure JavaScript (its dependencies, including the optional `pg-cloudflare`, carry no install script); its optional native peer `pg-native` SHALL NOT be a dependency or be installed. The store SHALL use Node's built-in `node:sqlite` binding, and `engines.node` SHALL be `>=22.13.0`, the first release that loads `node:sqlite` without a flag. A host test SHALL assert the property from `package-lock.json` and the installed tree.
 
 #### Scenario: Lockfile has no native module
 - **WHEN** the host tests read `package-lock.json` and `node_modules`
@@ -226,6 +224,10 @@ The npm package SHALL depend only on pure-JavaScript packages: no production dep
 #### Scenario: Node floor declared
 - **WHEN** the host tests read `package.json`
 - **THEN** `engines.node` is `>=22.13.0`
+
+#### Scenario: Postgres driver is pure JavaScript
+- **WHEN** the state tests read `package-lock.json`
+- **THEN** `node_modules/pg` is a production entry, no production entry carries `hasInstallScript`, and no `pg-native` or `libpq` entry exists
 
 ### Requirement: Quiet SQLite binding
 No executable of the package SHALL write the `node:sqlite` ExperimentalWarning to stderr, and the daemon log SHALL NOT contain it, whether the process was started by `daemonCommand()`, by a host, by `npx`, or directly from a terminal. Every other process warning SHALL still be printed. After the warning has been handled, or after the first turn of the event loop if it never arrives, the process's `warning` listeners SHALL be the ones that were installed before the store was loaded.
@@ -542,7 +544,7 @@ While an agent runs, the work loop SHALL read its launch from `GET /v1/status` e
 - **THEN** only the silence limit applies
 
 #### Scenario: The daemon expires a silent claim
-- **WHEN** the claimed agent never writes and never exits, and the daemon fails the launch `leaseExpired` (or `stuck`) and relaunches the task
+- **WHEN** the claimed agent never writes and never exits, so the loop keeps renewing its lease, and the daemon fails the launch `stuck` (or `leaseExpired`, when the renewals could not reach it) and relaunches the task
 - **THEN** the loop logs that the daemon ended the launch, ends the agent's process group, and claims the relaunch
 
 #### Scenario: An agent that reported keeps its last output
@@ -568,9 +570,43 @@ The work loop's silence limit SHALL be `--max-silence-ms` when given, else the c
 After an agent the loop ended has exited, the loop SHALL post its usage as for any exit and SHALL NOT classify its output as a start failure. It SHALL release the launch without keep, with a reason naming the termination, when the worker still holds it, and SHALL NOT release a launch the daemon ended. The outcome SHALL be `hung`, counted toward `--max-failures`, except after a report, when it SHALL be `started`. The loop SHALL then claim again.
 
 #### Scenario: The daemon's verdict stands
-- **WHEN** the loop ends an agent whose launch the daemon failed `leaseExpired`
+- **WHEN** the loop ends an agent whose launch the daemon failed `stuck`
 - **THEN** no `operator.release` is recorded for that launch and the outcome is `hung`
 
 #### Scenario: A model that always hangs
 - **WHEN** `--max-failures` launches in a row end with the outcome `hung`
 - **THEN** the loop stops
+
+### Requirement: Work workflow heartbeat interval
+The work workflow's claimer SHALL return the claim's `lease.ttlMs` and `lease.renewEveryMs`. The worker prompt SHALL state both, and SHALL say that only the worker's own calls renew its lease. It SHALL say to call `launch_heartbeat` at least every `renewEveryMs`. It SHALL say to run any command expected to take longer in the background, heartbeating while it runs. The numbers SHALL come from the claim. Without them the prompt SHALL give a rule with no number.
+
+#### Scenario: Prompt names the claimed interval
+- **WHEN** a loop claims a launch whose response carries `lease: { ttlMs: 600000, renewEveryMs: 200000 }`
+- **THEN** the worker prompt says the lease lasts 600000ms, to call `launch_heartbeat` at least every 200000ms, and to run longer commands in the background
+
+### Requirement: Work loop renews the lease
+While a claimed launch's agent process lives, `orchestrator-work` SHALL call `POST /v1/launches/:id/renew` with the launch token every `renewEveryMs` from the claim (else a third of `leaseTtlMs`), with one request in flight. It SHALL stop when the agent process exits, even while another process (a grandchild) still holds its output pipes, and when the process fails to spawn. While the watcher is ending the agent's process group, the loop SHALL renew until the group is gone, so that it can release the launch itself. It SHALL stop for good on 401, 404 or 409. A network error SHALL be a missed beat. A claim without lease facts SHALL start no renewal.
+
+#### Scenario: A silent agent keeps its launch
+- **WHEN** the loop runs an agent that writes nothing and calls nothing under `leaseTtlMs: 1500` and `--max-silence-ms 6000`
+- **THEN** the daemon does not expire the launch; the loop ends the agent at its silence limit and releases the launch (`endReason: "released"`) no sooner than 6000ms after the claim, and the launch's `progressAt` is still its claim time
+
+#### Scenario: A grandchild holds the pipe
+- **WHEN** the agent exits without a report, leaving a grandchild that keeps its stdout open, under `leaseTtlMs: 1500` and `--max-silence-ms 20000`
+- **THEN** the loop stops renewing at the exit, the daemon ends the launch with `leaseExpired` well before the silence limit, and the loop does not release it
+
+#### Scenario: A killed loop's claim expires
+- **WHEN** the loop process is killed with SIGKILL while its detached agent still runs
+- **THEN** the daemon ends the launch with `leaseExpired` within `leaseTtlMs` plus a tick, with margin for load, and the attempt is spent because nothing in the worktree changed
+
+#### Scenario: Renewal stops on refusal
+- **WHEN** a renewal answers 401, 404 or 409
+- **THEN** the loop sends no further renewal for that launch
+
+### Requirement: Work loop preamble states the interval
+The preamble that `orchestrator-work` feeds the agent SHALL state the lease TTL and `renewEveryMs` from the claim. It SHALL say to call an orchestrator tool at least that often and to run longer commands in the background, calling `heartbeat` while they run. It SHALL also say that the loop's renewal keeps the lease but is not progress. Without lease facts in the claim it SHALL carry no lease line.
+
+#### Scenario: Preamble names the claimed interval
+- **WHEN** the claim carries `lease: { ttlMs: 600000, renewEveryMs: 200000 }`
+- **THEN** the preamble says the lease is 600000ms and to call at least every 200000ms
+

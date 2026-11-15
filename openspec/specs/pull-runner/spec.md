@@ -2,9 +2,7 @@
 
 ## Purpose
 How a prepared launch is executed: the runner modes under which the daemon spawns a headless agent for every launch (`spawn`), parks every launch as `claimable` for a worker on the same machine to claim (`pull`), or parks it for a claim window and spawns it when nobody claims it in time (`mixed`); the claim that hands a parked launch to a worker and makes it live without a pid, with its lease starting at the claim; the release that hands a launch back, returning the task to `unstarted` without spending an attempt when no progress was observed and failing the attempt otherwise; the worker identity that limits a worker to one live launch and makes a repeated claim idempotent, carrying any pending question and answer so that a fresh worker can resume where the last one stopped; the `mode` override that `start` applies to a run; and the access modes, of which `local` is implemented and `remote` is reserved.
-
 ## Requirements
-
 ### Requirement: Runner modes
 The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `mixed`, defaulting to `spawn`, and `runner.claimWindowMs`, defaulting to 60000. Every launch prepared in `pull` or `mixed` mode SHALL be parked as `claimable` once its worktree and brief exist; in `spawn` mode the launch SHALL be spawned immediately as before. A parked launch SHALL have a claim window: unbounded in `pull`, `runner.claimWindowMs` from the moment it became claimable in `mixed`, and zero in `spawn`. On each tick the orchestrator SHALL spawn every parked launch whose window has elapsed. `start` with a `mode` argument SHALL override the configured mode for the run, passed to the daemon it spawns or set through the `runner` route on a daemon already running; the override SHALL be stored durably and SHALL apply from the next tick, including to launches already parked. While the run is paused, parked launches SHALL stay parked: they SHALL NOT be spawned and SHALL NOT be claimed.
 
@@ -87,7 +85,7 @@ The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `m
 - **THEN** the response is 409 naming T1's launch
 
 ### Requirement: Release
-`POST /v1/launches/:id/release` with a `reason` and an optional boolean `keep` SHALL apply to a live launch held by a worker and SHALL answer 409 for any other launch. When no progress has been observed since the claim, meaning no commit or dirty file in the worktree and no API call under the token, the launch SHALL end with reason `released`, the task SHALL return to `unstarted` without consuming an attempt, and the worktree SHALL be removed so that the next admission prepares a new launch. When progress has been observed and `keep` is false, the release SHALL be a failed attempt with reason `released` and the worker's reason as message. When progress has been observed and `keep` is true, the orchestrator SHALL commit any uncommitted changes in the worktree as a work-in-progress commit on the launch branch, SHALL end the launch with reason `released`, SHALL remove the worktree and keep the branch, SHALL return the task to `unstarted` with `attempts` unchanged, and SHALL store `carry.interrupted = { priorLaunchId, priorBranch, headSha, wipCommit?, reason }` so that the next brief carries it; the response SHALL report `kept` true with the branch and head sha. A release while the task is `waiting` SHALL act as process death: the task becomes `blocked` with its question preserved, and with `keep` the same `interrupted` context SHALL be stored and the branch kept. The overlay entry SHALL carry `interruptions`, increased by one on every kept release after progress or while waiting, reset to zero when the task submits, carried in the `interrupted` context, and reported with each live launch in `status`. The configuration SHALL accept `daemon.maxKeptReleases`, default 3, where 0 means unlimited; a release with `keep` for a task whose `interruptions` already equals or exceeds it SHALL behave as a release without `keep`. Lease expiry on a claimed launch SHALL follow the existing failure path with reason `leaseExpired`.
+`POST /v1/launches/:id/release` with a `reason` and an optional boolean `keep` SHALL apply to a live launch held by a worker and SHALL answer 409 for any other launch. When no progress has been observed since the claim, meaning no commit or dirty file in the worktree and no API call under the token, the launch SHALL end with reason `released`, the task SHALL return to `unstarted` without consuming an attempt, and the worktree SHALL be removed so that the next admission prepares a new launch. When progress has been observed and `keep` is false, the release SHALL be a failed attempt with reason `released` and the worker's reason as message. When progress has been observed and `keep` is true, the orchestrator SHALL commit any uncommitted changes in the worktree as a work-in-progress commit on the launch branch, SHALL end the launch with reason `released`, SHALL remove the worktree and keep the branch, SHALL return the task to `unstarted` with `attempts` unchanged, and SHALL store `carry.interrupted = { priorLaunchId, priorBranch, headSha, wipCommit?, reason }` so that the next brief carries it; the response SHALL report `kept` true with the branch and head sha. A release while the task is `waiting` SHALL act as process death: the task becomes `blocked` with its question preserved, and with `keep` the same `interrupted` context SHALL be stored and the branch kept. The overlay entry SHALL carry `interruptions`, increased by one on every kept release after progress or while waiting, reset to zero when the task submits, carried in the `interrupted` context, and reported with each live launch in `status`. The configuration SHALL accept `daemon.maxKeptReleases`, default 3, where 0 means unlimited; a release with `keep` for a task whose `interruptions` already equals or exceeds it SHALL behave as a release without `keep`. Lease expiry on a claimed launch SHALL follow "Lease expiry": a kept release when the worktree shows progress since the claim and the bound allows, a failed attempt with reason `leaseExpired` otherwise.
 
 #### Scenario: Release without progress
 - **WHEN** a worker releases a launch it has not touched
@@ -161,3 +159,85 @@ A claimed launch has no process for the daemon to observe and no log for a runne
 #### Scenario: Posted tokens are priced
 - **WHEN** `budgets.prices` has the launch's model at 100 USD input and 1000 USD output per million tokens and `w1` posts 40361 input and 260 output tokens with no cost
 - **THEN** the row records `costUsd` 4.2961 with `costSource` `priced`, and `status.cost.runUsd` includes it
+
+### Requirement: Lease facts in the claim
+The claim response, first and repeated, SHALL carry `leaseTtlMs`, `leaseExpiresAt` (the task's lease expiry when the response is made), and `lease: { ttlMs, expiresAt, renewEveryMs }`. `renewEveryMs` is a third of the TTL, rounded down: the longest a worker may go between calls. A repeated claim SHALL state the lease as it stands, not a fresh `now + leaseTtlMs`.
+
+#### Scenario: First claim states the lease
+- **WHEN** a worker claims a parked launch at time t under `leaseTtlMs: 60000`
+- **THEN** the response has `leaseTtlMs: 60000`, `leaseExpiresAt: t + 60000`, and `lease: { ttlMs: 60000, expiresAt: t + 60000, renewEveryMs: 20000 }`
+
+#### Scenario: Repeated claim states the current expiry
+- **WHEN** the worker heartbeats 5 seconds after the claim and then claims again with the same worker id
+- **THEN** the repeated response has `leaseExpiresAt: t + 5000 + 60000`
+
+### Requirement: Lease renewal by the work loop
+`POST /v1/launches/:id/renew` with `Authorization: Bearer <launch token>` SHALL set the lease of a live claimed launch to expire at `now + leaseTtlMs`, provided the task is `running` or `waiting` on that launch, and answer 200 with `{ ok, ttlMs, expiresAt, renewEveryMs }`. It SHALL answer 401 for a wrong token or an ended or revoked launch. It SHALL answer 409 for a launch with a pid or one that no longer holds its task.
+
+#### Scenario: Renewal keeps a silent claim
+- **WHEN** a claimed launch makes no call and changes nothing in its worktree for five TTLs while its loop renews every third of the TTL
+- **THEN** the launch is still live, its task is `running` with `attempts` unchanged, and `launches` is 1
+
+#### Scenario: Renewal stops
+- **WHEN** the loop renews once and then stops
+- **THEN** the lease expires no later than `leaseTtlMs` plus one tick after the last renewal, and a later renewal answers 401
+
+#### Scenario: Renewal of a spawned launch
+- **WHEN** the renew route is called for a launch the daemon spawned
+- **THEN** it answers 409 and the lease is unchanged
+
+### Requirement: Renewal is not progress
+A renewal SHALL NOT be a progress signal. It SHALL leave `progressAt`, `lastSignal`, `progressText` and `stuckSince` unchanged, and SHALL append no event. A launch that only renews SHALL still be flagged stuck after `health.stuckAfterMs` and failed after `health.stuckFailAfterMs`.
+
+#### Scenario: A launch that only renews goes stuck
+- **WHEN** a claimed launch only renews for longer than `health.stuckAfterMs`
+- **THEN** its `progressAt` is still the claim time, `lastSignal` is still `claimed`, a `launch.stuck` event is appended once, and `status.stuck` lists its task
+
+### Requirement: Lease expiry
+When a `running` claimed launch's lease expires, the orchestrator SHALL check the worktree for progress since the claim: a commit (head is not the base sha), a change to a tracked file, or a path the worker staged. An untracked file alone SHALL NOT be progress, and the work-in-progress commit of an expiry SHALL NOT include untracked files: a file is added to the kept commit only when the worker stages it. With progress and `interruptions` under `daemon.maxKeptReleases` (0: unlimited), the expiry SHALL be a kept release: the branch is kept with uncommitted tracked and staged work committed on it, the task is `unstarted` with `attempts` unchanged, and `carry.interrupted` has `reason: "leaseExpired"`. When the work-in-progress commit fails (another process holds the index lock, say), the orchestrator SHALL read the worktree head instead: a head that is not the base sha SHALL still make the expiry a kept release at that head, without `wipCommit`; a head at the base sha SHALL make it a failed attempt. A release with `keep` is unaffected: it commits untracked files too.
+
+#### Scenario: Expiry after a commit is kept
+- **WHEN** a claimed launch commits, the commit is observed, and the launch then makes no call past the TTL
+- **THEN** the launch ends with `leaseExpired`, the task is `unstarted` with `attempts` 0 and `interruptions` 1, and the next launch's brief says the previous launch's branch holds the work at the commit
+
+#### Scenario: Expiry with only a dirty file is kept
+- **WHEN** a claimed launch leaves a modified tracked file, or a staged new file, uncommitted and then falls silent past the TTL
+- **THEN** the file is committed as a work-in-progress commit on the branch and the next brief's `interrupted` carries `wipCommit`
+
+#### Scenario: An untracked file alone is not progress
+- **WHEN** a claimed launch's only change is an untracked file (a check command's artefact, say) and its lease expires
+- **THEN** the expiry is a failed attempt with reason `leaseExpired` and the branch stays at the base sha
+
+#### Scenario: An untracked file is left out of the kept commit
+- **WHEN** a claimed launch stages a new file, leaves another file untracked, and its lease expires
+- **THEN** the work-in-progress commit holds the staged file only
+
+#### Scenario: The work-in-progress commit fails
+- **WHEN** a claimed launch has committed, has uncommitted changes, and holds `index.lock` when its lease expires
+- **THEN** the expiry is a kept release at the launch's last commit with no `wipCommit`, `attempts` is unchanged, and the branch is kept
+
+### Requirement: Kept expiry record
+A kept expiry SHALL end the launch with reason `leaseExpired`, and its `launch.ended` event SHALL carry `kept: true`. It SHALL append `launch.released` with `reasonCode: "leaseExpired"`, `progressed: true` and `kept: true`. It SHALL increase `interruptions` by one and store `carry.interrupted = { priorLaunchId, priorBranch, headSha, wipCommit?, reason, interruptions }`, so that the retry's brief names the kept branch.
+
+#### Scenario: Events of a kept expiry
+- **WHEN** a claimed launch with a commit expires
+- **THEN** its `launch.ended` payload is `{ endReason: "leaseExpired", kept: true }` and its `launch.released` payload has `reasonCode: "leaseExpired"`
+
+### Requirement: Lease expiry without progress
+An expiry without progress in the worktree SHALL be a failed attempt with reason `leaseExpired`, as before, even when the launch made calls. So SHALL an expiry once the task's kept releases have reached `daemon.maxKeptReleases`. If a call renews the lease while the worktree is being checked, the launch SHALL stay live.
+
+#### Scenario: Expiry without progress spends the attempt
+- **WHEN** a claimed launch heartbeats but never touches its worktree, then falls silent past the TTL
+- **THEN** the task fails with reason `leaseExpired`, `attempts` is 1, and the next brief carries `priorFailure` with kind `leaseExpired`
+
+#### Scenario: Kept expiries are bounded
+- **WHEN** `daemon.maxKeptReleases` is 1 and a task's second claimed launch expires after a commit
+- **THEN** the expiry spends an attempt and `interruptions` stays at 1
+
+### Requirement: Silence limit in the claim
+The claim response, first and repeated, SHALL carry `health: { stuckFailAfterMs }` with the daemon's `health.stuckFailAfterMs`. A work loop SHALL take it as its silence limit when it is positive and no `--max-silence-ms` is given; when it is 0 (the daemon never fails a stuck launch) the loop SHALL keep its own default, so a hung agent whose lease the loop renews is still bounded.
+
+#### Scenario: Claim states the threshold
+- **WHEN** a worker claims a launch under `health.stuckFailAfterMs: 1800000`
+- **THEN** the response has `health: { stuckFailAfterMs: 1800000 }` and a loop without `--max-silence-ms` ends a silent agent after 1800000ms
+

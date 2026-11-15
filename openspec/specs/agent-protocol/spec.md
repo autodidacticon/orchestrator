@@ -313,6 +313,7 @@ The brief's definition of done SHALL name the effective check command at the tim
 A launch the daemon spawns SHALL inherit the daemon's environment with these changes:
 - `ORCH_HOME` replaced by a directory inside the run's data directory;
 - `ORCH_URL`, `ORCH_REPO`, and `ORCH_DATA_DIR` removed;
+- `DATABASE_URL`, `ORCH_RUN_ID`, and every variable whose value is the resolved store URL removed (specs/state-backend "No store URL in child environments"), for every runner kind;
 - the agent variables `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_API`, `ORCH_RETRY_WINDOW_MS`, `ORCH_TASK_ID`, and `ORCH_WORKTREE` added.
 
 An orchestrator client the agent runs therefore SHALL find no run under its `ORCH_HOME` and SHALL NOT be able to start, stop, or list a daemon of the user's. `ORCH_API` SHALL remain set so the shim reaches the agent's own daemon.
@@ -327,6 +328,10 @@ An MCP server that the agent's CLI spawns SHALL be assumed to receive only what 
 - **WHEN** a spawned agent runs `orchestrator-ctl runs`
 - **THEN** the result lists no runs
 
+#### Scenario: Agent sees no store URL
+- **WHEN** the daemon's environment holds `DATABASE_URL` and `APP_DATABASE` set to the store URL, and a spawned agent's command prints its environment
+- **THEN** the printout has neither variable nor the password
+
 ### Requirement: Codex brief reports through the MCP server
 The brief of a `codex` launch SHALL tell the agent to call heartbeat, report, block, inbox and log through the `orchestrator` MCP server's tools, and not to call the agent API from a command (curl or a script), because the Codex sandbox refuses a command's network access while Codex runs the MCP server outside the sandbox. It SHALL keep the fallback report file for the case where an MCP tool call itself fails. A `claude-code` or `opencode` brief SHALL NOT carry this text.
 
@@ -337,4 +342,83 @@ The brief of a `codex` launch SHALL tell the agent to call heartbeat, report, bl
 #### Scenario: Real Codex reports through the MCP server
 - **WHEN** the opt-in e2e (`ORCH_E2E_CODEX=1`) runs four tasks under `workspace-write`
 - **THEN** every task is published through an MCP `report`, no launch ends with `fallback:submit`, and the question task's log holds exactly one completed `block` item carrying the answer
+
+### Requirement: Heartbeat interval
+When the brief input carries the lease TTL, which the daemon passes from its `leaseTtlMs`, the brief's Reporting section SHALL carry a lease line and `brief.json` SHALL carry `leaseTtlMs`. The line SHALL state the TTL. It SHALL say to call an operation at least every third of the TTL, naming `lease.renewEveryMs` and its value. It SHALL say to run any longer command in the background and call `heartbeat` while it runs.
+
+#### Scenario: Brief names the interval
+- **WHEN** a launch is prepared under `leaseTtlMs: 60000`
+- **THEN** `brief.json` has `leaseTtlMs: 60000` and `brief.md` says to call at least every 20s (`lease.renewEveryMs` 20000, a third of the lease) and to run longer commands in the background while calling `heartbeat`
+
+### Requirement: No lease line without a TTL
+A brief composed from an input without `leaseTtlMs` SHALL carry no lease line, and its `brief.json` no `leaseTtlMs`.
+
+#### Scenario: No TTL, no line
+- **WHEN** a brief is composed from an input without `leaseTtlMs`
+- **THEN** the brief has no lease line and `brief.json` has no `leaseTtlMs`
+
+### Requirement: Integer fields
+The `log`, `heartbeat`, `report` and `block` calls SHALL check `seq`, when it is present, before anything is written; the lease renewal and the progress signal count as writes. `seq` SHALL be a non-negative safe integer. Otherwise the call SHALL answer 400 with `field: "seq"` and an error that names `seq`. The worker `usage` call SHALL require its token counts to be non-negative safe integers, and SHALL answer 400 naming the field before it records anything.
+
+#### Scenario: Fractional seq
+- **WHEN** an agent calls `log` with `"seq": 1.5`
+- **THEN** the call answers 400 naming `seq`, and no event, dedup row or lease renewal is written
+
+#### Scenario: Huge seq
+- **WHEN** an agent calls `log` with `"seq": 1e30`
+- **THEN** the call answers 400 naming `seq`, and nothing is written
+
+### Requirement: Unstorable values answer 400
+A write the store refuses with `UnstorableValueError` SHALL answer 400 with the error and its `field`, on agent and operator routes alike. A string the store cannot hold as it is SHALL NOT cause an error: it is stored with U+FFFD in place (see state-backend "Storable strings").
+
+#### Scenario: NUL in a log text
+- **WHEN** an agent calls `log` with `"text": "a\u0000b"`
+- **THEN** the call answers 200 and the event holds `a�b`
+
+#### Scenario: Store refusal over HTTP
+- **WHEN** a route's write binds a non-integer to an integer column
+- **THEN** the HTTP response is 400, with `field` naming `table.column`, and not 500
+
+### Requirement: No lease line for a spawned launch
+The daemon SHALL pass `leaseTtlMs` in the brief input only for a launch prepared for a claim, so that only such a brief carries the lease line. A launch prepared in `spawn` mode SHALL get no lease line: the tick renews a spawned launch's lease while its process lives.
+
+#### Scenario: Spawn mode
+- **WHEN** a launch is prepared and spawned in `spawn` mode
+- **THEN** its brief input has no `leaseTtlMs` and its brief has no lease line
+
+### Requirement: Expiry rule in the lease line
+The brief's lease line SHALL say that a lease expiry keeps the worker's commits, changes to tracked files and staged files on its branch, and that a new file it has not staged is not kept.
+
+#### Scenario: Lease line names the staging rule
+- **WHEN** a launch is prepared for a claim
+- **THEN** its lease line says that an unstaged new file is not kept at expiry
+
+### Requirement: Parked launch rebriefed before it is spawned
+A parked launch that the daemon spawns once its claim window elapses SHALL leave `claimable` before anything else is done, so no claim can take it. Its worktree and brief SHALL then be prepared again, without the lease line, before its process starts. The new brief is composed from the configuration in force at that moment; this is an exception to the rule that a launch already briefed keeps its text, because the launch is prepared again.
+
+#### Scenario: Parked, then spawned
+- **WHEN** in `mixed` mode a parked launch, briefed with the lease line, is spawned after `claimWindowMs`
+- **THEN** the spawned launch's brief has no lease line and `brief.json` no `leaseTtlMs`
+
+### Requirement: Durable inbox
+`GET /v1/launches/:id/inbox` renews the lease, records a progress signal and removes the notices it hands out, so it SHALL answer only once those writes are durable, like a POST. It SHALL hand out only notices whose records are durable. When the store goes fatal during the wait, the read SHALL NOT answer with notices.
+
+#### Scenario: Notice queued during a stall
+- **WHEN** the sink stalls, a nudge is queued, and the agent reads its inbox
+- **THEN** the read does not answer until the sink accepts the nudge's record, and then answers with the nudge
+
+#### Scenario: Durable notice, stalled inbox write
+- **WHEN** a nudge is durable, the sink then stalls, and the agent reads its inbox
+- **THEN** the read does not answer until its own writes are durable
+
+### Requirement: Inbox notices handed out once
+An inbox read SHALL take the notices the launch holds, wait until everything committed so far is durable, remove only the notices it took, and wait for that removal to be durable. A notice queued during the wait SHALL stay for the next read. Inbox reads of one launch SHALL run one at a time, so each notice is handed out once.
+
+#### Scenario: Notice queued during the wait
+- **WHEN** a second nudge is queued while an inbox read waits for durability
+- **THEN** that read answers with the first nudge only, and the next read answers with the second
+
+#### Scenario: Concurrent reads
+- **WHEN** two inbox reads of one launch run at once while one notice is held
+- **THEN** the notice is handed out by exactly one of them
 

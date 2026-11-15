@@ -2,9 +2,7 @@
 
 ## Purpose
 Durable record bracketing around every external effect, including the outbox boundary around tracker writes, the cascade boundary that records the plan before any reset so that a cascade reopen resumes after a crash, and the claim boundary that records a claim in one transaction before its response so that a lost response is repaired by an idempotent re-claim, recovery per boundary, including the durable `claimable` launch state and the launches workers hold, whose liveness is judged by the lease rather than by a process, adoption of surviving agents, fencing, sweeps, named crash points including `cascade.afterPlan`, `launch.afterClaimable`, and `claim.afterRecord`, and the convergence invariants the orchestrator must satisfy after any crash.
-
 ## Requirements
-
 ### Requirement: Durable record bracketing
 Every external effect, meaning worktree creation, process spawn, acknowledgement to an agent, ref update, and tag creation, SHALL be preceded by a durable record of intent and followed by a durable record of outcome, so that recovery can determine or safely re-derive what happened. The orchestrator SHALL hold no state in memory that a restart would lose.
 
@@ -31,8 +29,8 @@ On start, before the first tick, the orchestrator SHALL run idempotent recovery:
 - a launch in `live` whose process is dead and whose fallback file exists SHALL have the file applied;
 - a launch in `live` whose process is dead with no fallback file, while its task is `running`, SHALL be failed through the same path as a death the tick observes (task-lifecycle "Retry and exhaustion"): it is recorded as a `launch.failed` event, and the task ends as `failed` with `attempts` increased unless the runner diagnoses `startupContended` within the `health.contendedRetries` allowance, in which case the task returns to `unstarted` with `attempts` unchanged;
 - a verifier job in `queued`, `checking`, or `verified` SHALL have any temporary worktree removed and SHALL restart from `queued`;
-- a verifier job in `publishing` SHALL be resolved by inspecting the integration branch for the launch trailer: present means record `published` and `done`, absent means requeue;
-- a milestone tag SHALL be re-created idempotently.
+- a verifier job in `publishing` SHALL be resolved by inspecting the integration branch for the launch trailer: present means record `published` and `done`, absent means requeue. With `git.pushIntegration` on, recovery SHALL fetch and inspect origin's integration branch first. A trailer only on the clone, at the job's `squashSha`, while origin is still at the job's `expectedHead`, SHALL be pushed once with that lease and recorded `published`. A lease that no longer holds SHALL undo the local compare-and-swap and requeue, as SHALL an origin that cannot be reached;
+- a milestone tag SHALL be re-created idempotently, and with `git.pushIntegration` on, pushed to origin.
 
 #### Scenario: Crash between spawn and pid record
 - **WHEN** the daemon dies after spawning an agent but before recording its pid
@@ -57,6 +55,10 @@ On start, before the first tick, the orchestrator SHALL run idempotent recovery:
 #### Scenario: Other death found at restart
 - **WHEN** a running task's launch died while the daemon was down, left no fallback file, and the runner gives any other diagnosis or none
 - **THEN** recovery records one `launch.failed` event with `charged: true` and the task is failed with `attempts` increased
+
+#### Scenario: Crash between swap and push
+- **WHEN** the daemon dies after the local compare-and-swap succeeded but before the push to origin, with pushing on
+- **THEN** on restart the squash is pushed to origin once, the task is `done`, a second recovery pushes nothing, and origin holds exactly one commit with the launch trailer
 
 ### Requirement: Adoption
 Agent processes SHALL be spawned detached with stdout and stderr redirected to per-launch log files so they survive the daemon's death. The daemon SHALL NOT rely on being the parent for signalling; stop SHALL be an explicit signal from the runner.
@@ -124,7 +126,7 @@ The cascade plan and a pending-cascade marker SHALL be recorded in one transacti
 - **THEN** recovery resets T2 only, MVP is not reset a second time, and the marker is cleared
 
 ### Requirement: Claim boundaries
-The launch lifecycle SHALL gain the durable state `claimable`, entered after the worktree and brief exist in `pull` and `mixed` modes; a parked launch whose window elapses SHALL move through `launching` and `live` as a spawned launch does. The claim's external effect is its response. Its durable record SHALL be one transaction that sets the launch to `live` with the worker id, resets the lease, and appends the event, committed before the response is sent, and a lost response SHALL be repaired by the idempotent re-claim. The named crash points SHALL additionally include `launch.afterClaimable`, after the row becomes claimable, and `claim.afterRecord`, after the claim transaction and before the response. On start, recovery SHALL keep a `claimable` launch claimable, verifying that its worktree exists and re-preparing it when missing; SHALL keep a live launch held by a worker while its lease is unexpired, judging liveness by the lease rather than by a process; and SHALL fail an expired one with reason `leaseExpired`. Sweeps SHALL treat claimable launches as live. The convergence invariants SHALL hold for the crash matrix run in `pull` mode with scripted workers.
+The launch lifecycle SHALL gain the durable state `claimable`, entered after the worktree and brief exist in `pull` and `mixed` modes; a parked launch whose window elapses SHALL move through `launching` and `live` as a spawned launch does. The claim's external effect is its response. Its durable record SHALL be one transaction that sets the launch to `live` with the worker id, resets the lease, and appends the event, committed before the response is sent, and a lost response SHALL be repaired by the idempotent re-claim. The named crash points SHALL additionally include `launch.afterClaimable`, after the row becomes claimable, and `claim.afterRecord`, after the claim transaction and before the response. On start, recovery SHALL keep a `claimable` launch claimable, verifying that its worktree exists and re-preparing it when missing; SHALL keep a live launch held by a worker while its lease is unexpired, judging liveness by the lease rather than by a process; and SHALL expire an expired one as the tick would, keeping it with progress and failing it with reason `leaseExpired` without (see "Claimed lease expired while the daemon was down"). Sweeps SHALL treat claimable launches as live. The convergence invariants SHALL hold for the crash matrix run in `pull` mode with scripted workers.
 
 #### Scenario: Crash after the claim record
 - **WHEN** the daemon dies at `claim.afterRecord` and the worker claims again with the same worker id after the restart
@@ -143,7 +145,9 @@ The launch lifecycle SHALL gain the durable state `claimable`, entered after the
 - **THEN** the launch stays live without a pid and the worker's next call succeeds
 
 ### Requirement: Store transactions
-The store's `transaction(fn)` SHALL run `fn` inside one SQLite transaction that commits when `fn` returns, returning its value, and that is rolled back entirely when `fn` throws, rethrowing the error. A `transaction` call made while a transaction is open SHALL nest as a savepoint: when the inner function throws, only the inner function's writes are undone and the outer transaction continues; when the outer function throws, the inner function's writes are undone with it. A primary key or unique violation SHALL throw an `Error` whose message names the constraint, and the transaction it happened in SHALL roll back. The store SHALL open in WAL mode with `synchronous = NORMAL` and a busy timeout of five seconds, so that a reader in another process never blocks the writer and a writer that finds the database locked by another connection waits for it rather than failing at once. The busy timeout SHALL be set before the switch to WAL mode, and opening the store SHALL retry the WAL switch and the schema creation while SQLite reports `SQLITE_BUSY`, for up to the same five seconds, because SQLite returns `SQLITE_BUSY` from the switch without calling the busy handler when two connections open a new file at once. An existing store file SHALL open unchanged.
+The store's `transaction(fn)` SHALL run `fn` as one transaction that commits when `fn` returns, returning its value, and that is rolled back entirely when `fn` throws, rethrowing the error. A `transaction` call made while a transaction is open SHALL nest: when the inner function throws, only the inner function's writes are undone and the outer transaction continues; when the outer function throws, the inner function's writes are undone with it. A primary key or unique violation SHALL throw an `Error` whose message names the constraint, and the transaction it happened in SHALL roll back. An existing store SHALL open unchanged. These rules hold for every backend: a plain SQLite store and a journaled store (see specs/state-backend), whose image applies them and whose sink receives only what committed.
+
+For the SQLite store (and a journaled store's SQLite image), a transaction SHALL be one SQLite transaction and a nested call a savepoint. The store SHALL open in WAL mode with `synchronous = NORMAL` and a busy timeout of five seconds, so that a reader in another process never blocks the writer and a writer that finds the database locked by another connection waits for it rather than failing at once. The busy timeout SHALL be set before the switch to WAL mode, and opening the store SHALL retry the WAL switch and the schema creation while SQLite reports `SQLITE_BUSY`, for up to the same five seconds, because SQLite returns `SQLITE_BUSY` from the switch without calling the busy handler when two connections open a new file at once.
 
 #### Scenario: Inner rollback, outer commit
 - **WHEN** an outer transaction writes entry T1, calls an inner `transaction` that writes entry T2 and throws, catches the error, and returns
@@ -158,15 +162,15 @@ The store's `transaction(fn)` SHALL run `fn` inside one SQLite transaction that 
 - **THEN** the call throws an error whose message contains `UNIQUE constraint failed` and the event is absent
 
 #### Scenario: Second process waits for the writer
-- **WHEN** another process holds a write transaction open on the store and this process writes a key
+- **WHEN** (SQLite only) another process holds a write transaction open on the SQLite store file and this process writes a key
 - **THEN** a read of that key made while the other transaction is open returns the previous value, and the write succeeds after the other process commits, having waited rather than thrown
 
 #### Scenario: Opening a store another process is creating
-- **WHEN** another process has created the store file, still in rollback-journal mode, and holds its exclusive lock for one second while this process opens the store
+- **WHEN** (SQLite only) another process has created the SQLite store file, still in rollback-journal mode, and holds its exclusive lock for one second while this process opens the store
 - **THEN** the open waits for the lock and succeeds, rather than throwing "database is locked"; a daemon starting in that moment keeps running instead of exiting at startup
 
 #### Scenario: Existing file reopens
-- **WHEN** a store is closed and opened again from its file
+- **WHEN** a store is closed and opened again (a SQLite store from its file, a journaled store as a fresh image loaded from its sink)
 - **THEN** its entries, events, keys, and snapshot read back unchanged
 
 ### Requirement: Idle exit and revival
@@ -198,3 +202,120 @@ The end of an attachment SHALL be a durable record written before any launch is 
 #### Scenario: Crash between preserve and transition
 - **WHEN** the daemon dies after committing a launch's uncommitted work and before ending the launch
 - **THEN** after restart the launch is released with `keep`, the branch holds the work-in-progress commit once, and the task is `unstarted` with `attempts` unchanged
+
+### Requirement: Startup on a fresh clone
+A daemon restarted with no volume has a new clone and no worktrees. Startup recovery SHALL first read the integration head (fetching origin when it is the source of truth), then handle each claimable launch, claimed launch and queued verifier job as its scenarios state. None of these cases SHALL spend an attempt of the task.
+
+#### Scenario: Parked launch on a fresh clone
+- **WHEN** the daemon starts on a fresh clone with a claimable launch
+- **THEN** the same launch stays claimable, its worktree is prepared again, and `launch.reprepared` is recorded
+
+#### Scenario: Claimed launch without a worktree
+- **WHEN** the daemon starts on a fresh clone with a claimed launch whose worktree is gone
+- **THEN** the launch ends with `worktreeLost`, the task's attempts are unchanged, and it is admitted again without waiting for lease expiry
+
+#### Scenario: Sealed commit lost
+- **WHEN** the daemon starts on a fresh clone with a queued job whose sealed commit is not in the clone
+- **THEN** the job is dropped, `verify.commitLost` is recorded, and the task is retried with prior failure `commitLost` naming the commit and attempts unchanged
+
+#### Scenario: Not a lost commit
+- **WHEN** the commit check fails for another reason (no repository, a malformed sha)
+- **THEN** the job is left queued
+
+### Requirement: Origin lookup before commit lost
+With `git.pushIntegration` on, recovery SHALL fetch origin before it decides any unapplied job in `queued`, `checking`, `verified` or `publishing`. A job whose `Orchestrator-Launch` trailer is on origin's integration branch SHALL be recorded `published` at that commit, whatever its status and whether or not its sealed commit is in the clone. Only a job with neither SHALL be `commitLost`. This takes precedence over "Startup on a fresh clone" and "Recovery per boundary".
+
+#### Scenario: Landed while its record lagged
+- **WHEN** the daemon starts on a fresh clone with a job stored as `checking`, `verified` or `publishing` whose launch trailer is on origin
+- **THEN** the task is `done` at origin's commit, no `verify.commitLost` is recorded, and the task is not launched again
+
+#### Scenario: Neither on origin nor in the clone
+- **WHEN** origin answers, it lacks the launch trailer, and the sealed commit is not in the clone
+- **THEN** the job is `commitLost` and the task is retried with attempts unchanged
+
+### Requirement: Unreachable origin decides nothing
+When origin cannot be fetched at recovery, no undecided job SHALL be published, pushed or dropped: each SHALL be queued, kept from the verifier, and decided by a later pass once origin answers.
+
+#### Scenario: Origin cannot be fetched
+- **WHEN** the daemon starts on a fresh clone and origin cannot be fetched
+- **THEN** the job is still queued afterwards, is not handed to the verifier, and is decided once origin answers
+
+### Requirement: Publishing recovery while origin is unreachable
+Recovery SHALL hand every job found `publishing` to the verifier backend, saying whether origin could be fetched. When the backend cannot confirm the push (origin unreachable, the lease lost, or the push refused), it SHALL put the clone's integration branch back on the job's expected head if the job's squash is still the tip. The job SHALL be requeued, and deferred while origin is unreachable. The clone MUST NOT keep an unpushed squash at its tip.
+
+#### Scenario: Restarted while origin is unreachable
+- **WHEN** the daemon is killed between the local swap and the push for a task whose branch has two commits that edit one file, and it restarts on the same clone while origin is unreachable
+- **THEN** the clone's branch is back at the job's expected head and the task stays `submitted`. Once origin answers, the task is `done` exactly once, with one commit carrying its trailer on origin, one launch, and no integration retry.
+
+### Requirement: A landed push is found by its trailer
+A job whose swap recovery undid SHALL be published at origin's commit when its launch trailer is found on origin, once origin answers. Nothing SHALL be pushed again for it.
+
+#### Scenario: The push had landed
+- **WHEN** the lost push had reached origin before the kill
+- **THEN** once origin answers, the job is recorded `published` at origin's commit, and nothing is pushed again
+
+### Requirement: Claimed lease expired while the daemon was down
+At startup, recovery SHALL treat a `running` claimed launch whose lease expired while the daemon was down as the tick treats an expired claim (specs/pull-runner "Lease expiry"): with progress in its worktree and `interruptions` under `daemon.maxKeptReleases`, a kept release that keeps the branch and spends no attempt; otherwise a failed attempt with reason `leaseExpired`. Either way the launch ends with `leaseExpired` and its worktree is removed.
+
+#### Scenario: Expired claim with a commit
+- **WHEN** the daemon is down past the lease of a claimed launch that has committed, and restarts
+- **THEN** the launch ends with `leaseExpired` and `kept: true`, its branch stays at the commit, and the task is `unstarted` with `attempts` 0 and `interruptions` 1
+
+#### Scenario: Expired claim without progress
+- **WHEN** the daemon is down past the lease of a claimed launch that changed nothing, and restarts
+- **THEN** the launch ends with `leaseExpired` and the task's `attempts` is 1
+
+### Requirement: Waiting claim with a lost worktree
+At startup, recovery SHALL end a `waiting` claimed launch whose worktree is gone with `worktreeLost`. If the task's answer has already arrived, the task SHALL be retried without spending an attempt, with the question and answer in the next brief's context. If not, the task SHALL stay `waiting`. An answer to a `waiting` task whose launch is no longer live SHALL retry the task the same way, because nothing can resume.
+
+#### Scenario: Answer arrived before the restart
+- **WHEN** a claimed launch blocks, its answer is recorded, and the daemon restarts on a fresh clone before the worker collects it
+- **THEN** the launch ends with `worktreeLost`, the task is `unstarted` with `attempts` 0, and the next launch's brief carries the question and the answer
+
+#### Scenario: Answer not yet arrived
+- **WHEN** a claimed launch blocks and the daemon restarts on a fresh clone before anyone answers
+- **THEN** the launch ends with `worktreeLost` and the task stays `waiting` on its question
+
+#### Scenario: Answer after the restart
+- **WHEN** the operator answers that waiting task
+- **THEN** the task is `unstarted` with `attempts` 0 and the answer in its carry, and the next launch's brief carries it
+
+### Requirement: Lost refs found at startup
+With a git workspace, recovery SHALL find, before any brief is composed:
+- lost launch branches: the branch of every launch not in flight that is missing from the clone's `refs/heads`;
+- lost commits: those named in stored attempt context that the clone definitely lacks (an interrupted context's `headSha` and `wipCommit`, a revision's `priorPublishedSha`).
+
+The daemon SHALL keep these refs for its life.
+
+#### Scenario: Fresh clone
+- **WHEN** the daemon restarts on a fresh clone after a launch ended with its branch kept
+- **THEN** that branch is among the lost refs
+
+### Requirement: Context naming lost work
+Recovery SHALL rewrite every stored attempt context that names a lost ref, and record each rewrite as a `recovery.workLost` event naming what was lost:
+- an `interrupted` context SHALL become `lostWork { priorLaunchId, reason }`;
+- a conflict SHALL lose `previousBranch`;
+- a revision SHALL lose `priorBranch` or `priorPublishedSha`.
+
+#### Scenario: Kept release lost with the clone
+- **WHEN** a claimed launch commits, is released with `keep`, its relaunch is parked, and the daemon restarts on a fresh clone
+- **THEN** a `recovery.workLost` event names the prior launch, branch, head and reason, and the task's carry holds `lostWork` and no `interrupted`
+
+### Requirement: No brief names a lost ref
+No brief SHALL name a lost ref, in `brief.md` or `brief.json`. This includes a context composed after startup, such as a reopen's revision. A `lostWork` context SHALL tell the worker that the kept work was lost with the previous clone and that it starts from its base commit.
+
+#### Scenario: Parked launch briefed again
+- **WHEN** the parked relaunch of a kept release is prepared again on a fresh clone
+- **THEN** its brief names neither the lost branch nor its commit, and says the previous launch's work was lost
+
+### Requirement: Re-preparing a parked launch
+When recovery prepares a claimable launch's missing worktree again, it SHALL NOT prepare a base commit the clone definitely lacks. Such a launch SHALL end with `baseLost`, and one whose preparation throws SHALL end with `prepareFailed`. Either way, its task SHALL fail with reason `worktreeLost`, without spending an attempt, and the daemon SHALL NOT exit.
+
+#### Scenario: Base commit not in the clone
+- **WHEN** the daemon restarts on a fresh clone that lacks a parked launch's base commit
+- **THEN** the launch ends with `baseLost`, the task is `unstarted` with `attempts` 0 and a `worktreeLost` prior failure naming the base, and the next tick parks a new launch on the integration head
+
+#### Scenario: Preparation throws
+- **WHEN** preparing a parked launch's worktree fails for another reason
+- **THEN** the launch ends with `prepareFailed`, the task is retried without spending an attempt, and startup completes
+

@@ -2,9 +2,7 @@
 
 ## Purpose
 The HTTP-backed operator interface, reached through both a CLI and an MCP server, and its operations: status, answers, cancellation, reopen and unblock, milestone review, pause and resume, shutdown, and logs, together with per-user run directories, daemon lifecycle and discovery, the event stream, the review bundle, graph import through the daemon, the tracker outbox routes a drainer uses to list, acknowledge, and reject tracker-bound effects, the health operations (`nudge` to reach a running agent through its inbox, the health facts `status` reports such as stuck tasks, cost, and budgets, and the cost-budget pause that `resume` lifts only with an override), the `cascade` flag on `reopen` that resets the started closure downstream of the target and returns its plan, the proposal operations (`proposals`, `accept_proposal`, and `reject_proposal`) through which a human decides the follow-up work agents propose, and the pull-runner operations (`claim` and `release`, through which a worker takes a prepared launch and hands it back, and the `mode` override that `start` and the `runner` route apply to a run) together with the `runner`, `claimable`, and `workers` facts `status` reports, where every human action is recorded as an event.
-
 ## Requirements
-
 ### Requirement: Operator interface
 The orchestrator SHALL expose operator routes on its loopback HTTP server, and both a CLI and an MCP server SHALL speak to them. The operations SHALL be `status`, `answer`, `cancel` with optional release, `reopen` with optional cascade, `unblock`, `accept`, `reject`, `pause`, `resume` with optional budget override, `logs`, `events`, `review`, `import`, `shutdown`, `start` with optional mode and configuration arguments, `stop`, `runs`, `outbox`, `ack`, `nudge`, `proposals`, `accept_proposal`, `reject_proposal`, `claim`, `release`, `mode`, and `config` to show and set the configuration. Humans and host sessions SHALL act only through this interface.
 
@@ -101,7 +99,7 @@ Graceful shutdown SHALL stop admission, flush pending transactions, and exit whi
 - **THEN** the output is the log file of T2's second launch
 
 ### Requirement: Run directory
-Run data SHALL live outside the repository in `$ORCH_HOME/runs/<id>/`, where `ORCH_HOME` defaults to `~/.orchestrator` and `<id>` is the first sixteen hex digits of the SHA-256 of the repository's real path. The run directory SHALL contain a `repo` file with that path, the store, the graph file, worktrees, logs, verification temp space, `daemon.log`, `daemon.pid`, and `daemon.json` with the daemon's pid, URL, port, start time, repository, and, after a graceful exit, the exit record. The CLI and MCP server SHALL resolve the run directory from an explicit repository argument or from the git top level of the working directory. A `runs` operation SHALL list every run with its repository path, whether its daemon is alive, a status digest when it is, and otherwise the exit record or its absence.
+Run data SHALL live outside the repository in `$ORCH_HOME/runs/<id>/`, where `ORCH_HOME` defaults to `~/.orchestrator` and `<id>` is the run id. For a SQLite run the id is the first sixteen hex digits of the SHA-256 of the repository's real path. For a Postgres run it is chosen as specs/state-backend "Run id per deployment" says. The run directory SHALL contain a `repo` file with that path, the store, the graph file, worktrees, logs, verification temp space, `daemon.log`, `daemon.pid`, and `daemon.json` with the daemon's pid, URL, port, start time, repository, and, after a graceful exit, the exit record. The CLI and MCP server SHALL resolve the run directory from an explicit repository argument or from the git top level of the working directory, with the same id the daemon chooses. A `runs` operation SHALL list every run with its repository path, whether its daemon is alive, a status digest when it is, and otherwise the exit record or its absence.
 
 #### Scenario: Same repository, same run
 - **WHEN** a run directory is resolved from two different working directories inside the same repository, or via a symlinked path to it
@@ -118,6 +116,10 @@ Run data SHALL live outside the repository in `$ORCH_HOME/runs/<id>/`, where `OR
 #### Scenario: Runs listing shows why a daemon is gone
 - **WHEN** `runs` is invoked after one run's daemon exited idle and another's was killed
 - **THEN** the first is listed with `exit.reason` `idle` and its last digest, and the second with no exit record
+
+#### Scenario: Run directory follows the run id
+- **WHEN** a repository's `orchestrator.yaml` selects `store.kind: postgres` with `store.runId: team-a`
+- **THEN** the run directory is `$ORCH_HOME/runs/team-a`, and with `store.kind: sqlite` it is the path hash whatever `store.runId` says
 
 ### Requirement: Daemon lifecycle and discovery
 `start` SHALL be idempotent: if `daemon.pid` names a live process and the recorded URL answers `status`, it SHALL return that URL; otherwise it SHALL spawn the daemon detached with output to `daemon.log`, write `daemon.pid`, wait for the URL to answer within a bounded time, and return it. A stale pid file SHALL be ignored. `stop` SHALL invoke the `shutdown` route and fall back to a signal. The daemon SHALL record its chosen port and SHALL reuse it on the next start when it is free, so that agents launched before a restart reach the daemon after it. The daemon SHALL accept `--default-mode <spawn|pull|mixed>`, which SHALL become the run's durable mode override only when the store holds none and the repository's `orchestrator.yaml` does not set `runner.mode`; `--mode` SHALL keep setting the override unconditionally. A daemon started after an idle exit SHALL run recovery as after any stop and SHALL find nothing to adopt.
@@ -540,3 +542,19 @@ The daemon lifecycle `start` SHALL accept `checkCommand`, `integrationBranch`, `
 #### Scenario: Codex run names its work loop
 - **WHEN** the `start` tool is called with `runnerKind: "codex"` on a run with no configured mode, and later with `mode: "pull"`
 - **THEN** both results carry a `modeNote` naming `orchestrator-work --runner codex`
+
+### Requirement: Revive a local Postgres run
+A Postgres run keeps no store file locally. Revival SHALL treat a Postgres run whose run directory holds `daemon.json` (a daemon was started from it) as a local run: refused after an explicit stop or signal, started again after an idle exit or a crash. Only a Postgres run whose run directory has no `daemon.json` SHALL be answered as remote ("pass --url or set ORCH_URL").
+
+#### Scenario: Never started here
+- **WHEN** revival is asked for a Postgres run whose run directory has no `daemon.json`
+- **THEN** it fails naming the run as remote
+
+#### Scenario: Stopped locally
+- **WHEN** revival is asked for a Postgres run whose local daemon was stopped
+- **THEN** it fails saying the daemon was stopped and to call start, not that the run is remote
+
+#### Scenario: Idle exit locally
+- **WHEN** revival is asked for a Postgres run whose local daemon exited idle
+- **THEN** the daemon is started again
+

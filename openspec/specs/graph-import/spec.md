@@ -2,9 +2,7 @@
 
 ## Purpose
 Mapping normalized tracker issue records into a task graph: the normalized record shape and its validation, the rules that map an epic's children and their blocking relations to tasks, external nodes, and a gated milestone, the extraction of acceptance criteria from issue descriptions, the import outcome returned through the daemon, and the recording of the source tracker at import so that a run can be mirrored back to it.
-
 ## Requirements
-
 ### Requirement: Normalized issue record
 Import SHALL accept records of the form `{ id, title, description?, state, blockedBy[], parent?, labels?, priority?, url? }` with `state` one of `open`, `inProgress`, `done`, or `cancelled`, plus a `root` id naming the epic or parent. Records SHALL be validated before mapping and a malformed record SHALL fail the import naming the field.
 
@@ -113,3 +111,36 @@ The import SHALL split a description at the first heading matching the configure
 #### Scenario: No scope heading
 - **WHEN** a child's description has no scope heading
 - **THEN** the mapped task has no `scope` and the import succeeds
+
+### Requirement: Graph source by store kind
+Under `store.kind: sqlite` the graph source SHALL be the run's graph file, unchanged. Under `store.kind: postgres` it SHALL be the store's proposed-graph slot: `PUT /v1/graph` SHALL write the slot and reload at once, and proposal acceptance SHALL read the slot, falling back to the active graph when it is empty. No graph file is read or written.
+
+#### Scenario: Import on a Postgres run
+- **WHEN** `PUT /v1/graph` is called on a Postgres run
+- **THEN** the document is written to the proposed slot, the reload accepts it, and no graph file exists
+
+### Requirement: Proposed graph slot
+The store SHALL keep the proposed graph apart from the accepted snapshot. The snapshot SHALL be written only after a reload passes classification and SHALL be trusted without classification at startup. A document SHALL be evaluated once per write, so an unchanged rejected one is not classified again every tick and a re-sent one is.
+
+#### Scenario: Rejected graph across a restart
+- **WHEN** an incompatible graph is sent with `PUT /v1/graph` and the daemon is restarted
+- **THEN** the response reports it rejected with reasons, it stays in the proposed slot, and after the restart the active graph is still the previously accepted one
+
+### Requirement: Rejected proposal stays rejected
+Under a Postgres store, a stored proposal SHALL be evaluated once per write (its stamp). The reload SHALL record a rejected proposal's stamp and reasons in kv `graph.rejectedStamp`. The store source SHALL NOT evaluate that stamp again, in this daemon or a later one, which still reports it as rejected, so a restart never activates it. A new `PUT /v1/graph` has a new stamp and SHALL be evaluated.
+
+#### Scenario: Compatible later, not activated by a restart
+- **WHEN** a proposal is rejected because a task it changes is started, the task later returns to `unstarted`, and the daemon restarts
+- **THEN** the active graph is unchanged, no `graph.loaded` event is recorded for the proposal, and the status still reports it as rejected with its reasons
+
+#### Scenario: Sent again
+- **WHEN** the same document is sent again after it became compatible
+- **THEN** it is evaluated and becomes active
+
+### Requirement: File source re-evaluates a rejected file
+With the graph file as the source, a file that differs from the active graph SHALL be evaluated again at every reload. A rejected file therefore becomes active once it is compatible, whether or not the daemon restarted.
+
+#### Scenario: File becomes compatible
+- **WHEN** a graph file is rejected because a task it changes is started, and the task later returns to `unstarted`
+- **THEN** the next reload makes the file active
+

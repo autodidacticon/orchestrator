@@ -29,12 +29,15 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 | running | blocked | agent | block delivered through the fallback file after exit |
 | running | waiting | agent | block through the long-poll |
 | running | failed | orchestrator | process dead without a report, lease expired, or a claimed launch released after progress without keep |
+| running | failed | orchestrator | worktreeLost: a claimed launch's worktree is gone at startup on a fresh clone; attempts unchanged |
 | running | unstarted | orchestrator | claimed launch released without progress, or released with keep after progress |
 | waiting | running | orchestrator | answer persisted and a slot admitted |
 | waiting | blocked | orchestrator | maxWait elapsed, process dead, or a claimed launch released |
 | submitted | done | verifier | published |
 | submitted | failed | verifier | checks red, undeclared empty diff, missing acceptance evidence, or integration cap hit |
 | submitted | unstarted | verifier | rebase conflict under the cap |
+| submitted | blocked | verifier | pushRefused: origin refused the publication push `git.pushRefusalLimit` times; attempts unchanged |
+| submitted | failed | orchestrator | commitLost: a queued job's sealed commit is missing at startup on a fresh clone; attempts unchanged |
 | failed | unstarted | orchestrator | attempts below maxAttempts |
 | failed | blocked | orchestrator | attempts exhausted |
 | blocked | unstarted | human | unblock or answer |
@@ -74,6 +77,14 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 #### Scenario: Kept release after progress returns to unstarted
 - **WHEN** a claimed launch with commits is released with `keep`
 - **THEN** the orchestrator applies `running -> unstarted` with trigger `released`, `attempts` unchanged, the lease cleared, and `carry.interrupted` set
+
+#### Scenario: Fresh-clone losses spend no attempt
+- **WHEN** startup on a fresh clone applies `submitted -> failed` with trigger `commitLost` or `running -> failed` with trigger `worktreeLost`
+- **THEN** `attempts` is unchanged and the task is retried through `failed -> unstarted`
+
+#### Scenario: A refused push blocks the task
+- **WHEN** the verifier's job for a submitted task fails as `pushRefused`
+- **THEN** the verifier applies `submitted -> blocked` with trigger `pushRefused` and `attempts` unchanged, and the same request by an agent is rejected
 
 ### Requirement: Admission
 The orchestrator SHALL admit `unstarted` ready tasks and resumable `waiting` tasks into run slots up to the configured capacity, admitting resumables before new launches and otherwise in first-in first-out order. A `waiting` task SHALL NOT hold a run slot, and the number of `waiting` tasks SHALL be bounded by `maxWaiting`.
@@ -203,11 +214,15 @@ A human SHALL accept a `submitted` milestone only against its pinned `integratio
 - **THEN** MVP is `submitted` at version 2 with the new integration head pinned, and accepting it against version 1 is refused as stale
 
 ### Requirement: Structured blocked reasons
-A `blocked` status SHALL carry a reason with a kind from `needsDecision`, `needsAccess`, `impossible`, `dependencyCancelled`, `outOfScope`, `insufficientSpec`, and `milestoneRejected`, plus a message, and for `needsDecision` any options and the eventual answer.
+A `blocked` status SHALL carry a reason with a kind from `needsDecision`, `needsAccess`, `impossible`, `dependencyCancelled`, `outOfScope`, `insufficientSpec`, `milestoneRejected`, and `pushRefused`, plus a message, and for `needsDecision` any options and the eventual answer. Only the verifier SHALL set `pushRefused`, and agents MUST NOT block with it.
 
 #### Scenario: Question survives into the next brief
 - **WHEN** a task is blocked with kind `needsDecision` and a human answers
 - **THEN** the task returns to `unstarted` and its next brief contains the question and the answer
+
+#### Scenario: A refused push names origin's text
+- **WHEN** a task is blocked with kind `pushRefused`
+- **THEN** its message holds the text origin answered the push with, and an unblock returns it to `unstarted` with its budgets reset
 
 ### Requirement: Fresh process per launch
 Every launch SHALL be a new process with a new worktree and branch. Resuming after `blocked` SHALL be a new launch whose brief carries the answer. Resuming after `waiting` SHALL continue the same process once admitted.
@@ -353,7 +368,7 @@ When a task is reopened, uncancelled, or reset by cascade, every milestone reach
 - **THEN** no task whose status is `running`, `waiting`, `submitted`, or `done` has a dependency whose status is `unstarted`
 
 ### Requirement: Claimable launches
-In `pull` and `mixed` modes a launch SHALL be parked as `claimable` once its worktree and brief exist. The task SHALL be `running` from the moment the launch row exists and SHALL hold a run slot while parked, so that the number of parked launches is bounded by `capacity`. The lease of a parked launch SHALL NOT expire; its TTL SHALL start at the claim, when `claimedAt` and `expiresAt` are set and `spawnedAt` stays unset. A claimed launch's lease SHALL be renewed by any API call under its token, by observed worktree progress, and at admission when the task resumes from `waiting`. An expired lease on a claimed launch SHALL follow the existing failure path: `failed` with reason `leaseExpired`, `attempts` increased, the worktree swept, and a new launch prepared while attempts remain. `launches` SHALL increase by one for every launch row, claimed or spawned.
+In `pull` and `mixed` modes a launch SHALL be parked as `claimable` once its worktree and brief exist. The task SHALL be `running` from the moment the launch row exists and SHALL hold a run slot while parked, so that the number of parked launches is bounded by `capacity`. The lease of a parked launch SHALL NOT expire; its TTL SHALL start at the claim, when `claimedAt` and `expiresAt` are set and `spawnedAt` stays unset. A claimed launch's lease SHALL be renewed by any API call under its token, by observed worktree progress, at admission when the task resumes from `waiting`, and by its work loop's renewal (see specs/pull-runner "Lease renewal by the work loop"), which is not progress. An expired lease on a claimed launch whose worktree shows progress since the claim SHALL be a kept release while the task's kept releases are under `daemon.maxKeptReleases`: `unstarted` with `attempts` unchanged and the branch kept (see specs/pull-runner "Lease expiry"). Otherwise it SHALL follow the existing failure path: `failed` with reason `leaseExpired`, `attempts` increased, the worktree swept, and a new launch prepared while attempts remain. `launches` SHALL increase by one for every launch row, claimed or spawned.
 
 #### Scenario: Parked launch holds a slot
 - **WHEN** capacity is 2 and two launches are parked
