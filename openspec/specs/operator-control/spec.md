@@ -359,11 +359,15 @@ The configuration SHALL accept `daemon.idleExitMs`, an integer in milliseconds d
 - **THEN** the daemon never exits on its own and `idle.exitAfterMs` is 0
 
 ### Requirement: Exit record
-On every graceful exit, whether by the `shutdown` route, by signal, or by idle exit, the daemon SHALL write `exit: { at, reason, reap, digest, by? }` into `daemon.json` after the orchestrator has stopped and before the process ends, where `reason` is `stop`, `signal`, or `idle`, `digest` is the event-stream digest at that moment, and `by`, present for a `stop`, names the caller as recorded by the `shutdown` route. A daemon that starts SHALL write `daemon.json` without `exit`. A dead pid whose `daemon.json` has no `exit` SHALL be read as a crash. `runs` SHALL report, for every run whose daemon is not alive, the exit record or that none exists, and the revival refusal after a `stop` SHALL name the caller when one was recorded.
+On every graceful exit, whether by the `shutdown` route, by signal, or by idle exit, the daemon SHALL write `exit: { at, reason, reap, digest, by?, unflushedBatches?, storeClosed?, rejected? }` into `daemon.json` after the orchestrator has stopped and before the process ends. `reason` is `stop`, `signal`, or `idle`. `digest` is the event-stream digest taken before the store closes. `by`, present for a `stop`, names the caller as recorded by the `shutdown` route.
+
+The record SHALL be written after the store's close returns. When the close reports lost batches, the record SHALL carry their count as `unflushedBatches`. When the sink rejected a batch, the record SHALL carry its cause as `rejected`. When the shutdown grace period elapses before the close returns, the record SHALL carry `storeClosed: false` and `unflushedBatches` set to the pending count read before the record is written, even when that count is 0. When the journal turns fatal after a shutdown began and before the close returns, the record SHALL carry `storeClosed: false` and the fatal condition's `unflushedBatches` before the daemon exits 1. A fatal condition with no shutdown under way leaves no record and reads as a crash. A record without these fields is clean. A clean record SHALL be written only after the store closed with nothing unflushed.
+
+A daemon that starts SHALL write `daemon.json` without `exit`. A dead pid whose `daemon.json` has no `exit` SHALL be read as a crash. `runs` SHALL report, for every run whose daemon is not alive, the exit record or that none exists. The revival refusal after a `stop` SHALL name the caller when one was recorded, and SHALL name the lost batches when the record is not clean.
 
 #### Scenario: Stop records the reason
 - **WHEN** the daemon is stopped through the `shutdown` route with `reap` false
-- **THEN** `daemon.json` carries `exit` with reason `stop`, `reap` false, the digest, and `by` with the caller's remote address
+- **THEN** `daemon.json` carries `exit` with reason `stop`, `reap` false, the digest, and `by` with the caller's remote address, and no `unflushedBatches` or `storeClosed`
 
 #### Scenario: Crash leaves no record
 - **WHEN** the daemon is killed with SIGKILL
@@ -372,6 +376,14 @@ On every graceful exit, whether by the `shutdown` route, by signal, or by idle e
 #### Scenario: Restart clears the record
 - **WHEN** a daemon that exited idle is started again
 - **THEN** `daemon.json` has no `exit` while it runs
+
+#### Scenario: Exit that lost batches
+- **WHEN** the database session stops answering, a write is committed, and the daemon receives SIGTERM
+- **THEN** the daemon exits 1, and `exit` carries reason `signal` and `unflushedBatches` equal to the count the daemon logged
+
+#### Scenario: Revival refusal names the loss
+- **WHEN** the exit record is a `stop` with `unflushedBatches: 3` and an operation asks for revival
+- **THEN** the refusal reads `stop, losing 3 unflushed batches`
 
 ### Requirement: Revive on demand
 When an operator operation other than `start`, `stop`, or `runs` finds no healthy daemon for a run directory that holds a store, the CLI and the operator MCP server SHALL start the daemon as `start` would and proceed with the operation when the last exit record is `idle` or absent, and SHALL refuse with an error naming the stop time and `start` when the last exit record is `stop` or `signal`. A repository with no run directory SHALL be refused as today.

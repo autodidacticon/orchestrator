@@ -313,10 +313,10 @@ The brief's definition of done SHALL name the effective check command at the tim
 A launch the daemon spawns SHALL inherit the daemon's environment with these changes:
 - `ORCH_HOME` replaced by a directory inside the run's data directory;
 - `ORCH_URL`, `ORCH_REPO`, and `ORCH_DATA_DIR` removed;
-- `DATABASE_URL`, `ORCH_RUN_ID`, and every variable whose value is the resolved store URL removed (specs/state-backend "No store URL in child environments"), for every runner kind;
+- `DATABASE_URL`, `DATABASE_URL_FILE`, `ORCH_RUN_ID`, every libpq connection variable named in `LIBPQ_VARS`, and every variable whose value is the resolved store URL removed (specs/state-backend "No store URL in child environments"), for every runner kind;
 - the agent variables `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_API`, `ORCH_RETRY_WINDOW_MS`, `ORCH_TASK_ID`, and `ORCH_WORKTREE` added.
 
-An orchestrator client the agent runs therefore SHALL find no run under its `ORCH_HOME` and SHALL NOT be able to start, stop, or list a daemon of the user's. `ORCH_API` SHALL remain set so the shim reaches the agent's own daemon.
+An orchestrator client the agent runs therefore SHALL find no run under its `ORCH_HOME` and SHALL NOT be able to start, stop, or list a daemon of the user's. `ORCH_API` SHALL remain set so the shim reaches the agent's own daemon. What a spawned agent running as the daemon's user can still reach of the store's credentials is stated in specs/state-backend "Store credentials a child can still reach".
 
 An MCP server that the agent's CLI spawns SHALL be assumed to receive only what the runner forwards to it explicitly, unless the CLI is known to pass its whole environment on. Codex passes the server a fixed set of variables plus its `env` entries. OpenCode passes the MCP child its whole environment plus the server's `environment`, so the OpenCode runner SHALL forward nothing: it puts the shim's variables in the agent environment, registers the server with no `environment` block, and keeps the token off argv and out of every file. The runners SHALL build the shim's variables through one `shimEnv` helper.
 
@@ -329,8 +329,8 @@ An MCP server that the agent's CLI spawns SHALL be assumed to receive only what 
 - **THEN** the result lists no runs
 
 #### Scenario: Agent sees no store URL
-- **WHEN** the daemon's environment holds `DATABASE_URL` and `APP_DATABASE` set to the store URL, and a spawned agent's command prints its environment
-- **THEN** the printout has neither variable nor the password
+- **WHEN** the daemon's environment holds `DATABASE_URL` and `APP_DATABASE` set to the store URL, `DATABASE_URL_FILE`, and every name in `LIBPQ_VARS` with `PGPASSWORD` set, and a spawned agent's command prints its environment
+- **THEN** the printout has none of those variables, not the password and not the `PGPASSWORD` value
 
 ### Requirement: Codex brief reports through the MCP server
 The brief of a `codex` launch SHALL tell the agent to call heartbeat, report, block, inbox and log through the `orchestrator` MCP server's tools, and not to call the agent API from a command (curl or a script), because the Codex sandbox refuses a command's network access while Codex runs the MCP server outside the sandbox. It SHALL keep the fallback report file for the case where an MCP tool call itself fails. A `claude-code` or `opencode` brief SHALL NOT carry this text.
@@ -412,7 +412,7 @@ A parked launch that the daemon spawns once its claim window elapses SHALL leave
 - **THEN** the read does not answer until its own writes are durable
 
 ### Requirement: Inbox notices handed out once
-An inbox read SHALL take the notices the launch holds, wait until everything committed so far is durable, remove only the notices it took, and wait for that removal to be durable. A notice queued during the wait SHALL stay for the next read. Inbox reads of one launch SHALL run one at a time, so each notice is handed out once.
+An inbox read SHALL take the notices the launch holds, wait until everything committed so far is durable, remove only the notices it took, and wait for that removal to be durable. A notice queued during the wait SHALL stay for the next read. Inbox reads of one launch SHALL run one at a time, so each notice is handed out once. A notice SHALL be removed from the launch only when its answer goes to a caller whose connection is still open. When the caller is gone after the first wait, the read SHALL remove nothing. When the caller is gone after the removal's wait, the read SHALL put the removed notices back at the front of the launch's notices, ahead of any queued meanwhile. Either way the next read SHALL hand them out.
 
 #### Scenario: Notice queued during the wait
 - **WHEN** a second nudge is queued while an inbox read waits for durability
@@ -421,4 +421,12 @@ An inbox read SHALL take the notices the launch holds, wait until everything com
 #### Scenario: Concurrent reads
 - **WHEN** two inbox reads of one launch run at once while one notice is held
 - **THEN** the notice is handed out by exactly one of them
+
+#### Scenario: Read abandoned during a stall
+- **WHEN** a nudge is durable, the sink stalls, the agent's inbox read waits, and the agent gives up and closes the connection before the sink recovers
+- **THEN** once the sink recovers the nudge is still held by the launch, and the next read answers with it
+
+#### Scenario: Caller gone while the removal waits
+- **WHEN** two nudges are taken, the sink stalls on the batch that removes them, a third nudge is queued, and the caller goes away before the removal is durable
+- **THEN** the read removes nothing for good, and the next read answers with the three nudges in order
 

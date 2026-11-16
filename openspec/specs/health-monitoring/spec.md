@@ -2,9 +2,7 @@
 
 ## Purpose
 How the daemon tells a working agent from a dead or stuck one and keeps a run inside its budgets: process liveness observed by the runner, which replaces silence as the failure signal; progress signals from the worktree, commits, API calls, and heartbeat text; stuck detection and escalation with a diagnosis hook; the launch time budget; usage accounting from launch logs; the run cost budget that pauses admission; and the base-moved notice that tells live agents when the integration head advances.
-
 ## Requirements
-
 ### Requirement: Process liveness
 On every tick, in the reconcile phase, the daemon SHALL ask the runner for the liveness of each live launch as `alive`, `dead`, or `unknown`. `alive` SHALL renew the task's lease and feed the progress, stuck, and time-budget checks. `dead` SHALL be handled as before: a fallback file is applied, otherwise the task fails with reason `exitedWithoutReport`. When the runner implements `readFailure` and returns a diagnosis `{ reason, detail? }` for the dead launch, the dead-launch record SHALL carry it: the failure's message SHALL name the reason and the detail, its `detail.runnerFailure` SHALL hold the diagnosis, and the `launch.ended` event SHALL carry `runnerFailure`. A runner without `readFailure`, or one that returns nothing, SHALL leave the record as before. The same SHALL hold for a launch found dead at recovery. `unknown` SHALL leave lease expiry as the only bound on silence. Runners that spawn processes SHALL derive liveness from the recorded pid; a runner that cannot observe its launches SHALL report `unknown`. For the OpenCode runner the recorded pid leads the `sh` process group that holds `opencode` and its MCP child (the shim): liveness follows the `sh`, which lives as long as `opencode`, and reaping signals the whole group, so the shim does not outlive its launch. A dead launch's diagnosis also decides whether its failure is charged: see task-lifecycle "Retry and exhaustion" for `startupContended`.
 
@@ -218,3 +216,18 @@ The daemon's git commands SHALL run with `GIT_OPTIONAL_LOCKS=0`. Its read-only g
 #### Scenario: Observation still sees uncommitted edits
 - **WHEN** an agent modifies a tracked file without committing
 - **THEN** the next tick's fingerprint differs from the previous one and `progressAt` is recorded with `lastSignal` `worktree`, as without the setting
+
+### Requirement: Suite reproduction of the half-removed worktree read
+The test suite SHALL reproduce on demand, without product code changes, a tick fingerprint read of a released launch's worktree that `git worktree remove` has deleted part way. The silent-agent work-loop test SHALL take the absence of progress from the release's decision and the launch row at removal, not from the row read afterwards.
+
+#### Scenario: Silent-agent progress race on demand
+- **WHEN** the work-loop test "the loop renews the lease of a silent agent" runs with `ORCH_TEST_REPRO=silent-agent-progress`, which holds the tick's fingerprint read until the release has ended the launch and removed a tracked file with `.git` still present
+- **THEN** the ended launch's row afterwards has `lastSignal: worktree`, and the test still passes, because `launch.released` has `progressed: false` and the row at removal has `progressAt` equal to the claim time
+
+### Requirement: Suite reproduction of an agent alive after its report
+The scripted test agent SHALL stay alive `ORCH_TEST_AGENT_EXIT_DELAY_MS` milliseconds after its behaviour when that variable is set. A test that checks a launch's end or its worktree after its task is `done` SHALL first wait for the launch to end. The crash harness's `waitTerminal` SHALL also wait until no launch is `preparing`, `launching` or `live`.
+
+#### Scenario: Reported agent still running
+- **WHEN** `test/slice/launch.test.ts` and `test/crash/crash.test.ts` run with `ORCH_TEST_AGENT_EXIT_DELAY_MS=400`
+- **THEN** every test in them passes, the crash invariant `liveLaunches == 0` included
+

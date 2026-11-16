@@ -141,15 +141,15 @@ Reopen, uncancel, and cascade SHALL NOT update the integration ref, revert or re
 - **THEN** the integration branch carries two commits with trailer `Orchestrator-Task: T1`, each with a distinct `Orchestrator-Launch`, and the second has the first as an ancestor
 
 ### Requirement: Check environment
-The check command SHALL run with the same environment isolation as a spawned agent: the daemon's environment with the git identity variables added, `ORCH_HOME` replaced by a directory inside the run's data directory, and `ORCH_URL`, `ORCH_REPO`, `ORCH_DATA_DIR`, `DATABASE_URL`, `ORCH_RUN_ID` and every variable whose value is the resolved store URL removed. Repository code run by the check SHALL NOT be able to discover or stop any daemon of the user's through the run directory layout, nor reach the orchestrator's state database through its environment.
+The check command SHALL run with the same environment isolation as a spawned agent: the daemon's environment with the git identity variables added, `ORCH_HOME` replaced by a directory inside the run's data directory, and `ORCH_URL`, `ORCH_REPO`, `ORCH_DATA_DIR`, `DATABASE_URL`, `DATABASE_URL_FILE`, `ORCH_RUN_ID`, every libpq connection variable named in `LIBPQ_VARS` and every variable whose value is the resolved store URL removed. Repository code run by the check SHALL NOT be able to discover or stop any daemon of the user's through the run directory layout, nor reach the orchestrator's state database through its environment. The check runs as the daemon's user, so it can still read what specs/state-backend "Store credentials a child can still reach" lists; this requirement does not cover that.
 
 #### Scenario: Check sees an isolated home
 - **WHEN** the check command is `echo "$ORCH_HOME" > home.txt && test -z "$ORCH_URL"`
 - **THEN** the check passes and the recorded path is inside the run's data directory
 
 #### Scenario: Check sees no store URL
-- **WHEN** the check command is `env > check.env` on a daemon whose environment holds `DATABASE_URL` and another variable set to the store URL
-- **THEN** `check.env` has neither variable nor the password, so check output stored in job rows cannot carry it
+- **WHEN** the check command is `env > check.env` on a daemon whose environment holds `DATABASE_URL` and another variable set to the store URL, `DATABASE_URL_FILE`, and every name in `LIBPQ_VARS` with `PGPASSWORD` set
+- **THEN** `check.env` has none of those variables, not the password and not the `PGPASSWORD` value, so check output stored in job rows cannot carry them
 
 ### Requirement: Origin as source of truth
 The configuration block `git` SHALL hold `originUrl` (optional), `pushIntegration` (default `false`) and `fetchIntervalMs` (default 30000).
@@ -302,4 +302,36 @@ When the tick applies a terminal verifier job, it SHALL await the removal of the
 #### Scenario: Stale registration cleared
 - **WHEN** a launch worktree's directory is already gone but the clone still lists it
 - **THEN** the removal prunes the registration and reports the worktree gone
+
+### Requirement: Fetch failures are classified
+A failed fetch at the start of a verifier job SHALL be classified from git's output. Origin declining the credentials or the access is a refusal; anything else, a timeout included, is unreachable. A refused fetch SHALL count against `git.pushRefusalLimit`, with a message saying the fetch was refused, and SHALL block the task as `pushRefused` at the limit. An unreachable fetch MUST NOT count.
+
+#### Scenario: An expired credential blocks the task
+- **WHEN** every fetch fails with "Authentication failed", and `git.pushRefusalLimit` is 3
+- **THEN** the job is requeued twice as a refusal, and the third refusal blocks the task with kind `pushRefused` and a message that says the fetch was refused and holds "Authentication failed", with `attempts` unchanged
+
+#### Scenario: An unreachable origin is retried without a limit
+- **WHEN** the fetch cannot reach origin more times than `git.pushRefusalLimit`
+- **THEN** each failure requeues the job as unreachable with no refusal counted, and the task stays `submitted` and publishes once origin answers
+
+### Requirement: A slow tag push is confirmed when it completes
+A milestone tag push the tick starts and stops waiting for SHALL be kept with its outcome. A later tag call for the same tag and sha SHALL use that push rather than start another. While the push runs, the call SHALL wait on it within the tick's bound. Once it has landed, the call SHALL answer pushed without pushing again, and the tag SHALL be recorded as `tagPushed:<id>:<version>`. Once it has failed, the call SHALL push again.
+
+#### Scenario: Every tag push outlives the tick's wait
+- **WHEN** origin takes longer than the tick's wait to accept every tag push
+- **THEN** the tag is recorded as pushed after its first push completes, and origin receives that one push only
+
+### Requirement: A failed local tag is retried
+With `git.pushIntegration` off, a tag created in the clone for a gated milestone SHALL be recorded as `tagLocal:<id>:<version>`. On every tick, a gated milestone in `submitted` or `done` with no such record and no recorded conflict SHALL have its tag created in the clone again, idempotently. A conflict SHALL still be recorded once and not retried.
+
+#### Scenario: The tag could not be created when the milestone was submitted
+- **WHEN** a gated milestone is submitted with pushing off while `git tag` fails in the clone, and the failure later clears
+- **THEN** a later tick creates `milestone/<id>/v<version>` at the milestone's `integrationSha` and records it as `tagLocal:<id>:<version>`
+
+### Requirement: Push retry state ends with its job
+The push retry state the store keeps for a verifier job (`pushRetry:<jobId>`) SHALL be removed when the job's result is applied, in the same transaction. Whatever the outcome (published, conflict, failed or `pushRefused`), no later read SHALL find retry state for that job. Because the store offers no kv delete, the entry SHALL be emptied, and an empty entry SHALL read as no state.
+
+#### Scenario: A job published after outages
+- **WHEN** a job is requeued for an unreachable origin and later publishes
+- **THEN** once the job is applied, reading its push retry state finds none
 
