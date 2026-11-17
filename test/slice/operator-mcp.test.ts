@@ -136,6 +136,11 @@ describe('operator MCP server', () => {
     const rv = await tool('wait', { afterSeq: q['seq'] as number, until: 'review', timeoutMs: 60_000 });
     expect(rv).toMatchObject({ matched: true });
     expect((rv['digest'] as Record<string, unknown>)['awaitingReview']).toEqual(['MVP']);
+    // The submitted event comes cut like the review index. See specs/operator-mcp "Wait tool".
+    const submittedEv = (rv['events'] as Array<{ kind: string; taskId?: string; payload?: Record<string, unknown> }>).find(
+      (e) => e.kind === 'transition' && e.taskId === 'MVP' && e.payload?.['to'] === 'submitted',
+    );
+    expect(Array.isArray(submittedEv?.payload?.['omitted'])).toBe(true);
 
     const bundle = await tool('review', { milestone: 'MVP' });
     expect(bundle).toMatchObject({ status: 200, milestone: 'MVP', reviewVersion: 1, tag: 'milestone/MVP/v1' });

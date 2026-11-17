@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { SlotValidator, defaultSlots } from '../../src/brief/template.js';
 import type { Config } from '../../src/config.js';
+import type { Entry } from '../../src/state/status.js';
 import { setTracker } from '../../src/state/store.js';
+import type { Actor } from '../../src/state/transitions.js';
+import { deriveEffects } from '../../src/tracker/effects.js';
 import { fixtureText } from '../graph/helpers.js';
 import { makeHarness, runToQuiet, type Harness } from './harness.js';
 
@@ -92,8 +95,16 @@ describe('tracker effect derivation', () => {
     const [submitted] = comments(h, 'MVP');
     expect(submitted).toContain(`version 1 at ${mvp.integrationSha}`);
     expect(submitted).toContain('milestone/MVP/v1');
-    expect(submitted).toContain('- T3 (pub-T3-');
-    expect(submitted).toContain('did T4');
+    // A short notice: no diff stat, no task lines. See specs/tracker-sync "Comment effects".
+    expect(submitted).toContain('orchestrator-ctl review MVP');
+    expect(submitted).toMatch(/\breview tool\b/);
+    expect(String(submitted).split('\n').filter((l) => l.startsWith('- '))).toEqual([]);
+    expect(submitted).not.toContain('Diff stat');
+    for (const id of ['T1', 'T2', 'T3', 'T4', 'T5']) {
+      const summary = h.store.getCompletionReport(id)?.body['summary'];
+      if (typeof summary === 'string' && summary) expect(submitted).not.toContain(summary);
+    }
+    expect(submitted).not.toContain('did T4');
     expect(h.orch.acceptMilestone('MVP', mvp.integrationSha!, 1)).toEqual({ ok: true });
     await h.orch.settle();
     expect(states(h, 'MVP')).toEqual(['inProgress', 'done']);
@@ -103,6 +114,28 @@ describe('tracker effect derivation', () => {
     const markers = h.store.listOutbox().filter((e) => e.kind === 'comment').map((e) => String(e.payload['marker']));
     expect(markers.every((m) => /^— orchestrator run \S+ · event \d+$/.test(m))).toBe(true);
     expect(new Set(markers).size).toBe(markers.length);
+  });
+
+  it('the ready-for-review comment stays short for a milestone of 24 tasks with long summaries and a long stat', async () => {
+    const h = tracked();
+    await h.orch.tick();
+    const g = h.orch.graph();
+    const node = g.nodes.get('MVP')!;
+    const sha = 'a'.repeat(40);
+    const closure = Array.from({ length: 24 }, (_, i) => ({ taskId: `T${i + 1}`, publishedSha: 'b'.repeat(40), summary: `S${i + 1} `.padEnd(1200, 'x') }));
+    const diffStat = [...Array.from({ length: 600 }, (_, i) => ` src/file${i}.ts | 10 ++++++++++`), ' 600 files changed, 6000 insertions(+)'].join('\n');
+    const entry = { ...h.orch.entry('MVP'), status: { kind: 'submitted' }, integrationSha: sha, reviewVersion: 1 } as unknown as Entry;
+    const effects = deriveEffects(
+      { graph: g, store: h.store, config: h.orch.config, runId: 'r1', now: 1 },
+      { id: 'MVP', node, from: 'running', to: 'submitted', actor: 'orchestrator' as Actor, trigger: 'closureDone', entry, seq: 7, extra: { integrationSha: sha, diffStat, closure } },
+    );
+    const bodies = effects.filter((e) => e.kind === 'comment').map((e) => String(e.payload['body']));
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]!.length).toBeLessThan(600);
+    expect(bodies[0]).toContain(`version 1 at ${sha}`);
+    expect(bodies[0]).toContain('milestone/MVP/v1');
+    expect(bodies[0]).not.toContain('src/file0.ts');
+    expect(bodies[0]).not.toContain('S1 ');
   });
 
   it('done at milestone acceptance: tasks under the gated milestone flip at accept, others at publication', async () => {

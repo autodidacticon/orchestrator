@@ -128,10 +128,7 @@ export function deriveEffects(ctx: DerivationContext, t: TransitionFacts): NewOu
     case 'submitted': {
       if (node.kind !== 'milestone') break;
       const sha = str(extra['integrationSha']) ?? entry.integrationSha ?? '';
-      const closure = Array.isArray(extra['closure'])
-        ? (extra['closure'] as Array<{ taskId: Id; publishedSha?: string; summary?: string }>)
-        : closureTasks(node).map((task) => ({ taskId: task.id, publishedSha: publishedShaOf(task.id), summary: summaryOf(task.id) }));
-      comment(node, submittedBody({ id: node.id, sha, version: entry.reviewVersion, diffStat: str(extra['diffStat']) ?? '', closure }));
+      comment(node, submittedBody({ id: node.id, sha, version: entry.reviewVersion }));
       break;
     }
     case 'failed': {

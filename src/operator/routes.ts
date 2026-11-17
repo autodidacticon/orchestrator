@@ -17,7 +17,7 @@ import { type OutboxEffect, setTracker, trackerOf } from '../state/store.js';
 import { storeLag } from '../state/gate.js';
 import { assertStorableId } from '../state/storable.js';
 import { policyReport } from '../tracker/policy.js';
-import { parseReviewQuery, reviewAnswer } from './review.js';
+import { cutSubmittedEvent, parseCutSubmitted, parseReviewQuery, reviewAnswer } from './review.js';
 import { git } from '../workspace/git.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
@@ -349,6 +349,9 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     return { status: 200, body: { launchId: launch.launchId, launchNo: launch.launchNo, log: text } };
   });
   server.addRoute('GET', /^\/v1\/events$/, async (_req, query) => {
+    // Opt-in: other readers (deploy/smoke.sh) need whole events. See specs/operator-control "Cut submitted events on request".
+    const cutParam = parseCutSubmitted(query);
+    if (!cutParam.ok) return { status: 400, body: cutParam };
     const asked = Number(query['after'] ?? 0);
     const after = Number.isFinite(asked) && asked > 0 ? Math.floor(asked) : 0;
     const limit = Math.max(1, Math.min(500, Number(query['limit'] ?? 200)));
@@ -370,7 +373,10 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     const last = read.events[read.events.length - 1];
     const upTo = read.events.length >= limit && last ? last.seq : Math.min(orch.store.latestEventSeq(), read.upTo);
     const seq = Math.max(after, upTo);
-    return { status: 200, body: { events: read.events, seq, digest: digestOf(orch) } };
+    // The cut changes payloads only, on copies; which events are served and the cursor stay as above.
+    const cuts = { statLines: orch.config.review.statLines, summaryChars: orch.config.review.summaryChars };
+    const events = cutParam.cut ? read.events.map((e) => cutSubmittedEvent(e, cuts)) : read.events;
+    return { status: 200, body: { events, seq, digest: digestOf(orch) } };
   });
   // An index by default; `task` for one task's report, `full=true` for the whole bundle. See specs/operator-control "Review bundle".
   server.addRoute('GET', /^\/v1\/milestones\/([^/]+)\/review$/, async (_req, query, [id]) => {

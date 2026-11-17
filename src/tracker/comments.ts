@@ -30,18 +30,15 @@ export interface SubmittedFacts {
   id: Id;
   sha: string;
   version: number;
-  diffStat: string;
-  closure: Array<{ taskId: Id; publishedSha?: string; summary?: string }>;
 }
 
+/** A short notice: no diff stat and no task lines; the review answer holds those. See specs/tracker-sync "Comment effects". */
 export function submittedBody(m: SubmittedFacts): string {
-  const lines = [`Milestone ${m.id} is ready for review, version ${m.version} at ${m.sha} (tag milestone/${m.id}/v${m.version}).`];
-  if (m.diffStat.trim()) lines.push('', 'Diff stat:', m.diffStat.trim());
-  if (m.closure.length) {
-    lines.push('', 'Tasks:');
-    for (const t of m.closure) lines.push(`- ${t.taskId}${t.publishedSha ? ` (${t.publishedSha})` : ''}${t.summary ? `: ${t.summary}` : ''}`);
-  }
-  return lines.join('\n');
+  return [
+    `Milestone ${m.id} is ready for review, version ${m.version} at ${m.sha} (tag milestone/${m.id}/v${m.version}).`,
+    '',
+    `To review it, call the orchestrator's review tool with milestone ${m.id}, or run: orchestrator-ctl review ${m.id}`,
+  ].join('\n');
 }
 
 export function acceptedBody(f: { sha: string; version: number }): string {

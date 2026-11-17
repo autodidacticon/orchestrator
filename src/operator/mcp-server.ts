@@ -243,7 +243,7 @@ export class OperatorClient {
     for (;;) {
       const remaining = deadline - Date.now();
       const slice = Math.max(0, Math.min(POLL_SLICE_MS, remaining));
-      const r = await this.call(bound, 'GET', `/v1/events?after=${seq}&wait=${slice}`, undefined, slice + 15_000);
+      const r = await this.call(bound, 'GET', `/v1/events?after=${seq}&wait=${slice}&cutSubmitted=true`, undefined, slice + 15_000);
       const events = (r.body['events'] as unknown[]) ?? [];
       collected.push(...events);
       // The cursor only moves forward, from the durable sequence the status and the event feed report. See specs/state-backend "Durable cursor in the status".
@@ -406,7 +406,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   tool(
     'wait',
     {
-      description: `Block until something happens. Returns events after afterSeq (default: now), the latest seq, and a digest (openQuestions, awaitingReview, finished, stalled, stuck, pausedReason, deferred: the count of ready tasks held back by scope overlap, needsConfig: configuration keys still unresolved, with checkCommand meaning submitted work is held until configure sets it, outboxPending, trackerErrors). until: question | review | finished | stalled | any; any also returns on launch.stuck, launch.unstuck, and budget.exceeded. timeoutMs default ${WAIT_DEFAULT_MS}, cap ${WAIT_CAP_MS}. Loop on this instead of polling status.`,
+      description: `Block until something happens. Returns events after afterSeq (default: now), the latest seq, and a digest (openQuestions, awaitingReview, finished, stalled, stuck, pausedReason, deferred: the count of ready tasks held back by scope overlap, needsConfig: configuration keys still unresolved, with checkCommand meaning submitted work is held until configure sets it, outboxPending, trackerErrors). until: question | review | finished | stalled | any; any also returns on launch.stuck, launch.unstuck, and budget.exceeded. timeoutMs default ${WAIT_DEFAULT_MS}, cap ${WAIT_CAP_MS}. A milestone's submitted transition event comes cut like the review index (diffStat cut to review.statLines file lines, each closure summary cut to review.summaryChars with summaryLength, and an omitted list); the review tool holds the rest. Loop on this instead of polling status.`,
       inputSchema: { afterSeq: z.number().int().nonnegative().optional(), timeoutMs: z.number().int().nonnegative().optional(), until: z.enum(['question', 'review', 'finished', 'stalled', 'any']).optional() },
     },
     async (a, c) => guarded(() => c.wait(a)),

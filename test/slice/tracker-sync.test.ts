@@ -62,7 +62,8 @@ describe('tracker sync through a fake tracker', () => {
     expect(tracker.states('MVP')).toEqual(['started']);
     const mvp = h.orch.entry('MVP');
     expect(tracker.comments('MVP')).toEqual([expect.stringContaining(`version 1 at ${mvp.integrationSha}`)]);
-    expect(tracker.comments('MVP')[0]).toContain('- T2');
+    // The ready-for-review comment is a short notice without task lines. See specs/tracker-sync "Comment effects".
+    expect(tracker.comments('MVP')[0]!.split('\n').filter((l) => l.startsWith('- '))).toEqual([]);
     expect(tracker.comments('T1')).toHaveLength(1);
 
     expect((await post(h, `/v1/milestones/MVP/accept`, { sha: mvp.integrationSha, version: 1 })).status).toBe(200);

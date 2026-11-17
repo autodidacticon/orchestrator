@@ -234,3 +234,65 @@ function taskAnswer(orch: ReviewSource, milestoneId: Id, taskId: Id): ReviewAnsw
     },
   };
 }
+
+/** A stored event as the events route serves it. */
+export interface CutEvent {
+  kind: string;
+  taskId?: Id;
+  payload?: Record<string, unknown>;
+}
+
+/**
+ * A milestone's submitted transition with the cuts of the index: `diffStat` cut by `cutStat`, each closure entry's
+ * `summary` cut by `cutSummary` with `summaryLength` beside it, and an `omitted` list. Any other event is returned as
+ * given, whatever its size. Never mutates `event`. See specs/operator-control "Cut submitted events on request".
+ */
+export function cutSubmittedEvent<E extends CutEvent>(event: E, cuts: ReviewCuts): E {
+  const p = event.payload;
+  if (event.kind !== 'transition' || !p || p['to'] !== 'submitted') return event;
+  const hasStat = typeof p['diffStat'] === 'string';
+  const hasClosure = Array.isArray(p['closure']);
+  if (!hasStat && !hasClosure) return event;
+  const milestone = event.taskId ?? '';
+  const payload: Record<string, unknown> = { ...p };
+  const omitted: OmittedField[] = [];
+  if (hasClosure) {
+    let summariesCut = 0;
+    payload['closure'] = (p['closure'] as unknown[]).map((c) => {
+      const entry = c as Record<string, unknown> | null;
+      if (!entry || typeof entry !== 'object' || typeof entry['summary'] !== 'string') return c;
+      const whole = entry['summary'];
+      const summary = cutSummary(whole, cuts.summaryChars);
+      if (summary.length < whole.length) summariesCut++;
+      return { ...entry, summary, summaryLength: whole.length };
+    });
+    if (summariesCut > 0) {
+      omitted.push({
+        field: 'closure.summary',
+        count: summariesCut,
+        fetch: `call review with milestone=${milestone} and task=<taskId> (HTTP: GET ${reviewPath(milestone)}?task=<taskId>)`,
+      });
+    }
+  }
+  if (hasStat) {
+    const stat = cutStat(p['diffStat'] as string, cuts.statLines);
+    payload['diffStat'] = stat.text;
+    if (stat.omitted > 0) {
+      omitted.push({
+        field: 'diffStat',
+        count: stat.omitted,
+        fetch: `call review with milestone=${milestone} and full=true (HTTP: GET ${reviewPath(milestone)}?full=true)`,
+      });
+    }
+  }
+  payload['omitted'] = omitted;
+  return { ...event, payload };
+}
+
+/** The `cutSubmitted` parameter of the events route; query values are strings. Absent or `false` serves events whole. */
+export function parseCutSubmitted(query: Record<string, unknown>): { ok: true; cut: boolean } | { ok: false; reason: string; parameter: string } {
+  const v = query['cutSubmitted'];
+  if (v === undefined || v === 'false') return { ok: true, cut: false };
+  if (v === 'true') return { ok: true, cut: true };
+  return bad('cutSubmitted', `cutSubmitted must be true or false, not ${JSON.stringify(String(v))}`);
+}
