@@ -10,6 +10,7 @@
 //
 //   orchestrator-work [--runner codex|opencode] [--workers N] [--run-tag T] [--capacity C] [--url URL]
 //                     [--repo DIR] [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N] [--max-silence-ms MS]
+//                     [--gap-after-ms MS]
 //
 // Dependency-light: node built-ins plus the orchestrator package this file ships in, found the
 // way bin/orchestrator.mjs finds it (a checkout, the host-local install, else npx at the pinned
@@ -27,6 +28,8 @@ const DEFAULT_RUNNER = 'codex';
 const WAKE_KINDS = 'launch.claimable,launch.ended,launch.released';
 /** The silence limit when neither --max-silence-ms nor the claim names one: the daemon's default health.stuckFailAfterMs. */
 export const DEFAULT_MAX_SILENCE_MS = 45 * 60_000;
+/** Two notes of the loop's clock further apart than this are a sleep of this machine (--gap-after-ms; the daemon's health.gapAfterMs default). */
+export const DEFAULT_GAP_AFTER_MS = 60_000;
 /** How long an agent whose launch has reported may keep running (its last output carries the usage) before it is ended. */
 export const REPORT_GRACE_MS = 30_000;
 /** SIGTERM to SIGKILL. */
@@ -87,6 +90,7 @@ export function parseWorkArgs(argv) {
       'poll-ms': { type: 'string', default: '2000' },
       'max-failures': { type: 'string', default: '3' },
       'max-silence-ms': { type: 'string' },
+      'gap-after-ms': { type: 'string', default: String(DEFAULT_GAP_AFTER_MS) },
       help: { type: 'boolean', short: 'h' },
     },
     strict: true,
@@ -109,6 +113,8 @@ export function parseWorkArgs(argv) {
     maxFailures: Math.max(1, Number.parseInt(values['max-failures'], 10) || 3),
     // Undefined: learnt from the claim, else DEFAULT_MAX_SILENCE_MS. 0 turns the silence limit off.
     maxSilenceMs: values['max-silence-ms'] === undefined ? undefined : Math.max(0, Number(values['max-silence-ms']) || 0),
+    // A step of the loop's clock longer than this is a sleep and is left out of the silence. 0 turns the rule off.
+    gapAfterMs: Math.max(0, Number(values['gap-after-ms']) || 0),
   };
 }
 
@@ -172,6 +178,48 @@ export function watchVerdict(state, { now, lastOutputAt, reportedAt, maxSilenceM
   if (state === 'waiting') return undefined;
   if (maxSilenceMs > 0 && now - lastOutputAt >= maxSilenceMs) return { why: `no output for ${Math.round((now - lastOutputAt) / 1000)}s (limit ${maxSilenceMs}ms)`, hung: true };
   return undefined;
+}
+
+/**
+ * The agent's silence clock, with explicit times so it is testable without real time. The silence is the time since the
+ * last output (or the last look that found the task waiting), less any sleep of this machine. A sleep is found as a gap:
+ * two consecutive notes of the clock more than `gapAfterMs` apart (a step exactly at the threshold is not a gap, and a
+ * note earlier than the one before it is not one either). The gap's length is added to `lastOutputAt`, capped at the
+ * note's time, so the time asleep is not silence. `gapAfterMs` 0 turns the rule off. The first note is the creation.
+ * `note(now)` returns the milliseconds it left out of the silence (0 when the step was not a gap).
+ * See specs/host-integration "Work loop silence leaves out a sleep".
+ */
+export function silenceClock({ now, gapAfterMs = DEFAULT_GAP_AFTER_MS }) {
+  let lastOutputAt = now;
+  let lastNote = now;
+  return {
+    get lastOutputAt() {
+      return lastOutputAt;
+    },
+    output(t) {
+      lastOutputAt = t;
+    },
+    waiting(t) {
+      lastOutputAt = t;
+    },
+    note(t) {
+      const step = t - lastNote;
+      lastNote = t;
+      if (!(gapAfterMs > 0) || step <= gapAfterMs) return 0;
+      const before = lastOutputAt;
+      lastOutputAt = Math.max(before, Math.min(t, before + step));
+      return lastOutputAt - before;
+    },
+    /** The silence at `t`: never below 0 and never above the wall time since the last output. */
+    silence(t) {
+      return Math.max(0, t - lastOutputAt);
+    },
+  };
+}
+
+/** How often a running agent's silence clock is noted: every second, or a quarter of the gap threshold when shorter. */
+export function noteEveryMs(gapAfterMs) {
+  return Math.max(1, Math.min(1000, Math.floor(gapAfterMs / 4)));
 }
 
 /** The renewal interval from the claim: lease.renewEveryMs, else a third of leaseTtlMs; undefined from a daemon that states no lease. */
@@ -403,10 +451,19 @@ export async function runWork(opts, mods) {
       // The agent cannot call while one long command runs, so this loop keeps the lease while the process lives.
       renewal = startRenewal(http, c, log);
       let closed = false;
-      let lastOutputAt = Date.now();
+      // The silence clock leaves a sleep of this machine out of the silence. It is noted by its own short timer, not between
+      // two looks of the watcher: a look can take over a minute while awake (the client retries for up to 60s).
+      const gapAfterMs = opts.gapAfterMs ?? DEFAULT_GAP_AFTER_MS;
+      const clock = silenceClock({ now: Date.now(), gapAfterMs });
+      const note = (now) => {
+        const left = clock.note(now);
+        if (left > 0) log(`${workerId}: ${c.taskId} a clock gap (this machine was asleep): ${left}ms left out of the agent's silence`);
+      };
+      const noter = gapAfterMs > 0 ? setInterval(() => note(Date.now()), noteEveryMs(gapAfterMs)) : undefined;
+      noter?.unref?.();
       let reportedAt;
       const take = (chunk) => {
-        lastOutputAt = Date.now();
+        clock.output(Date.now());
         text += chunk.toString('utf8');
         if (text.length > 1024 * 1024) text = text.slice(text.length - 512 * 1024);
         out.write(chunk);
@@ -425,6 +482,7 @@ export async function runWork(opts, mods) {
       });
       child.on('close', (code, signal) => {
         closed = true;
+        if (noter) clearInterval(noter);
         renewal?.stop();
         resolve({ code, signal });
       });
@@ -441,9 +499,11 @@ export async function runWork(opts, mods) {
             state = 'running'; // the daemon is unreachable: only the silence limit applies
           }
           const now = Date.now();
-          if (state === 'waiting') lastOutputAt = now;
+          // After a wake this look can run before the timer fires, so the clock is noted before every verdict.
+          note(now);
+          if (state === 'waiting') clock.waiting(now);
           if (state === 'reported') reportedAt ??= now;
-          const v = watchVerdict(state, { now, lastOutputAt, reportedAt, maxSilenceMs });
+          const v = watchVerdict(state, { now, lastOutputAt: clock.lastOutputAt, reportedAt, maxSilenceMs });
           if (v && !closed) {
             terminated = v;
             log(`${workerId}: ${c.taskId} ending ${kind} (process group ${child.pid}): ${v.why}`);
@@ -554,12 +614,14 @@ export async function runWork(opts, mods) {
 
 const USAGE = `usage: orchestrator-work [--runner <codex|opencode>] [--workers N] [--run-tag T] [--capacity C]
                          [--url URL] [--repo DIR] [--idle-exit-ms MS] [--poll-ms MS] [--max-failures N]
-                         [--max-silence-ms MS]
+                         [--max-silence-ms MS] [--gap-after-ms MS]
 Claims launches of one runner kind from the orchestrator daemon and runs the agent CLI for each:
 codex exec for --runner codex (the default), opencode run for --runner opencode. The daemon is
 found by --url, ORCH_URL, or the run directory of --repo (default: the current directory).
 The agent's process group is ended when the daemon ends its launch, or when the agent writes no
-output for --max-silence-ms (default: the claim's health.stuckFailAfterMs, else 45 minutes; 0 is off).\n`;
+output for --max-silence-ms (default: the claim's health.stuckFailAfterMs, else 45 minutes; 0 is off).
+A step of the loop's own clock longer than --gap-after-ms (default 60000; 0 is off) is a sleep of
+this machine, and is left out of the agent's silence.\n`;
 
 async function main() {
   let opts;

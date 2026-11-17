@@ -9,7 +9,7 @@ import { DEFAULT_OPENCODE_COMMAND } from '../../src/runner/command.js';
 import type { Launch } from '../../src/state/store.js';
 import { makeSlice, type SliceHarness, tsxLoader } from '../slice/harness.js';
 // @ts-expect-error a plain .mjs host script without type declarations
-import { DEFAULT_MAX_SILENCE_MS, launchState, packageModules, parseWorkArgs, renewEveryMs, silenceLimitMs, startRenewal, stopVerdict, watchVerdict, workerPreamble } from '../../hosts/codex/bin/work.mjs';
+import { DEFAULT_GAP_AFTER_MS, DEFAULT_MAX_SILENCE_MS, launchState, noteEveryMs, packageModules, parseWorkArgs, renewEveryMs, silenceClock, silenceLimitMs, startRenewal, stopVerdict, watchVerdict, workerPreamble } from '../../hosts/codex/bin/work.mjs';
 
 /**
  * The work loop by runner kind (hosts/codex/bin/work.mjs) with `--runner opencode` against a
@@ -521,6 +521,111 @@ describe('work.mjs by kind', () => {
     expect(silenceLimitMs(undefined, { health: { stuckFailAfterMs: 0 } })).toBe(DEFAULT_MAX_SILENCE_MS);
     expect(silenceLimitMs(2000, { health: { stuckFailAfterMs: 7000 } })).toBe(2000);
     expect(silenceLimitMs(0, { health: { stuckFailAfterMs: 7000 } })).toBe(0);
+  });
+
+  it('--gap-after-ms: 60000 by default, 0 is off, else the given threshold', () => {
+    expect(DEFAULT_GAP_AFTER_MS).toBe(60_000);
+    expect(parseWorkArgs([]).gapAfterMs).toBe(60_000);
+    expect(parseWorkArgs(['--gap-after-ms', '0']).gapAfterMs).toBe(0);
+    expect(parseWorkArgs(['--gap-after-ms', '5000']).gapAfterMs).toBe(5000);
+    expect(noteEveryMs(60_000)).toBe(1000);
+    expect(noteEveryMs(2000)).toBe(500);
+  });
+
+  describe('the silence clock leaves a sleep of this machine out of the silence', () => {
+    const limit = 10_000;
+    const gapAfterMs = 3000;
+    const verdict = (clock: { lastOutputAt: number }, now: number) => watchVerdict('running', { now, lastOutputAt: clock.lastOutputAt, maxSilenceMs: limit });
+    const t = 1_000_000;
+
+    it('awake: notes one second apart past the limit make the silence the wall time and end the agent', () => {
+      const clock = silenceClock({ now: t - 500, gapAfterMs });
+      clock.output(t);
+      let now = t;
+      for (let i = 0; i < limit / 1000 + 1; i++) {
+        now += 1000;
+        expect(clock.note(now)).toBe(0);
+        expect(clock.silence(now)).toBe(now - t);
+      }
+      expect(verdict(clock, now)).toMatchObject({ hung: true });
+    });
+
+    it('asleep: one step of twice the limit is left out, and a further limit of awake notes ends the agent', () => {
+      const clock = silenceClock({ now: t, gapAfterMs });
+      clock.output(t);
+      let now = t + 1000;
+      clock.note(now);
+      now += 2 * limit;
+      expect(clock.note(now)).toBe(2 * limit);
+      expect(clock.silence(now)).toBeLessThan(limit);
+      expect(clock.silence(now)).toBe(1000);
+      expect(verdict(clock, now)).toBeUndefined();
+      const asleepUntil = now;
+      while (now < asleepUntil + limit) {
+        now += 1000;
+        expect(clock.note(now)).toBe(0);
+      }
+      expect(clock.silence(now)).toBe(limit + 1000);
+      expect(verdict(clock, now)).toMatchObject({ hung: true });
+    });
+
+    it('a step exactly at the threshold is not a gap; a note earlier than the one before it is not a gap', () => {
+      const clock = silenceClock({ now: t, gapAfterMs });
+      expect(clock.note(t + gapAfterMs)).toBe(0);
+      expect(clock.silence(t + gapAfterMs)).toBe(gapAfterMs);
+      expect(clock.note(t + gapAfterMs + 1)).toBe(0);
+      expect(clock.note(t)).toBe(0); // the clock stepped back
+      expect(clock.silence(t)).toBe(0);
+      expect(clock.lastOutputAt).toBe(t);
+    });
+
+    it('the silence is never below 0 nor above the wall time; output right after a wake is capped at the present', () => {
+      const clock = silenceClock({ now: t, gapAfterMs });
+      // Output arrives after the wake, before any note: the gap's shift is capped at the note, not pushed into the future.
+      clock.output(t + 50_000);
+      expect(clock.note(t + 50_001)).toBe(1);
+      expect(clock.lastOutputAt).toBe(t + 50_001);
+      expect(clock.silence(t + 50_001)).toBe(0);
+      // Random walks: 0 <= silence <= wall time since the last output.
+      let seed = 7;
+      const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31);
+      for (let run = 0; run < 50; run++) {
+        const c2 = silenceClock({ now: 0, gapAfterMs });
+        let now = 0;
+        let lastOut = 0;
+        for (let i = 0; i < 200; i++) {
+          const r = rnd();
+          now += r < 0.05 ? -Math.floor(rnd() * 5000) : r < 0.15 ? Math.floor(rnd() * 4 * limit) : Math.floor(rnd() * 1500);
+          if (rnd() < 0.1) {
+            c2.output(now);
+            lastOut = now;
+          }
+          c2.note(now);
+          expect(c2.silence(now)).toBeGreaterThanOrEqual(0);
+          expect(c2.silence(now)).toBeLessThanOrEqual(Math.max(0, now - lastOut));
+        }
+      }
+    });
+
+    it('with a threshold of 0 a step of twice the limit ends the agent as today', () => {
+      const clock = silenceClock({ now: t, gapAfterMs: 0 });
+      clock.output(t);
+      expect(clock.note(t + 2 * limit)).toBe(0);
+      expect(clock.silence(t + 2 * limit)).toBe(2 * limit);
+      expect(verdict(clock, t + 2 * limit)).toMatchObject({ hung: true });
+    });
+
+    it('a look that finds the task waiting resets the clock', () => {
+      const clock = silenceClock({ now: t, gapAfterMs });
+      clock.waiting(t + 5000);
+      expect(clock.silence(t + 5000)).toBe(0);
+    });
+  });
+
+  it('--help names --gap-after-ms and its default', async () => {
+    const { stdout } = await execFileP(process.execPath, [workMjs, '--help']);
+    expect(stdout).toContain('--gap-after-ms');
+    expect(stdout).toMatch(/--gap-after-ms \(default 60000; 0 is off\)/);
   });
 
   it('the watcher reads the launch from status and ends the agent only when the launch ended, it outlived its report, or it was silent while running', () => {
