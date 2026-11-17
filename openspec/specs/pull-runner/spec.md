@@ -235,11 +235,11 @@ An expiry without progress in the worktree SHALL be a failed attempt with reason
 - **THEN** the expiry spends an attempt and `interruptions` stays at 1
 
 ### Requirement: Silence limit in the claim
-The claim response, first and repeated, SHALL carry `health: { stuckFailAfterMs }` with the daemon's `health.stuckFailAfterMs`. A work loop SHALL take it as its silence limit when it is positive and no `--max-silence-ms` is given; when it is 0 (the daemon never fails a stuck launch) the loop SHALL keep its own default, so a hung agent whose lease the loop renews is still bounded.
+The claim response, first and repeated, SHALL carry `health: { stuckFailAfterMs }` with the daemon's `health.stuckFailAfterMs` in force. A work loop without `--max-silence-ms` SHALL take it as its first silence limit when it is positive, and SHALL then follow `budgets.stuckFailAfterMs` from `GET /v1/status` as host-integration "Work loop silence limit" states; when the value is 0 (the daemon never fails a stuck launch) the loop SHALL keep its own default, so a hung agent whose lease the loop renews is still bounded.
 
 #### Scenario: Claim states the threshold
 - **WHEN** a worker claims a launch under `health.stuckFailAfterMs: 1800000`
-- **THEN** the response has `health: { stuckFailAfterMs: 1800000 }` and a loop without `--max-silence-ms` ends a silent agent after 1800000ms
+- **THEN** the response has `health: { stuckFailAfterMs: 1800000 }`, and a loop without `--max-silence-ms` ends a silent agent after 1800000ms unless `status` names another value meanwhile
 
 ### Requirement: Spawn pass reads each launch before it spawns it
 The spawn pass SHALL read each launch's status and its task's entry again just before it changes the launch, not rely on a list read before earlier awaits. It SHALL move the launch from `claimable` to `launching` in the same synchronous store step as that read, and only while the launch is `claimable` and is the lease of a `running` task. A launch claimed meanwhile SHALL keep its worker, lease and worktree, and SHALL NOT be prepared again or spawned.
@@ -283,4 +283,177 @@ Only after the store work for a failed spawn SHALL the pass kill any process by 
 #### Scenario: Worktree of a failed spawn removed
 - **WHEN** a spawn fails after the worktree was prepared
 - **THEN** the worktree is removed, or retried on a later tick when the removal leaves it
+
+### Requirement: Lease renewal after a gap
+Each write of gaps (health-monitoring "Gap in the daemon's clock") SHALL renew, in the same transaction, the lease of every live launch that holds the lease of a `running` or `waiting` task, to expire at the time of the write plus `leaseTtlMs`. The renewal SHALL NOT be a progress signal: it SHALL leave `progressAt`, `lastSignal`, `progressText` and `stuckSince` unchanged and SHALL append no `launch.unstuck` and no `launch.notice`. The tick SHALL write pending gaps before it tests any lease against the clock it reads in the reconcile phase, and the lease-expiry test of a claimed launch SHALL note the clock and write pending gaps before each test, so no lease is expired while a noted gap is unwritten. This excepts pull-runner "Lease renewal by the work loop" scenario "Renewal stops" and health-monitoring "Process liveness" scenario "Unknown liveness falls back to the lease": a gap after the last contact lengthens the time to expiry by up to the gap plus a TTL.
+
+#### Scenario: A claimed launch survives a sleep between ticks
+- **WHEN** a claimed launch in `pull` mode makes no call and the machine sleeps for five TTLs between two ticks
+- **THEN** the tick at the wake leaves it live with `attempts` unchanged, its lease expires at or after the wake plus `leaseTtlMs`, and `progressAt` and `lastSignal` are unchanged; after a further TTL plus one tick without a call it ends with `leaseExpired`
+
+#### Scenario: A spawned launch of unknown liveness survives a sleep
+- **WHEN** the runner reports `unknown` for a running spawned launch and the machine sleeps for five TTLs
+- **THEN** the tick at the wake leaves it live with `attempts` unchanged, and it is failed with reason `leaseExpired` only after a further TTL without contact
+
+#### Scenario: A sleep inside the tick before the lease test
+- **WHEN** the machine sleeps for five TTLs while the tick awaits the graph source, before the reconcile phase reads the clock
+- **THEN** a claimed launch and a spawned launch of unknown liveness are both live after that tick with `attempts` unchanged
+
+### Requirement: Prepare command
+With the top-level file key `prepareCommand` set, the daemon SHALL run it once after each `Workspace.prepare` of a launch, for every runner kind and mode, in the background so the tick does not wait. The launch SHALL be parked or spawned only after the command now configured exited 0 and left the worktree clean outside `.orchestrator/`. Unset, nothing changes. This narrows "Failed launch at admission": a task MAY be `running` on a `preparing` or `launching` row while its command runs.
+
+#### Scenario: Keys
+- **WHEN** the configuration file is read at start
+- **THEN** `prepareCommand` is an optional non-empty string and `prepareTimeoutMs` a positive integer defaulting to 600000; neither is an override, neither is detected, and neither is in the config report
+
+#### Scenario: Background run and row status
+- **WHEN** admission creates a launch while `prepareCommand` is set
+- **THEN** `launch.prepareStarted` with `{ command, timeoutMs }` is appended, the tick goes on, and the row stays `preparing` while the command runs; no launch status is added and the job is held in memory only
+
+#### Scenario: Capacity and scope
+- **WHEN** a launch's command runs
+- **THEN** its task is `running`, so the launch holds a capacity slot and its task's scope, and at most `capacity` commands run at once
+
+#### Scenario: Environment
+- **WHEN** the command runs
+- **THEN** it runs like the check command: in the worktree root, with the check command's environment, a 64 KiB output tail written to one daemon log line, and its process group killed at `prepareTimeoutMs`
+- **AND** it is started as `/bin/sh -c '/bin/sh -c "$1"; exit $?' orch-prepare-<launchId> <prepareCommand>`, so `killByLaunchId` finds it after a crash
+
+#### Scenario: Bounded wait after a kill
+- **WHEN** a command the daemon killed, at the timeout or at an abort, has not closed 2000 ms later, or a command exited while another process still holds its output pipe
+- **THEN** its outcome is recorded then, as `timeout` at the timeout and as aborted at an abort, and no job stays without an outcome
+
+#### Scenario: Success and next step
+- **WHEN** the command exited 0 and the worktree is clean
+- **THEN** a tick appends `launch.prepared` with `{ command, durationMs }` and then parks the launch, or spawns it when the row is `launching` or the mode was `spawn` when the command started
+- **AND** the lease is renewed for a full TTL immediately before the spawn
+
+#### Scenario: Outcome applied by the tick
+- **WHEN** the command ends
+- **THEN** its callback only records the outcome in the job and wakes the loop; the tick applies it, and no job's error ends the tick or keeps the other jobs from being handled in the same pass
+
+#### Scenario: Pause
+- **WHEN** a command succeeds while the run is paused
+- **THEN** a launch whose next step is park is parked at once, and one whose next step is spawn waits in `preparing` or `launching` until the resume; a running command is not stopped
+
+#### Scenario: Hold after a gap
+- **WHEN** the daemon is in the hold after a gap
+- **THEN** no new command starts and no prepared launch is spawned, a running command is not interrupted, a success is applied, and a launch whose next step is park is parked
+
+#### Scenario: Second run in mixed mode
+- **WHEN** in `mixed` mode the daemon spawns a parked launch after the claim window
+- **THEN** its worktree is prepared again and the command runs a second time while the row is `launching`; a failure of that run is a prepare failure
+- **AND** a `launching` row can last for the length of a command, while no agent holds its token
+
+#### Scenario: Not claimable before success
+- **WHEN** a worker claims while a launch's command runs
+- **THEN** that launch is not offered, and a claim naming its task answers 409 with `state` `preparing`
+
+### Requirement: Prepare failure
+A command that exits non-zero, times out, is killed from outside, cannot be started, or leaves the worktree dirty or unreadable SHALL be a prepare failure. It SHALL spend no attempt: the launch is ended with `prepareCommandFailed`, `launch.prepareFailed` appended, the worktree removed, and the task returned to `unstarted` by the orchestrator with trigger `prepareFailed`, attempts and carry unchanged.
+
+#### Scenario: Event payload
+- **WHEN** a prepare failure is applied
+- **THEN** `launch.prepareFailed` carries `{ reason, exitCode, durationMs, output, dirty, error }`, `output` being the last 4096 characters of the command's output
+
+#### Scenario: Reasons
+- **WHEN** the command exits non-zero, times out, dies from a signal the daemon did not send, cannot be started (or the runner throws), or leaves the worktree dirty
+- **THEN** the reason is `exit`, `timeout`, `killed`, `spawn` or `dirty` respectively; a `dirty` failure names up to 10 paths, and the daemon never edits ignore rules
+
+#### Scenario: A throwing clean test
+- **WHEN** the clean test after a zero exit throws
+- **THEN** it is a prepare failure of reason `dirty` with `error` holding the error text, and the other jobs are handled in the same tick
+
+#### Scenario: No attempt spent
+- **WHEN** a prepare failure is applied
+- **THEN** the task is not charged an attempt and has no `priorFailure` added; while the run is paused it is not admitted again before the resume
+
+### Requirement: Prepare command and a task that left
+When the task no longer runs on a launch whose command runs (cancelled, reset by a cascade, superseded), the next tick SHALL kill the command by its own handle and, once it has ended, end the launch (`cancelled` for a cancelled task, else `superseded`) and remove the worktree, appending no `launch.prepareFailed`. `stop()` SHALL abort every command and apply nothing.
+
+#### Scenario: Cancel while the command runs
+- **WHEN** a task is cancelled while its launch's command runs
+- **THEN** the next tick aborts the command, and after it ended the launch is ended as `cancelled` and its worktree removed, with no `launch.live` or `launch.claimable`
+
+#### Scenario: Cascade while the command runs
+- **WHEN** a cascade resets the task while its command runs, and admission launches it again
+- **THEN** the old launch alone is ended as `superseded`; the jobs are keyed by launch id and the two commands run in separate worktrees
+
+#### Scenario: Left between success and spawn
+- **WHEN** the task leaves after its success was applied and before the spawn
+- **THEN** the launch is not spawned, its job is kept, and the next pass over the jobs ends it as above
+
+#### Scenario: Stop
+- **WHEN** `stop()` runs while commands run
+- **THEN** each is aborted, `stop()` waits for them for no longer than 5000 ms in all, the rows stay `preparing` or `launching` for the next start, and no command starts after it
+
+#### Scenario: Fatal store
+- **WHEN** the store goes fatal while a command runs
+- **THEN** the job records nothing and the row stays for the next start
+
+### Requirement: Claim states the limit in force
+The `health.stuckFailAfterMs` of a claim response, a repeated claim included, SHALL be the value in force when the response is built, overrides applied: an override of 0 SHALL give 0, and a cleared override SHALL give the file value, else the default. A work loop that has already taken the value for a launch keeps it for that launch.
+
+#### Scenario: A claim after an override
+- **WHEN** `health: { stuckFailAfterMs: 1800000 }` is applied and a worker claims a launch
+- **THEN** the claim carries `health.stuckFailAfterMs` 1800000
+
+#### Scenario: A repeated claim after a further change
+- **WHEN** the override is changed to 3600000 and the worker repeats its claim
+- **THEN** the repeated claim carries 3600000
+
+#### Scenario: A claim after an override of 0
+- **WHEN** `health: { stuckFailAfterMs: 0 }` is applied and a worker claims a launch
+- **THEN** the claim carries `health.stuckFailAfterMs` 0
+
+### Requirement: Prepare failure limit
+The system SHALL count the prepare failures of each task in a row, as "Prepare failure" defines them, in one kv entry `prepareRetry`: a JSON object from task id to `{ failures, retryAt, last }`, `last` being `exit <code>`, `timeout`, `killed`, `spawn` or `dirty`. A failure SHALL be counted only when the task still runs on the failed launch; a cancel, a cascade reset, a stop or a crash during a command counts nothing, and a failure whose run overlapped a machine sleep counts like any other. The count SHALL be read and written inside the transaction that applies the failure.
+
+Below `prepareFailureLimit` (a top-level file key read at start, positive integer, default 3) the task SHALL return to `unstarted` as "Prepare failure" says, and SHALL be admitted again only at `retryAt`: the failure time plus `prepareRetryBackoffMs` (a top-level file key read at start, non-negative integer, default 30000) times 2 to the power of the earlier failures, the factor capped at 32. The wait SHALL count wall time and SHALL go on during a pause. A task before its `retryAt` SHALL NOT be a candidate for admission and SHALL hold no capacity slot. Nothing wakes the loop at `retryAt`: the task is admitted on the first tick at or after it.
+
+When `failures` reaches `prepareFailureLimit` the orchestrator SHALL apply `running -> blocked` with trigger `prepareFailed` and reason kind `prepareFailed`, attempts and carry unchanged, and remove the task's entry. The message SHALL be `` prepare command `<command>` failed <n> times in a row; last: <reason> `` and SHALL carry no command output; the output stays in `launch.prepareFailed` and the daemon log.
+
+`launch.prepareFailed` SHALL carry `failures` and `limit` when the failure is counted, and `retryAt` when the task is not blocked.
+
+The entry of a task SHALL be removed when its prepare command succeeds (in the transaction that appends `launch.prepared`), when it is blocked at the limit, and by every transition of it with trigger `unblock`, `reopen`, `uncancel` or `cascade`. A cancel alone SHALL leave it; the uncancel removes it. A task the cascade does not reset, such as an `unstarted` dependent of the reopened task, SHALL keep its entry. The store has no kv delete: an emptied object is stored as `''`, which reads as no entries.
+
+Per operator-control "Idle exit", a retry entry whose id is a task node of the loaded graph that is `unstarted` SHALL keep the daemon from being quiescent, whatever its `retryAt` says. An entry for an id that is not a task node of the loaded graph SHALL NOT.
+
+With `prepareCommand` unset the entry SHALL never be read or written.
+
+#### Scenario: First failure is counted
+- **WHEN** the prepare command of a task's first launch exits 1 under the defaults
+- **THEN** `launch.prepareFailed` carries `failures` 1, `limit` 3 and `retryAt` the failure time plus 30000, the task is `unstarted` with `attempts` unchanged, and its entry holds the same `failures` and `retryAt`
+
+#### Scenario: Doubling backoff
+- **WHEN** the task is launched again at `retryAt` and its command fails again
+- **THEN** no launch was created for it before `retryAt`, and the new `retryAt` is the failure time plus 60000
+
+#### Scenario: A waiting task holds no slot
+- **WHEN** capacity is 1 and a task waits out its retry while another task is ready
+- **THEN** the other task is launched
+
+#### Scenario: Block at the limit
+- **WHEN** the third failure in a row of a task is applied under the defaults
+- **THEN** the task is `blocked` with reason kind `prepareFailed`, attempts unchanged, the message names the command, the count and the last reason and holds no output, the event carries `failures` 3 and no `retryAt`, and the task has no entry
+
+#### Scenario: Reset by a success
+- **WHEN** a task's command fails, then succeeds, then fails
+- **THEN** the last failure has `failures` 1
+
+#### Scenario: Reset by an uncancel
+- **WHEN** a task with an entry is cancelled and then uncancelled
+- **THEN** the cancel leaves the entry, the uncancel removes it, and the task is admitted on the next tick without waiting for the old `retryAt`
+
+#### Scenario: Cascade
+- **WHEN** a cascade reopen resets a task whose command runs, and another task waits out its retry as an `unstarted` dependent of a reopened task
+- **THEN** the reset task has no entry and the waiting task keeps its entry
+
+#### Scenario: Not quiescent while a retry waits
+- **WHEN** a task with an entry is `unstarted`, before or after its `retryAt`
+- **THEN** the daemon is not quiescent; once the task is cancelled or blocked, or when the entry names no task of the graph, the entry does not count
+
+#### Scenario: Limit 1 and backoff 0
+- **WHEN** `prepareFailureLimit` is 1, or `prepareRetryBackoffMs` is 0
+- **THEN** the first failure blocks the task and writes no entry, or the task is admitted again in the same tick that applies the failure
 

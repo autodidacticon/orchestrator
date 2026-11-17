@@ -157,7 +157,7 @@ When the digest's `proposals` is non-empty the run skill SHALL present each pend
 - **THEN** the skill tells the user T2 would be reset, and calls `reopen` with `cascade` only after the user agrees
 
 ### Requirement: Work skill and workflow
-The plugin SHALL provide a `work` skill and a bundled workflow `workflows/work.js`. The skill SHALL call `start` with mode `pull` or `mixed`, check that a graph is loaded, choose a worker count no larger than the run's capacity, run the workflow with the worker count, the run's `capacity`, and a run tag, and when the workflow returns: present open questions to the user, answer them through `answer`, and re-run the workflow with the same run tag; invoke the review skill for milestones awaiting review; and stop when the digest reports finished, or stalled with nothing claimable. The skill SHALL say that pull-mode workers are this session's Claude subagents, which claim only `claude-code` launches, so that codex launches are worked only in `spawn` or `mixed`; when only codex launches are parked it SHALL offer `start` with `mode: "spawn"` or `"mixed"` instead of running the workflow. The workflow SHALL claim with `runner: "claude-code"`, so that codex-kind launches are never claimed by the Claude worker loop, and its stop rule SHALL count only `claimableByKind["claude-code"]`. The workflow SHALL clamp the worker count to the `capacity` argument when one is given, logging the clamp, and SHALL fan out one loop per worker with `parallel`. Each cycle SHALL run a claimer agent on the model named by the `claimModel` argument at the effort named by `claimEffort`, defaulting to `claude-haiku-5-5` at `low`, labelled `claim <workerId>`; the claimer SHALL claim with the loop's worker id and, when nothing is claimable, SHALL wait for up to 90 seconds with `until: "any"`, read `status`, evaluate the stop rule, and claim again, up to three polls before returning without a launch. On a claim the loop SHALL run a worker agent labelled `work <workerId> <taskId>` with the claim's `model` and `effort` as the agent's model and effort options, whose prompt is composed from the brief plus tool instructions: work in the worktree with ordinary tools, commit on the launch branch, ask questions through `launch_block` and call it again while pending, report through `launch_report`, commit and resubmit with the same seq on a 409 dirty-worktree rejection, never write the fallback file, and stop on 401. A loop SHALL end when nothing is claimable, no loop holds a launch, and the digest reports finished, stalled, or an open question. Workflow results SHALL be short outcomes, never briefs or logs. The `work` and `run` skills SHALL document `claimModel` and `claimEffort` with their defaults and pass them only when the user asks for a different claimer, and SHALL say that workers edit worktrees under the run directory, outside the repository, so a session in `acceptEdits` mode prompts for each file there unless started with `--add-dir` for that directory.
+The plugin SHALL provide a `work` skill and a bundled workflow `workflows/work.js`. The skill SHALL call `start` with mode `pull` or `mixed`, check that a graph is loaded, choose a worker count no larger than the run's capacity, run the workflow with the worker count, the run's `capacity`, and a run tag, and when the workflow returns: present open questions to the user, answer them through `answer`, and re-run the workflow with the same run tag; invoke the review skill for milestones awaiting review; and stop when the digest reports finished, or stalled with nothing claimable and nothing being prepared (`claimable` and `preparing` are 0). The skill SHALL say that pull-mode workers are this session's Claude subagents, which claim only `claude-code` launches, so that codex launches are worked only in `spawn` or `mixed`; when only codex launches are parked it SHALL offer `start` with `mode: "spawn"` or `"mixed"` instead of running the workflow. The workflow SHALL claim with `runner: "claude-code"`, so that codex-kind launches are never claimed by the Claude worker loop, and its stop rule SHALL count only `claimableByKind["claude-code"]` and `preparingByKind["claude-code"]` (0 when the status has no `preparingByKind`). The workflow SHALL clamp the worker count to the `capacity` argument when one is given, logging the clamp, and SHALL fan out one loop per worker with `parallel`. Each cycle SHALL run a claimer agent on the model named by the `claimModel` argument at the effort named by `claimEffort`, defaulting to `claude-haiku-5-5` at `low`, labelled `claim <workerId>`; the claimer SHALL claim with the loop's worker id and, when nothing is claimable, SHALL wait for up to 90 seconds with `until: "any"`, read `status`, evaluate the stop rule, and claim again, up to three polls before returning without a launch. On a claim the loop SHALL run a worker agent labelled `work <workerId> <taskId>` with the claim's `model` and `effort` as the agent's model and effort options, whose prompt is composed from the brief plus tool instructions: work in the worktree with ordinary tools, commit on the launch branch, ask questions through `launch_block` and call it again while pending, report through `launch_report`, commit and resubmit with the same seq on a 409 dirty-worktree rejection, never write the fallback file, and stop on 401. A loop SHALL end when nothing is claimable, nothing is being prepared for `claude-code`, no loop holds a launch, and the digest reports finished, stalled, or an open question. Workflow results SHALL be short outcomes, never briefs or logs. The `work` and `run` skills SHALL document `claimModel` and `claimEffort` with their defaults and pass them only when the user asks for a different claimer, and SHALL say that workers edit worktrees under the run directory, outside the repository, so a session in `acceptEdits` mode prompts for each file there unless started with `--add-dir` for that directory.
 
 #### Scenario: Two workers drain a graph
 - **WHEN** the work skill runs with two workers on a three-task graph in `pull` mode
@@ -194,6 +194,10 @@ The plugin SHALL provide a `work` skill and a bundled workflow `workflows/work.j
 #### Scenario: Codex launches are not claimed by the Claude worker loop
 - **WHEN** a mixed-mode run holds a parked `codex` launch and a parked `claude-code` launch and the workflow runs
 - **THEN** a worker claims the `claude-code` launch only, the `codex` launch stays parked until the claim window passes and the daemon spawns it, and the loop's stop rule counts only `claimableByKind["claude-code"]`
+
+#### Scenario: A launch being prepared keeps the claimer polling
+- **WHEN** nothing is claimable for `claude-code`, a question is open, and `status.preparingByKind["claude-code"]` is 1 because a launch's prepare command runs
+- **THEN** the claimer's stop is false and it polls again; a status without `preparingByKind` is read as 0
 
 ### Requirement: Marketplace manifest
 The repository SHALL contain `.claude-plugin/marketplace.json` at its root listing the `orchestrator` plugin with `source: "./hosts/claude-code"`, so that `claude plugin marketplace add <owner>/orchestrator` installs the plugin. Because a marketplace install copies only the plugin directory, the installed plugin SHALL be self-contained: the plugin-local install from its `package.json` and lockfile SHALL provide the package, and the launcher SHALL fall back to the published package at the plugin manifest's version through `npx` when that tree is missing or incomplete. The plugin manifest version, the package version, and the pin in the plugin's `package.json` SHALL be equal, the launcher's package name and the pinned dependency SHALL equal the package name `@autodidacticon/orchestrator`, the lockfile SHALL be present and consistent with the pin, and a test SHALL assert all of it. The plugin SHALL still pass `claude plugin validate --strict` with the work skill, the workflow, the launcher, the plugin manifest, and the hooks present.
@@ -394,7 +398,7 @@ The Codex host SHALL ship `hosts/codex/bin/work.mjs`, also the package executabl
 - For an opencode claim the loop SHALL build the per-launch config with `openCodeConfig(opencode.settings, opencode.allowedTools, opencode.maxWaitMs)`, write it through `prepareOpenCodeLaunch` (`.orchestrator/opencode.json`, 0600), and run `opencode run` in the claimed worktree, composed by `composeOpenCodeCommand(launch, policy)` from `opencode.settings`, `model` and `effort`. The environment SHALL carry the claim's `opencode.env` (from which the shim, an MCP child that inherits it, takes `ORCH_API`, `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_RETRY_WINDOW_MS` and `ORCH_COMMIT_POLICY`) and the additions `prepareOpenCodeLaunch` returns: `OPENCODE_CONFIG_CONTENT`, and `XDG_DATA_HOME` or `XDG_CONFIG_HOME` when the settings ask for them. No env file is written.
 - Either way the loop process's own `ORCH_*` variables SHALL be dropped from the child environment. Stdin SHALL be a short preamble followed by the brief, redirected from `.orchestrator/<kind>-work-prompt.md`. The preamble SHALL name the launch, say that the orchestrator MCP server's tools carry its credentials (for opencode by their names `orchestrator_heartbeat`, `orchestrator_report`, `orchestrator_block`, `orchestrator_inbox`, `orchestrator_log`), say to stop on a 401, and say to retry rather than write a fallback report file. It SHALL carry the claim's `pending` question or answer when there is one.
 - After the agent exits, the loop SHALL post the usage (codex: summed over `turn.completed` lines; opencode: summed over `step_finish` events by `parseOpenCodeUsage`) to `POST /v1/launches/:id/usage` with its worker id. When the loop did not end the agent itself and the launch is still held and running or waiting, the loop SHALL release it: with `keep: true` when the agent failed to start (codex: no turn began; opencode: no event, that is `exitBeforeTurn` or `startupContended`), and without keep when it ran but did not report. The release reason SHALL name the failure `classifyCodexFailure` or `classifyOpenCodeFailure` gave. After a `startupContended` release the loop SHALL wait between 0.5 and 1.5 s before it claims again.
-- A loop SHALL stop when the run is finished or stalled; or when nothing is claimable for its kind (`claimableByKind.<kind>` is 0), no launch of that kind is live, no task is awaiting the verifier (`status.verifying` is empty), and a question or review waits on a human; or when that quiet has lasted `--idle-exit-ms`. A review is a node in `awaitingReview` that is not in `verifying`; a submitted task awaiting its check waits on no human, and its result can make a dependent claimable or send the task back for another launch. The log line SHALL name the kind. It SHALL also stop after `--max-failures` launches in a row that ended without the agent running or reporting; a contended start counts, and so does an agent the loop ended as hung.
+- A loop SHALL stop when the run is finished or stalled; or when nothing is claimable for its kind (`claimableByKind.<kind>` is 0), nothing is being prepared for it (`preparingByKind.<kind>` is 0; a status without the field counts as 0), no launch of that kind is live, no task is awaiting the verifier (`status.verifying` is empty), and a question or review waits on a human; or when that quiet has lasted `--idle-exit-ms`. A review is a node in `awaitingReview` that is not in `verifying`; a submitted task awaiting its check waits on no human, and its result can make a dependent claimable or send the task back for another launch. The log line SHALL name the kind. It SHALL also stop after `--max-failures` launches in a row that ended without the agent running or reporting; a contended start counts, and so does an agent the loop ended as hung.
 - While nothing is claimable a loop SHALL long-poll `GET /v1/events` instead of spinning. The poll SHALL be filtered to the `launch.claimable`, `launch.ended` and `launch.released` kinds, so that other loops' claim events do not wake it.
 - On SIGINT or SIGTERM the process SHALL end its agents' process groups (SIGTERM, then SIGKILL after a grace period) and release their launches with `keep: true`.
 - The Codex host's run skill SHALL document the loop as the way to work a `pull` or `mixed` codex run, and the OpenCode host's run skill and README SHALL document `--runner opencode` as the way to work a `pull` or `mixed` opencode run.
@@ -430,6 +434,10 @@ The Codex host SHALL ship `hosts/codex/bin/work.mjs`, also the package executabl
 #### Scenario: No launches of the kind
 - **WHEN** `orchestrator-work --runner opencode` runs against a daemon whose claimable launches are all `codex`
 - **THEN** it leaves them parked and exits once the quiet has lasted `--idle-exit-ms`, logging `nothing claimable for opencode`
+
+#### Scenario: A launch being prepared keeps the loop running
+- **WHEN** a `codex` loop finds nothing claimable and nothing live, a question is open, and `status.preparingByKind.codex` is 1
+- **THEN** the loop does not stop, also after `--idle-exit-ms`, while an `opencode` loop on the same status stops because the run waits on a human
 
 ### Requirement: OpenCode host
 `hosts/opencode/` SHALL let an OpenCode session be the operator. It SHALL ship `bin/orchestrator.mjs`, the third copy of the launcher of "Plugin launcher", whose npx fallback is pinned to the version of the published package in `hosts/opencode/package.json`. `hosts/opencode/package.json` SHALL be private, named for the host and not for the package, and SHALL have the published package as its only dependency, pinned to the exact version the Claude Code plugin pins. `hosts/opencode/node_modules` SHALL be ignored by git.
@@ -556,15 +564,31 @@ While an agent runs, the work loop SHALL read its launch from `GET /v1/status` e
 - **THEN** the loop does not end it
 
 ### Requirement: Work loop silence limit
-The work loop's silence limit SHALL be `--max-silence-ms` when given, else the claim's `health.stuckFailAfterMs` when the claim carries a positive one, else 45 minutes (the daemon's default `health.stuckFailAfterMs`). `--max-silence-ms 0` SHALL turn it off.
+The work loop's silence limit SHALL follow this rule, in this order. `--max-silence-ms` when given SHALL win and SHALL never be replaced; `--max-silence-ms 0` SHALL turn the limit off. Else, when the claim carries no `health` field, the limit SHALL be 45 minutes (the daemon's default `health.stuckFailAfterMs`) and the loop SHALL NOT read `status` for it. Else the first limit SHALL be the claim's `health.stuckFailAfterMs` when positive, and after each `GET /v1/status` answer the limit SHALL be that answer's `budgets.stuckFailAfterMs` when it is a positive number; a value of 0 SHALL give 45 minutes, so a hung agent whose lease the loop renews is still bounded. When `status` cannot be read (an answer that is not 200, a thrown request, or no number there) the loop SHALL keep the limit it had. The loop SHALL log one line when its limit changes.
 
 #### Scenario: The claim names no threshold
 - **WHEN** the loop runs without `--max-silence-ms` against a daemon whose claim carries no `health`
-- **THEN** the silence limit is 45 minutes
+- **THEN** the silence limit is 45 minutes, whatever `status` says
 
 #### Scenario: Silence past the limit
 - **WHEN** the loop runs with `--max-silence-ms 5000` and the claimed agent writes nothing for longer while its task runs and the launch is still held
 - **THEN** the loop ends the agent's process group, releases the launch with `keep: false` and a reason naming the silence, and claims the next launch
+
+#### Scenario: A raise during silence
+- **WHEN** the loop runs without `--max-silence-ms`, claims under `health.stuckFailAfterMs: 4000`, and the operator raises it to 60000 through `PUT /v1/config` while the agent is silent
+- **THEN** the loop logs the new limit, and does not end the agent when 4000ms of silence have passed
+
+#### Scenario: Status names 0
+- **WHEN** the loop runs without `--max-silence-ms` and `status` answers `budgets.stuckFailAfterMs: 0`
+- **THEN** the silence limit is 45 minutes, not off
+
+#### Scenario: A fixed limit is not replaced
+- **WHEN** the loop runs with `--max-silence-ms 4000` and the operator raises `health.stuckFailAfterMs` to 60000 while the agent is silent
+- **THEN** the loop ends the agent after 4000ms of silence
+
+#### Scenario: Status cannot be read
+- **WHEN** the loop's `status` read fails or answers without a number at `budgets.stuckFailAfterMs`
+- **THEN** the silence limit stays what it was
 
 ### Requirement: Work loop after ending an agent
 After an agent the loop ended has exited, the loop SHALL post its usage as for any exit and SHALL NOT classify its output as a start failure. It SHALL release the launch without keep, with a reason naming the termination, when the worker still holds it, and SHALL NOT release a launch the daemon ended. The outcome SHALL be `hung`, counted toward `--max-failures`, except after a report, when it SHALL be `started`. The loop SHALL then claim again.
@@ -609,4 +633,167 @@ The preamble that `orchestrator-work` feeds the agent SHALL state the lease TTL 
 #### Scenario: Preamble names the claimed interval
 - **WHEN** the claim carries `lease: { ttlMs: 600000, renewEveryMs: 200000 }`
 - **THEN** the preamble says the lease is 600000ms and to call at least every 200000ms
+
+### Requirement: Run skill handles a Linear project-milestone root
+The `run` skill SHALL treat a Linear effect whose `url` is a project URL (its path holds `/project/` and not `/issue/`) as an effect for a project-milestone root. It SHALL never change the project's state: every `setState` effect for such a root SHALL be acknowledged with `ack { id, result: { applied: false, reason } }`. It SHALL post only a `comment` whose body opens with "Milestone accepted:" or "Milestone rejected:", as a project status update on the project the `url` names, with the body, a blank line and the marker as the last line, setting no health value (keeping the current health when the tool requires one), and SHALL acknowledge it with `result: { statusUpdateId }`. Before posting it SHALL list the project's recent status updates and, if one holds the effect's marker, acknowledge with that update's id and not post again. Every other comment effect for such a root SHALL be acknowledged with `applied: false` and a reason. When the session has no tool that posts a project status update, the skill SHALL acknowledge the accept and reject comments with `applied: false` and a reason that says so, and tell the user once. These effects SHALL be answered with `result`, never with `error`, except that a tracker error while posting a status update is an error. An effect acknowledged with `applied: false` SHALL be counted in neither number of the tracker count line. A Linear effect with an issue URL SHALL follow the existing rules.
+
+#### Scenario: Done for a project root
+- **WHEN** the outbox lists `setState done` for a root whose `url` holds `/project/`
+- **THEN** the skill acknowledges it with `applied: false` and a reason, and the project is unchanged
+
+#### Scenario: In progress for a project root
+- **WHEN** the outbox lists `setState inProgress` for a root whose `url` holds `/project/`
+- **THEN** the skill acknowledges it with `applied: false` and a reason, and the project is unchanged
+
+#### Scenario: Ready for review comment
+- **WHEN** the outbox lists the ready-for-review comment for a root whose `url` holds `/project/`
+- **THEN** the skill posts nothing and acknowledges it with `applied: false` and a reason
+
+#### Scenario: Accepted comment
+- **WHEN** the outbox lists a comment opening "Milestone accepted:" for a project root
+- **THEN** the skill posts a project status update with the body, a blank line and the marker as the last line, and acknowledges with `statusUpdateId`
+
+#### Scenario: Rejected comment
+- **WHEN** the outbox lists a comment opening "Milestone rejected:" for a project root
+- **THEN** the skill posts a project status update with the body, a blank line and the marker as the last line, and acknowledges with `statusUpdateId`
+
+#### Scenario: Marker already posted
+- **WHEN** a recent status update of the project already holds the effect's marker
+- **THEN** the skill acknowledges with that update's id and posts no second update
+
+#### Scenario: Issue URL
+- **WHEN** a Linear effect has a `url` holding `/issue/`
+- **THEN** the skill follows the existing state-type and comment rules
+
+### Requirement: Import skill records a Linear project-milestone root
+The `import` skill SHALL state that for a Linear project-milestone root the root record's `url` is the project's URL, its `id` is a short key the user confirms that is safe in a URL path and a git branch name, and its `state` is `open`.
+
+#### Scenario: Project milestone root
+- **WHEN** the user imports a Linear project milestone
+- **THEN** the root record carries the project's URL as `url`, and the milestone's issues are the children
+
+### Requirement: Work loop silence leaves out a sleep
+As an exception to "Work loop ends a hung agent" and "Work loop silence limit", the work loop SHALL leave a sleep of its own machine out of an agent's silence. The loop SHALL note its own clock for each running agent at spawn, every second (or every quarter of the threshold when that is shorter), and immediately before each verdict of the watcher. A *gap* SHALL be two consecutive notes more than `--gap-after-ms` apart (default 60000); a step exactly at the threshold, and a note earlier than the one before it, SHALL NOT be gaps. When the loop finds a gap it SHALL add the gap's length to the agent's last output time, capped at the present, and SHALL log one line with the length it left out, when that is above zero. The gap SHALL NOT be measured between two looks of the watcher. `--gap-after-ms 0` SHALL turn the rule off. The loop SHALL NOT read the daemon's gap record, the silence limit SHALL be chosen as before, and the report grace SHALL keep counting wall time.
+
+#### Scenario: A sleep longer than the limit
+- **WHEN** the agent wrote output, then the machine slept for twice the silence limit, and the loop notes its clock after the wake
+- **THEN** the sleep is left out of the silence, the silence is below the limit, the loop logs the length it left out, and the loop does not end the agent
+- **AND** the agent is ended when it then stays silent for the limit while the machine is awake
+
+#### Scenario: Silence while awake
+- **WHEN** the machine stays awake and the agent writes nothing for longer than the silence limit, with the loop's notes one second apart
+- **THEN** no gap is found, the silence equals the wall time, and the loop ends the agent and releases the launch without keep
+
+#### Scenario: A slow look of the watcher is not a sleep
+- **WHEN** the machine is awake and a look of the watcher takes more than a minute because the daemon is unreachable
+- **THEN** the per-agent timer's notes stay one second apart, no gap is found, and the silence limit applies as before
+
+#### Scenario: The rule turned off
+- **WHEN** the loop runs with `--gap-after-ms 0` and the machine sleeps for twice the silence limit
+- **THEN** the sleep counts as silence and the loop ends the agent as it did before this rule
+
+### Requirement: Review skill reads the index then each task
+The `review` skill of each host SHALL key its reading on the `view` field of the `review` answer, never on the tool's argument list: read the index, then each closure task with `task`, and judge against that answer's `acceptanceCriteria`. Before deciding it SHALL check that every one-task answer carries the index's `integrationSha` and `reviewVersion`, else start again. Only the Claude Code edition SHALL hold a fan-out sentence, saying each reviewer fetches its own task.
+
+#### Scenario: Index answer
+- **WHEN** the answer has `view` `index`
+- **THEN** the skill reads `omitted`, fetches each closure task with `task`, says `full` can be too large, and says `diffStat` is cut and runs against the run's baseline
+
+#### Scenario: Answer without view
+- **WHEN** the answer has no `view` field
+- **THEN** the skill treats it as the whole bundle of an older daemon and says never to call per task
+
+#### Scenario: Index answer and a tool without task
+- **WHEN** `view` is `index` and the `review` tool has no `task` argument
+- **THEN** the skill fetches `GET <daemonUrl>/v1/milestones/<id>/review?task=<taskId>` with `daemonUrl` from `status`, or updates the plugin
+
+#### Scenario: Refused answer
+- **WHEN** the client refuses an answer for its size, in any case
+- **THEN** the skill saves it with `curl -s <daemonUrl>/v1/milestones/<id>/review` (`?full=true` for the whole bundle), reads the file in parts, and asks the user to run the command if the session refuses it
+
+#### Scenario: Answer with previous
+- **WHEN** the answer has `previous`
+- **THEN** the skill reads `git diff <previous.sha>..<integrationSha>` and the tasks in `previous.tasksSince` (every closure task when `previous.tasksSinceUnavailable` is true), and says `accept` covers the whole pinned commit
+
+#### Scenario: Previous version unavailable
+- **WHEN** `previous.unavailable` is set
+- **THEN** the skill reviews the whole closure as for a first version
+
+#### Scenario: Whole-bundle entry
+- **WHEN** the answer is a whole bundle (no `view`, or `view` `full`)
+- **THEN** the skill reads each task's criteria from its tracker issue or its one-task answer, since the bundle's `acceptanceCriteria` is the milestone's
+
+#### Scenario: Resubmitted milestone
+- **WHEN** a one-task answer carries another `integrationSha` or `reviewVersion` than the index
+- **THEN** the skill starts the review again
+
+### Requirement: Run skill offers a raised limit
+Each run skill SHALL hold, in its monitor list after the stuck bullet, a bullet that starts with `- **a launch needs more time**`. It SHALL tell the agent to compare, whenever it reads `status`, each running launch's `elapsedMs` in `liveLaunches` with `budgets.maxLaunchMs` when that is above 0, and to tell the user when less than 15 minutes remain, and to offer the same when the user wants a stuck launch to keep running. It SHALL offer `configure` with `budgets: { maxLaunchMs }` for the time budget and with `health: { stuckFailAfterMs }` (`health.stuckFailAfterMs`) for a stuck launch that has a `pid`, say that values are milliseconds, tell the agent to check that `applied` lists `budgets` or `health`, to tell the worker the new limit with `nudge`, and to clear the override with a null leaf once the launch has reported or ended. The Claude Code edition SHALL say that a launch held by this session's workers has no `pid` and is bound by its lease, `leaseTtlMs`, a start-time key. The Codex and OpenCode editions SHALL hold the same bullet and SHALL say that a launch held by an `orchestrator-work` loop keeps the silence limit its loop took when it claimed. The stuck bullet SHALL point to the new bullet.
+
+#### Scenario: The bullet in each edition
+- **WHEN** the bullet is cut out of each run skill
+- **THEN** it holds `configure`, `health.stuckFailAfterMs`, `budgets.maxLaunchMs`, `elapsedMs`, `applied` and `null`; the Claude Code bullet holds `leaseTtlMs`, and the Codex and OpenCode bullets hold `orchestrator-work` and not "this session's workers"
+
+### Requirement: Run skill confirms a lowering with the user
+The bullet `- **a launch needs more time**` of each run skill SHALL say that a lowered, cleared or switched-on limit that a live launch is already past is refused with a 409 whose `wouldEnd` lists the launches it would end and that nothing is applied, that the agent shows `wouldEnd` to the user, and that it sends the call again with `endLive: true` only when the user says so. The Claude Code, Codex and OpenCode editions SHALL hold the same sentence. A session SHALL NOT add `endLive` by itself after a 409.
+
+#### Scenario: The refusal is shown
+- **WHEN** the bullet is cut out of each run skill
+- **THEN** it holds `wouldEnd` and `endLive` and says to send `endLive` only when the user says so
+
+#### Scenario: The confirmed change
+- **WHEN** the user, shown `wouldEnd`, says to go on
+- **THEN** the skill has the agent send the same call with `endLive: true`
+
+#### Scenario: Clearing a raise
+- **WHEN** the agent clears a raise with a null leaf once a launch has reported, and another live launch relies on the raise
+- **THEN** the 409 with `wouldEnd` is shown to the user, and `endLive` is sent only on the user's say
+
+### Requirement: Run skill: workers are told of a limit change
+The bullet **a launch needs more time** of each run skill SHALL say that the daemon tells each affected worker of a changed limit through its inbox, as a `nudge` notice the worker sees on its next inbox call, and SHALL NOT tell the session to send a nudge with the new limit. The Codex and OpenCode editions SHALL say that an `orchestrator-work` loop follows the new stuck limit from `status`, unless it was started with `--max-silence-ms`, which keeps that value, and SHALL NOT say that the loop keeps the limit of its claim. The Claude Code edition SHALL keep its sentence on the lease of this session's workers. The Codex and OpenCode bullets SHALL stay identical after the tool-name substitution.
+
+#### Scenario: The session does not send the new limit
+- **WHEN** the session raises `budgets.maxLaunchMs` for a launch that needs more time
+- **THEN** the skill tells it that the daemon has told the worker through its inbox, and does not tell it to `nudge` the worker
+
+#### Scenario: A loop started with a fixed limit
+- **WHEN** the session raises `health.stuckFailAfterMs` for a launch held by an `orchestrator-work` loop
+- **THEN** the Codex and OpenCode skills say the loop follows the new limit unless it was started with `--max-silence-ms`
+
+### Requirement: Run skill asks for a held profile
+
+Each run skill (Claude Code, Codex, OpenCode) SHALL hold one paragraph that starts with `**Worker profile.**`, directly after the paragraph that starts "Tell the user who is executing the work". It SHALL say that the `start` result's `confirmProfile` tells whether the profile hold is on; that before a graph is loaded, with `confirmProfile` true and `config.model.source` or `config.effort.source` `default`, the session asks the user for the model and effort, naming the value shown as one option; that with a graph the session reads `status.profiles` (again after every import), tells the user every entry with its sources (`modelSource`, `effortSource`) and asks for the keys in `missing` of every entry with `held: true`; that the answer is applied with `configure` (`model` and `effort` for the kind in force, or the `claude`, `codex` or `opencode` object), also when the user accepts the value shown; that the session never chooses from the model of this session nor without the user's answer; and that `orchestrator.yaml` holds a lasting choice and `runner.confirmProfile: false` there turns the hold off. Each monitor list SHALL hold one bullet that starts with `- **profileHeld**`, directly after the `needsConfig` bullet, that sends the session to that paragraph and says the run is not slow or stalled. The Claude Code work skill SHALL hold one bullet in section 1 that starts with `- **Worker profile.**` and says to follow the run skill's paragraph before running workers when `status.profiles` has an entry with `held: true`. No existing paragraph or bullet SHALL change, and the Codex and OpenCode blocks SHALL be equal after the edition substitutions.
+
+#### Scenario: The paragraph read alone
+
+- **WHEN** the **Worker profile.** paragraph is cut out of any of the three run skills
+- **THEN** it holds `confirmProfile`, `status.profiles`, `held`, `missing`, `modelSource`, `configure`, `runner.confirmProfile`, `orchestrator.yaml` and the words "model of this session"
+
+#### Scenario: The work skill bullet
+
+- **WHEN** the **Worker profile.** bullet is cut out of the Claude Code work skill
+- **THEN** it holds `status.profiles` and `held: true`
+
+### Requirement: Import skill reports held tasks
+
+Each import skill SHALL hold one bullet in section 1 that starts with `- **Worker profile.**`, directly after the bullet that starts "The orchestrator daemon must be running for this repository": when the `start` result has `confirmProfile` true and `config.model.source` or `config.effort.source` is `default`, the imported tasks will be held, so the session asks the user for the model and effort before the import and applies the answer with `configure`, as the run skill's Worker profile paragraph says. Each import skill SHALL hold one paragraph in section 5 that starts with `**Held tasks.**`, directly before "Then offer to run it": the session calls `status` after the import and, when `status.profiles` has an entry with `held: true`, tells the user how many tasks are held and that the daemon will not launch them, asks for the keys in `missing` and applies the answer with `configure`, never choosing from the model of this session.
+
+#### Scenario: The blocks read alone
+
+- **WHEN** the **Worker profile.** bullet and the **Held tasks.** paragraph are cut out of any of the three import skills
+- **THEN** the bullet holds `confirmProfile`, `default` and `configure`
+- **AND** the paragraph holds `status.profiles`, `held`, `missing`, `configure` and the words "model of this session"
+
+### Requirement: Run skill names the Codex network access override
+
+The paragraph of each run skill (Claude Code, Codex and OpenCode editions) that lists what `configure` also takes SHALL name `networkAccess` (`codex.networkAccess`, `true` or `false`, for launches spawned or claimed after the change), SHALL say that it widens what a Codex worker can reach, and SHALL say that it is set only when the user says so. The Codex and OpenCode editions SHALL use the same words. The skills SHALL NOT offer the key as a remedy for a `needsAccess` question.
+
+#### Scenario: The configure paragraph names the key and its risk
+- **WHEN** a run skill is split at blank lines and the block that holds `` `configure` also takes `` is read with its whitespace collapsed
+- **THEN** it holds `networkAccess`, `widens what a Codex worker can reach` and `only when the user says so`
+
+#### Scenario: The session does not choose network access itself
+- **WHEN** a Codex worker asks with `needsAccess` for a command that needs the network
+- **THEN** the run skill does not tell the session to set `networkAccess`
+- **AND** the session sets it only when the user says so
 

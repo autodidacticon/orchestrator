@@ -160,11 +160,41 @@ The daemon SHALL expose `events` returning events after a given sequence number,
 - **THEN** the request returns an empty list with the unchanged sequence and the current digest
 
 ### Requirement: Review bundle
-`review` for a gated milestone in `submitted` SHALL return its pinned `integrationSha`, `reviewVersion`, tag name, the baseline sha, a diff stat between baseline and pinned sha, and for every task in the milestone's closure its id, published sha, and completion report summary. For a milestone not in `submitted` it SHALL return an error naming the current status.
+`review` for a gated milestone in `submitted` SHALL answer in one of three views, named by the answer's field `view`, and every answer SHALL carry `milestone`, the pinned `integrationSha`, `reviewVersion` and the tag name, so that a caller making several calls can see a resubmission between them. In every answer `view` and `omitted` SHALL be serialised before `diffStat` and `closure`.
+
+- **Index** (`view: "index"`, the default): `baseline` and the milestone's `acceptanceCriteria` as in the whole bundle; `diffStat`, the first `statLines` file lines of `git diff --stat <baseline>..<integrationSha>` as git printed them, then one line ` ... <k> more files` when k file lines were left out, then git's totals line, which is always kept (an empty stat stays empty); and for every task in the milestone's closure an entry with `taskId`, `title` (the payload's title, else the task id), `status`, `publishedSha`, `summary` cut to `summaryChars` UTF-16 units (one fewer when the cut would split a surrogate pair), `summaryLength` (the whole summary's length), `acceptanceCount` (the evidence items of its report) and `changedFileCount` (the published job's changed files, absent when the job records none). An entry SHALL NOT carry `acceptance`. A task with no submit report has an empty `summary`, `summaryLength` 0 and `acceptanceCount` 0. `omitted` SHALL list `{ field, count, fetch }` for each cut with a count above 0: `closure.acceptance` with the number of tasks that have evidence, `closure.summary` with the number of summaries cut, and `diffStat` with the number of file lines left out. The `fetch` text of the closure elements SHALL name the tool argument `task`, the HTTP form `GET /v1/milestones/<id>/review?task=<taskId>` and `full=true`; that of `diffStat` SHALL be the command `git diff --stat <baseline>..<integrationSha>` with both shas.
+- **One task** (`view: "task"`, parameter `task=<id>`): `omitted: []`, no `diffStat`, and `closure` with one entry: `taskId`, `title`, `status`, `publishedSha` when there is one, the task's own `acceptanceCriteria`, `changedFiles` when the published job has them, and from the task's latest submit report `summary`, `acceptance`, `interfaces`, `decisions`, `deviations`, `followUps`, `tests` and `noChanges`, but not `proposals`. A closure task with no submit report SHALL be answered 200 with none of the report's fields. This view SHALL make no git call.
+- **Whole bundle** (`view: "full"`, parameter `full=true`): every key of the bundle the orchestrator builds, with `baseline`, the whole `diffStat` and every closure entry's `summary` and `acceptance`, plus `omitted: []`.
+
+The cuts SHALL come from the config keys `review.statLines` (default 40) and `review.summaryChars` (default 400), integers of 0 or more read from the config file at daemon start; the request parameters `statLines` and `summaryChars` SHALL override them for one call, and 0 means none. The parameters SHALL be read as follows, and a refusal answered 400 with `{ ok: false, reason, parameter }` naming the parameter: `full` is the whole bundle only for `true`, no for `false` or absent, and refused for any other value; an empty `task`, `statLines` or `summaryChars` is refused; `statLines` and `summaryChars` must be integers of 0 or more, and are checked in every view but have no effect in the one-task and whole views; `task` together with `full=true` is refused. A request is checked in this order: no graph loaded (409), a refused parameter (400), a node that is not a milestone or a milestone not in `submitted` (409, naming the current status, also when `task` is given), and a `task` that is not a task in the milestone's closure (404 with `{ ok: false, reason, closure }`, the reason naming the id and `closure` listing the closure's task ids).
 
 #### Scenario: Bundle for a submitted milestone
-- **WHEN** MVP is submitted at version 2 over tasks T3 and T4
-- **THEN** `review` returns the sha, version 2, tag `milestone/MVP/v2`, a diff stat, and two closure entries with summaries
+- **WHEN** MVP is submitted at version 2 over tasks T3 and T4, T3's summary is 1,000 characters, both have evidence, and the diff stat has 45 file lines
+- **THEN** `review` returns `view: "index"`, the sha, version 2, tag `milestone/MVP/v2`, a diff stat of 40 file lines, ` ... 5 more files` and the totals line, two closure entries with a title, a summary of at most 400 characters with its `summaryLength` and an `acceptanceCount`, and `omitted` naming `closure.acceptance` 2, `closure.summary` 1 and `diffStat` 5
+
+#### Scenario: One task
+- **WHEN** `review` is called for MVP with `task=T3`
+- **THEN** it returns `view: "task"`, the same sha, version and tag, `omitted: []`, no diff stat, and one entry with T3's own acceptance criteria and every field of its latest submit report but its proposals
+
+#### Scenario: A task with no report
+- **WHEN** T4 was cancelled with release, MVP is submitted, and `review` is called with `task=T4`
+- **THEN** it answers 200 with an entry holding `taskId`, `title`, `status` and `acceptanceCriteria` and none of a report's fields
+
+#### Scenario: Whole bundle
+- **WHEN** `review` is called for MVP with `full=true`
+- **THEN** it returns every key of the whole bundle with its values, `view: "full"` and `omitted: []`
+
+#### Scenario: A task outside the closure
+- **WHEN** `review` is called for MVP with `task=NOPE`
+- **THEN** it answers 404 with a reason naming NOPE and `closure` listing T3 and T4
+
+#### Scenario: A refused parameter
+- **WHEN** `review` is called with `statLines=-1`, or with `task=T3&full=true`
+- **THEN** it answers 400 naming `statLines`, or `full`
+
+#### Scenario: A milestone that is not submitted
+- **WHEN** `review` is called for a milestone that is running, with or without `task`
+- **THEN** it answers 409 with an error naming the current status
 
 ### Requirement: Graph import through the daemon
 `import` SHALL accept graph content or a node list, validate it with the graph loader, write the run's graph file atomically on success, trigger a reload, and return the new revision together with the reload classification and reasons. On validation failure nothing SHALL be written and the errors SHALL be returned.
@@ -182,11 +212,15 @@ The daemon SHALL expose `events` returning events after a given sequence number,
 - **THEN** nothing is written and the response lists the cycle path
 
 ### Requirement: Tracker outbox
-The daemon SHALL expose `outbox`, returning pending effects with `id` greater than `after` in `id` order, limited in count, together with the tracker policy; `ack`, marking an effect `applied` with the drainer's result; and `nack`, recording the error and either keeping the effect `pending` with `attempts` increased or marking it `failed` at `tracker.maxAttempts`. An unknown effect id SHALL be answered 404. Both the CLI and the MCP server SHALL expose `outbox` and `ack`, the latter taking a result or an error. `status` SHALL additionally report `tracker` (the recorded kind and workspace, or none), `outboxPending` (the count of pending effects), and `trackerErrors` (every `failed` effect with its id, issue, kind, attempts, and error); the event stream digest SHALL carry `outboxPending` and `trackerErrors`.
+The daemon SHALL expose `outbox`, returning pending effects with `id` greater than `after` in `id` order, limited in count, together with the tracker policy; `ack`, marking an effect `applied` with the drainer's result; and `nack`, recording the error and either keeping the effect `pending` with `attempts` increased or marking it `failed` at `tracker.maxAttempts`. An unknown effect id SHALL be answered 404. The answers of `ack` and `nack`, including a repeated `ack` and the 409 for a `nack` of an applied effect, SHALL carry `effect` with only the effect's `id`, `taskId`, `kind`, `status` and `attempts`, plus `result` and `error` when the effect has them, and SHALL NOT carry its `payload`; `outbox` SHALL keep returning each effect with its `payload`. Both the CLI and the MCP server SHALL expose `outbox` and `ack`, the latter taking a result or an error. `status` SHALL additionally report `tracker` (the recorded kind and workspace, or none), `outboxPending` (the count of pending effects), and `trackerErrors` (every `failed` effect with its id, issue, kind, attempts, and error); the event stream digest SHALL carry `outboxPending` and `trackerErrors`.
 
 #### Scenario: List then acknowledge
 - **WHEN** two effects are pending and `ack` is posted for the first with result `{ commentId: "c1" }`
 - **THEN** `outbox` returns only the second and `status` shows `outboxPending` 1
+
+#### Scenario: Acknowledgement answer omits the payload
+- **WHEN** `ack` is posted for a pending `comment` effect with result `{ commentId: "c1" }`
+- **THEN** the answer's `effect` has the effect's `id`, `taskId`, `kind` `comment`, `status` `applied`, `attempts` and `result` `{ commentId: "c1" }`, and no `payload`, so the comment body is not returned
 
 #### Scenario: Rejected effect retried then surfaced
 - **WHEN** `nack` is posted for an effect three times with `maxAttempts` 3
@@ -569,4 +603,284 @@ A Postgres run keeps no store file locally. Revival SHALL treat a Postgres run w
 #### Scenario: Idle exit locally
 - **WHEN** revival is asked for a Postgres run whose local daemon exited idle
 - **THEN** the daemon is started again
+
+### Requirement: Cut submitted events on request
+`GET /v1/events` SHALL take `cutSubmitted`. With `true` it SHALL serve each `transition` event whose payload has `to: "submitted"` and a `diffStat` or a `closure` with the review index's cuts from the daemon's configuration and an `omitted` list, on a copy. No other event SHALL change, whatever its size, nor the cursor. Absent or `false` SHALL serve every event whole. Any other value SHALL be answered 400 naming `cutSubmitted`.
+
+#### Scenario: Parameter set
+- **WHEN** a gated milestone E was submitted under `review: { summaryChars: 5, statLines: 0 }` with a stat of more than one line and `GET /v1/events?kinds=transition&cutSubmitted=true` is called
+- **THEN** E's submitted event keeps `from`, `to`, `actor`, `trigger` and `integrationSha`; its `diffStat` holds git's totals line and no file line of the stored stat; each closure entry keeps `taskId` and `publishedSha`, has a `summary` of at most 5 characters and a `summaryLength` equal to the stored summary's length; and `omitted` lists `{ field, count, fetch }` for `closure.summary` (summaries cut) and `diffStat` (file lines left out), each only when its count is above 0, with a `fetch` naming the `review` tool and E
+
+#### Scenario: Nothing to cut
+- **WHEN** no summary is longer than `review.summaryChars` and the stat has no more file lines than `review.statLines`
+- **THEN** the submitted event's `omitted` is `[]`
+
+#### Scenario: Other events and the store stay whole
+- **WHEN** the same request is served
+- **THEN** every other event, including a task's transition and events of other kinds, equals its stored form, the cursor is the one served without the parameter, and the stored event still holds the whole stat and summaries
+
+#### Scenario: Parameter absent
+- **WHEN** the same request is made without `cutSubmitted`, or with `cutSubmitted=false`
+- **THEN** E's submitted event is served with a payload equal to the stored one
+
+#### Scenario: Parameter refused
+- **WHEN** the request is made with `cutSubmitted=yes`
+- **THEN** it is answered 400 with `{ ok: false, reason, parameter: "cutSubmitted" }`
+
+### Requirement: Requests from another origin are refused
+The API server SHALL answer 403 to any request that carries an `Origin` header, whatever its value (`null` and an empty value included), on every bind, for every method and every path. When the bind is a loopback address (`localhost`, `::1`, or an IPv4 address in `127.0.0.0/8`), the server SHALL also answer 403 to a request whose `Host` header is missing or is not one of: the bound address with the listening port; `localhost` with the listening port; with `apiBind: localhost`, `127.0.0.1` and `[::1]` with the listening port; the host and port of `apiBaseUrl` when that key is set. When the bind is not loopback (`0.0.0.0` and `::` included) there SHALL be no `Host` check. The `Host` comparison SHALL ignore case and one trailing dot on the name, SHALL compare an IPv6 address in its bracketed form, and SHALL take a missing port to be the default port of the entry's scheme (`http` for the bound address and `localhost`, the URL's own scheme for `apiBaseUrl`). The `Origin` rule SHALL be tested before the `Host` rule, and both SHALL be applied before the route is matched, before the request counts as activity for the idle exit, and before the body is read, so a refused request runs no handler and writes nothing. The probes SHALL get no exemption. The answer SHALL be JSON `{ error, code }` with `code` `originHeader` or `hostHeader`; the `error` text SHALL name the header, and for `hostHeader` the value received and that `apiBaseUrl` adds a host. No CORS header SHALL be sent and no configuration key SHALL switch the rules off.
+
+#### Scenario: Origin header on a loopback bind
+- **WHEN** a daemon bound to `127.0.0.1` receives a `POST` with `Origin: https://example.com` and `Host: 127.0.0.1:<port>`
+- **THEN** it answers 403 with `code: 'originHeader'` and the route handler does not run
+
+#### Scenario: Origin header on a cluster bind
+- **WHEN** a daemon bound to `0.0.0.0` receives a request with `Host: 10.1.2.3:8080` and an `Origin` header
+- **THEN** it answers 403 with `code: 'originHeader'`
+
+#### Scenario: Foreign Host on a loopback bind
+- **WHEN** a daemon bound to `127.0.0.1` receives a request with `Host: evil.example:<port>`, `Host: localhost:<other port>`, or no `Host`
+- **THEN** it answers 403 with `code: 'hostHeader'` and the route handler does not run
+
+#### Scenario: localhost with the listening port
+- **WHEN** a daemon bound to `127.0.0.1` receives a request with `Host: localhost:<port>` or `Host: LOCALHOST:<port>` and no `Origin`
+- **THEN** the request reaches its route
+
+#### Scenario: The apiBaseUrl host
+- **WHEN** a daemon bound to `127.0.0.1` with `apiBaseUrl: https://orch.test` receives a request with `Host: orch.test` or `Host: orch.test:443`
+- **THEN** the request reaches its route, and `Host: 127.0.0.1:<port>` still does, while `Host: orch.test:80` is answered 403 with `code: 'hostHeader'`
+
+#### Scenario: No Host check on a cluster bind
+- **WHEN** a daemon bound to `0.0.0.0` receives a request with `Host: 10.1.2.3:8080` and no `Origin`
+- **THEN** the request reaches its route
+
+#### Scenario: A kubelet probe is answered as before
+- **WHEN** a daemon bound to `0.0.0.0` receives `GET /healthz` with `Host: <pod IP>:8080` and no `Origin`
+- **THEN** it answers the probe as before
+
+#### Scenario: A refused request does not count as activity
+- **WHEN** a page polls a route with an `Origin` header
+- **THEN** each request is answered 403 before it is counted as activity, so it does not keep the daemon from its idle exit
+
+### Requirement: Review answer names the previous version
+
+At review version n above 1, the index and the full answer of `GET /v1/milestones/<id>/review` SHALL carry a block `previous`, after `omitted` and before `diffStat`, naming version n-1, the sha it was pinned at (kv `tagged:<id>:<n-1>`, never the tag), the closure tasks added or republished since, and the diff stat between the two shas. The one-task answer SHALL NOT carry it. Nothing new SHALL be stored, and every other field SHALL stay as it is.
+
+#### Scenario: Version 1 has no previous block
+
+- **WHEN** a milestone submitted at review version 1 is reviewed with the index or the full answer
+- **THEN** the answer has no `previous` key
+- **AND** the one-task answer has no `previous` key at any version
+
+#### Scenario: A later version lists the tasks added and republished
+
+- **WHEN** a milestone is submitted at version n above 1, and kv `tagged:<id>:<n-1>` holds sha S
+- **THEN** `previous` has `version` n-1, `sha` S and `tag` `milestone/<id>/v<n-1>`
+- **AND** the closure of version n-1 is read from the milestone's second-to-last `transition` event with `to: "submitted"`, only when that event's `integrationSha` equals S
+- **AND** `previous.tasksSince` lists `{ taskId, change }` for each current closure task that was not in that closure (`added`) or whose `publishedSha` differs from the one recorded there (`republished`), and no other task
+- **AND** when that closure cannot be read, `tasksSince` is left out and `previous.tasksSinceUnavailable` is `true`
+- **AND** `previous.diffStat` is the stat from S to `integrationSha`; the index cuts it by the stat limit of `diffStat` and adds `{ field: "previous.diffStat", count, fetch }` to `omitted`, with `git diff --stat S..<integrationSha>` as `fetch`; the full answer keeps it whole
+- **AND** the block carries no outcome, rejection note or last accepted version
+
+#### Scenario: The same commit at two versions
+
+- **WHEN** a milestone is reset from `submitted` and resubmitted at the next version with no new commit, so that both versions have the same sha
+- **THEN** `previous.sameCommit` is `true` and `previous.diffStat` is empty
+- **AND** `previous.tasksSince` is `[]` when the closure did not change
+- **AND** no git call is made for the previous sha
+
+#### Scenario: No sha on record for the previous version
+
+- **WHEN** kv `tagged:<id>:<n-1>` is absent
+- **THEN** `previous` is `{ version, unavailable }`, where `unavailable` is a sentence saying no sha is on record, with no other key
+
+#### Scenario: An empty stat between two shas
+
+- **WHEN** `previous.sha` differs from `integrationSha` and git prints nothing for the stat between them, or the git call fails
+- **THEN** `previous.diffStat` is empty
+- **AND** `previous.diffStatNote` names `previous.sha` and says that either no file differs or that commit is not in the daemon's clone
+
+### Requirement: Configuration route: limit keys
+`PUT /v1/config` SHALL take `budgets: { maxLaunchMs }` and `health: { stuckAfterMs, stuckFailAfterMs }`, each leaf a value or null and each block a value or null, applying toolchain-discovery "Runtime limit overrides". A refusal SHALL be a 400 whose `key` is the dotted key (`budgets.maxLaunchMs`, `health.stuckAfterMs`, `health.stuckFailAfterMs`, or the unknown leaf). `applied` SHALL name the block, `budgets` or `health`. `start` SHALL pass the blocks to a daemon it spawns as `--set budgets=<json>` and `--set health=<json>`, and through the route to one already running. A refusal by a daemon that `start` spawns SHALL be readable from the error `start` returns: the daemon SHALL write its usage text before the refusal line, so the tail of its log ends with the refusal.
+
+#### Scenario: The spawn path takes the limit blocks
+- **WHEN** `start` on a stopped run passes `budgets: { maxLaunchMs: 10800000 }` and `health: { stuckAfterMs: 0 }`
+- **THEN** the spawned daemon's `GET /v1/config` gives both leaves with source `argument`
+
+#### Scenario: A refusal at spawn is readable
+- **WHEN** `start` on a stopped run with the default limits passes `health: { stuckFailAfterMs: 600000 }`
+- **THEN** the call fails, and its error text ends with the refusal line, which holds 600000 and 900000
+
+### Requirement: Configuration command: set flags
+`orchestrator-ctl config` SHALL take `--set key=value` (repeatable) for every key `start --set` takes, including `budgets.maxLaunchMs`, `health.stuckAfterMs` and `health.stuckFailAfterMs`, parse it as `start` does, and merge it per leaf into the one `PUT /v1/config` built from the other flags. A call SHALL name each leaf once: the same leaf (a key, or `block.leaf`), or a block and a leaf under it, named by two of `--set`, `--clear`, `--allow` (the key `allowedTools`) and the per-key flags SHALL be refused before anything is sent. A repeated `--set allowedTools` appends rules and names the key once. Different leaves of one block SHALL merge. A `--set` with an unknown key or a bad value SHALL be refused before anything is sent, naming the key. The CLI usage SHALL name `--set` on `config` and the three limit keys.
+
+#### Scenario: A limit set and cleared from the CLI
+- **WHEN** `orchestrator-ctl config --set budgets.maxLaunchMs=10800000` runs, then `orchestrator-ctl config --clear budgets.maxLaunchMs`
+- **THEN** the override document is `{ budgets: { maxLaunchMs: 10800000 } }` after the first and empty after the second
+
+#### Scenario: A leaf named twice
+- **WHEN** `config --set capacity=3 --capacity 4`, or `config --clear budgets.maxLaunchMs --set budgets.maxLaunchMs=1`, runs
+- **THEN** it fails before any request and the override document is unchanged
+
+#### Scenario: Leaves of one block merge
+- **WHEN** `config --set codex.model=gpt-6-pro --sandbox read-only` runs
+- **THEN** the override document holds both leaves under `codex`
+
+### Requirement: Status report: limits in force
+`status.budgets` SHALL keep its shape (`maxLaunchMs`, `maxRunCostUsd`, `stuckAfterMs`, `stuckFailAfterMs`) and SHALL give the values of `budgets.maxLaunchMs`, `health.stuckAfterMs` and `health.stuckFailAfterMs` in force, overrides applied. `maxRunCostUsd` SHALL stay the start-time value.
+
+#### Scenario: Status after an override of 0
+- **WHEN** `health: { stuckFailAfterMs: 0 }` is applied
+- **THEN** `status.budgets.stuckFailAfterMs` is 0 at once
+
+#### Scenario: Status after a clear
+- **WHEN** the override is cleared with a null leaf
+- **THEN** `status.budgets.stuckFailAfterMs` is the file value, else the default
+
+### Requirement: Profile hold key
+
+The configuration SHALL have a key `runner.confirmProfile`, a boolean that is `false` by default, so that the daemon by itself never holds a profile. The profile hold in force SHALL be the stored choice when kv `runner.confirmProfile` is `on` (on) or `off` (off), and else the configuration's `runner.confirmProfile`. Any other stored value SHALL be ignored. The stored choice SHALL be read every time the hold is evaluated. See model-selection "Profile hold at admission".
+
+#### Scenario: Off by default
+
+- **WHEN** a run's configuration does not set `runner.confirmProfile` and no choice is stored
+- **THEN** `status.runner.confirmProfile` is false and a ready task with no selector is launched on the first tick
+
+#### Scenario: The stored choice is read first
+
+- **WHEN** the configuration sets `runner.confirmProfile: false` and kv `runner.confirmProfile` is `on`
+- **THEN** a task with no selector on built-in defaults is held and `status.runner.confirmProfile` is true
+- **AND** with the configuration `true` and the kv `off`, the task is launched and the field is false
+
+### Requirement: Status report: profiles
+
+`status` SHALL carry `profiles`, listing every `unstarted` task node grouped into one entry per distinct `{ runner, model, effort, modelSource, effortSource }` (model-selection "Profile sources of a task"). Each entry SHALL carry `held` (a boolean), `missing` (a list holding `model`, `effort`, both or neither, in that order), `tasks` (the count) and `sample` (at most 5 task ids, in graph order). Entries SHALL be ordered by their first task in graph order. A task that has a launch SHALL be in no entry. The list SHALL be present with the profile hold on or off; with it off every entry SHALL have `held: false` and an empty `missing`. `status.runner` SHALL carry `confirmProfile`, the profile hold in force. The body of `GET /v1/status` without a graph SHALL carry `runner.confirmProfile` and `profiles: []`.
+
+#### Scenario: Profiles are grouped and ordered
+
+- **WHEN** the first task of a graph has `model: claude-sonnet-5-5` and the next six have no selector, all `unstarted`
+- **THEN** `profiles` has two entries: the first with `tasks: 1`, `modelSource: "task"` and `effortSource: "default"`; the second with `tasks: 6` and a `sample` of the first 5 of those ids in graph order
+
+#### Scenario: A task that waits on a dependency is listed
+
+- **WHEN** the profile hold is on and a task with no selector depends on a task that runs
+- **THEN** `profiles` has an entry with `held: true` whose `sample` holds the waiting task
+
+#### Scenario: Without a graph
+
+- **WHEN** a daemon whose configuration sets `runner.confirmProfile: true` has no graph loaded
+- **THEN** `GET /v1/status` answers with `runner.confirmProfile` true and `profiles` `[]`
+
+### Requirement: Configuration route: a change that would end a live launch
+`PUT /v1/config` SHALL refuse with 409 a patch that would end a live launch, unless the body holds `endLive: true` (or `"true"`). A patch would end a launch when, for a `live` launch that holds the lease of a `running` task, the limits in force after the patch end it now and the limits in force before the patch do not. Two limits end a launch: `budgets.maxLaunchMs`, which ends it when its elapsed time is at or above the limit, and `health.stuckFailAfterMs`, which ends it when its idle time is above the limit; a limit of 0 ends nothing. The route SHALL take the elapsed and idle times, and SHALL compare them, through the same functions the time budget and stuck checks use, so time the daemon did not run is left out in both places. A changed `health.stuckAfterMs` only flags a launch and SHALL never be refused. The rule SHALL cover every shape of patch: a lower value, a null leaf that clears a raise, a null `budgets` or `health` block, and a limit that was 0 and is switched on. The route SHALL read the store only: it SHALL NOT ask the runner for liveness, so it can name a launch the next tick would not end. A `waiting` task's launch SHALL NOT be named. The route SHALL name only launches the new limits end now; a value below the age a young launch will reach SHALL be accepted.
+
+The refusal body SHALL be `{ ok: false, error, wouldEnd }`, where each `wouldEnd` entry is `{ taskId, launchId, limit, value, elapsedMs }` for `budgets.maxLaunchMs` or `{ taskId, launchId, limit, value, idleMs }` for `health.stuckFailAfterMs`, `value` being the limit the patch would put in force, with one entry per launch and limit. `error` SHALL be one sentence that names each task and the `endLive` option. Nothing of the patch SHALL be applied, other keys included, and no `operator.config` event SHALL be appended. A patch that is invalid (the stuck pair rule included) SHALL be answered 400 first, and a start-only key SHALL be answered with its 409 and `startOnly` body before this check.
+
+`endLive` SHALL NOT be a configuration key: it SHALL NOT be stored, validated as part of the patch, or listed under `applied`. With `endLive: true` the patch SHALL be applied as without the guard, the `operator.config` event SHALL record `endLive: true`, and the next tick ends the named launches. A body of `endLive` alone SHALL be answered 200 with `applied: []` and SHALL store nothing. `orchestrator-ctl config --end-live` SHALL add `endLive: true` to the PUT, and with no key SHALL send the PUT, not the GET; its usage SHALL name `--end-live`. The guard SHALL cover the route only: a daemon spawned with `--set`, and a changed file, apply their limits on the first tick. The `start` tool SHALL NOT take `endLive`; on a running daemon a refused limit lands under `rejected` with the route's `error` text.
+
+#### Scenario: A lowered time budget is refused
+- **WHEN** a launch of a running task is at 9000 ms elapsed under a budget of 10000 and `PUT /v1/config` carries `{ budgets: { maxLaunchMs: 5000 } }`
+- **THEN** the answer is 409 with `wouldEnd: [{ taskId, launchId, limit: "budgets.maxLaunchMs", value: 5000, elapsedMs: 9000 }]` and an `error` naming the task and `endLive`, the stored document is unchanged, and the task is still `running` after a tick
+
+#### Scenario: A lowered stuck fail limit is refused, a lowered flag limit is not
+- **WHEN** a launch is idle for 2000 ms under limits 1000 and 3000 and the patch is `{ health: { stuckFailAfterMs: 1500 } }`
+- **THEN** the answer is 409 with an entry `limit: "health.stuckFailAfterMs"`, `value: 1500` and `idleMs: 2000`; and the patch `{ health: { stuckAfterMs: 500 } }` for the same launch is applied
+
+#### Scenario: The confirmed change
+- **WHEN** the refused patch is sent again with `endLive: true`
+- **THEN** it is answered 200 with `applied` holding `budgets`, the `operator.config` event holds `endLive: true`, the stored document holds no `endLive` key, and the next tick ends the launch with reason `timeBudget`
+
+#### Scenario: Clearing a raise
+- **WHEN** a boot budget of 10000 was raised to 0, a launch runs past 15000 ms, and the patch is `{ budgets: { maxLaunchMs: null } }` or `{ budgets: null }`
+- **THEN** the answer is 409 naming that launch and the value in force stays 0; once the launch has submitted, the same clear is applied and the leaf is `{ value: 10000, source: "file" }`
+
+#### Scenario: A limit switched on
+- **WHEN** under a boot budget of 0 a launch is at 15000 ms elapsed and the patch is `{ budgets: { maxLaunchMs: 10000 } }`
+- **THEN** the answer is 409 naming the launch
+
+#### Scenario: The boundary follows the checks
+- **WHEN** a launch's elapsed time equals the new `budgets.maxLaunchMs`, and its idle time equals the new `health.stuckFailAfterMs`
+- **THEN** the first is listed in `wouldEnd` and the second is not
+
+#### Scenario: Never refused
+- **WHEN** the patch is `{ capacity: 3 }`, a raise, or leaves both ending limits in force unchanged, or the only launch past the new limits belongs to a `waiting` task
+- **THEN** it is not refused for live launches
+
+#### Scenario: Nothing applied on a refusal
+- **WHEN** `{ capacity: 3, budgets: { maxLaunchMs: 5000 } }` is refused for a live launch
+- **THEN** `capacity` keeps its value
+
+#### Scenario: endLive alone
+- **WHEN** the body is `{ endLive: true }`
+- **THEN** the answer is 200 with `applied: []` and the stored document is unchanged and holds no `endLive` key
+
+#### Scenario: The command line
+- **WHEN** `orchestrator-ctl config --set budgets.maxLaunchMs=1` is run while a launch is live
+- **THEN** the 409 with `wouldEnd` is relayed; with `--end-live` the change is applied
+
+### Requirement: Profile hold default for a spawned daemon
+
+The daemon SHALL take `--default-confirm-profile on|off`. Any other value SHALL end the start with an error that holds `--default-confirm-profile must be on or off, not <value>`, whatever the file says and before the store is opened. After the store is open, at every start: when `orchestrator.yaml` states `runner.confirmProfile` as a boolean, the daemon SHALL write the stored choice (kv `runner.confirmProfile`) as `on` or `off` to match the file; else, when the flag is given and the store holds no choice, it SHALL write the flag's value; else it SHALL write nothing. So the file's value SHALL overwrite the stored choice at every start, and a file line that is later removed SHALL leave the last stored choice in force. The stored choice SHALL belong to the run: a start without the flag (by `orchestrator-ctl`, by hand or by a revival) SHALL keep it. `orchestrator-ctl`, a daemon started by hand and a cluster daemon SHALL never pass the flag by themselves.
+
+`startDaemon` SHALL take `defaultConfirmProfile?: boolean` and pass the flag only to a daemon it spawns, independent of `--mode` and `--default-mode`. A running daemon SHALL keep the choice it has. The start result SHALL carry `confirmProfile`, the hold in force read from the status probe's `runner.confirmProfile`, in every path, also when the daemon is already running and a `mode` is passed (where the result's `mode` stays the passed `mode`). The field SHALL be absent only when the probe fails.
+
+A run that existed before this requirement has no stored choice. It SHALL adopt the hold the next time a daemon is spawned for it with the flag `on`, by a start or by a revival, and its `unstarted` tasks are then held.
+
+#### Scenario: The default is adopted once and kept
+
+- **WHEN** `startDaemon({ defaultConfirmProfile: true })` starts a fresh run whose file states no `runner.confirmProfile`
+- **THEN** the result has `confirmProfile: true`
+- **AND** while that daemon runs, `startDaemon({ mode: "pull" })` returns `started: false`, `mode: "pull"` and `confirmProfile: true`
+- **AND** after a stop, `startDaemon()` without the option returns `confirmProfile: true`
+
+#### Scenario: A stored off is not turned on by the default
+
+- **WHEN** a run was first started with `defaultConfirmProfile: false` and is started again with `true`
+- **THEN** the result has `confirmProfile: false`
+
+#### Scenario: The file overwrites the stored choice
+
+- **WHEN** a run whose stored choice is `on` is started after `runner: { confirmProfile: false }` is added to `orchestrator.yaml`
+- **THEN** the result has `confirmProfile: false`, with or without `defaultConfirmProfile: true`
+- **AND** after the line is removed again, a start with `defaultConfirmProfile: true` still returns `confirmProfile: false`
+
+#### Scenario: A bad flag value
+
+- **WHEN** the daemon is started with `--default-confirm-profile maybe`
+- **THEN** the start fails with `--default-confirm-profile must be on or off, not maybe` before the store is opened
+
+### Requirement: Status report: launches being prepared
+The status report SHALL always carry `preparing`, the task ids of launches being prepared (row `preparing` or `launching`), oldest first; `prepareRetry`, `[{ taskId, failures, retryAt }]` for every retry entry whose task is `unstarted`, by `retryAt`, then task id; and `preparingByKind`, per runner kind the launches being prepared plus the tasks in `prepareRetry`, every kind present. The wait digest SHALL carry `preparing`, the sum of `preparingByKind`, and `preparingByKind`.
+
+#### Scenario: Command running
+- **WHEN** a `pull` run's only task, of kind `codex`, has a launch whose prepare command is running
+- **THEN** `status.preparing` lists the task, `preparingByKind.codex` is 1, `claimable` is empty, and the digest has `preparing: 1`; after the command succeeds `preparing` is empty and `claimableByKind.codex` is 1
+
+#### Scenario: Retry entry counted until the task is launched
+- **WHEN** a task's prepare command failed once and the clock has passed its `retryAt` but no tick has run
+- **THEN** `prepareRetry` still lists it with its `failures` and `retryAt` and `preparingByKind` counts it; after the next tick launches it, it is in `preparing` only and counted once
+
+#### Scenario: A task counted once
+- **WHEN** a task with a retry entry runs on a launch being prepared
+- **THEN** it is in `preparing` and not in `prepareRetry`, and `preparingByKind` counts it once
+
+#### Scenario: Entry no longer counted
+- **WHEN** a task with a retry entry is cancelled, blocked with `prepareFailed`, done, or no longer a task of the loaded graph
+- **THEN** it is in neither list and is not counted
+
+#### Scenario: Prepare command unset
+- **WHEN** `prepareCommand` is unset
+- **THEN** `prepareRetry` is empty, the retry entries are not read, and `preparing` holds only `launching` rows of an ordinary spawn
+
+#### Scenario: Derived from the store
+- **WHEN** a daemon restarts on a store with a launch left `preparing` and a retry entry of an `unstarted` task
+- **THEN** before its first tick its status lists the launch's task in `preparing` and the entry in `prepareRetry` with the same `failures` and `retryAt`
+
+#### Scenario: Launching row in mixed mode
+- **WHEN** in `mixed` mode the daemon takes back a parked launch after the claim window and its prepare command runs again with the row `launching`
+- **THEN** the task is in `preparing` and counted under its kind, so a work loop of that kind can stay up for the length of that install though nothing becomes claimable from it
+
+#### Scenario: Bodies without a graph
+- **WHEN** no graph is loaded
+- **THEN** the status body carries `preparing: []`, `prepareRetry: []` and `preparingByKind` all zero, and the digest carries `preparing: 0` and `preparingByKind` all zero
 

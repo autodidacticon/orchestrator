@@ -31,6 +31,8 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 | running | failed | orchestrator | process dead without a report, lease expired, or a claimed launch released after progress without keep |
 | running | failed | orchestrator | worktreeLost: a claimed launch's worktree is gone at startup on a fresh clone; attempts unchanged |
 | running | unstarted | orchestrator | claimed launch released without progress, or released with keep after progress |
+| running | unstarted | orchestrator | prepareFailed: the prepare command failed in the launch's worktree, below `prepareFailureLimit` failures in a row; attempts and carry unchanged |
+| running | blocked | orchestrator | prepareFailed: the prepare command failed `prepareFailureLimit` times in a row; attempts and carry unchanged |
 | waiting | running | orchestrator | answer persisted and a slot admitted |
 | waiting | blocked | orchestrator | maxWait elapsed, process dead, or a claimed launch released |
 | submitted | done | verifier | published |
@@ -85,6 +87,14 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 #### Scenario: A refused push blocks the task
 - **WHEN** the verifier's job for a submitted task fails as `pushRefused`
 - **THEN** the verifier applies `submitted -> blocked` with trigger `pushRefused` and `attempts` unchanged, and the same request by an agent is rejected
+
+#### Scenario: A failed prepare command returns the task to unstarted
+- **WHEN** a launch's prepare command fails while its task runs on it, below `prepareFailureLimit` failures in a row
+- **THEN** the orchestrator applies `running -> unstarted` with trigger `prepareFailed`, `attempts` and the carry unchanged and the lease cleared, and the same request by an agent is rejected
+
+#### Scenario: Prepare failures at the limit block the task
+- **WHEN** a task's prepare command fails for the `prepareFailureLimit`-th time in a row
+- **THEN** the orchestrator applies `running -> blocked` with trigger `prepareFailed`, `attempts` and the carry unchanged, and the same request by an agent is rejected
 
 ### Requirement: Admission
 The orchestrator SHALL admit `unstarted` ready tasks and resumable `waiting` tasks into run slots up to the configured capacity, admitting resumables before new launches and otherwise in first-in first-out order. A `waiting` task SHALL NOT hold a run slot, and the number of `waiting` tasks SHALL be bounded by `maxWaiting`.
@@ -214,7 +224,7 @@ A human SHALL accept a `submitted` milestone only against its pinned `integratio
 - **THEN** MVP is `submitted` at version 2 with the new integration head pinned, and accepting it against version 1 is refused as stale
 
 ### Requirement: Structured blocked reasons
-A `blocked` status SHALL carry a reason with a kind from `needsDecision`, `needsAccess`, `impossible`, `dependencyCancelled`, `outOfScope`, `insufficientSpec`, `milestoneRejected`, and `pushRefused`, plus a message, and for `needsDecision` any options and the eventual answer. Only the verifier SHALL set `pushRefused`, and agents MUST NOT block with it.
+A `blocked` status SHALL carry a reason with a kind from `needsDecision`, `needsAccess`, `impossible`, `dependencyCancelled`, `outOfScope`, `insufficientSpec`, `milestoneRejected`, `pushRefused`, and `prepareFailed`, plus a message, and for `needsDecision` any options and the eventual answer. Only the verifier SHALL set `pushRefused`, and agents MUST NOT block with it. Only the orchestrator SHALL set `prepareFailed`, and agents MUST NOT block with it.
 
 #### Scenario: Question survives into the next brief
 - **WHEN** a task is blocked with kind `needsDecision` and a human answers
@@ -223,6 +233,14 @@ A `blocked` status SHALL carry a reason with a kind from `needsDecision`, `needs
 #### Scenario: A refused push names origin's text
 - **WHEN** a task is blocked with kind `pushRefused`
 - **THEN** its message holds the text origin answered the push with, and an unblock returns it to `unstarted` with its budgets reset
+
+#### Scenario: Repeated prepare failures name the command
+- **WHEN** a task is blocked with kind `prepareFailed`
+- **THEN** its message names the prepare command, the count and the last reason and holds no command output, and an unblock returns it to `unstarted` with its count of prepare failures removed
+
+#### Scenario: An agent cannot block with an orchestrator kind
+- **WHEN** an agent's block call names kind `prepareFailed` or `pushRefused`
+- **THEN** it is answered 400 and the task stays `running`
 
 ### Requirement: Fresh process per launch
 Every launch SHALL be a new process with a new worktree and branch. Resuming after `blocked` SHALL be a new launch whose brief carries the answer. Resuming after `waiting` SHALL continue the same process once admitted.

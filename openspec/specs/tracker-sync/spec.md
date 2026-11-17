@@ -2,9 +2,7 @@
 
 ## Purpose
 A durable outbox of tracker-bound effects derived from the daemon's own transitions, so that a run imported from an issue tracker is mirrored back to it without the daemon ever contacting the tracker: the vendor-agnostic effect kinds and the marker that identifies an orchestrator comment, the policy that decides when effects are derived and the done semantics that decide when a task's issue is closed, and the contract a drainer such as the run skill follows to apply and acknowledge effects.
-
 ## Requirements
-
 ### Requirement: Durable outbox
 The daemon SHALL keep tracker-bound effects in a durable `outbox` table with `id`, `sourceSeq`, `taskId`, `kind`, `payload`, `status` of `pending`, `applied`, or `failed`, `attempts`, `result`, `error`, `createdAt`, and `appliedAt`. Effects SHALL be derived from the daemon's own transitions and inserted in the same store transaction as the `transition` event they mirror, with `sourceSeq` equal to that event's sequence number. The key `(sourceSeq, taskId, kind)` SHALL be unique so that derivation is idempotent. The daemon SHALL never contact a tracker; a drainer outside the daemon applies effects and acknowledges them.
 
@@ -73,7 +71,7 @@ With `tracker.doneAt` at `integration` (default) a task's `setState done` SHALL 
 - **THEN** `setState done` for T5 is derived at publication
 
 ### Requirement: Comment effects
-The daemon SHALL derive a `comment` when: a task enters `waiting`, or enters `blocked` with a question delivered through the fallback file, with the question verbatim and its options; a task becomes `blocked` for any other reason, with the reason kind and message, the missing slots for `insufficientSpec`, and `whatWouldUnblock` when the last fail report carries one; a gated milestone becomes `submitted`, with the pinned sha, the tag, the diff stat against the baseline, and the closure tasks with their published shas and summaries; a milestone is accepted, with the sha and version; and a milestone is rejected, with the note. A `waiting` to `blocked` transition that preserves the same question SHALL NOT derive a second comment. A done task SHALL derive a comment only when `tracker.commentOnDone` is true (default false) or `doneAt` is `milestoneAccepted`; a `failed` transition SHALL derive a comment with the failure reason only when `tracker.commentOnFail` is true (default false).
+The daemon SHALL derive a `comment` when: a task enters `waiting`, or enters `blocked` with a question delivered through the fallback file, with the question verbatim and its options; a task becomes `blocked` for any other reason, with the reason kind and message, the missing slots for `insufficientSpec`, and `whatWouldUnblock` when the last fail report carries one; a gated milestone becomes `submitted`, with a short notice: a first line naming the milestone, `ready for review`, `version <n> at <sha>` and the tag `milestone/<id>/v<n>`, then how to get the review (the `review` tool with the milestone id, or `orchestrator-ctl review <id>`), and no diff stat and no task lines; a milestone is accepted, with the sha and version; and a milestone is rejected, with the note. A `waiting` to `blocked` transition that preserves the same question SHALL NOT derive a second comment. A done task SHALL derive a comment only when `tracker.commentOnDone` is true (default false) or `doneAt` is `milestoneAccepted`; a `failed` transition SHALL derive a comment with the failure reason only when `tracker.commentOnFail` is true (default false). The effect key and marker of the submitted comment are unchanged, so an effect derived before the notice and still pending keeps its long body.
 
 #### Scenario: Question is mirrored
 - **WHEN** A blocks with the question "Use REST or GraphQL?" and options REST and GraphQL
@@ -89,7 +87,7 @@ The daemon SHALL derive a `comment` when: a task enters `waiting`, or enters `bl
 
 #### Scenario: Submitted milestone is mirrored
 - **WHEN** E becomes `submitted` at version 1
-- **THEN** a comment for E is derived with the pinned sha, `milestone/E/v1`, the diff stat, and every closure task with its published sha and summary
+- **THEN** a comment for E is derived with the pinned sha, `milestone/E/v1`, the `review` tool and `orchestrator-ctl review E`, and with no diff stat, no line starting with `- ` and no closure task's summary
 
 #### Scenario: Optional comments are off by default
 - **WHEN** A fails once and is retried, then is published, with the default policy
@@ -109,3 +107,4 @@ A drainer SHALL read pending effects in `id` order and apply each through the tr
 #### Scenario: Duplicate acknowledgement
 - **WHEN** an applied effect is acknowledged again
 - **THEN** its status and result are unchanged
+

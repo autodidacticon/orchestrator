@@ -86,16 +86,24 @@ The daemon SHALL be the only writer of its run's state; other processes MAY read
 ### Requirement: Postgres migrations
 The Postgres sink SHALL apply its SQL migrations at startup, each once, recorded in a migrations table and serialized across sessions sharing the database.
 
+The sink SHALL refuse to open when the migrations table records a version that is not among its own migrations, whatever that version is: a newer release has migrated the database. The refusal SHALL name the highest recorded version the sink does not know and the highest version it knows, and SHALL say that this daemon must be upgraded; it SHALL NOT carry the database password. The check SHALL run in the migration transaction, after the migration lock is taken and the recorded versions are read and before any pending migration runs, so the refusal comes before the run lock is taken and before the run is loaded. On a refusal the transaction SHALL be rolled back: no migration is applied and no version is recorded. The store open SHALL report the refusal with the code `schemaNewer`. A recorded version the sink knows SHALL NOT be compared by name, and a gap in the recorded versions SHALL NOT be an error.
+
+The check runs at startup only: a daemon that is already running when a newer daemon migrates the database SHALL NOT be stopped by it, and gets the refusal at its next start.
+
 #### Scenario: Migrations at startup
 - **WHEN** a sink opens on a database where the migrations have already been applied
 - **THEN** no migration runs again and the migrations table lists each version once
 
+#### Scenario: Database migrated by a newer daemon
+- **WHEN** a sink opens on a database whose migrations table records a version above the highest version the sink knows, for a run whose lock another session holds or for any other run
+- **THEN** the open is refused with an error naming the recorded version and the highest known version and saying to upgrade the daemon, not with a run-lock refusal; the run lock is not taken, nothing is loaded, no migration is applied, the recorded versions are unchanged, and the store open fails with the code `schemaNewer`
+
 ### Requirement: Postgres schema
-The Postgres tables SHALL mirror the SQLite store's tables, with attachments in `kv` and no attachments table. Documents SHALL be JSONB. Every table SHALL have a `run_id` column leading every primary key and every unique index. `events.seq` and `outbox.id` SHALL be plain `bigint` columns written explicitly, with no sequence or identity default. `launches` SHALL have an insertion-order column, set when a launch is first inserted and kept on every update and re-applied batch.
+The Postgres tables SHALL mirror the SQLite store's tables, with attachments in `kv` and no attachments table. They SHALL be in the store's schema (see "Store schema placement"). Documents SHALL be JSONB. Every table SHALL have a `run_id` column leading every primary key and every unique index. `events.seq` and `outbox.id` SHALL be plain `bigint` columns written explicitly, with no sequence or identity default. `launches` SHALL have an insertion-order column, set when a launch is first inserted and kept on every update and re-applied batch.
 
 #### Scenario: Tables
 - **WHEN** the migrations have been applied
-- **THEN** the database has the tables `overlay`, `events`, `dedup`, `launches`, `verifier_jobs`, `reports`, `payload_overlays`, `graph_snapshot`, `kv`, `proposals` and `outbox`, each with `run_id` leading its primary key and unique indexes
+- **THEN** the store's schema (`orchestrator` unless `store.schema` names another) has the tables `overlay`, `events`, `dedup`, `launches`, `verifier_jobs`, `reports`, `payload_overlays`, `graph_snapshot`, `kv`, `proposals` and `outbox`, each with `run_id` leading its primary key and unique indexes, the bookkeeping table `orchestrator_migrations`, and the indexes `events_task`, `launches_task`, `launches_status`, `proposals_status` and `outbox_status`
 
 #### Scenario: Runs share a database
 - **WHEN** two runs with different run ids write rows with the same keys (task ids, event sequence numbers, launch ids and tokens, outbox ids, kv keys) to one database
@@ -173,25 +181,29 @@ The test run SHALL decide once, in a vitest global setup in the main process, wh
 - **THEN** the tests that stall a server by stopping its backend process are skipped
 
 ### Requirement: Store selection
-The configuration SHALL carry `store: { kind: sqlite | postgres, url, urlFile, flushDeadlineMs }`, with `kind` defaulting to `sqlite` and `flushDeadlineMs` to 120000. When the file leaves `url` unset, `url` SHALL come from the sources of specs/state-backend "Store URL from a file" under `postgres`, and from `DATABASE_URL` under `sqlite`. The daemon SHALL open `<dataDir>/store.sqlite` under `sqlite`; under `postgres` it SHALL take the run lock, load the memory image for the run, and run the journal over the Postgres sink. The block SHALL be read from the file, the environment and the URL file only.
+The configuration SHALL carry `store: { kind: sqlite | postgres, url, urlFile, runId, schema, flushDeadlineMs }`, with `kind` defaulting to `sqlite` and `flushDeadlineMs` to 120000; `schema` has no default in the configuration, and the schema in force is `orchestrator` when it is unset (see "Store schema key"). When the file leaves `url` unset, `url` SHALL come from the sources of specs/state-backend "Store URL from a file" under `postgres`. Under `sqlite` the daemon SHALL NOT read `DATABASE_URL` (or `DATABASE_URL_FILE`) as a store input: `url` stays unset unless the config file writes it, and a `url` written in the file is kept and reported with `urlSource: file`. The daemon SHALL open `<dataDir>/store.sqlite` under `sqlite`; under `postgres` it SHALL take the run lock, load the memory image for the run from the tables in the store's schema, and run the journal over the Postgres sink. The block SHALL be read from the file, the environment and the URL file only.
 
 #### Scenario: Postgres restart on an empty data directory
-- **WHEN** a daemon on `store.kind: postgres` is stopped and started again with a new, empty data directory
+- **WHEN** a daemon on `store.kind: postgres` is stopped and started again with a new, empty data directory and the same `store.schema`
 - **THEN** it serves the same tasks, launches, events and outbox as before, and no `store.sqlite` exists
 
 #### Scenario: Override document cannot select a store
 - **WHEN** the stored `config.overrides` document holds a `store` key beside other keys
-- **THEN** the `store` key is ignored and the other keys still apply; a `PUT /v1/config` or `--set` naming `store` is refused
+- **THEN** the `store` key is ignored and the other keys still apply; a `PUT /v1/config` or `--set` naming `store` (or `store.schema`) is refused
 
 #### Scenario: Run already owned
 - **WHEN** a second daemon starts on a run whose lock another session holds
-- **THEN** it exits with an error saying the run is locked by another session
+- **THEN** it exits with an error saying the run is locked by another session, naming the store's schema and saying that the run lock is per database
+
+#### Scenario: DATABASE_URL under SQLite
+- **WHEN** a daemon on `store.kind: sqlite` (written or by default) starts with `DATABASE_URL` set and no `store.url` in its config file
+- **THEN** its resolved `store.url` is unset, and the store report (start output, `GET /v1/config`, `config.json`) has no `url`, no `urlSource` and no `schema`; with `store.url` written in the file, the report shows it without its password and with `urlSource: file`
 
 ### Requirement: Database URL redaction
 Every surface that prints resolved configuration (`orchestrator-ctl start`, `orchestrator-ctl config`, `GET /v1/config`, `config.json`, the `config.resolved` event) SHALL show the database URL with its password removed, and no daemon log line SHALL contain the password.
 
 #### Scenario: Password never printed
-- **WHEN** a daemon starts with `DATABASE_URL` carrying a password
+- **WHEN** a daemon on `store.kind: postgres` starts with `DATABASE_URL` carrying a password
 - **THEN** the start output, the config route, the CLI's config output, `config.json` and the daemon log show the URL without it and never contain it
 
 ### Requirement: Lease versus flush deadline
@@ -243,27 +255,31 @@ With `store.kind: postgres` the daemon SHALL choose the run id, in this order: `
 - **THEN** the run id and the run directory are the repository path hash, as before
 
 ### Requirement: No store URL in child environments
-Check commands, agents of every runner kind together with the processes they start, and the git commands the daemon runs itself through its git wrapper (`src/workspace/git.ts`) together with the project git hooks they trigger, SHALL NOT receive `DATABASE_URL`, `DATABASE_URL_FILE`, `ORCH_RUN_ID`, any libpq connection variable named in `LIBPQ_VARS` (`src/runs/childEnv.ts`: among them `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGPASSFILE`, `PGSERVICE`, `PGSERVICEFILE`, `PGSYSCONFDIR`, `PGSSLMODE`, `PGSSLCERT`, `PGSSLKEY` and `PGSSLROOTCERT`), or any variable whose value equals the resolved `store.url`. The libpq names SHALL be removed whatever their values, so a store URL built from parts (`postgres://host/db` plus `PGPASSWORD`) does not reach a child, and a project's check command loses its own `PG*` variables too. `LIBPQ_VARS` SHALL be the one list of these names. The daemon's own environment SHALL keep them. The environment of each daemon git command SHALL be built when the command runs, so a store URL resolved after startup is removed too, and SHALL still set `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1` and `GIT_OPTIONAL_LOCKS=0`. The read-only startup lookups in `src/runs/runDir.ts` (`git config --get remote.origin.url`, `git ls-files --error-unmatch`, `git rev-parse --show-toplevel`) run no hooks and are not covered. This requirement covers environment variables only; what a child running as the daemon's user can still reach is stated in "Store credentials a child can still reach".
+Check commands, agents of every runner kind together with the processes they start, and the git commands the daemon runs itself through its git wrapper (`src/workspace/git.ts`) together with the project git hooks they trigger, SHALL NOT receive `ORCH_RUN_ID`, on every store kind. While the daemon withholds (see "Withholding follows the store": always on a Postgres store), they SHALL NOT receive `DATABASE_URL`, `DATABASE_URL_FILE`, any libpq connection variable named in `LIBPQ_VARS` (`src/runs/childEnv.ts`: among them `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGPASSFILE`, `PGSERVICE`, `PGSERVICEFILE`, `PGSYSCONFDIR`, `PGSSLMODE`, `PGSSLCERT`, `PGSSLKEY` and `PGSSLROOTCERT`), or any variable whose value equals a withheld store URL (the resolved `store.url`). While it withholds, the libpq names SHALL be removed whatever their values, so a store URL built from parts (`postgres://host/db` plus `PGPASSWORD`) does not reach a child, and a project's check command loses its own `PG*` variables too. While it does not withhold, these variables SHALL reach the children unchanged. `LIBPQ_VARS` SHALL be the one list of these names. The daemon's own environment SHALL keep them. The environment of each daemon git command SHALL be built when the command runs, so a store URL resolved after startup is removed too, and SHALL still set `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1` and `GIT_OPTIONAL_LOCKS=0`. The read-only startup lookups in `src/runs/runDir.ts` (`git config --get remote.origin.url`, `git ls-files --error-unmatch`, `git rev-parse --show-toplevel`) run no hooks and are not covered. This requirement covers environment variables only; what a child running as the daemon's user can still reach is stated in "Store credentials a child can still reach".
 
 #### Scenario: Printed environments
-- **WHEN** a daemon whose environment holds `DATABASE_URL`, `DATABASE_URL_FILE`, every name in `LIBPQ_VARS` with `PGPASSWORD` set, and another variable with the store URL runs a check command and a spawned agent that print their environment
+- **WHEN** a daemon that withholds, whose environment holds `DATABASE_URL`, `DATABASE_URL_FILE`, every name in `LIBPQ_VARS` with `PGPASSWORD` set, and another variable with the store URL, runs a check command and a spawned agent that print their environment
 - **THEN** neither printout contains any of those variables, the store password or the `PGPASSWORD` value, and unrelated variables are kept
 
 #### Scenario: URL from the config file
-- **WHEN** `store.url` comes from an untracked config file and another variable holds the same URL
+- **WHEN** a daemon that withholds takes `store.url` from an untracked config file and another variable holds the same URL
 - **THEN** that variable is absent from the check and agent environments, and no worktree contains the config file
 
 #### Scenario: Hook run by a daemon git command
-- **WHEN** the daemon's environment holds `DATABASE_URL`, `DATABASE_URL_FILE`, `ORCH_RUN_ID`, every name in `LIBPQ_VARS` and another variable with the store URL, and a project git hook that prints its environment runs under the daemon's kept-release work-in-progress commit or another daemon `git commit`
+- **WHEN** a daemon that withholds, whose environment holds `DATABASE_URL`, `DATABASE_URL_FILE`, `ORCH_RUN_ID`, every name in `LIBPQ_VARS` and another variable with the store URL, runs its kept-release work-in-progress commit or another `git commit`, and a project git hook that prints its environment runs under it
 - **THEN** the printout contains none of those variables, not the store password and not the `PGPASSWORD` value, keeps unrelated variables, and shows `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1` and `GIT_OPTIONAL_LOCKS=0`
 
 #### Scenario: Store URL withheld after import
-- **WHEN** the store URL is withheld after the git module has loaded, as the daemon does once its configuration is resolved
+- **WHEN** a daemon that withholds registers the store URL after the git module has loaded, as it does once its configuration is resolved
 - **THEN** the next daemon git command's environment no longer holds a variable with that URL
 
 #### Scenario: Each libpq name is removed
-- **WHEN** an environment holding one name from `LIBPQ_VARS` and an unrelated variable is passed through the child-environment filter, with no store URL withheld
+- **WHEN** an environment holding one name from `LIBPQ_VARS` and an unrelated variable is passed through the child-environment filter in its default state (withholding), with no store URL withheld
 - **THEN** the libpq name is removed and the unrelated variable is kept; `PGDATA` and other names outside the list are kept
+
+#### Scenario: SQLite run passes the database variables
+- **WHEN** a daemon on a SQLite store with no Postgres input, whose environment holds `DATABASE_URL`, another variable with the same value, `DATABASE_URL_FILE`, `PGHOST`, `PGPASSWORD` and `ORCH_RUN_ID` (with `store.kind: sqlite` written in the file), runs a check command, a spawned agent and a git commit whose hook print their environment
+- **THEN** each printout holds `DATABASE_URL`, the other variable, `DATABASE_URL_FILE`, `PGHOST` and `PGPASSWORD` with their values, and no `ORCH_RUN_ID`; the git printout still shows `GIT_TERMINAL_PROMPT=0`, `GIT_CONFIG_NOSYSTEM=1` and `GIT_OPTIONAL_LOCKS=0`
 
 ### Requirement: No store URL in a tracked config file
 When `store.url` comes from a config file that git tracks in the repository, the daemon SHALL refuse to start with a message saying so, without printing the URL: a tracked file is checked out into every worktree.
@@ -459,10 +475,10 @@ The daemon SHALL refuse to start, with a message naming the file and the setting
 - **THEN** the configuration is refused with a message naming both
 
 ### Requirement: Store credentials a child can still reach
-The daemon removes only environment variables from its children. Any process of the daemon's user in its container (a check, a spawned agent, a worker there) can still read the URL file, the daemon's environment as started (`/proc/<daemon pid>/environ`), and its memory where the kernel allows. No requirement SHALL claim the daemon prevents these. `deploy/README.md` "Store credentials" SHALL state each of them and what a deployment does about it.
+The daemon removes only environment variables from its children, and only while it withholds (see "Withholding follows the store"). Any process of the daemon's user in its container (a check, a spawned agent, a worker there) can still read the URL file, the daemon's environment as started (`/proc/<daemon pid>/environ`), and its memory where the kernel allows. No requirement SHALL claim the daemon prevents these. `deploy/README.md` "Store credentials" SHALL state each of them and what a deployment does about it.
 
 #### Scenario: Environment as started
-- **WHEN** a daemon is started with `DATABASE_URL` in its environment and runs a check command
+- **WHEN** a daemon that withholds is started with `DATABASE_URL` in its environment and runs a check command
 - **THEN** the check command's environment has no `DATABASE_URL`, and `/proc/<daemon pid>/environ` still holds it
 
 #### Scenario: URL file stays readable
@@ -475,4 +491,238 @@ The reference manifests SHALL give the daemon the store URL through a mounted Se
 #### Scenario: Reference manifests keep the URL out of the daemon's environment
 - **WHEN** `kubectl kustomize deploy/base` runs
 - **THEN** the daemon container has no `DATABASE_URL`, no `DATABASE_URL_FILE`, no variable starting with `PG`, no `envFrom` and no variable read from a Secret, and `orchestrator.yaml` names `store.urlFile` on the mounted Secret file
+
+### Requirement: Withholding follows the store
+The daemon SHALL withhold the store's variables from its children (see "No store URL in child environments") exactly when the store it opened is Postgres, or is SQLite while a Postgres input is set and the file does not write `store.kind` (see "Postgres inputs under SQLite", with its warning and event). A process that opens no store SHALL withhold. The daemon SHALL state at startup and in its config report whether it withholds (see "Withholding stated").
+
+#### Scenario: A Postgres store withholds
+- **WHEN** a daemon opens a Postgres store, whatever the config file and the environment hold
+- **THEN** it withholds: its check commands, agents and git hooks see none of the store's variables, as in "No store URL in child environments"
+
+#### Scenario: A SQLite store passes
+- **WHEN** a daemon started with `orchestrator --repo`, with no `store` block in its config file and an empty `ORCH_RUN_ID`, opens a SQLite store with `DATABASE_URL` (holding a password), `APP_DATABASE` set to the same value, `DATABASE_URL_FILE`, `PGHOST` and `PGPASSWORD` in its environment, and runs a check command and a spawned agent that print their environment
+- **THEN** both printouts hold all five variables and an unrelated one, no `ORCH_URL`, and an `ORCH_HOME` inside the run directory; no `config.warning` event is appended; the report has `withholdsDatabaseVariables: false`
+
+#### Scenario: Postgres inputs without store.kind
+- **WHEN** the same SQLite daemon is started with `ORCH_RUN_ID=team-a`, or with a `store` block that sets only `flushDeadlineMs`
+- **THEN** its check command and agent see none of `DATABASE_URL`, `APP_DATABASE`, `DATABASE_URL_FILE`, `PGHOST`, `PGPASSWORD` or `ORCH_RUN_ID`, and not the password; its log has one warning and its events one `config.warning` with code `postgresInputsUnderSqlite`, both naming `ORCH_RUN_ID` (or `store.flushDeadlineMs`); the report has `withholdsDatabaseVariables: true`
+
+#### Scenario: store.kind written as sqlite
+- **WHEN** the config file writes `store.kind: sqlite` and `ORCH_RUN_ID=team-a` is set
+- **THEN** the daemon does not withhold, its children see the database variables and no `ORCH_RUN_ID`, and nothing warns
+
+#### Scenario: No store opened
+- **WHEN** a process that opened no store (an operator command, a library caller, the in-process test harness) builds a child environment, a claim's `env` block or a config report
+- **THEN** it withholds: the store's variables are removed (blanked in a claim's `env` block), and the report has `withholdsDatabaseVariables: true`
+
+#### Scenario: Variables named at startup
+- **WHEN** a daemon starts with `DATABASE_URL`, `DATABASE_URL_FILE`, `PGHOST` and `PGPASSWORD` in its environment
+- **THEN** its log has one info line with `withholds`, `storeKind` and `names` holding those four names, and the line holds neither the password nor the `PGHOST` value
+
+#### Scenario: The config report states the rule
+- **WHEN** an operator reads `GET /v1/config` of a running daemon, or its `config.json`
+- **THEN** the store block has `withholdsDatabaseVariables`: `true` on a Postgres store or under the exception, `false` on a SQLite store otherwise
+
+### Requirement: Postgres inputs under SQLite
+A Postgres input is a key other than `kind` in the file's `store` block, or a non-blank `ORCH_RUN_ID`. A file that writes `store.kind` has none. `DATABASE_URL`, `DATABASE_URL_FILE`, libpq names and `git.originUrl` are not inputs. A SQLite daemon with inputs SHALL also withhold the trimmed `DATABASE_URL` by value, and at each start log one warning and append one `config.warning` event `{ code: 'postgresInputsUnderSqlite', message, inputs }` naming each input and both remedies.
+
+#### Scenario: Project variables are no inputs
+- **WHEN** a SQLite daemon with no `store` block and an empty `ORCH_RUN_ID` has `DATABASE_URL`, `DATABASE_URL_FILE`, `PGHOST` and `PGPASSWORD` in its environment, or `git.originUrl` in its config file
+- **THEN** it finds no Postgres input, appends no `config.warning` event and does not withhold
+
+#### Scenario: Warning names the remedies
+- **WHEN** a SQLite daemon starts with a Postgres input and no `store.kind` in its config file
+- **THEN** the warning and the event's `message` name each input, `store.kind: postgres` and `store.kind: sqlite`
+
+### Requirement: Withholding stated
+The daemon SHALL decide once per start, after the store opens and before its first resolution, with no configuration key or pass-list. When its environment holds a non-empty `DATABASE_URL`, `DATABASE_URL_FILE` or `LIBPQ_VARS` name, it SHALL log one info line with `withholds`, `storeKind` and `names`, never a value. The report's store block SHALL carry `withholdsDatabaseVariables` on every store kind, in the start output, `GET /v1/config`, `config.json` and `config.resolved`.
+
+#### Scenario: No line without database variables
+- **WHEN** a daemon starts with none of `DATABASE_URL`, `DATABASE_URL_FILE` or the `LIBPQ_VARS` names set in its environment
+- **THEN** it logs no line naming database variables, and its report still carries `withholdsDatabaseVariables`
+
+### Requirement: Store schema placement
+Under `store.kind: postgres` the store's tables SHALL be in the schema in force (see "Store schema key"). Every statement the sink sends that names a store table or `orchestrator_migrations` SHALL name the quoted schema. The unqualified migrations SHALL run under a transaction-local `search_path` holding the schema alone. The sink's session SHALL resolve to the schema alone, whatever path the connection asked for, also after a rolled-back batch.
+
+#### Scenario: Migrations under a transaction-local path
+- **WHEN** `migrate()` runs on a caller's session, and returns or throws
+- **THEN** a transaction-local `search_path` holding the schema alone was set before the first statement that names a table, and the caller's `search_path` is unchanged afterwards
+
+#### Scenario: Statements name the schema
+- **WHEN** the sink builds a batch's statements, the loader reads a run, or `migrate()` runs, for a schema other than `orchestrator`
+- **THEN** each statement that names a store table or `orchestrator_migrations` names it as `"<schema>"."<table>"`, the `launches` sub-select included
+
+#### Scenario: The connection asks for another schema
+- **WHEN** the connection's startup `options` put another schema first, and that schema holds tables named like all twelve of the store's
+- **THEN** after the open `current_schema()` on the sink's session is the store's schema, a journaled store writes every table there, a fresh image loaded from the sink equals the running image, and the other schema's tables hold no row and gain no relation
+
+#### Scenario: A refused batch keeps the path
+- **WHEN** the server refuses a batch for its content
+- **THEN** the sink's session still resolves to the store's schema and the next batch lands there
+
+#### Scenario: A run in another schema
+- **WHEN** a sink opened on a schema other than `orchestrator` applies batches and loads an image
+- **THEN** every row is in that schema, and `orchestrator` holds no row for the run id
+
+### Requirement: Store schema creation
+At every start, in the migration transaction and under its lock, the sink SHALL look the schema up in `pg_namespace` and send `CREATE SCHEMA` only when it is absent, never with `IF NOT EXISTS`. The role SHALL hold USAGE and CREATE on an existing schema, or the open is refused. A `CREATE SCHEMA` refused with SQLSTATE `42501` SHALL name both remedies; other failures give no grant advice. Every refusal SHALL name the schema and carry the server's message.
+
+#### Scenario: Absent schema
+- **WHEN** a sink opens on a schema that does not exist, as a role that may create schemas
+- **THEN** exactly one `CREATE SCHEMA` for the quoted name is sent, after the migration lock, and the tables and indexes are created in that schema
+
+#### Scenario: Ready-made schema
+- **WHEN** a role without CREATE on the database opens a schema made for it with USAGE and CREATE granted
+- **THEN** no `CREATE SCHEMA` is sent and the tables are created there
+
+#### Scenario: The role may not create the schema
+- **WHEN** that role opens a schema that does not exist
+- **THEN** the open is refused with a message holding the schema's name, both remedies and the server's message, and the schema still does not exist
+
+#### Scenario: Rights missing on an existing schema
+- **WHEN** the schema exists and the role lacks USAGE or CREATE on it
+- **THEN** the open is refused with a message naming the schema
+
+#### Scenario: Another failure
+- **WHEN** `CREATE SCHEMA` fails with a SQLSTATE other than `42501`, or the connection is lost
+- **THEN** the refusal names the schema and carries the cause's message, and gives no grant advice
+
+#### Scenario: Two daemons at once
+- **WHEN** two sinks with different run ids open at once on a schema that does not exist
+- **THEN** both open and `pg_namespace` holds the schema once
+
+#### Scenario: Failed first open
+- **WHEN** the first open on an absent schema fails while applying migration 1
+- **THEN** the transaction is rolled back and the schema does not exist
+
+### Requirement: Store schema key
+`store.schema` SHALL name the Postgres store's schema, `orchestrator` when unset, read from the config file at start only and never a runtime override. A name SHALL be 1 to 63 characters of `a-z`, `0-9` and `_`, start with a letter or `_`, not start with `pg_`, and not be `information_schema`. Under `postgres` a bad name SHALL refuse the start before the store opens; `sqlite` ignores the key. Under `postgres` the report and the store log lines SHALL show the schema in force.
+
+#### Scenario: Not a string
+- **WHEN** the config file sets `store.schema` to a number, a boolean or an empty YAML value, on any store kind
+- **THEN** the config parse fails at `store.schema`
+
+#### Scenario: Same rule before connecting
+- **WHEN** `PgSink.open` is given a schema name the rule refuses
+- **THEN** it rejects before connecting, naming the value, and it accepts exactly the names the configuration check accepts
+
+#### Scenario: Default
+- **WHEN** a daemon on `store.kind: postgres` starts with no `store.schema`
+- **THEN** its tables are in the schema `orchestrator`, and its report and `store opened` line show `schema: orchestrator`
+
+#### Scenario: A named schema
+- **WHEN** a daemon starts with `store.schema` set to a valid name
+- **THEN** the start result, `GET /v1/config`, `config.json` and the `store opened` line show that name, the twelve tables are in that schema, and a restart on an empty data directory with the same value serves the same tasks
+
+#### Scenario: A refused name
+- **WHEN** a daemon on `store.kind: postgres` starts with `store.schema: Bad-Name`
+- **THEN** it exits non-zero before the store opens and logs `store configuration refused` with a message holding `store.schema`, the value and the rule
+
+#### Scenario: SQLite ignores the key
+- **WHEN** a daemon on `store.kind: sqlite` has `store.schema` set to any string
+- **THEN** nothing refuses it and the report carries no `schema`
+
+#### Scenario: Never an override
+- **WHEN** the stored override document holds `store.schema`, or an operator names it in `--set` or a configuration patch
+- **THEN** the stored key is ignored and the flag and the patch are refused
+
+#### Scenario: A changed value starts an empty run
+- **WHEN** a daemon restarts with another `store.schema` value
+- **THEN** it serves no task, and the first schema still holds the run's rows
+
+#### Scenario: Tables in another schema are not read
+- **WHEN** the database holds a run's tables in `public` (made before this requirement) and a daemon starts with no `store.schema`
+- **THEN** it creates the schema `orchestrator` and starts an empty run there; the tables in `public` are neither read nor moved
+
+### Requirement: Run lock is per database
+The run lock and the migration lock SHALL stay keyed per database, whatever the schema: one run id SHALL NOT be live in two schemas of one database. The refusal of a second open SHALL keep the words `locked by another session`, name the store's schema, and say that the run lock is per database. A second daemon that starts on a locked run id with a new schema name creates that schema and its tables before it is refused, and leaves them empty.
+
+#### Scenario: Same run id in a second schema
+- **WHEN** a sink holds a run id in one schema and another sink opens the same run id in a second schema of the same database
+- **THEN** the second open is refused with `RunLockedError`, while two different run ids open in the two schemas
+
+#### Scenario: Refusal names the schema
+- **WHEN** `openStore` is refused because the run is locked
+- **THEN** its error says the run is locked by another session, names the schema and says the run lock is per database; the errors for a failed open and a failed load name the schema too
+
+### Requirement: Empty run beside tables in another schema
+
+Under `store.kind: postgres`, when the load finds no row for the run id in the configured schema, the daemon SHALL look, with one catalogue query on the sink's session, for other schemas of the database holding an ordinary table named `orchestrator_migrations`. When it finds any, it SHALL log one warning and append one `config.warning` event with `code: 'tablesInOtherSchema'`. A failed query SHALL NOT stop the start.
+
+#### Scenario: An empty run with tables in another schema
+
+- **WHEN** a daemon starts a run that has no row in the configured schema while another schema of the database holds an ordinary table named `orchestrator_migrations`
+- **THEN** it finds that schema with one query on `pg_catalog.pg_class` joined with `pg_catalog.pg_namespace`, leaving out the configured schema and reading no row of another schema
+- **AND** it logs one warning naming every such schema, sorted, the configured schema, the run id and the key `store.schema`
+- **AND** it appends one `config.warning` event with `code` `tablesInOtherSchema`, the message, and the schema names in `schemas`
+- **AND** the warning does not say whether the other schema holds rows for this run id, and does not name other run ids
+
+#### Scenario: A run that has rows
+
+- **WHEN** the load finds at least one row for the run id, as at every start after the first (each start writes the run id and a `config.resolved` event)
+- **THEN** the daemon runs no catalogue query and logs no such warning
+
+#### Scenario: No other schema
+
+- **WHEN** a run is empty and no other schema of the database holds a table named `orchestrator_migrations` (a schema holding only other store table names, such as `launches`, does not count)
+- **THEN** the daemon logs no such warning and appends no such event
+
+#### Scenario: A failed catalogue query
+
+- **WHEN** the catalogue query fails
+- **THEN** the daemon logs nothing about it, appends no event, and starts as it would without the check
+
+### Requirement: Origin identity is frozen
+
+The identity hashed for an origin run id SHALL be the URL trimmed, normalised as the scenarios state and otherwise kept as written; an address that does not parse as a URL SHALL be taken unchanged. No form SHALL lose a `.git` suffix or a trailing slash. The rule SHALL NOT change in a later release, and a test SHALL hold run ids as literals.
+
+#### Scenario: https host case, default port and credential
+
+- **WHEN** the origin is `https://git.example.com/team/project.git`, `https://GIT.example.com:443/team/project.git` or `https://x-access-token:secret@git.example.com/team/project.git`
+- **THEN** the run id is `88b53ae7afc6f781` for each, because an `http` or `https` URL has its user information removed, its host lowercased and its default port dropped
+
+#### Scenario: http default port
+
+- **WHEN** the origin is `http://GIT.example.com:80/team/project.git`
+- **THEN** the run id is `559e44dca6da773f`
+
+#### Scenario: ssh URL keeps host and port as written
+
+- **WHEN** the origin is `ssh://git@git.example.com/team/project.git` or `ssh://other@git.example.com/team/project.git`
+- **THEN** the run id is `80a522b921e76c20` for both, because user information is removed
+- **AND WHEN** the origin is `ssh://git@GIT.example.com/team/project.git`
+- **THEN** the run id is `a929f8abcff79ed4`
+- **AND WHEN** the origin is `ssh://git@git.example.com:22/team/project.git`
+- **THEN** the run id is `a52c4abb760e2b58`
+
+#### Scenario: git URL keeps host and port as written
+
+- **WHEN** the origin is `git://git-origin.orch.svc:9418/fixture.git`
+- **THEN** the run id is `af1507c5d17cfdef`
+- **AND WHEN** the origin is `git://git-origin.orch.svc/fixture.git`
+- **THEN** the run id is `f62598e6976ef69f`
+
+#### Scenario: Three path spellings are three run ids
+
+- **WHEN** the origin is `https://git.example.com/team/project.git`, `https://git.example.com/team/project` or `https://git.example.com/team/project/`
+- **THEN** the run ids are `88b53ae7afc6f781`, `30774d330900e9dc` and `884bf3a568293c95`
+
+#### Scenario: scp-like address with a user is taken unchanged
+
+- **WHEN** the origin is `git@git.example.com:team/project.git`
+- **THEN** the run id is `9245f0dda77f617c`
+- **AND WHEN** the origin is `other@git.example.com:team/project.git`
+- **THEN** the run id is `a93c1af9aa06b2a6`, because the address does not parse as a URL and its user is kept
+- **AND WHEN** the origin is `git@GIT.example.com:team/project.git`
+- **THEN** the run id is `27f5d6b225cee7c8`, because its host case is kept
+
+#### Scenario: scp-like address without a user
+
+- **WHEN** the origin is `git.example.com:team/project.git` or `GIT.example.com:team/project.git`
+- **THEN** the run id is `430a03b607b6e432` for both, because the address parses as a URL whose scheme is the host name, and only that name is lowercased
+
+#### Scenario: Local path
+
+- **WHEN** the origin is `/srv/git/project.git`
+- **THEN** the run id is `86fb6c3ee3132ede`
 

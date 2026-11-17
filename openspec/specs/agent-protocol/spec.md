@@ -312,9 +312,11 @@ The brief's definition of done SHALL name the effective check command at the tim
 ### Requirement: Agent environment
 A launch the daemon spawns SHALL inherit the daemon's environment with these changes:
 - `ORCH_HOME` replaced by a directory inside the run's data directory;
-- `ORCH_URL`, `ORCH_REPO`, and `ORCH_DATA_DIR` removed;
-- `DATABASE_URL`, `DATABASE_URL_FILE`, `ORCH_RUN_ID`, every libpq connection variable named in `LIBPQ_VARS`, and every variable whose value is the resolved store URL removed (specs/state-backend "No store URL in child environments"), for every runner kind;
+- `ORCH_URL`, `ORCH_REPO`, `ORCH_DATA_DIR` and `ORCH_RUN_ID` removed on every store kind;
+- while the daemon withholds (specs/state-backend "Withholding follows the store": always on a Postgres store), `DATABASE_URL`, `DATABASE_URL_FILE`, every libpq connection variable named in `LIBPQ_VARS`, and every variable whose value is the resolved store URL removed (specs/state-backend "No store URL in child environments"), for every runner kind. While it does not withhold (a SQLite store with no Postgres input), they are passed unchanged;
 - the agent variables `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_API`, `ORCH_RETRY_WINDOW_MS`, `ORCH_TASK_ID`, and `ORCH_WORKTREE` added.
+
+The `env` block of a codex or opencode claim SHALL carry the same changes. A removed name appears there as an empty value, which the work loop deletes. A name that is passed does not appear there at all, so the worker's own value stays.
 
 An orchestrator client the agent runs therefore SHALL find no run under its `ORCH_HOME` and SHALL NOT be able to start, stop, or list a daemon of the user's. `ORCH_API` SHALL remain set so the shim reaches the agent's own daemon. What a spawned agent running as the daemon's user can still reach of the store's credentials is stated in specs/state-backend "Store credentials a child can still reach".
 
@@ -329,8 +331,12 @@ An MCP server that the agent's CLI spawns SHALL be assumed to receive only what 
 - **THEN** the result lists no runs
 
 #### Scenario: Agent sees no store URL
-- **WHEN** the daemon's environment holds `DATABASE_URL` and `APP_DATABASE` set to the store URL, `DATABASE_URL_FILE`, and every name in `LIBPQ_VARS` with `PGPASSWORD` set, and a spawned agent's command prints its environment
+- **WHEN** a daemon that withholds has `DATABASE_URL` and `APP_DATABASE` set to the store URL, `DATABASE_URL_FILE`, and every name in `LIBPQ_VARS` with `PGPASSWORD` set in its environment, and a spawned agent's command prints its environment
 - **THEN** the printout has none of those variables, not the password and not the `PGPASSWORD` value
+
+#### Scenario: Agent on a SQLite run keeps the project's database variables
+- **WHEN** a daemon with a SQLite store and no Postgres input has `DATABASE_URL`, `APP_DATABASE` set to the same value, `DATABASE_URL_FILE`, `PGHOST` and `PGPASSWORD` in its environment, and a spawned agent's command prints its environment; or a codex or opencode worker claims a launch from that daemon
+- **THEN** the printout holds each of them with its value and no `ORCH_URL` or `ORCH_RUN_ID` line; the claim's `env` block has no key for any of them and has `ORCH_RUN_ID` empty
 
 ### Requirement: Codex brief reports through the MCP server
 The brief of a `codex` launch SHALL tell the agent to call heartbeat, report, block, inbox and log through the `orchestrator` MCP server's tools, and not to call the agent API from a command (curl or a script), because the Codex sandbox refuses a command's network access while Codex runs the MCP server outside the sandbox. It SHALL keep the fallback report file for the case where an MCP tool call itself fails. A `claude-code` or `opencode` brief SHALL NOT carry this text.
@@ -429,4 +435,118 @@ An inbox read SHALL take the notices the launch holds, wait until everything com
 #### Scenario: Caller gone while the removal waits
 - **WHEN** two nudges are taken, the sink stalls on the batch that removes them, a third nudge is queued, and the caller goes away before the removal is durable
 - **THEN** the read removes nothing for good, and the next read answers with the three nudges in order
+
+### Requirement: Brief states the limits in force
+The daemon SHALL pass in every brief input it builds `limits` (`stuckAfterMs`, `stuckFailAfterMs`, `maxLaunchMs`) from the configuration in force when the brief is composed, and `brief.json` SHALL carry it. The Reporting section SHALL hold one `- Limits:` line after the place of the lease line stating each limit above 0 with its consequence, what counts as progress, what to do, and that the numbers can change during the run, a change arriving as a `nudge` notice.
+
+#### Scenario: Default limits
+- **WHEN** a launch is briefed under the default configuration
+- **THEN** its brief has one limits line naming `health.stuckAfterMs` 900000 (flagged, a `stuck` notice in the inbox), `health.stuckFailAfterMs` 2700000 (the launch is ended and the attempt spent) and `budgets.maxLaunchMs` 7200000 (the launch is ended when the budget is used up, also while it makes progress)
+- **AND** the line says a progress signal is a call to an operation, a commit, or a change in the worktree, tells the worker to call `heartbeat` between long steps, to run a longer command in the background, and to report or ask a question before the budget ends
+- **AND** the line says the numbers are those in force when the brief was written, that the operator can change them during the run, and that a change arrives as a `nudge` notice in the inbox
+- **AND** the line does not say when the budget clock starts, what it leaves out, or how idle time is measured, and holds no URL
+- **AND** `brief.json` carries `limits` with those three numbers
+
+#### Scenario: One limit 0
+- **WHEN** a brief is composed with `stuckAfterMs` 0 and the other two limits above 0
+- **THEN** the limits line does not name `health.stuckAfterMs` or promise a `stuck` notice, and still names the other two limits
+
+#### Scenario: All limits 0
+- **WHEN** a brief is composed with all three limits 0
+- **THEN** the brief has no limits line, and `brief.json` carries `limits` with the three zeros
+
+#### Scenario: Input without limits
+- **WHEN** a brief is composed from an input without `limits`
+- **THEN** the brief has no limits line and `brief.json` has no `limits` key
+
+#### Scenario: Launch prepared for a claim
+- **WHEN** a launch is prepared for a claim
+- **THEN** its brief has the lease line followed by the limits line, and `brief.json` carries both `leaseTtlMs` and `limits`
+
+### Requirement: Codex brief states the network limit
+As an exception to the `needsAccess` rule of "Check command and tool rules in the brief", a `codex` brief whose sandbox lacks network SHALL tell the worker to run the parts of the check that work, submit without asking, and name in the report summary what did not run; a login, a credential or a token SHALL stay a `needsAccess` question. The bullet SHALL follow the configuration in force when the brief was composed, so a launch parked before a change and claimed after it keeps it.
+
+#### Scenario: Network access in the brief input
+- **WHEN** the daemon builds the brief input of a `codex` launch
+- **THEN** its `runner` carries `networkAccess`: true under `runner.codex.sandbox: danger-full-access`, true under `workspace-write` when `runner.codex.networkAccess` is true, false under `read-only` or under `workspace-write` with the key unset or false, whatever the text of a custom `runner.codex.command`
+- **AND** the brief input of a launch of another kind carries no `networkAccess` key
+
+#### Scenario: No network access
+- **WHEN** a `codex` launch with `networkAccess` false is briefed with check command `npm ci && npm test`
+- **THEN** its Definition of done holds, after the check command bullet, one bullet saying the commands have no network access, so an install that must download fails and a test that opens a port or a local socket can fail, and that an install can be refused for writing to a package store outside the worktree
+- **AND** the bullet says the orchestrator runs the check command itself, outside the sandbox, after the submit; that the worker runs the parts that do run and, for the rest, does not ask with a `needsAccess` question and does not wait but submits and names in the report summary each part that did not run and its error
+- **AND** the bullet says it is the exception to the `needsAccess` rule under Workspace and that a login, a credential or a token stays a `needsAccess` question
+- **AND** the check command bullet and the sandbox paragraph, with its pointer to `runner.codex.sandbox`, are unchanged
+- **AND** `brief.json` carries `runner.networkAccess` false
+
+#### Scenario: Network access granted under workspace-write
+- **WHEN** a `codex` launch under `workspace-write` with `networkAccess` true is briefed with a check command
+- **THEN** its Definition of done holds one bullet saying `runner.codex.networkAccess` is on but a test that opens a port or a local socket, and an install that writes to a package store outside the worktree, may still be refused, with the same submit rule and the same login and credential exception
+- **AND** the brief neither says the commands have no network access nor that they have network access
+
+#### Scenario: Danger-full-access
+- **WHEN** a `codex` launch under `danger-full-access` with `networkAccess` true is briefed
+- **THEN** the brief holds neither bullet
+
+#### Scenario: No networkAccess field
+- **WHEN** a brief is composed from an input whose `runner` has no `networkAccess`
+- **THEN** the brief and `brief.json` are byte for byte what they were before this requirement
+
+#### Scenario: No check command
+- **WHEN** a `codex` launch with `networkAccess` false, or true under `workspace-write`, is briefed with no check command configured
+- **THEN** the bullet speaks of the project's test suite in place of the check and does not say the orchestrator runs a check after the submit
+
+#### Scenario: Another kind
+- **WHEN** a brief input of a `claude-code` or `opencode` launch is composed, even one carrying `networkAccess`
+- **THEN** the brief holds neither bullet
+
+#### Scenario: Parked launch claimed after a change
+- **WHEN** a launch parked under one value of `runner.codex.sandbox` or `runner.codex.networkAccess` is claimed after the operator changes it
+- **THEN** the worker gets the brief composed when the launch was prepared, with its bullet unchanged
+
+### Requirement: Limit change notice
+When an accepted configuration patch changes the value in force of `budgets.maxLaunchMs`, `health.stuckAfterMs` or `health.stuckFailAfterMs`, the daemon SHALL queue one inbox notice to each affected launch: `{ kind: 'nudge', source: 'config', message, changed, limits }`. `changed` SHALL list the dotted names of the limits whose value in force changed. `limits` SHALL hold the three values now in force, nested like the config file: `{ budgets: { maxLaunchMs }, health: { stuckAfterMs, stuckFailAfterMs } }`. `message` SHALL state, for each changed limit, the old and the new value in milliseconds, SHALL say that 0 means the limit is off, and for the time budget SHALL give the launch's elapsed time, with time the daemon did not run left out as at the time budget check. The affected launches SHALL be every launch with status `live` or `launching` that holds the lease of a `running` or `waiting` task, and every launch with status `claimable`. The notices SHALL be queued in the store transaction that writes the override document, each with its `launch.notice` event; no other operator event SHALL be appended. A patch that changes no value in force of the three limits, a patch of any other key, and a refused patch SHALL queue nothing. The notice SHALL be delivered once, like any notice, and nothing in the daemon SHALL depend on it being read.
+
+#### Scenario: A raised time budget reaches each live launch
+- **WHEN** the operator sets `budgets.maxLaunchMs` from 10000 to 20000 while launches run
+- **THEN** the next inbox call of each live launch returns exactly one notice with `kind: 'nudge'`, `source: 'config'`, `changed: ['budgets.maxLaunchMs']`, the three values in force under `limits`, and a message holding 10000, 20000 and the launch's elapsed time, and a `launch.notice` event exists for each
+
+#### Scenario: The same value again
+- **WHEN** the operator sets a limit to the value already in force, from an override, the file or the default
+- **THEN** no notice is queued
+
+#### Scenario: Two limits in one patch
+- **WHEN** one patch changes `budgets.maxLaunchMs` and `health.stuckFailAfterMs`
+- **THEN** each affected launch gets one notice whose `changed` lists both
+
+#### Scenario: Parked and waiting launches
+- **WHEN** a limit changes while a launch is `claimable` in pull mode and another launch's task is `waiting` on a question
+- **THEN** both launches get the notice, and the parked launch returns it on its first inbox call after it is claimed; a launch that has ended gets none
+
+#### Scenario: Another key or a refusal
+- **WHEN** the patch changes only `capacity`, or is refused with 400, with the start-only 409 or with the `wouldEnd` 409
+- **THEN** no notice is queued
+
+#### Scenario: Written with the document
+- **WHEN** a write in the transaction of an accepted patch fails after a notice was queued
+- **THEN** neither the override document, the `operator.config` event nor any notice is stored
+
+### Requirement: Prepare command in the brief
+The brief of a launch prepared while `prepareCommand` is set SHALL carry, in "Definition of done" directly after the check command bullet, the bullet `` - Dependencies are installed: the orchestrator ran `<prepareCommand>` in this worktree before you started, outside any sandbox. Do not run it again unless your change needs it. ``, and `brief.json` SHALL carry `prepareCommand`. Both SHALL be absent when the key is unset. The command's output SHALL never be in the brief.
+
+#### Scenario: Bullet after the check command bullet
+- **WHEN** a brief is composed with `prepareCommand: "npm ci"`
+- **THEN** the line after the check command bullet is the prepare bullet naming `npm ci`, and `brief.json` has `prepareCommand: "npm ci"`
+
+#### Scenario: Order beside the Codex network bullet
+- **WHEN** a Codex launch without network access is prepared with a prepare command
+- **THEN** the check command bullet, the prepare bullet and the network bullet appear in that order
+
+#### Scenario: Every runner kind and mode
+- **WHEN** a launch of any runner kind is prepared in `spawn`, `pull` or `mixed` mode with the key set
+- **THEN** its brief carries the bullet
+
+#### Scenario: Key unset
+- **WHEN** `prepareCommand` is unset
+- **THEN** the brief has no such bullet, `brief.json` has no `prepareCommand`, and the golden briefs are unchanged
 

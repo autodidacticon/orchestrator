@@ -2,9 +2,7 @@
 
 ## Purpose
 The operator MCP server a host session uses to start, drive, wait on, and review a run: a stdio server that forwards every operator operation to the daemon's HTTP routes, the tool set it exposes, the behaviour of the `wait`, `start`, and `review` tools, the `outbox` and `ack` tools through which a session drains tracker-bound effects, the `nudge` tool, the `stuck` and `pausedReason` health fields the `wait` digest carries, the `cascade` parameter of the `reopen` tool, the `proposals`, `accept_proposal`, and `reject_proposal` tools through which a session decides proposed follow-up work, the worker tools (`claim`, `release`, and the token-scoped `launch_heartbeat`, `launch_report`, `launch_block`, `launch_inbox`, and `launch_log`) through which a session subagent acts as the agent for a claimed launch, and the `mode` argument of `start` that sets the runner mode on a run whether or not it spawned the daemon.
-
 ## Requirements
-
 ### Requirement: Operator MCP server
 The package SHALL provide `orchestrator-mcp`, a stdio MCP server that exposes operator operations as tools and forwards each to the daemon's HTTP routes. It SHALL never open the store directly. Every tool SHALL take an optional `repo` argument, an absolute path inside the session's project, which the server SHALL resolve to the real path of its git top level and SHALL never forward to the daemon; a relative `repo`, or one not inside a git repository, SHALL fail the call with a message saying so. The server SHALL resolve the run directory from the call's `repo`, else the `repo` the session last passed, else a `--repo` argument, the `ORCH_REPO` environment variable, or the git top level of its working directory, in that order. The server SHALL make that choice once per call, before the tool's handler runs, and every request the call forwards SHALL go to the daemon of the repository chosen; because the server handles calls concurrently, a call that names another `repo` while it is in flight SHALL NOT change the daemon it reaches. When none of them yields a repository, the tool SHALL fail with a message naming the `repo` argument rather than resolve to another place, and the `repo` argument's description SHALL say so. Before forwarding any tool other than `start`, `stop`, and `runs` it SHALL revive the daemon on demand as the operator-control specification defines, so that an idle exit or a crash is invisible to the session, and SHALL refuse only after an explicit stop or for a repository with no run directory. On its first successful contact with a daemon, and again whenever that daemon's pid changes, it SHALL register an attachment `{ id, pids }` with its own pid followed by its ancestor chain, walked with `ps -o ppid=` up to six levels within 300 ms; it SHALL send the attachment id in the `x-orch-attachment` header of every request it forwards, SHALL register again when a response carries `x-orch-attachment: unknown` (the operation stands and is not retried) and before forwarding any `claim`, SHALL carry the attachment on every `claim`, and SHALL end the attachment on every daemon it registered with, with reason `sessionEnded`, when its transport closes or it receives `SIGTERM`, `SIGINT`, or `SIGHUP`, waiting at most half a second. `runs` SHALL include each run's exit record.
 
@@ -64,7 +62,7 @@ The server SHALL expose at least `start`, `stop`, `status`, `runs`, `import_issu
 - **THEN** every tool of the base set is present with an input schema, and every advertised tool is in the implementation's list of names
 
 ### Requirement: Wait tool
-`wait` SHALL take `afterSeq`, an optional `timeoutMs` defaulting to sixty seconds and capped at ninety seconds so that the call stays under the host's tool-call timeout: Claude Code's foreground limit, Codex's `mcp_servers.<id>.tool_timeout_sec`. It SHALL also take an optional `until` filter of `question`, `review`, `finished`, `stalled`, or `any`. It SHALL return the events since `afterSeq`, the latest sequence number, and the digest. When `until` is set it SHALL return early only when the digest satisfies the filter, otherwise at the timeout. Every poll a `wait` makes SHALL go to the daemon of the repository the call was bound to, for the whole duration of the call.
+`wait` SHALL take `afterSeq`, an optional `timeoutMs` defaulting to sixty seconds and capped at ninety seconds so that the call stays under the host's tool-call timeout: Claude Code's foreground limit, Codex's `mcp_servers.<id>.tool_timeout_sec`. It SHALL also take an optional `until` filter of `question`, `review`, `finished`, `stalled`, or `any`. It SHALL return the events since `afterSeq`, the latest sequence number, and the digest. When `until` is set it SHALL return early only when the digest satisfies the filter, otherwise at the timeout. Every poll a `wait` makes SHALL go to the daemon of the repository the call was bound to, for the whole duration of the call. Every poll SHALL send `cutSubmitted=true`, so that a milestone's submitted transition event comes with the cuts of the review index and an `omitted` list; the tool SHALL take no argument for it, and its description SHALL say that a submitted event comes cut and that `review` holds the rest. A daemon that ignores the parameter returns the event whole.
 
 #### Scenario: Wait for a question
 - **WHEN** `wait` is called with `until: question` and an agent blocks ten seconds later
@@ -77,6 +75,10 @@ The server SHALL expose at least `start`, `stop`, `status`, `runs`, `import_issu
 #### Scenario: Wait keeps its daemon
 - **WHEN** a `wait` with `repo` A has returned from one poll on an event in A, and a call with `repo` B was made before its next poll
 - **THEN** the next poll still goes to A's daemon with A's seq, and the `wait` returns A's digest
+
+#### Scenario: Submitted event comes cut
+- **WHEN** a gated milestone E is submitted while a `wait` with `until: review` is polling
+- **THEN** the `wait` returns E's transition event to `submitted` with an `omitted` array in its payload, its summaries cut to `review.summaryChars` with `summaryLength` beside each, and the stored event is unchanged
 
 ### Requirement: Start tool
 `start` SHALL perform the daemon lifecycle `start` for the resolved run, creating the run directory if needed, and SHALL return the URL, pid, run directory, graph path, and the runner mode in force. It SHALL be safe to call repeatedly. When it spawns the daemon and no `mode` argument is given, it SHALL pass `--default-mode pull`, so that a run started from the plugin executes its launches through session workers unless the repository's `orchestrator.yaml` sets `runner.mode` or the run already holds a mode override. When the runner kind for the start is `codex`, it SHALL pass `--default-mode spawn` instead, because pull-mode workers are the session's Claude subagents and claim only `claude-code` launches. The runner kind for the start is the `runnerKind` argument; without one it is the kind already in force for the run: the run's stored override, as recorded in `config.json`, else `runner.kind` in `orchestrator.yaml`, else `claude-code`. The tool SHALL NOT open the store to find it. When the codex default applied, the result SHALL carry a `modeNote` saying so. When the kind in force after the start is `codex` and the mode in force is `pull`, the `modeNote` SHALL warn that codex launches stay parked. When the daemon is already running and no `mode` is given, the mode SHALL be left as it is. It SHALL accept the optional configuration arguments `checkCommand`, `integrationBranch`, `capacity`, `allowedTools`, `runnerCommand`, `runnerKind`, `model`, `effort` (any level of either kind), `codex` (`{ model, effort }`), `sandbox` (the key `codex.sandbox`), and `commit` (the commit policy of `runnerKind`, else of the kind in force) beside `mode`. It SHALL pass them to the lifecycle `start` as one override document and return the `config` block with value and source per key, the `toolchain` record, `needsConfig`, and any `rejected` keys, so that the session can report what was detected and set what was not. Its description SHALL name both kinds' default models.
@@ -122,11 +124,15 @@ The server SHALL expose at least `start`, `stop`, `status`, `runs`, `import_issu
 - **THEN** the mode becomes `pull` and the result's `modeNote` warns that codex launches stay parked
 
 ### Requirement: Review tool
-`review` SHALL return the daemon's review bundle for a milestone unchanged, so that the session can judge it or hand it to reviewers before calling `accept` or `reject`.
+`review` SHALL take `milestone` and the optional arguments `task` (a string), `full` (a boolean), `statLines` and `summaryChars` (integers of 0 or more), forward the ones that are set to the daemon's review route as query parameters built with `URLSearchParams`, adding `full` only when it is `true`, and return the daemon's answer unchanged, so that the session can judge it or hand it to reviewers before calling `accept` or `reject`. Its description SHALL name `task`, `full` and `omitted`, and say that `full` can be too large for a client.
 
 #### Scenario: Review then accept
 - **WHEN** `review` is called for a submitted milestone and then `accept` is called with the returned sha and version
 - **THEN** the milestone becomes done
+
+#### Scenario: full false is the index
+- **WHEN** `review` is called with `full: false`
+- **THEN** no `full` parameter is sent and the answer is the index
 
 ### Requirement: Outbox tools
 The server SHALL expose `outbox`, taking optional `after` and `limit` and forwarding to the daemon's `outbox` route, and `ack`, taking an effect `id` and exactly one of `result` or `error`, forwarding to the `ack` route when `result` is given and to the `nack` route when `error` is given. A call with neither or both SHALL return an error without reaching the daemon. Both tools SHALL return the route's response as a single JSON text block.
@@ -224,3 +230,79 @@ The server SHALL expose `configure`, taking any of `checkCommand`, `capacity`, `
 #### Scenario: Ultra refused for Claude Code through the tool
 - **WHEN** `configure` is called with `runnerKind: "claude-code"` and `effort: "ultra"`
 - **THEN** the result carries status 400 naming `effort` and `isError` is true
+
+### Requirement: Configure and start tools: limit keys
+The `configure` tool SHALL take `budgets: { maxLaunchMs }` and `health: { stuckAfterMs, stuckFailAfterMs }`, each leaf an integer from 0 to `Number.MAX_SAFE_INTEGER` or null and each block an object or null, and forward them through the configuration route. The `start` tool SHALL take the same objects without null. Both objects SHALL be strict: a leaf the schema does not hold SHALL be refused by the tool, not dropped. The `configure` description SHALL name the keys and say that the values are milliseconds, that 0 disables a limit, that a change applies on the next tick, and that a null falls back to the file or the default.
+
+#### Scenario: Configure raises a stuck limit
+- **WHEN** `configure` is called with `health: { stuckFailAfterMs: 5400000 }`
+- **THEN** the answer's `applied` holds `health` and its config gives the leaf as `{ value: 5400000, source: "argument" }`
+
+#### Scenario: A mistyped leaf is refused
+- **WHEN** `configure` is called with `health: { stuckFailAfterMS: 1 }`
+- **THEN** the call is an error naming the leaf and nothing is sent
+
+#### Scenario: The tools list the limit keys
+- **WHEN** a client lists the tools
+- **THEN** the input schemas of `configure` and `start` list `budgets` and `health`, and the `configure` description says that 0 disables a limit and that a change applies on the next tick
+
+### Requirement: Wait digest: profileHeld
+
+The wait digest SHALL carry `profileHeld`: one entry `{ runner, missing, tasks }` per runner kind that has a task with a held profile (model-selection "Profile hold at admission"). `missing` SHALL be the union of the missing keys over that kind's held tasks, `model` before `effort`, and `tasks` SHALL count them. Entries SHALL be ordered by their first held task in graph order. It SHALL be an empty list when nothing is held and when no graph is loaded. No event SHALL be written when a task becomes held; a session learns of it from `status.profiles` and from the digest of its next `wait` return. `needsConfig` SHALL be unchanged.
+
+#### Scenario: A held task is in the digest
+
+- **WHEN** the profile hold is on and a ready `claude-code` task with no selector is held after only the model was set
+- **THEN** the digest's `profileHeld` is `[{ runner: "claude-code", missing: ["effort"], tasks: 1 }]`
+- **AND** after both keys are set and a tick, `profileHeld` is `[]`
+
+#### Scenario: Without a graph
+
+- **WHEN** no graph is loaded
+- **THEN** the digest's `profileHeld` is `[]`
+
+### Requirement: Configure tool: endLive
+The `configure` tool SHALL take `endLive`, a boolean, and SHALL send it as `endLive: true` beside the patch to `PUT /v1/config`, never inside the patch, so it is neither folded with the runner arguments nor stored. The tool SHALL return the route's 409 with `wouldEnd` unchanged, as an error. The `configure` description SHALL say that a change that would end a live launch is refused without `endLive`, that the 409 lists the launches under `wouldEnd`, and that `endLive` is sent only when the user says so. The `start` tool SHALL NOT take `endLive`.
+
+#### Scenario: The refusal
+- **WHEN** `configure` is called with `budgets: { maxLaunchMs: 1 }` while a running task's launch is live
+- **THEN** the call is an error whose body is the route's 409 with `wouldEnd` naming that launch
+
+#### Scenario: The confirmed change
+- **WHEN** the same call is made with `endLive: true`
+- **THEN** the answer is 200 with `applied` holding `budgets`
+
+#### Scenario: Clearing a raise
+- **WHEN** `configure` is called with `budgets: { maxLaunchMs: null }` while a launch that is past the file's budget lives under a raise
+- **THEN** the call is an error with the route's 409 and `wouldEnd`, and the same call with `endLive: true` is applied
+
+#### Scenario: The tools list
+- **WHEN** a client lists the tools
+- **THEN** the `configure` input schema lists `endLive` beside its other properties, the `start` input schema does not, and the `configure` description says that a change that would end a live launch is refused without `endLive`
+
+### Requirement: Start tool turns the profile hold on
+
+The operator server SHALL pass `defaultConfirmProfile: true` (operator-control "Profile hold default for a spawned daemon") at its two local spawn sites: the `start` tool and the local revival every other tool makes after an idle exit or a crash. The remote path (a remote `ORCH_URL`) SHALL NOT spawn and SHALL NOT change the hold; a remote daemon gets the hold only from its own file. `orchestrator-ctl` SHALL NOT pass it. So a daemon a host's tools spawn holds tasks whose model or effort would come from a built-in default unless the file or the run chose otherwise. The `start` result SHALL carry `confirmProfile`. The `start` description SHALL name `runner.confirmProfile` and `confirmProfile` and say that `orchestrator.yaml` wins; the `status` description SHALL name `profiles` and `runner.confirmProfile`; the `wait` description SHALL name `profileHeld`. There SHALL be no `start` argument that forces or clears the hold.
+
+#### Scenario: A held task waits for configure
+
+- **WHEN** the `start` tool starts a fresh repository in `pull` mode whose file sets no `runner.confirmProfile` and no model, and one task with no selector is imported
+- **THEN** `start` returned `confirmProfile: true`, and `status` before the import had `runner.confirmProfile` true and `profiles` `[]`
+- **AND** `status.profiles` has one entry with `held: true` and `missing: ["model", "effort"]`, `status.claimable` is `[]`, and the wait digest's `profileHeld` is `[{ runner: "claude-code", missing: ["model", "effort"], tasks: 1 }]`
+- **AND** after `configure` with a model and an effort, `status.claimable` holds the task and `profileHeld` is `[]`
+
+#### Scenario: A revival turns the hold on for a run from before the update
+
+- **WHEN** a `pull` run started without the default holds T1 and T2 (T2 depends on T1), exits idle, and a tool call then revives its daemon
+- **THEN** `status` answers with `runner.confirmProfile` true and a `profiles` entry with `held: true` whose `sample` holds T2
+
+### Requirement: Configure and start tools: claude object
+
+The `configure` and `start` tools SHALL take a `claude` object with `model` and `effort`, shaped like their `codex` object: nullable leaves and a nullable object in `configure`, neither in `start`, and the effort limited to the levels `claude-code` accepts. It SHALL set `claude.model` and `claude.effort` whichever runner kind is in force, so a held `claude-code` task on a run of another kind can be released through the tools.
+
+#### Scenario: Releasing a held claude-code task on a codex run
+
+- **WHEN** a run is started with `mode: "pull"`, `runnerKind: "codex"`, `codex: { model, effort }` and `claude: { effort: "high" }`, and C1 and C2 (both `runner: claude-code`, C2 depends on C1) are imported
+- **THEN** the start result's `applied` holds `claude`, and `status.profiles` has one entry with `runner: "claude-code"`, `held: true`, `missing: ["model"]`, `effortSource: "argument"` and `tasks: 2`
+- **AND** after `configure` with `claude: { model }`, `status.claimable` is `["C1"]` and the entry whose `sample` holds C2 has `held: false` and `modelSource: "argument"`
+

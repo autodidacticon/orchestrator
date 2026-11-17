@@ -141,15 +141,19 @@ Reopen, uncancel, and cascade SHALL NOT update the integration ref, revert or re
 - **THEN** the integration branch carries two commits with trailer `Orchestrator-Task: T1`, each with a distinct `Orchestrator-Launch`, and the second has the first as an ancestor
 
 ### Requirement: Check environment
-The check command SHALL run with the same environment isolation as a spawned agent: the daemon's environment with the git identity variables added, `ORCH_HOME` replaced by a directory inside the run's data directory, and `ORCH_URL`, `ORCH_REPO`, `ORCH_DATA_DIR`, `DATABASE_URL`, `DATABASE_URL_FILE`, `ORCH_RUN_ID`, every libpq connection variable named in `LIBPQ_VARS` and every variable whose value is the resolved store URL removed. Repository code run by the check SHALL NOT be able to discover or stop any daemon of the user's through the run directory layout, nor reach the orchestrator's state database through its environment. The check runs as the daemon's user, so it can still read what specs/state-backend "Store credentials a child can still reach" lists; this requirement does not cover that.
+The check command SHALL run with the same environment isolation as a spawned agent: the daemon's environment with the git identity variables added, `ORCH_HOME` replaced by a directory inside the run's data directory, and `ORCH_URL`, `ORCH_REPO`, `ORCH_DATA_DIR` and `ORCH_RUN_ID` removed on every store kind. While the daemon withholds (specs/state-backend "Withholding follows the store": always on a Postgres store), `DATABASE_URL`, `DATABASE_URL_FILE`, every libpq connection variable named in `LIBPQ_VARS` and every variable whose value is the resolved store URL SHALL be removed too. While it does not withhold (a SQLite store with no Postgres input), they SHALL reach the check unchanged, so a project's check keeps its own database variables. Repository code run by the check SHALL NOT be able to discover or stop any daemon of the user's through the run directory layout. While the daemon withholds, it SHALL NOT be able to reach the orchestrator's state database through its environment. The check runs as the daemon's user, so it can still read what specs/state-backend "Store credentials a child can still reach" lists; this requirement does not cover that.
 
 #### Scenario: Check sees an isolated home
 - **WHEN** the check command is `echo "$ORCH_HOME" > home.txt && test -z "$ORCH_URL"`
 - **THEN** the check passes and the recorded path is inside the run's data directory
 
 #### Scenario: Check sees no store URL
-- **WHEN** the check command is `env > check.env` on a daemon whose environment holds `DATABASE_URL` and another variable set to the store URL, `DATABASE_URL_FILE`, and every name in `LIBPQ_VARS` with `PGPASSWORD` set
+- **WHEN** the check command is `env > check.env` on a daemon that withholds, whose environment holds `DATABASE_URL` and another variable set to the store URL, `DATABASE_URL_FILE`, and every name in `LIBPQ_VARS` with `PGPASSWORD` set
 - **THEN** `check.env` has none of those variables, not the password and not the `PGPASSWORD` value, so check output stored in job rows cannot carry them
+
+#### Scenario: Check on a SQLite run keeps the project's database variables
+- **WHEN** the check command is `env > check.env` on a daemon with a SQLite store and no Postgres input, whose environment holds `DATABASE_URL`, `APP_DATABASE` set to the same value, `DATABASE_URL_FILE`, `PGHOST` and `PGPASSWORD`
+- **THEN** `check.env` holds each of them with its value, has no `ORCH_URL` or `ORCH_RUN_ID` line, and its `ORCH_HOME` is inside the run directory
 
 ### Requirement: Origin as source of truth
 The configuration block `git` SHALL hold `originUrl` (optional), `pushIntegration` (default `false`) and `fetchIntervalMs` (default 30000).
@@ -334,4 +338,57 @@ The push retry state the store keeps for a verifier job (`pushRetry:<jobId>`) SH
 #### Scenario: A job published after outages
 - **WHEN** a job is requeued for an unreachable origin and later publishes
 - **THEN** once the job is applied, reading its push retry state finds none
+
+### Requirement: Prepare command before the check
+With the top-level file key `prepareCommand` set, the verifier SHALL run it in each job's temporary worktree after the rebase and the declared no-op test and immediately before the check command, with `prepareTimeoutMs` (default 600000) and the check command's environment ("Check environment"). The value SHALL be read once when the verifier is built; it is a file key with no override. A prepare command that exits non-zero, or whose exit code is null, SHALL fail the job with kind `checkFailed` and message `prepare command exited <code>`. One that exceeds `prepareTimeoutMs` SHALL be killed and SHALL fail the job with kind `checkTimeout` and message `prepare command exceeded <ms>ms`. On either failure the check command SHALL NOT run, an attempt SHALL be spent as for a failing check ("Check and verified tree"), and the job's output SHALL be the message, a newline, and the command's output tail, so the first line of the output names the prepare command. The verifier's prepare command SHALL have no failure count, backoff or block of its own; `maxAttempts` bounds it. The published tree SHALL be the one read before the prepare command runs ("Check and verified tree"), so nothing the command writes is published, and the verifier SHALL NOT test whether the command left the worktree clean. A command that has not closed 2000 ms after the kill at `prepareTimeoutMs`, or that exited while another process still holds its output pipe, SHALL be recorded then as a timeout. With `prepareCommand` unset the verifier SHALL behave as it does without this requirement.
+
+#### Scenario: Install before the check
+- **WHEN** `prepareCommand` installs into `node_modules/` in the temporary worktree and the check command needs that install
+- **THEN** the check passes, the submission is published and the task is `done`, and the published tree has no file under `node_modules/` even though the repository does not ignore it
+
+#### Scenario: Non-zero exit
+- **WHEN** the prepare command exits 3
+- **THEN** the check command does not run, the job is `failed` with kind `checkFailed`, an attempt is spent, the first line of the job's output is `prepare command exited 3` followed by the command's output, and the task's next brief carries that output
+
+#### Scenario: Timeout
+- **WHEN** the prepare command runs longer than `prepareTimeoutMs`
+- **THEN** it is killed, the check command does not run, the job is `failed` with kind `checkTimeout`, an attempt is spent, and the first line of the job's output is `prepare command exceeded <prepareTimeoutMs>ms`
+
+#### Scenario: Output pipe held after exit
+- **WHEN** the prepare command exits 0 but a process it started in another process group still holds its output pipe
+- **THEN** the command is killed at `prepareTimeoutMs`, the job is recorded as `failed` with kind `checkTimeout` 2000 ms later while that process may still be alive, and the first line of the job's output is `prepare command exceeded <prepareTimeoutMs>ms`
+
+#### Scenario: Declared no-op
+- **WHEN** a declared no-op is verified with `prepareCommand` set
+- **THEN** neither the prepare command nor the check command runs and the job is published at the integration head
+
+#### Scenario: No check command
+- **WHEN** a job reaches the check step with no check command
+- **THEN** it fails as it does without `prepareCommand`, and the prepare command does not run
+
+#### Scenario: Unset key
+- **WHEN** `prepareCommand` is unset
+- **THEN** the verifier runs only the check command and every outcome is as without this requirement
+
+### Requirement: Failed check across a gap
+
+A verifier run that ends `failed` with kind `checkFailed` or `checkTimeout`, or that throws, and whose run overlapped a gap in the daemon's clock SHALL be put back to `queued` instead of `failed`, once per job. No attempt SHALL be spent and the task SHALL stay `submitted`. The run overlapped a gap when the daemon's awake time between the run's start and the outcome's arrival is less than the wall time between them; both instants SHALL be read after a note of the clock, from the daemon's own gap list (specs/health-monitoring "Gap in the daemon's clock"), and the verifier SHALL keep no clock of its own. In one store transaction the daemon SHALL append `verify.requeued` with `jobId`, a `reason` naming the gap and the failure kind, and `gap: { failureKind, gapMs }`, where `gapMs` is the wall time less the awake time, and SHALL reset the job's `expectedHead`, `rebasedSha`, `verifiedSha` and `squashSha` as a `requeue` outcome does and set its `gapRequeues` to 1. Push retry state SHALL NOT change. The count SHALL be kept on the job row and SHALL NOT be cleared when the job is re-queued for another reason. A failure of a job whose `gapRequeues` is 1 SHALL be written `failed` as before, gap or no gap. The re-run SHALL start like any queued job, after the hold that follows the gap (specs/health-monitoring "Hold after a gap"). A `conflict`, `published` or `requeue` outcome, another failure kind, a dropped job and a fatal store SHALL be handled as before, and `checkTimeoutMs` SHALL still count wall time. With `health.gapAfterMs` at 0 there are no gaps and this rule re-queues nothing. "Check and verified tree" is unchanged.
+
+#### Scenario: A check times out across a gap
+
+- **WHEN** the machine sleeps longer than `health.gapAfterMs` while a check runs and the run ends `failed` with kind `checkTimeout`
+- **THEN** the job is `queued` with `gapRequeues` 1 and no `rebasedSha`
+- **AND** one `verify.requeued` event carries the job id and `gap: { failureKind: checkTimeout, gapMs }` with a positive `gapMs`
+- **AND** the task is `submitted` with no attempt spent, and the job runs again after the hold
+
+#### Scenario: The re-run fails across a second gap
+
+- **WHEN** the job re-queued after a gap runs again and fails across a second gap
+- **THEN** the task fails by `verificationFailed` and spends an attempt
+- **AND** no second `verify.requeued` event with `gap` is appended
+
+#### Scenario: A failure without a gap
+
+- **WHEN** a check run during which the daemon's clock had no gap ends `failed`, including a run that began after a gap had ended
+- **THEN** the task fails by `verificationFailed` and spends an attempt, and no `verify.requeued` event is appended
 

@@ -46,7 +46,7 @@ For every live launch whose task is `running` and whose process is alive, the da
 - **THEN** the next tick's fingerprint equals the previous one and no `progressAt` is recorded
 
 ### Requirement: Stuck detection and escalation
-Config `health.stuckAfterMs` (default fifteen minutes) and `health.stuckFailAfterMs` (default forty-five minutes) SHALL each be disabled when 0. When a `running` task's launch has been idle (`now - progressAt`) for longer than `stuckAfterMs`, the daemon SHALL flag it: record `stuckSince`, append `launch.stuck` with `idleMs`, queue an inbox notice `{ kind: 'stuck', idleMs, message }`, and invoke the stuck diagnoser once. New progress SHALL clear the flag and append `launch.unstuck`. When idleness exceeds `stuckFailAfterMs`, the daemon SHALL reap the process, end the launch, and transition the task `running -> failed` with reason `stuck`, increasing `attempts`. A `waiting` task SHALL never be flagged or failed as stuck. Status and the digest SHALL list flagged task ids under `stuck`.
+Config `health.stuckAfterMs` (default fifteen minutes) and `health.stuckFailAfterMs` (default forty-five minutes) SHALL each be disabled when 0. A launch's idle time SHALL be the awake time (see "Gap in the daemon's clock") from `progressAt` (or `spawnedAt`, or the launch's creation) to now. When a `running` task's launch has been idle for longer than `stuckAfterMs`, the daemon SHALL flag it: record `stuckSince`, append `launch.stuck` with `idleMs`, queue an inbox notice `{ kind: 'stuck', idleMs, message }`, and invoke the stuck diagnoser once. New progress SHALL clear the flag and append `launch.unstuck`. When idleness exceeds `stuckFailAfterMs`, the daemon SHALL reap the process, end the launch, and transition the task `running -> failed` with reason `stuck`, increasing `attempts`. A `waiting` task SHALL never be flagged or failed as stuck. Status and the digest SHALL list flagged task ids under `stuck`.
 
 #### Scenario: Silent agent is flagged, nudged, then failed
 - **WHEN** `stuckAfterMs` is one second, `stuckFailAfterMs` is three seconds, and a scripted `hang` agent makes no progress
@@ -64,6 +64,10 @@ Config `health.stuckAfterMs` (default fifteen minutes) and `health.stuckFailAfte
 - **WHEN** `stuckAfterMs` is 0
 - **THEN** no launch is ever flagged and nothing is failed with reason `stuck`
 
+#### Scenario: A gap is not idle time
+- **WHEN** a silent launch's machine sleeps for twice `stuckFailAfterMs` and a tick runs at the wake
+- **THEN** the launch is still live with `attempts` unchanged and no `launch.stuck` is appended; a launch flagged before the sleep stays flagged, with no `launch.unstuck`; and once `stuckFailAfterMs` of awake time has passed without progress the task is `failed` with reason `stuck`
+
 ### Requirement: Stuck diagnosis hook
 The orchestrator SHALL accept a `StuckDiagnoser` whose `diagnose({ task, launch, idleMs, logTail, diffStat })` returns `{ action: 'wait' | 'nudge' | 'fail', message? }`, invoked once when a launch is flagged. `nudge` SHALL queue a `nudge` notice with the message, `fail` SHALL fail the task at once with reason `stuck` and the message, and `wait` SHALL do nothing. The default diagnoser SHALL be human: it returns `wait`, and the time-based escalation applies whatever the diagnoser answers.
 
@@ -76,7 +80,7 @@ The orchestrator SHALL accept a `StuckDiagnoser` whose `diagnose({ task, launch,
 - **THEN** the task becomes `failed` with reason `stuck` carrying that message before `stuckFailAfterMs`
 
 ### Requirement: Launch time budget
-Config `budgets.maxLaunchMs` (default two hours) SHALL be disabled when 0. `elapsedMs` for a launch SHALL be wall time since `spawnedAt` excluding time its task spent `waiting`. When a `running` task's launch exceeds the budget, the daemon SHALL reap the process, end the launch, and transition the task to `failed` with reason `timeBudget`, increasing `attempts`.
+Config `budgets.maxLaunchMs` (default two hours) SHALL be disabled when 0. `elapsedMs` for a launch SHALL be the awake time (see "Gap in the daemon's clock") since `spawnedAt` (or the launch's creation), excluding time its task spent `waiting`: `waitedMs`, which a resume grows by the awake time of the wait, and the awake time of a wait in progress. When a `running` task's launch exceeds the budget, the daemon SHALL reap the process, end the launch, and transition the task to `failed` with reason `timeBudget`, increasing `attempts`.
 
 #### Scenario: Launch past the budget is killed
 - **WHEN** `maxLaunchMs` is two hours and a running launch reaches two hours of elapsed time
@@ -85,6 +89,10 @@ Config `budgets.maxLaunchMs` (default two hours) SHALL be disabled when 0. `elap
 #### Scenario: Waiting time is excluded
 - **WHEN** a launch spent ninety minutes `waiting` and forty minutes running under a two-hour budget
 - **THEN** its `elapsedMs` is forty minutes and it is not failed
+
+#### Scenario: A gap is not elapsed time
+- **WHEN** a running launch's machine sleeps for twice `maxLaunchMs` and a tick runs at the wake
+- **THEN** the launch is live with `elapsedMs` below the budget, and it is failed with reason `timeBudget` only once its awake elapsed time reaches the budget
 
 ### Requirement: Usage accounting
 Usage SHALL have two sources, and the launch row and `launch.usage` SHALL name the source as `source`/`usageSource`. When a spawned launch is observed dead or is ended, the daemon SHALL ask the runner named on the launch row for the launch's usage. Each runner SHALL read its own log format:
@@ -230,4 +238,98 @@ The scripted test agent SHALL stay alive `ORCH_TEST_AGENT_EXIT_DELAY_MS` millise
 #### Scenario: Reported agent still running
 - **WHEN** `test/slice/launch.test.ts` and `test/crash/crash.test.ts` run with `ORCH_TEST_AGENT_EXIT_DELAY_MS=400`
 - **THEN** every test in them passes, the crash invariant `liveLaunches == 0` included
+
+### Requirement: Gap in the daemon's clock
+A *note* SHALL be one reading of the daemon's clock that the daemon remembers. A *gap* SHALL be two consecutive notes more than `health.gapAfterMs` apart, running from the earlier note to the later one. *Awake time* between two instants SHALL be their difference less the parts inside gaps, never below 0. The configuration SHALL accept `health.gapAfterMs` and `health.gapHoldMs`, non-negative integers in milliseconds, each optional with a default of 60000 and read at start; `gapAfterMs: 0` SHALL turn the whole rule off, so that no note is taken, no gap is noted, no timer runs and every limit counts wall time.
+
+The daemon SHALL take a note from a timer that `start()` arms and `stop()` clears, every second or every quarter of `gapAfterMs` when that is shorter; at the start of every tick; where the reconcile phase reads the clock; inside the lease-expiry test of a claimed launch; and immediately before each use of idle time, elapsed time or the hold. The first note of a process SHALL NOT be a gap. A note earlier than the one before it SHALL NOT be a gap and SHALL become the reference for the next one. A timer note that finds a gap SHALL wake the loop. A note SHALL change memory only.
+
+The tick SHALL write the gaps noted since the last write at its start and again where the reconcile phase reads the clock, and the lease-expiry test SHALL write them before it tests a lease. Each write SHALL be one transaction that appends one `daemon.gap` event per gap, with payload `{ from, to, gapMs, holdUntil }` (`holdUntil` is `to` plus `health.gapHoldMs`) and event time `to`, and renews the leases as pull-runner "Lease renewal after a gap" states. Awake time SHALL leave out every noted gap, written or not. A gap SHALL NOT be a progress signal.
+
+A new orchestrator SHALL read the gaps of the run's earlier `daemon.gap` events when it is constructed. They SHALL count towards awake time and SHALL NOT start a hold. Time during which no daemon process ran SHALL NOT be a gap.
+
+Writing a gap SHALL be activity for idle exit: the time of the last activity becomes the gap's end, with or without a hold. This excepts operator-control "Idle exit", whose list of what counts as activity does not name it. `status().liveLaunches[].idleMs` and `elapsedMs` SHALL be awake time; this excepts the sentence of health-monitoring "Usage accounting" that says `elapsedMs` gives wall time. No status field reports gaps or the hold.
+
+`maxWaitMs`, the report grace, the claim window, push retry backoff, remote git timeouts, the check command's timer and the journal's flush deadline SHALL keep counting wall time. With no gap every value SHALL equal what wall time gives.
+
+#### Scenario: A sleep is a gap written once
+- **WHEN** a live launch is silent and the clock moves in one step from `t0` to `t1`, more than `health.gapAfterMs`, and a tick runs
+- **THEN** one `daemon.gap` event is appended at `t1` with `from: t0`, `to: t1`, `gapMs: t1 - t0` and `holdUntil: t1 + health.gapHoldMs`
+
+#### Scenario: Two gaps before one tick
+- **WHEN** two gaps are noted before a tick runs
+- **THEN** the tick appends two `daemon.gap` events, oldest first
+
+#### Scenario: The first note and a backwards step are not gaps
+- **WHEN** a process takes its first note long after the run's last event, or a note reads an earlier time than the one before it
+- **THEN** no gap is noted, and the later note is the reference for the next one
+
+#### Scenario: Gaps read at restart
+- **WHEN** a second orchestrator is built on the same store after a gap was written
+- **THEN** it reports the same `idleMs` and `elapsedMs` for each live launch as the first, and its first tick does not end a launch the first would keep
+
+#### Scenario: The note timer wakes the loop
+- **WHEN** the note timer fires after the clock jumped past `health.gapAfterMs` and no tick is due from the tick timer
+- **THEN** the loop runs a tick that appends the `daemon.gap` event; after `stop()` no further firing occurs
+
+#### Scenario: The rule is off
+- **WHEN** `health.gapAfterMs` is 0 and the clock jumps by twice `health.stuckFailAfterMs` over a silent launch
+- **THEN** no `daemon.gap` event is appended and the launch is failed with reason `stuck`
+
+### Requirement: Hold after a gap
+The hold SHALL run from the end of the latest gap the process noted until `health.gapHoldMs` later; `gapHoldMs: 0` SHALL turn it off, and a gap inside a hold SHALL start it again from its own end. During the hold nothing SHALL start: no admission, no resume of a waiting task, no spawn of a parked launch, no verifier job and no deferred-job pass. The admission phase SHALL test the hold after the pause test, and again (noting the clock first) before each resume, each new launch and each spawn of a parked launch, so a sleep in the middle of the pass stops the rest of it. A hold SHALL NOT stop claims, SHALL NOT change how a dead process or a cancelled task is handled, and SHALL NOT pause the run or count as a stall. While the hold is on the daemon's idle time SHALL be 0; this excepts operator-control "Idle exit", whose idle time is otherwise the time since the last activity. The `daemon.gap` event SHALL be the only trace of a hold.
+
+#### Scenario: Nothing starts during the hold
+- **WHEN** after a gap there is a ready task with free capacity, an answered waiting task, a queued verifier job and, in `mixed` mode, a parked launch past its claim window
+- **THEN** ticks inside `health.gapHoldMs` append no `launch.created`, no `launch.live` and no transition with trigger `resumed`, the job stays `queued`, and the first tick after the hold does all four
+
+#### Scenario: Claims and dead processes are not held
+- **WHEN** during a hold a worker claims a parked launch in `pull` mode, and a spawned launch's process is found dead
+- **THEN** the claim answers 200, and the dead launch's task fails as before with `attempts` increased
+
+#### Scenario: The hold keeps a quiescent daemon
+- **WHEN** a quiescent daemon with no session attached sleeps longer than `daemon.idleExitMs`
+- **THEN** it does not exit during the hold, and exits once `daemon.idleExitMs` has passed after the hold with nothing to do
+
+#### Scenario: Hold off
+- **WHEN** `health.gapHoldMs` is 0 and a ready task waits
+- **THEN** the tick after a gap admits it, and the daemon does not exit on that tick for idleness
+
+### Requirement: Limits read at every check
+The stuck check and the launch time budget check SHALL read `health.stuckAfterMs`, `health.stuckFailAfterMs` and `budgets.maxLaunchMs` from the effective configuration (the boot resolution with the stored override document applied) each time they test a launch, so a change applies on the next tick to every live launch, spawned or claimed. Idle and elapsed time are measured as "Stuck detection and escalation", "Launch time budget" and "Gap in the daemon's clock" state; only the limit they are compared with follows the override. A raised limit SHALL keep a launch that has not yet crossed it; a lowered or cleared limit SHALL apply at once. A launch already flagged stuck SHALL stay flagged until progress clears it, also after `health.stuckAfterMs` is raised. A change that lands while the tick is already ending a launch does not save it.
+
+#### Scenario: A raised time budget saves a spawned launch
+- **WHEN** a spawned launch has run 9500 ms under a `budgets.maxLaunchMs` of 10000, the override `budgets: { maxLaunchMs: 20000 }` is applied, and a tick runs 1000 ms later
+- **THEN** the task is still `running`; a tick after the launch has run past 20000 ms ends it with reason `timeBudget`
+
+#### Scenario: A raised time budget saves a claimed launch
+- **WHEN** a claimed launch in `pull` mode is 9500 ms old under a budget of 10000, the same override is applied, and a tick runs 1000 ms later
+- **THEN** the task is still `running`
+
+#### Scenario: A raised fail limit saves a silent launch, which stays flagged
+- **WHEN** with limits 1000 and 3000 a launch idle for 2500 ms is flagged stuck, `health: { stuckFailAfterMs: 6000 }` is applied, and a tick runs 1000 ms later
+- **THEN** the task is `running` and the launch is still flagged stuck; once it has been idle for more than 6000 ms a tick fails it with reason `stuck` and `attempts` 1
+
+#### Scenario: A raised flag limit leaves the flag
+- **WHEN** a flagged launch makes no progress and `health.stuckAfterMs` is raised above its idle time
+- **THEN** it stays in `status.stuck` and no second `launch.stuck` event is appended
+
+#### Scenario: Zero at runtime
+- **WHEN** `health: { stuckFailAfterMs: 0 }` is applied and a launch stays silent past the old fail limit
+- **THEN** it is not failed
+
+### Requirement: Time budget of a claimed launch
+For "Launch time budget", the elapsed time of a launch SHALL start at `spawnedAt`, else at `claimableAt`, else at `createdAt`. So a claimed launch's elapsed time starts when it became claimable: the prepare command and the worktree's preparation do not count, time parked does, a spawned launch counts from `spawnedAt`, and the stuck clock is unchanged. `status().liveLaunches[].elapsedMs` SHALL use the same start.
+
+#### Scenario: Claimed after a long install
+- **WHEN** in `pull` mode with `budgets.maxLaunchMs` of one hour a launch's prepare command took 30 minutes and the launch was claimed 20 minutes after it was parked
+- **THEN** it is still live 59 minutes after `claimableAt` with `elapsedMs` of 59 minutes, and is ended with `endReason` `timeBudget` one hour after `claimableAt`
+
+#### Scenario: Spawned launch
+- **WHEN** in `spawn` mode a launch's prepare command took 30 minutes and its agent has run for 5 minutes
+- **THEN** its `elapsedMs` is 5 minutes
+
+#### Scenario: Row without claimableAt
+- **WHEN** a live launch has neither `spawnedAt` nor `claimableAt`
+- **THEN** its elapsed time starts at `createdAt`
 
