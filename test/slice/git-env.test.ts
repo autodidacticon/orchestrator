@@ -1,12 +1,15 @@
 /**
  * The daemon's own git commands carry no store URL: specs/state-backend "No store URL in child environments".
  * A project hook prints its environment into a file outside the worktree; the daemon's environment holds the store.
+ * The filter is in its default state (withholding) unless a test turns it off; with it off (a daemon on a SQLite
+ * store) the database variables reach the hook and ORCH_RUN_ID does not. See specs/state-backend "Withholding follows
+ * the store".
  */
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { clearWithheldStoreUrls, LIBPQ_VARS, withholdStoreUrl } from '../../src/runs/childEnv.js';
+import { clearWithheldStoreUrls, LIBPQ_VARS, setStoreWithholding, withholdStoreUrl } from '../../src/runs/childEnv.js';
 import type { Launch } from '../../src/state/store.js';
 import { git } from '../../src/workspace/git.js';
 import { GitWorkspace } from '../../src/workspace/git-workspace.js';
@@ -105,5 +108,27 @@ describe('daemon git commands carry no store URL (specs/state-backend "No store 
     const r = await git(repo, ['-c', 'alias.penv=!env', 'penv']);
     expect(r.stdout).toMatch(/^ORCH_TEST_UNRELATED=changed-later$/m);
     expect(r.stdout).not.toContain('late@db');
+  });
+
+  it('with withholding off (a daemon on a SQLite store), a hook run by a daemon git commit sees the database variables but not ORCH_RUN_ID (ORC-115)', async () => {
+    setStoreWithholding(false);
+    dir = mkdtempSync(path.join(tmpdir(), 'orch-genv-'));
+    const repo = makeRepo(dir);
+    const out = path.join(dir, 'hook-env.txt');
+    envHook(repo, 'pre-commit', out);
+    writeFileSync(path.join(repo, 'shared.txt'), 'edit\n');
+    await git(repo, ['add', '-A']);
+    await git(repo, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'edit']);
+    const printed = readFileSync(out, 'utf8');
+    expect(printed).toContain('ORCH_TEST_UNRELATED=kept');
+    expect(printed).toMatch(new RegExp(`^DATABASE_URL=${URL}$`, 'm'));
+    expect(printed).toMatch(/^DATABASE_URL_FILE=\/run\/secrets\/db\/uri$/m);
+    expect(printed).toMatch(new RegExp(`^PGPASSWORD=${LIBPQ_PW}$`, 'm'));
+    expect(printed).toMatch(new RegExp(`^ORCH_STORE_COPY=${URL}$`, 'm'));
+    for (const k of LIBPQ_VARS) expect(printed, k).toMatch(new RegExp(`^${k}=`, 'm'));
+    expect(printed).not.toMatch(/^ORCH_RUN_ID=/m);
+    expect(printed).toMatch(/^GIT_TERMINAL_PROMPT=0$/m);
+    expect(printed).toMatch(/^GIT_CONFIG_NOSYSTEM=1$/m);
+    expect(printed).toMatch(/^GIT_OPTIONAL_LOCKS=0$/m);
   });
 });

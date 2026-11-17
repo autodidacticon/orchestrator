@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { type Config, configSchema, redactUrl, storeUrlSource, type StoreUrlSource } from '../config.js';
 import { hasAllowedToolsSlot, hasEffortSlot, hasModelSlot } from '../runner/command.js';
+import { storeWithholding } from './childEnv.js';
 import {
   anyModelSchema,
   CODEX_SANDBOXES,
@@ -485,13 +486,15 @@ export interface StoreReport {
   url?: string;
   urlSource?: StoreUrlSource;
   flushDeadlineMs: number;
+  /** Whether this process withholds the database variables from its children. See specs/state-backend "Withholding follows the store". */
+  withholdsDatabaseVariables: boolean;
 }
 
 /** The printed store block of a resolution: never the password. */
 export function storeReportOf(resolved: Pick<Resolved, 'config' | 'inputs'>): StoreReport {
   const s = resolved.config.store;
   const source = storeUrlSource(resolved.config, resolved.inputs.fileRaw);
-  return { kind: s.kind, ...(s.url ? { url: redactUrl(s.url) } : {}), ...(source ? { urlSource: source } : {}), flushDeadlineMs: s.flushDeadlineMs };
+  return { kind: s.kind, ...(s.url ? { url: redactUrl(s.url) } : {}), ...(source ? { urlSource: source } : {}), flushDeadlineMs: s.flushDeadlineMs, withholdsDatabaseVariables: storeWithholding() };
 }
 
 /** The compact form appended as the `config.resolved` event. */

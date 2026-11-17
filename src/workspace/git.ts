@@ -32,10 +32,12 @@ export const GIT_FIXED_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1
 
 /**
  * The environment of one git command, built when it runs: the daemon's environment, the fixed git settings, the
- * caller's overrides, and then the store removed (`DATABASE_URL`, `ORCH_RUN_ID` and any variable holding a withheld
- * store URL), so neither git nor a project hook it runs can reach the state database. Built per call, not at import:
- * the store URL is withheld only once the daemon has resolved its configuration. See specs/state-backend
- * "No store URL in child environments".
+ * caller's overrides, and then `withoutStore` applied. `ORCH_RUN_ID` is always removed. While the daemon withholds
+ * (always on a Postgres store, see src/runs/childEnv.ts), every name in `WITHHELD_VARS` is removed too
+ * (`DATABASE_URL`, `DATABASE_URL_FILE` and the libpq names in `LIBPQ_VARS`), with any variable holding a withheld
+ * store URL, so neither git nor a project hook it runs can reach the state database. Built per call, not at import:
+ * the store URL is withheld, and withholding decided, only once the daemon has opened its store and resolved its
+ * configuration. See specs/state-backend "No store URL in child environments" and "Withholding follows the store".
  */
 export function gitEnv(extra: Record<string, string> = {}): Record<string, string | undefined> {
   return withoutStore<string | undefined>({ ...process.env, ...GIT_FIXED_ENV, ...extra });

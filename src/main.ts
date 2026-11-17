@@ -25,7 +25,7 @@ import { composeAllowedTools } from './toolchain/tools.js';
 import { openStore, type OpenedStore } from './state/open.js';
 import { GitVerifierBackend } from './verify/verifier.js';
 import { chooseRunId, CONFIG_FILE, DAEMON_PID, ensureRunDir, repoRunId, type RunIdChoice, runIdInputOf, runIdWarning, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, trackedInRepo, writeConfigJson, writeDaemonJson, writeExitRecord, type ExitRecord, exitStoreFields } from './runs/runDir.js';
-import { withholdStoreUrl } from './runs/childEnv.js';
+import { databaseVariablesIn, postgresInputsWithoutKind, setStoreWithholding, storeWithholding, storeWithholdingFor, withholdStoreUrl } from './runs/childEnv.js';
 import { applyOverridePatch, configSummary, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved, resolveLayers } from './runs/resolve.js';
 import { digestOf } from './operator/routes.js';
 import { runIdOf, setRunId } from './state/store.js';
@@ -186,6 +186,18 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   }
   const store = opened.store;
   stderrLogger.info('store opened', { kind: opened.kind, ...(opened.kind === 'postgres' ? { url: redactedStore(early.store).url, runId, backendPid: opened.sink?.backendPid } : {}) });
+  // Children get the database variables back only on a SQLite store; a Postgres input without store.kind keeps them withheld. See specs/state-backend "Withholding follows the store".
+  const postgresInputs = postgresInputsWithoutKind(fileRaw, process.env);
+  setStoreWithholding(storeWithholdingFor(opened.kind, postgresInputs));
+  if (opened.kind === 'sqlite' && postgresInputs.length > 0) {
+    // Withheld by value too, whether or not the SQLite store block copied DATABASE_URL.
+    withholdStoreUrl(process.env['DATABASE_URL']);
+    const message = postgresInputsWarning(postgresInputs);
+    stderrLogger.warn(message, { inputs: postgresInputs });
+    store.appendEvent({ kind: 'config.warning', payload: { code: 'postgresInputsUnderSqlite', message, inputs: postgresInputs } }, Date.now());
+  }
+  const databaseNames = databaseVariablesIn(process.env);
+  if (databaseNames.length > 0) stderrLogger.info('database variables for children', { withholds: storeWithholding(), storeKind: opened.kind, names: databaseNames });
   // The run id names this run in tracker comments; by repository under a run directory, otherwise once per store.
   if (runId) setRunId(store, runId);
   else if (!runIdOf(store)) setRunId(store, randomUUID().slice(0, 16));
@@ -380,6 +392,15 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   };
 
   await orch.start();
+}
+
+/** The startup warning of a SQLite store opened while a Postgres input is set and the config file leaves store.kind unwritten. */
+function postgresInputsWarning(inputs: readonly string[]): string {
+  return (
+    `store.kind is not set, so this run uses SQLite, but ${inputs.join(', ')} ${inputs.length === 1 ? 'is' : 'are'} set, which only Postgres uses: ` +
+    'the daemon keeps withholding DATABASE_URL, DATABASE_URL_FILE and the libpq variables from check commands, agents and git hooks; ' +
+    'set store.kind: postgres to run on Postgres, or store.kind: sqlite to stay on SQLite and pass those variables to children'
+  );
 }
 
 /** A resolution whose store URL (config, base, and file layer) has its password removed. */
