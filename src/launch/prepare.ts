@@ -7,7 +7,7 @@ import type { Id } from '../graph/model.js';
 import type { Orchestrator } from '../loop/orchestrator.js';
 import { abandonSpawn, removeOrRetryLater } from '../loop/tick.js';
 import { StoreFatalError } from '../state/gate.js';
-import type { Launch } from '../state/store.js';
+import type { Launch, Store } from '../state/store.js';
 import { runCheck } from '../verify/verifier.js';
 import { parkLaunch, spawnLaunch } from './launch.js';
 
@@ -60,6 +60,73 @@ export interface PrepareJob {
   outcome?: PrepareOutcome;
   /** The success was applied and the next step is spawn: the spawn pass spawns it. */
   ready?: boolean;
+}
+
+/** The kv key of the retry entries: a JSON object from task id to its entry. */
+export const PREPARE_RETRY_KEY = 'prepareRetry';
+/** The longest wait, as a multiple of `prepareRetryBackoffMs`. */
+export const PREPARE_MAX_BACKOFF_FACTOR = 32;
+
+/** One task's count of prepare failures in a row. `last` is `exit <code>`, `timeout`, `killed`, `spawn` or `dirty`. */
+export interface PrepareRetryEntry {
+  failures: number;
+  retryAt: number;
+  last: string;
+}
+
+/**
+ * The retry entries, by task id. Unset, emptied or unparsable reads as `{}`; the store has no kv delete, so an emptied
+ * entry means no state. See specs/pull-runner "Prepare failure limit".
+ */
+export function readPrepareRetry(store: Pick<Store, 'getKv'>): Record<Id, PrepareRetryEntry> {
+  const raw = store.getKv(PREPARE_RETRY_KEY);
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed as Record<Id, PrepareRetryEntry>;
+  } catch {
+    return {};
+  }
+}
+
+function writePrepareRetry(store: Pick<Store, 'setKv'>, all: Record<Id, PrepareRetryEntry>): void {
+  store.setKv(PREPARE_RETRY_KEY, Object.keys(all).length ? JSON.stringify(all) : '');
+}
+
+/** True when the task has no entry or its `retryAt` is at or before `now`. */
+export function prepareRetryDue(store: Pick<Store, 'getKv'>, taskId: Id, now: number): boolean {
+  const entry = readPrepareRetry(store)[taskId];
+  return !entry || entry.retryAt <= now;
+}
+
+/** Remove the task's entry; writes nothing when it has none. An emptied object is stored as `''`. */
+export function clearPrepareRetry(store: Pick<Store, 'getKv' | 'setKv'>, taskId: Id): void {
+  const all = readPrepareRetry(store);
+  if (!Object.prototype.hasOwnProperty.call(all, taskId)) return;
+  delete all[taskId];
+  writePrepareRetry(store, all);
+}
+
+/**
+ * The entries whose id is a task node of the loaded graph that is `unstarted`, whatever `retryAt` says: each keeps the
+ * daemon from being quiescent. Nothing without a graph.
+ */
+export function pendingPrepareRetries(o: Orchestrator): Array<{ taskId: Id; failures: number; retryAt: number }> {
+  if (!o.hasGraph()) return [];
+  const nodes = o.graph().nodes;
+  const out: Array<{ taskId: Id; failures: number; retryAt: number }> = [];
+  for (const [taskId, entry] of Object.entries(readPrepareRetry(o.store))) {
+    if (nodes.get(taskId)?.kind !== 'task') continue;
+    if (o.entry(taskId).status.kind !== 'unstarted') continue;
+    out.push({ taskId, failures: entry.failures, retryAt: entry.retryAt });
+  }
+  return out;
+}
+
+/** The reason as the blocked message and the entry's `last` name it. */
+function lastOf(failure: PrepareFailure): string {
+  return failure.reason === 'exit' ? `exit ${failure.exitCode}` : failure.reason;
 }
 
 /** The outer shell's `$0`, so `killByLaunchId` finds the command by its launch id after a crash. */
@@ -210,7 +277,11 @@ async function settleJob(o: Orchestrator, job: PrepareJob): Promise<void> {
     await abandonPrepare(o, current, { reason: 'dirty', exitCode: 0, durationMs, output,...(dirty !== undefined ? { dirty } : {}), ...(error !== undefined ? { error } : {}) });
     return;
   }
-  o.store.appendEvent({ kind: 'launch.prepared', taskId: job.taskId, launchId: job.launchId, payload: { command: job.command, durationMs } }, o.now());
+  // A success ends the count of failures in a row.
+  o.store.transaction(() => {
+    o.store.appendEvent({ kind: 'launch.prepared', taskId: job.taskId, launchId: job.launchId, payload: { command: job.command, durationMs } }, o.now());
+    clearPrepareRetry(o.store, job.taskId);
+  });
   if (job.next === 'park') {
     parkLaunch(o, current);
     o.prepareJobs.delete(job.launchId);
@@ -254,27 +325,62 @@ export async function spawnPreparedLaunches(o: Orchestrator): Promise<void> {
 }
 
 /**
- * A prepare failure: the launch is ended with `prepareCommandFailed`, `launch.prepareFailed` appended, and the task
- * returned to `unstarted` with its attempts and carry unchanged, all in one transaction before any await. Killing what
- * is left of the command and removing the worktree are best effort; a worktree left behind is retried on later ticks.
+ * A prepare failure: the launch is ended with `prepareCommandFailed` and `launch.prepareFailed` appended, all in one
+ * transaction before any await. When the task still runs on the launch the failure is counted, the count read inside
+ * the transaction: below `prepareFailureLimit` the task returns to `unstarted` with its attempts and carry unchanged and
+ * is not admitted before `retryAt`; at the limit it is blocked as `prepareFailed` and its entry removed. Killing what is
+ * left of the command and removing the worktree are best effort; a worktree left behind is retried on later ticks.
+ * See specs/pull-runner "Prepare failure limit".
  */
 export async function abandonPrepare(o: Orchestrator, launch: Launch, failure: PrepareFailure): Promise<void> {
   const { launchId, taskId } = launch;
-  const ended = o.store.transaction((): boolean => {
+  const limit = o.config.prepareFailureLimit;
+  const last = lastOf(failure);
+  const applied = o.store.transaction((): { failures?: number; retryAt?: number; blocked: boolean } | undefined => {
     const current = o.store.getLaunch(launchId);
-    if (!current || current.status === 'ended' || current.status === 'revoked') return false;
-    o.store.appendEvent({ kind: 'launch.prepareFailed', taskId, launchId, payload: { ...failure } }, o.now());
-    o.endLaunch(current, 'prepareCommandFailed', { reason: failure.reason });
+    if (!current || current.status === 'ended' || current.status === 'revoked') return undefined;
+    const now = o.now();
     const entry = o.entry(taskId);
-    if (entry.status.kind === 'running' && entry.lease?.launchId === launchId) {
-      o.transition(taskId, { kind: 'unstarted' }, 'orchestrator', 'prepareFailed', undefined, { launchId, reason: failure.reason });
+    const counted = entry.status.kind === 'running' && entry.lease?.launchId === launchId;
+    let failures: number | undefined;
+    let retryAt: number | undefined;
+    let blocked = false;
+    if (counted) {
+      const all = readPrepareRetry(o.store);
+      const earlier = all[taskId]?.failures ?? 0;
+      failures = earlier + 1;
+      blocked = failures >= limit;
+      if (blocked) {
+        clearPrepareRetry(o.store, taskId);
+      } else {
+        retryAt = now + o.config.prepareRetryBackoffMs * Math.min(2 ** earlier, PREPARE_MAX_BACKOFF_FACTOR);
+        all[taskId] = { failures, retryAt, last };
+        writePrepareRetry(o.store, all);
+      }
     }
-    return true;
+    const counts = failures === undefined ? {} : { failures, limit, ...(retryAt === undefined ? {} : { retryAt }) };
+    o.store.appendEvent({ kind: 'launch.prepareFailed', taskId, launchId, payload: { ...failure, ...counts } }, now);
+    o.endLaunch(current, 'prepareCommandFailed', { reason: failure.reason });
+    if (counted) {
+      const extra = { launchId, reason: failure.reason, failures };
+      if (blocked) {
+        // No output in the message: it is posted to the tracker. The output stays in the event and the daemon log.
+        const message = `prepare command \`${o.config.prepareCommand ?? ''}\` failed ${failures} times in a row; last: ${last}`;
+        o.transition(taskId, { kind: 'blocked', reason: { kind: 'prepareFailed', message } }, 'orchestrator', 'prepareFailed', undefined, extra);
+      } else {
+        o.transition(taskId, { kind: 'unstarted' }, 'orchestrator', 'prepareFailed', undefined, extra);
+      }
+    }
+    return { ...(failures === undefined ? {} : { failures }), ...(retryAt === undefined ? {} : { retryAt }), blocked };
   });
   o.prepareJobs.delete(launchId);
-  if (!ended) return;
+  if (!applied) return;
   const { output: _output, ...logged } = failure;
-  o.log.warn('the prepare command failed; the launch is ended and the task launched again without spending an attempt', { taskId, launchId, ...logged });
+  if (applied.blocked) {
+    o.log.warn('the prepare command failed too many times in a row; the launch is ended and the task blocked', { taskId, launchId, failures: applied.failures, limit, ...logged });
+  } else {
+    o.log.warn('the prepare command failed; the launch is ended and the task launched again at retryAt without spending an attempt', { taskId, launchId, failures: applied.failures, limit, retryAt: applied.retryAt, ...logged });
+  }
   try {
     await o.runner.killByLaunchId(launchId);
   } catch (killErr) {

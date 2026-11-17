@@ -59,6 +59,13 @@ export const configSchema = z.object({
    */
   prepareCommand: z.string().min(1).optional(),
   prepareTimeoutMs: z.number().int().positive().default(10 * 60_000),
+  /**
+   * Prepare failures in a row after which the task is blocked as `prepareFailed`, and the base wait before the next
+   * launch, doubled per earlier failure (factor capped at 32). Read at start; not overrides. See specs/pull-runner
+   * "Prepare failure limit".
+   */
+  prepareFailureLimit: z.number().int().positive().default(3),
+  prepareRetryBackoffMs: z.number().int().nonnegative().default(30_000),
   /** Loopback API port; 0 picks a free port. */
   apiPort: z.number().int().nonnegative().default(0),
   /** Address the API binds to; `0.0.0.0` in a cluster. See specs/cluster-runtime. */

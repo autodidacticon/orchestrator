@@ -34,6 +34,8 @@ export const TRANSITIONS: readonly TransitionRow[] = [
   { from: 'running', to: 'unstarted', actor: 'orchestrator', nodeKind: 'task', trigger: 'released', effects: [] },
   // The prepare command failed in the launch's worktree: no agent ran, so no attempt is spent and the carry stays. See specs/pull-runner "Prepare failure".
   { from: 'running', to: 'unstarted', actor: 'orchestrator', nodeKind: 'task', trigger: 'prepareFailed', effects: [] },
+  // The prepare command failed prepareFailureLimit times in a row: a person must act; no attempt is spent. See specs/pull-runner "Prepare failure limit".
+  { from: 'running', to: 'blocked', actor: 'orchestrator', nodeKind: 'task', trigger: 'prepareFailed', effects: [] },
   // A claimed launch whose worktree a fresh clone lost: retried without spending an attempt. See specs/crash-recovery "Startup on a fresh clone".
   { from: 'running', to: 'failed', actor: 'orchestrator', nodeKind: 'task', trigger: 'worktreeLost', effects: [] },
   { from: 'waiting', to: 'running', actor: 'orchestrator', nodeKind: 'task', trigger: 'resumed', effects: [] },

@@ -223,18 +223,11 @@ describe('prepare command', () => {
     expect(spawned(h)).toBe(0);
     expect(h.orch.prepareJobs.size).toBe(0);
 
-    // ORC-130: one tick makes the second launch at once (task 84f moves this to the retry time).
+    // ORC-131: the second launch comes at the retry time; the count and the block are in prepare-failure.test.ts.
+    h.advance(h.orch.config.prepareRetryBackoffMs);
     await h.orch.tick();
     expect(launchesOf(h, 'A')).toHaveLength(2);
-
-    for (let i = 2; i <= 5; i++) {
-      await h.orch.prepareStarted();
-      r.calls.at(-1)!.resolve(EXIT1);
-      await h.orch.prepareSettled();
-      await h.orch.tick();
-    }
-    // ORC-130: five failures, six launches, never blocked (task 84f removes this expectation).
-    expect({ launches: launchesOf(h, 'A').length, attempts: h.orch.entry('A').attempts, neverBlocked: neverBlocked(h, 'A') }).toEqual({ launches: 6, attempts: 0, neverBlocked: true });
+    expect(neverBlocked(h, 'A')).toBe(true);
   });
 
   it('reasons: timeout, killed, spawn and dirty', async () => {

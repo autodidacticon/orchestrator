@@ -112,7 +112,11 @@ describe('transition table', () => {
     expect(findTransition('task', 'running', 'unstarted', 'orchestrator', 'prepareFailed')).toMatchObject({ effects: [] });
     expect(findTransition('task', 'running', 'unstarted', 'agent', 'prepareFailed')).toBeUndefined();
     expect(findTransition('milestone', 'running', 'unstarted', 'orchestrator', 'prepareFailed')).toBeUndefined();
-    expect(TRANSITIONS.filter((r) => r.from === 'running' && r.to === 'blocked' && r.trigger === 'prepareFailed')).toEqual([]);
+    // ORC-131: at prepareFailureLimit the orchestrator blocks the task instead, also at no cost.
+    expect(findTransition('task', 'running', 'blocked', 'orchestrator', 'prepareFailed')).toMatchObject({ effects: [] });
+    expect(findTransition('task', 'running', 'blocked', 'agent', 'prepareFailed')).toBeUndefined();
+    const blocked = applyTransition(e, { kind: 'blocked', reason: { kind: 'prepareFailed', message: 'm' } }, { nodeId: 'n', nodeKind: 'task', actor: 'orchestrator', trigger: 'prepareFailed', now: 1 });
+    expect(blocked).toMatchObject({ attempts: 1, launches: 2, status: { kind: 'blocked', reason: { kind: 'prepareFailed' } }, carry });
   });
 
   it('leaving running clears the lease unless patched', () => {

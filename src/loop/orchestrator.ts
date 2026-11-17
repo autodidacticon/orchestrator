@@ -44,7 +44,7 @@ import type { Logger, OrchestratorCore } from './core.js';
 import { chainPolicy, type Deferral, type Policy } from './schedule.js';
 import { pidAlive } from '../runner/subprocess.js';
 import { runTick } from './tick.js';
-import { defaultPrepareRunner, type PrepareJob, type PrepareRunner, startPrepareCommand, stopPrepareJobs } from '../launch/prepare.js';
+import { clearPrepareRetry, defaultPrepareRunner, pendingPrepareRetries, type PrepareJob, type PrepareRunner, startPrepareCommand, stopPrepareJobs } from '../launch/prepare.js';
 import { deriveEffects } from '../tracker/effects.js';
 import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, exceedsTimeBudget, priceFor, priceUsage, runCostUsd, tokensOf, unpricedLaunches } from '../health/budgets.js';
 import { recordSignal } from '../health/progress.js';
@@ -57,6 +57,9 @@ import { composeAllowedTools } from '../toolchain/tools.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { PUSH_REFUSED, pushRetryDue, recordPushRetry } from '../verify/push-retry.js';
+
+/** The triggers that remove a task's prepare retry entry. See specs/pull-runner "Prepare failure limit". */
+const PREPARE_RETRY_RESETS: ReadonlySet<string> = new Set(['unblock', 'reopen', 'uncancel', 'cascade']);
 
 export const questionSchema = z.object({
   kind: z.enum(['needsDecision', 'needsAccess', 'impossible', 'dependencyCancelled', 'outOfScope', 'insufficientSpec', 'milestoneRejected']),
@@ -467,6 +470,8 @@ export class Orchestrator implements OrchestratorCore {
     if (this.effectiveMode() !== 'pull' && this.store.listLaunches({ status: 'claimable' }).length) return false;
     if (this.store.listJobs({ applied: false }).length) return false;
     if (this.pendingCascade()) return false;
+    // A task waiting out a prepare retry will be launched by a tick, whatever its retryAt says. See specs/pull-runner "Prepare failure limit".
+    if (this.config.prepareCommand !== undefined && pendingPrepareRetries(this).length) return false;
     return true;
   }
 
@@ -1009,6 +1014,8 @@ export class Orchestrator implements OrchestratorCore {
       const prev = this.entry(id);
       const out = applyTransition(prev, next, { nodeId: id, nodeKind: node.kind, actor, trigger, now: this.now(), patch });
       this.store.setEntry(id, out);
+      // The triggers that reset budgets end the count of prepare failures too; this covers both uncancel paths and every task a cascade resets.
+      if (this.config.prepareCommand !== undefined && PREPARE_RETRY_RESETS.has(trigger)) clearPrepareRetry(this.store, id);
       this.recordTransition(id, prev.status.kind, next.kind, actor, trigger, extra);
       return out;
     });

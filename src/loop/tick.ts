@@ -10,7 +10,7 @@ import { existsSync } from 'node:fs';
 import { crashPoint } from '../crash.js';
 import * as q from '../graph/query.js';
 import { spawnLaunch, startLaunch } from '../launch/launch.js';
-import { settlePrepareJobs, spawnPreparedLaunches } from '../launch/prepare.js';
+import { prepareRetryDue, settlePrepareJobs, spawnPreparedLaunches } from '../launch/prepare.js';
 import type { Id } from '../graph/model.js';
 import type { AttemptContext, Entry, FailedKind } from '../state/status.js';
 import type { Launch, VerifierJob } from '../state/store.js';
@@ -447,7 +447,12 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
   // A task whose model or effort would come from a built-in default under the profile hold is not a candidate:
   // it takes no capacity and defers nothing. See specs/model-selection "Profile hold at admission".
   const profileCtx = { hold: o.confirmProfile(), mode: o.effectiveMode() };
-  const candidates = q.ready(g, overlay).filter((id) => !o.hasHeldProfile(id, profileCtx));
+  // A task waiting out a prepare retry is not a candidate either: it takes no slot until its retryAt. See specs/pull-runner "Prepare failure limit".
+  const retryNow = o.now();
+  const candidates = q
+    .ready(g, overlay)
+    .filter((id) => !o.hasHeldProfile(id, profileCtx))
+    .filter((id) => o.config.prepareCommand === undefined || prepareRetryDue(o.store, id, retryNow));
   const admission = admit(resumables, candidates, {
     graph: g,
     overlay,
