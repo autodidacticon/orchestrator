@@ -7,7 +7,27 @@
  *  - `launches.ord` is the insertion order, set on first insert and kept on update, because
  *    `listLaunches` breaks `created_at` ties by SQLite `rowid`.
  * Timestamps, sequence numbers and ids are `bigint`. See specs/state-backend.
+ *
+ * Every table lives in one schema, `store.schema` (`DEFAULT_STORE_SCHEMA` when unset). The migrations' statements are
+ * unqualified: `migrate()` runs them under a transaction-local `search_path` holding that schema alone.
+ * This file imports nothing, so the configuration can use the name rule without loading the driver.
  */
+
+/** The schema that holds the store's tables when `store.schema` is unset. See specs/state-backend "Store schema key". */
+export const DEFAULT_STORE_SCHEMA = 'orchestrator';
+
+/** The rule a schema name must follow, as printed in a refusal. */
+export const STORE_SCHEMA_RULE =
+  'a schema name is 1 to 63 characters of a-z, 0-9 and _, starts with a letter or _, does not start with pg_, and is not information_schema';
+
+/**
+ * Why `name` cannot be the store's schema, or undefined when it can. The one name rule: the configuration check and
+ * `PgSink.open` both call it. See specs/state-backend "Store schema key".
+ */
+export function storeSchemaError(name: string): string | undefined {
+  const ok = /^[a-z_][a-z0-9_]{0,62}$/.test(name) && !name.startsWith('pg_') && name !== 'information_schema';
+  return ok ? undefined : `store.schema ${JSON.stringify(name)} is refused: ${STORE_SCHEMA_RULE}`;
+}
 
 export interface Migration {
   version: number;

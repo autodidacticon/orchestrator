@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { daemonCommand, health, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
 import { cleanExit, readDaemonJson, runPaths } from '../../src/runs/runDir.js';
-import { adminClient, dropRun, pgAvailable, pgSource, stopTestPostgres, testDatabase } from '../state/pg-db.js';
+import { adminClient, dropRun, freshSchema, pgAvailable, pgSource, stopTestPostgres, testDatabase } from '../state/pg-db.js';
 import { gitIn, makeRepo, tsxLoader } from './harness.js';
 
 const execFileP = promisify(execFile);
@@ -410,4 +410,103 @@ describe.skipIf(!pgAvailable)('daemon on store.kind postgres', () => {
     const viaRepo = await execFileP('node', ['--import', tsxLoader, path.join(root, 'src/operator/cli.ts'), '--repo', run.repo, 'status'], { cwd: root, env: run.env() }).catch((e: { stderr: string; code: number }) => e);
     expect((viaRepo as { stderr: string }).stderr).toContain('keeps its state in Postgres and is remote');
   }, 60_000);
+
+  it('store.schema places the run, and a changed value starts an empty run', async () => {
+    const [first, second] = [freshSchema('slice_a'), freshSchema('slice_b')];
+    const admin = await adminClient();
+    const config = (schema: string) => [...STORE(), `  schema: ${schema}`, 'leaseTtlMs: 600000'];
+    const run = await makeRun(config(first));
+    const runId = runIdOfRepo(run);
+    const tablesIn = async (schema: string) =>
+      (await admin.query("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relkind = 'r' ORDER BY 1", [schema])).rows.map((r: { relname: string }) => r.relname as string);
+    const rowsIn = async (schema: string, table: string) => Number((await admin.query(`SELECT count(*)::int AS n FROM "${schema}"."${table}" WHERE run_id = $1`, [runId])).rows[0].n);
+    try {
+      const started = await startDaemon({ repo: run.repo, env: run.env() });
+      expect(started.store).toMatchObject({ kind: 'postgres', schema: first });
+      const url = started.url;
+      expect((await api(url, 'GET', '/v1/config')).body['store']).toMatchObject({ kind: 'postgres', schema: first });
+      const configJson = JSON.parse(readFileSync(path.join(started.runDir, 'config.json'), 'utf8')) as { store?: { schema?: string } };
+      expect(configJson.store?.schema).toBe(first);
+      expect((await api(url, 'PUT', '/v1/graph', { nodes: GRAPH })).body).toMatchObject({ accepted: true });
+      await api(url, 'POST', '/v1/tick');
+      await waitFor(async () => ((await api(url, 'GET', '/v1/status')).body['claimable'] as unknown[]).length === 1);
+      const before = await served(url);
+      await stopDaemon({ repo: run.repo, env: run.env() });
+      const opened = readFileSync(path.join(started.runDir, 'daemon.log'), 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .find((l) => l['msg'] === 'store opened');
+      expect(opened).toMatchObject({ kind: 'postgres', schema: first });
+      expect(await tablesIn(first)).toEqual(['dedup', 'events', 'graph_snapshot', 'kv', 'launches', 'orchestrator_migrations', 'outbox', 'overlay', 'payload_overlays', 'proposals', 'reports', 'verifier_jobs']);
+
+      // The same value on an empty data directory: the same run.
+      await waitFor(async () => (await health(url)) === undefined, 15_000);
+      run.wipe();
+      const again = await startDaemon({ repo: run.repo, env: run.env() });
+      const after = await served(again.url, before.latestSeq);
+      expect(after.graphRev).toBe(before.graphRev);
+      expect(after.byStatus).toEqual(before.byStatus);
+      expect(after.claimable).toEqual(before.claimable);
+      await stopDaemon({ repo: run.repo, env: run.env() });
+      await waitFor(async () => (await health(again.url)) === undefined, 15_000);
+
+      // Another value: an empty run in the new schema; the first schema keeps the run's rows.
+      writeFileSync(path.join(run.repo, 'orchestrator.yaml'), `${['runner:', '  mode: pull', 'daemon:', '  idleExitMs: 0', 'tickIntervalMs: 100', 'checkCommand: "true"', ...config(second)].join('\n')}\n`);
+      gitIn(run.repo, 'commit', '-q', '-am', 'another schema');
+      run.wipe();
+      const moved = await startDaemon({ repo: run.repo, env: run.env() });
+      expect(moved.store).toMatchObject({ kind: 'postgres', schema: second });
+      const empty = await served(moved.url);
+      expect(empty.graphRev ?? undefined).toBeUndefined();
+      expect(empty.claimable ?? []).toEqual([]);
+      expect(Object.values((empty.byStatus ?? {}) as Record<string, unknown[]>).flat()).toEqual([]);
+      expect(empty.launches).toEqual([
+        { taskId: 'T1', none: true },
+        { taskId: 'T2', none: true },
+      ]);
+      await stopDaemon({ repo: run.repo, env: run.env() });
+      expect(await rowsIn(first, 'launches')).toBeGreaterThan(0);
+      expect(await rowsIn(first, 'overlay')).toBeGreaterThan(0);
+      expect(await rowsIn(second, 'launches')).toBe(0);
+    } finally {
+      for (const s of [first, second]) await admin.query(`DROP SCHEMA IF EXISTS "${s}" CASCADE`);
+      await admin.end();
+    }
+  }, 120_000);
+
+  it('an invalid store.schema refuses the start', async () => {
+    const run = await makeRun([...STORE(), '  schema: Bad-Name', 'leaseTtlMs: 600000']);
+    const d = foreground(run);
+    const { code } = await d.exited;
+    expect(code).not.toBe(0);
+    const lines = d
+      .stderr()
+      .split('\n')
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+    const refused = lines.find((l) => l['msg'] === 'store configuration refused');
+    expect(refused).toBeTruthy();
+    expect(String(refused!['error'])).toContain('store.schema "Bad-Name"');
+    // Before the store opens: neither opened nor attempted.
+    expect(lines.find((l) => l['msg'] === 'store opened')).toBeUndefined();
+    expect(lines.find((l) => l['msg'] === 'could not open the store')).toBeUndefined();
+  }, 30_000);
+
+  it('could not open the store names the schema', async () => {
+    const run = await makeRun([...STORE(), 'leaseTtlMs: 600000']);
+    // Nothing listens on port 1.
+    const d = foreground({ ...run, env: () => ({ ...run.env(), DATABASE_URL: `postgresql://u:${PASSWORD}@127.0.0.1:1/db` }) });
+    const { code } = await d.exited;
+    expect(code).not.toBe(0);
+    const line = d
+      .stderr()
+      .split('\n')
+      .filter((l) => l.startsWith('{'))
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+      .find((l) => l['msg'] === 'could not open the store');
+    expect(line).toMatchObject({ kind: 'postgres', schema: 'orchestrator' });
+    expect(String(line!['error'])).toContain('schema "orchestrator"');
+    expect(d.stderr()).not.toContain(PASSWORD);
+  }, 30_000);
 });

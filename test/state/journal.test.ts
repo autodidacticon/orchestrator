@@ -78,7 +78,7 @@ const pgFuzzSink = async (): Promise<FuzzSink> => {
     failPartway: async (ops, n) => {
       await sink.client.query('BEGIN');
       try {
-        await applyPgOps(sink.client, sink.runId, ops.slice(0, n));
+        await applyPgOps(sink.client, sink.schema, sink.runId, ops.slice(0, n));
         throw new Error('sink unavailable');
       } finally {
         await sink.client.query('ROLLBACK');

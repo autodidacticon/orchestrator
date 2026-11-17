@@ -12,7 +12,7 @@ import path from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { daemonCommand, health } from '../../src/runs/lifecycle.js';
 import { readDaemonJson, runIdFor, runIdForOrigin, runPaths } from '../../src/runs/runDir.js';
-import { adminClient, dropRun, pgAvailable, pgSkipReason, stopTestPostgres, testDatabase } from '../state/pg-db.js';
+import { adminClient, dropRun, pgAvailable, pgSkipReason, stopTestPostgres, TEST_SCHEMA, testDatabase } from '../state/pg-db.js';
 import { freePort, gitIn, makeRepo, scriptedAgent, tsxLoader } from '../slice/harness.js';
 
 const PASSWORD = 'pw-Orc87-s3cret';
@@ -177,7 +177,7 @@ describe.skipIf(!pgAvailable)('deployment identity on store.kind postgres', () =
     await stop(db);
     const c = await adminClient();
     try {
-      const tasksOf = async (id: string) => (await c.query('select task_id from launches where run_id = $1 order by 1', [id])).rows.map((r) => r.task_id as string);
+      const tasksOf = async (id: string) => (await c.query(`select task_id from ${TEST_SCHEMA}.launches where run_id = $1 order by 1`, [id])).rows.map((r) => r.task_id as string);
       expect(await tasksOf(idA)).toEqual(['A1']);
       expect(await tasksOf(idB)).toEqual(['B1']);
       expect(await tasksOf(runIdFor(repo))).toEqual([]);

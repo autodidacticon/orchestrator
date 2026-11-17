@@ -11,7 +11,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ApiServer } from './agent/server.js';
 import { SlotValidator } from './brief/template.js';
-import { type Config, loadConfig, redactedStore, storeConfigError, storeUrlSource, urlSecrets } from './config.js';
+import { type Config, loadConfig, redactedStore, storeConfigError, storeSchemaOf, storeUrlSource, urlSecrets } from './config.js';
 import { FileGraphSource, StoreGraphSource } from './graph/source.js';
 import type { Logger } from './loop/core.js';
 import { Orchestrator } from './loop/orchestrator.js';
@@ -185,16 +185,24 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       log: stderrLogger,
     });
   } catch (err) {
-    stderrLogger.error('could not open the store', { kind: early.store.kind, url: redactedStore(early.store).url, error: err instanceof Error ? err.message : String(err) });
+    stderrLogger.error('could not open the store', {
+      kind: early.store.kind,
+      url: redactedStore(early.store).url,
+      ...(early.store.kind === 'postgres' ? { schema: storeSchemaOf(early.store) } : {}),
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
   const store = opened.store;
-  stderrLogger.info('store opened', { kind: opened.kind, ...(opened.kind === 'postgres' ? { url: redactedStore(early.store).url, runId, backendPid: opened.sink?.backendPid } : {}) });
+  stderrLogger.info('store opened', {
+    kind: opened.kind,
+    ...(opened.kind === 'postgres' ? { url: redactedStore(early.store).url, schema: storeSchemaOf(early.store), runId, backendPid: opened.sink?.backendPid } : {}),
+  });
   // Children get the database variables back only on a SQLite store; a Postgres input without store.kind keeps them withheld. See specs/state-backend "Withholding follows the store".
   const postgresInputs = postgresInputsWithoutKind(fileRaw, process.env);
   setStoreWithholding(storeWithholdingFor(opened.kind, postgresInputs));
   if (opened.kind === 'sqlite' && postgresInputs.length > 0) {
-    // Withheld by value too, whether or not the SQLite store block copied DATABASE_URL.
+    // Withheld by value too: the SQLite store block never reads DATABASE_URL, so nothing else registers it.
     withholdStoreUrl(process.env['DATABASE_URL']);
     const message = postgresInputsWarning(postgresInputs);
     stderrLogger.warn(message, { inputs: postgresInputs });

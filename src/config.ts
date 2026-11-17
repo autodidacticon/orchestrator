@@ -164,7 +164,7 @@ export const configSchema = z.object({
     .object({
       /** sqlite: `<dataDir>/store.sqlite`; postgres: a journaled memory image flushed to the database at `url`. */
       kind: z.enum(['sqlite', 'postgres']).default('sqlite'),
-      /** The Postgres connection URL; `DATABASE_URL` when unset. Printed only with its password removed. */
+      /** The Postgres connection URL; under postgres, `DATABASE_URL` when unset (under sqlite the environment never fills it). Printed only with its password removed. */
       url: z.string().min(1).optional(),
       /**
        * A file holding the Postgres connection URL (a mounted secret), read once at startup; `DATABASE_URL_FILE`
@@ -178,6 +178,13 @@ export const configSchema = z.object({
        * Checked at startup against 1 to 64 characters of [A-Za-z0-9_-]. See specs/state-backend "Run id per deployment".
        */
       runId: z.string().optional(),
+      /**
+       * postgres only: the schema that holds the store's tables, created at start when absent. Unset: `orchestrator`
+       * (see `storeSchemaOf`). Read from the config file at start only; no environment variable or flag sets it, and
+       * it is never a runtime override. Checked at startup against the name rule (`storeSchemaError`). A changed value
+       * starts an empty run in the new schema. Ignored under sqlite. See specs/state-backend "Store schema key".
+       */
+      schema: z.string().optional(),
       /** The oldest unflushed batch may be this old before the daemon exits. A worker lease must be at least as long. */
       flushDeadlineMs: z.number().int().positive().default(120_000),
     })
@@ -299,8 +306,14 @@ import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYaml } from 'yaml';
+import { DEFAULT_STORE_SCHEMA, storeSchemaError } from './state/pg/schema.js';
 
-/** Load a YAML/JSON config file; relative paths resolve against the file's directory. `DATABASE_URL` fills `store.url`. */
+/** The schema in force for the Postgres store's tables: `store.schema`, else `DEFAULT_STORE_SCHEMA`. */
+export function storeSchemaOf(store: Pick<Config['store'], 'schema'>): string {
+  return store.schema ?? DEFAULT_STORE_SCHEMA;
+}
+
+/** Load a YAML/JSON config file; relative paths resolve against the file's directory. Under `store.kind: postgres` the URL sources of `withStoreEnv` fill `store.url`. */
 export async function loadConfig(file: string, env: NodeJS.ProcessEnv = process.env): Promise<Config> {
   const text = await readFile(file, 'utf8');
   const raw = (parseYaml(text) ?? {}) as Record<string, unknown>;
@@ -345,16 +358,17 @@ export function readStoreUrlFile(file: string, origin: string): string {
 /**
  * `store.url` when the file leaves it unset. Under `store.kind: postgres`, in this order: the file named by
  * `store.urlFile`, else the file named by `DATABASE_URL_FILE`, else `DATABASE_URL`; `store.url` with
- * `store.urlFile`, or `DATABASE_URL` with `DATABASE_URL_FILE`, is refused. Under `sqlite` no file is read and
- * `DATABASE_URL` fills the unused url, as before. The only environment inputs of the store block besides
- * `ORCH_RUN_ID`. See specs/state-backend "Store URL from a file".
+ * `store.urlFile`, or `DATABASE_URL` with `DATABASE_URL_FILE`, is refused. Under `sqlite` the config is returned
+ * unchanged: no file is read and `DATABASE_URL` is not a store input (a `store.url` written in the file is kept).
+ * The only environment inputs of the store block besides `ORCH_RUN_ID`. See specs/state-backend "Store URL from a file"
+ * and "Store selection".
  */
 export function withStoreEnv(cfg: Config, env: NodeJS.ProcessEnv = process.env): Config {
-  const fromEnv = env['DATABASE_URL']?.trim();
-  const fileFromEnv = env['DATABASE_URL_FILE']?.trim();
   if (cfg.store.url && cfg.store.urlFile) throw new StoreUrlError('store.url and store.urlFile are both set: set one');
   if (cfg.store.url) return cfg;
-  if (cfg.store.kind !== 'postgres') return fromEnv ? { ...cfg, store: { ...cfg.store, url: fromEnv } } : cfg;
+  if (cfg.store.kind !== 'postgres') return cfg;
+  const fromEnv = env['DATABASE_URL']?.trim();
+  const fileFromEnv = env['DATABASE_URL_FILE']?.trim();
   if (fromEnv && fileFromEnv && !cfg.store.urlFile) throw new StoreUrlError('DATABASE_URL and DATABASE_URL_FILE are both set: set one');
   let url: string | undefined;
   if (cfg.store.urlFile) url = readStoreUrlFile(cfg.store.urlFile, 'store.urlFile');
@@ -435,12 +449,16 @@ export function minLeaseTtlMs(flushDeadlineMs: number): number {
 }
 
 /**
- * Why the store block cannot start, or undefined. Under `postgres` a URL is required, and the worker lease must
- * outlast the flush deadline by a stated margin (`minLeaseTtlMs`): a lease may not run out while the records that
- * granted or renewed it are still unflushed. See specs/state-backend "Lease margin above the flush deadline".
+ * Why the store block cannot start, or undefined. Under `postgres` the schema name must follow the rule
+ * (`storeSchemaError`), a URL is required, and the worker lease must outlast the flush deadline by a stated margin
+ * (`minLeaseTtlMs`): a lease may not run out while the records that granted or renewed it are still unflushed.
+ * Under `sqlite` nothing is checked, `store.schema` included. See specs/state-backend "Lease margin above the flush
+ * deadline" and "Store schema key".
  */
 export function storeConfigError(cfg: Pick<Config, 'store' | 'leaseTtlMs'>): string | undefined {
   if (cfg.store.kind !== 'postgres') return undefined;
+  const schemaError = cfg.store.schema !== undefined ? storeSchemaError(cfg.store.schema) : undefined;
+  if (schemaError) return schemaError;
   if (!cfg.store.url) return 'store.kind is postgres but no database URL is set: set store.url, store.urlFile, DATABASE_URL_FILE or DATABASE_URL';
   if (!leaseCoversFlushDeadline(cfg.leaseTtlMs, cfg.store.flushDeadlineMs)) {
     const min = minLeaseTtlMs(cfg.store.flushDeadlineMs);

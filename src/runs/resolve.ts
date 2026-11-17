@@ -5,7 +5,7 @@
  * "Resolution order and provenance".
  */
 import { z } from 'zod';
-import { type Config, configSchema, redactUrl, storeUrlSource, type StoreUrlSource } from '../config.js';
+import { type Config, configSchema, redactUrl, storeSchemaOf, storeUrlSource, type StoreUrlSource } from '../config.js';
 import { hasAllowedToolsSlot, hasEffortSlot, hasModelSlot } from '../runner/command.js';
 import { storeWithholding } from './childEnv.js';
 import {
@@ -566,6 +566,8 @@ export interface StoreReport {
   kind: 'sqlite' | 'postgres';
   url?: string;
   urlSource?: StoreUrlSource;
+  /** Under postgres only: the schema that holds the tables, `orchestrator` when the file sets none. See specs/state-backend "Store schema key". */
+  schema?: string;
   flushDeadlineMs: number;
   /** Whether this process withholds the database variables from its children. See specs/state-backend "Withholding follows the store". */
   withholdsDatabaseVariables: boolean;
@@ -575,7 +577,12 @@ export interface StoreReport {
 export function storeReportOf(resolved: Pick<Resolved, 'config' | 'inputs'>): StoreReport {
   const s = resolved.config.store;
   const source = storeUrlSource(resolved.config, resolved.inputs.fileRaw);
-  return { kind: s.kind, ...(s.url ? { url: redactUrl(s.url) } : {}), ...(source ? { urlSource: source } : {}), flushDeadlineMs: s.flushDeadlineMs, withholdsDatabaseVariables: storeWithholding() };
+  return {
+    kind: s.kind,
+    ...(s.url ? { url: redactUrl(s.url) } : {}),
+    ...(source ? { urlSource: source } : {}),
+    ...(s.kind === 'postgres' ? { schema: storeSchemaOf(s) } : {}),
+    flushDeadlineMs:s.flushDeadlineMs, withholdsDatabaseVariables: storeWithholding() };
 }
 
 /** The compact form appended as the `config.resolved` event. */

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
+import { DEFAULT_STORE_SCHEMA } from '../../src/state/pg/schema.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const script = path.join(root, 'deploy/smoke.sh');
@@ -42,6 +43,19 @@ describe('deploy/smoke.sh', () => {
     expect(lines[0]).toMatch(/^#!.*bash/);
     expect(lines[1]).toBe('set -euo pipefail');
     expect(spawnSync(bash, ['-n', script]).status).toBe(0);
+  });
+
+  it('the psql queries name the store schema', () => {
+    const text = readFileSync(script, 'utf8');
+    const want: Record<string, string> = { pg_launch_counts: 'launches', pg_claimable: 'launches', pg_claimable_tokens: 'launches', pg_states: 'overlay' };
+    for (const [fn, table] of Object.entries(want)) {
+      const line = text.split('\n').find((l) => l.startsWith(`${fn}() {`));
+      expect(line, fn).toBeDefined();
+      expect(line).toMatch(/psql_q "/);
+      // Every table the query reads is qualified with the store's default schema.
+      const read = [...line!.matchAll(/\bfrom\s+([\w."]+)/gi)].map((m) => m[1]);
+      expect(read, fn).toEqual([`${DEFAULT_STORE_SCHEMA}.${table}`]);
+    }
   });
 
   it('--dry-run prints the steps in order, executes nothing, and exits 0', () => {

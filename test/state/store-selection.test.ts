@@ -8,14 +8,15 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import pg from 'pg';
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { defaultConfig, leaseCoversFlushDeadline, minLeaseTtlMs, redactUrl, storeConfigError, urlSecrets, withStoreEnv } from '../../src/config.js';
+import { configSchema, defaultConfig, leaseCoversFlushDeadline, minLeaseTtlMs, redactUrl, storeConfigError, storeSchemaOf, storeUrlSource, urlSecrets, withStoreEnv } from '../../src/config.js';
 import { StoreGraphSource } from '../../src/graph/source.js';
-import { parseOverridePatch, parseSetFlags, readOverrides } from '../../src/runs/resolve.js';
+import { parseOverridePatch, parseSetFlags, readOverrides, type Resolved, storeReportOf } from '../../src/runs/resolve.js';
+import { STORE_SCHEMA_RULE } from '../../src/state/pg/schema.js';
 import { type FatalInfo, JournaledStore, type JournalSink, type RowOp } from '../../src/state/journal.js';
-import { openStore, type OpenedStore } from '../../src/state/open.js';
+import { openStore, type OpenedStore, StoreOpenError } from '../../src/state/open.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { backends } from './backends.js';
-import { adminClient, dropRun, freshRunId, pgAvailable, pgSource, stopTestPostgres, testDatabase } from './pg-db.js';
+import { ACCEPTED_SCHEMAS, adminClient, dropRun, freshRunId, pgAvailable, pgSource, REFUSED_SCHEMAS, stopTestPostgres, TEST_SCHEMA, testDatabase } from './pg-db.js';
 
 const G1 = 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n';
 const G2 = 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n  - { id: T2, deps: [T1], description: d, acceptanceCriteria: [a] }\n';
@@ -37,10 +38,11 @@ async function until(pred: () => boolean, timeoutMs = 10_000): Promise<void> {
 }
 
 describe('store block', () => {
-  it('defaults to sqlite with a 120s flush deadline; DATABASE_URL fills an unset url and never overrides the file', () => {
+  it('defaults to sqlite with a 120s flush deadline; DATABASE_URL fills an unset url under postgres only and never overrides the file', () => {
     const d = defaultConfig();
     expect(d.store).toEqual({ kind: 'sqlite', flushDeadlineMs: 120_000 });
-    expect(withStoreEnv(d, { DATABASE_URL: 'postgres://u:p@h/db' }).store.url).toBe('postgres://u:p@h/db');
+    expect(withStoreEnv(d, { DATABASE_URL: 'postgres://u:p@h/db' }).store.url).toBeUndefined();
+    expect(withStoreEnv(defaultConfig({ store: { kind: 'postgres' } }), { DATABASE_URL: 'postgres://u:p@h/db' }).store.url).toBe('postgres://u:p@h/db');
     const fromFile = defaultConfig({ store: { kind: 'postgres', url: 'postgres://file@h/db' } });
     expect(withStoreEnv(fromFile, { DATABASE_URL: 'postgres://env@h/db' }).store.url).toBe('postgres://file@h/db');
     expect(withStoreEnv(d, {}).store.url).toBeUndefined();
@@ -67,7 +69,7 @@ describe('store block', () => {
     expect(() => withStoreEnv(defaultConfig({ store: { kind: 'postgres', url: 'postgres://cfg@h/db', urlFile: file } }), {})).toThrow('store.url and store.urlFile are both set');
     expect(() => withStoreEnv(d, { DATABASE_URL: 'postgres://env@h/db', DATABASE_URL_FILE: file })).toThrow('DATABASE_URL and DATABASE_URL_FILE are both set');
     // Not refused under sqlite (no file is read), nor when the config names its own source.
-    expect(withStoreEnv(defaultConfig(), { DATABASE_URL: 'postgres://env@h/db', DATABASE_URL_FILE: file }).store.url).toBe('postgres://env@h/db');
+    expect(withStoreEnv(defaultConfig(), { DATABASE_URL: 'postgres://env@h/db', DATABASE_URL_FILE: file }).store.url).toBeUndefined();
     const missing = path.join(dir, 'absent');
     expect(() => withStoreEnv(d, { DATABASE_URL_FILE: missing })).toThrow(`cannot read the database URL file ${missing} (DATABASE_URL_FILE): ENOENT`);
     const empty = path.join(dir, 'empty');
@@ -118,6 +120,74 @@ describe('store block', () => {
     store.close();
     expect(parseOverridePatch({ store: { kind: 'postgres' } }).ok).toBe(false);
     expect(() => parseSetFlags(['store={"kind":"postgres"}'])).toThrow(/unknown key/);
+    // store.schema is never an override either.
+    const withSchema = new SqliteStore(':memory:');
+    withSchema.setKv('config.overrides', JSON.stringify({ capacity: 2, store: { schema: 'x' } }));
+    expect(readOverrides(withSchema)).toEqual({ capacity: 2 });
+    withSchema.close();
+    expect(() => parseSetFlags(['store.schema=x'])).toThrow(/unknown key/);
+    expect(parseOverridePatch({ store: { schema: 'x' } }).ok).toBe(false);
+  });
+
+  it('store.schema accepts lower-case names and refuses the rest under postgres only', () => {
+    const check = (kind: 'sqlite' | 'postgres', schema: string) =>
+      storeConfigError({ leaseTtlMs: 600_000, store: { kind, url: 'postgres://h/db', flushDeadlineMs: 120_000, schema } });
+    for (const name of REFUSED_SCHEMAS) {
+      const msg = check('postgres', name);
+      expect(msg, JSON.stringify(name)).toContain('store.schema');
+      expect(msg).toContain(JSON.stringify(name));
+      expect(msg).toContain(STORE_SCHEMA_RULE);
+      expect(check('sqlite', name)).toBeUndefined();
+    }
+    for (const name of ACCEPTED_SCHEMAS) {
+      expect(check('postgres', name), name).toBeUndefined();
+      expect(check('sqlite', name)).toBeUndefined();
+    }
+    // Unset is the default, which passes.
+    expect(storeConfigError({ leaseTtlMs: 600_000, store: { kind: 'postgres', url: 'postgres://h/db', flushDeadlineMs: 120_000 } })).toBeUndefined();
+    expect(storeSchemaOf(defaultConfig().store)).toBe('orchestrator');
+    expect(storeSchemaOf(defaultConfig({ store: { schema: '' } }).store)).toBe('');
+    // A value that is not a string fails the parse on every store kind, at store.schema.
+    for (const kind of ['sqlite', 'postgres'] as const) {
+      for (const value of [123, true]) {
+        const parsed = configSchema.safeParse({ store: { kind, schema: value } });
+        expect(parsed.success).toBe(false);
+        expect(parsed.error?.issues.map((i) => i.path)).toContainEqual(['store', 'schema']);
+        expect(() => configSchema.parse({ store: { kind, schema: value } })).toThrow();
+      }
+    }
+  });
+
+  it('the store report shows the schema in force under postgres', () => {
+    const report = (raw: Record<string, unknown>) => {
+      const config = withStoreEnv(defaultConfig(raw as never), { DATABASE_URL: 'postgres://u:pw@h/db' });
+      return storeReportOf({ config, inputs: { fileRaw: raw } } as unknown as Pick<Resolved, 'config' | 'inputs'>);
+    };
+    expect(report({ store: { kind: 'postgres' } }).schema).toBe('orchestrator');
+    expect(report({ store: { kind: 'postgres', schema: 'team_a' } }).schema).toBe('team_a');
+    expect(report({ store: { kind: 'sqlite' } })).not.toHaveProperty('schema');
+    expect(report({ store: { kind: 'sqlite', schema: 'team_a' } })).not.toHaveProperty('schema');
+    expect(report({})).not.toHaveProperty('schema');
+  });
+
+  it('under sqlite DATABASE_URL is not a store input: no url and no urlSource; a url written in the file is still reported', () => {
+    const env = { DATABASE_URL: 'postgres://u:pw@h/db' };
+    const sqlite = withStoreEnv(defaultConfig(), env);
+    expect(sqlite.store.url).toBeUndefined();
+    expect(storeUrlSource(sqlite, undefined, env)).toBeUndefined();
+    const rep = storeReportOf({ config: sqlite, inputs: { fileRaw: undefined } } as unknown as Pick<Resolved, 'config' | 'inputs'>);
+    expect(rep).not.toHaveProperty('url');
+    expect(rep).not.toHaveProperty('urlSource');
+    const fileRaw = { store: { kind: 'sqlite', url: 'postgres://file:pw@h/db' } };
+    const fromFile = withStoreEnv(defaultConfig(fileRaw as never), env);
+    expect(fromFile.store.url).toBe('postgres://file:pw@h/db');
+    expect(storeUrlSource(fromFile, fileRaw, env)).toBe('file');
+    const repFile = storeReportOf({ config: fromFile, inputs: { fileRaw } } as unknown as Pick<Resolved, 'config' | 'inputs'>);
+    expect(repFile).toMatchObject({ kind: 'sqlite', url: 'postgres://file@h/db', urlSource: 'file' });
+    // Under postgres DATABASE_URL alone fills the url, from the environment.
+    const pgOnly = withStoreEnv(defaultConfig({ store: { kind: 'postgres' } }), env);
+    expect(pgOnly.store.url).toBe('postgres://u:pw@h/db');
+    expect(storeUrlSource(pgOnly, { store: { kind: 'postgres' } }, env)).toBe('environment');
   });
 });
 
@@ -236,6 +306,8 @@ describe.skipIf(!pgAvailable)('openStore over Postgres', () => {
     const refused = await openStore({ store: { kind: 'postgres', url, flushDeadlineMs: 120_000 }, dataDir: dir, runId, onFatal: () => undefined }).catch((e: Error) => e);
     expect(refused).toBeInstanceOf(Error);
     expect((refused as Error).message).toContain('locked by another session');
+    expect((refused as Error).message).toContain(`schema "${TEST_SCHEMA}"`);
+    expect((refused as Error).message).toContain('the run lock is per database');
     expect((refused as Error).message).not.toContain('pw-s3cret');
     await a.close();
     opened.pop();
@@ -243,6 +315,33 @@ describe.skipIf(!pgAvailable)('openStore over Postgres', () => {
     opened.push(b);
     expect(b.store.getKv('k')).toBe('v');
     expect(b.store.getProposedGraph()).toMatchObject({ rev: 'r', content: G1 });
+  });
+
+  it('a failed open and a failed load name the schema', async () => {
+    // Open: nothing listens on port 1.
+    const unreachable = 'postgresql://u:pw-s3cret@127.0.0.1:1/db';
+    const notOpened = await openStore({ store: { kind: 'postgres', url: unreachable, flushDeadlineMs: 120_000, schema: 'team_x' }, dataDir: dir, runId: freshRunId('sel'), onFatal: () => undefined }).catch((e: Error) => e);
+    expect(notOpened).toBeInstanceOf(StoreOpenError);
+    expect((notOpened as Error).message).toMatch(/^could not open the Postgres store at /);
+    expect((notOpened as Error).message).toContain('schema "team_x"');
+    expect((notOpened as Error).message).not.toContain('pw-s3cret');
+    // Load: a row the loader cannot read (an event seq above the safe integer range).
+    const runId = freshRunId('sel');
+    runs.push(runId);
+    const url = await pgUrl();
+    const first = await openStore({ store: { kind: 'postgres', url, flushDeadlineMs: 120_000 }, dataDir: dir, runId, onFatal: () => undefined });
+    await first.close();
+    const admin = await adminClient();
+    try {
+      await admin.query(`INSERT INTO ${TEST_SCHEMA}.events (run_id, seq, ts, kind) VALUES ($1, 9007199254740993, 1, 'x')`, [runId]);
+    } finally {
+      await admin.end();
+    }
+    const notLoaded = await openStore({ store: { kind: 'postgres', url, flushDeadlineMs: 120_000 }, dataDir: dir, runId, onFatal: () => undefined }).catch((e: Error) => e);
+    expect(notLoaded).toBeInstanceOf(StoreOpenError);
+    expect((notLoaded as Error).message).toMatch(new RegExp(`^could not load run ${runId} from `));
+    expect((notLoaded as Error).message).toContain(`schema "${TEST_SCHEMA}"`);
+    expect((notLoaded as Error).message).not.toContain('pw-s3cret');
   });
 
   it('a terminated lock session is fatal at once, with no batch in flight and a deadline far away', async () => {
@@ -294,7 +393,7 @@ describe.skipIf(!pgAvailable)('openStore over Postgres', () => {
     const c = new pg.Client(typeof (await testDatabase()) === 'string' ? { connectionString: (await testDatabase()) as string } : ((await testDatabase()) as pg.ClientConfig));
     await c.connect();
     try {
-      expect((await c.query("SELECT value FROM kv WHERE run_id = $1 AND key = 'a'", [runId])).rows).toEqual([{ value: '1' }]);
+      expect((await c.query(`SELECT value FROM ${TEST_SCHEMA}.kv WHERE run_id = $1 AND key = 'a'`, [runId])).rows).toEqual([{ value: '1' }]);
     } finally {
       await c.end();
     }

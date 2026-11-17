@@ -67,7 +67,7 @@ The run's state (tasks, launches, events, outbox, the accepted and proposed grap
 
 #### The run id
 
-Many runs can share one database: their rows are keyed by `run_id`, and each daemon holds an advisory lock keyed by it. Every deployment from this manifest clones into the same path, `/data/repo`, so the run id does not come from the path. With `store.kind: postgres` the daemon picks it in this order:
+Many runs can share one database: their rows are in the tables of one schema, `orchestrator` by default, named by `store.schema`, keyed by `run_id`, and each daemon holds an advisory lock keyed by it; the advisory locks are per database, not per schema. Every deployment from this manifest clones into the same path, `/data/repo`, so the run id does not come from the path. With `store.kind: postgres` the daemon picks it in this order:
 
 1. `store.runId` in `orchestrator.yaml` (the ConfigMap);
 2. the environment variable `ORCH_RUN_ID`;
@@ -193,7 +193,7 @@ It asserts:
 - M2: no volume of the daemon pod is backed by a claim (`persistentVolumeClaim` or `ephemeral`), whatever the claim is called. The script reads the pod's volumes, not the claim names in the namespace. Postgres and `git-origin` keep their own claims.
 - M2 restart drill. The graph has `SMOKE` and `SMOKE-PARKED`, which depends on it. The script works `SMOKE` itself as a pull-mode worker: it claims the launch, commits in the pod's worktree with `kubectl exec`, and submits with the launch token. It waits until the in-pod verifier has published `SMOKE` to origin and `SMOKE-PARKED` is claimable. It then records three things:
   - from the API: the claimable launches as launch id and task id, the task states, `latestSeq`, the integration head (the `publishedSha` of `SMOKE`'s transition to `done`), and the daemon pod's uid. `/v1/status` lists claimable tasks only, so the launch ids come from `/v1/events`: a launch is claimable when its latest `launch.claimable`, `launch.claimed`, `launch.released`, `launch.ended`, `launch.revoked` or `launch.failed` event is `launch.claimable`, and those launches' tasks must equal `/v1/status` `claimable`;
-  - through `psql` on the CloudNativePG pod: `select status, count(*) from launches where run_id = ... group by 1`, the claimable launches as launch id, task id and `md5(token)`, and the task states;
+  - through `psql` on the CloudNativePG pod: `select status, count(*) from orchestrator.launches where run_id = ... group by 1`, the claimable launches as launch id, task id and `md5(token)`, and the task states;
   - a check that the API and `psql` agree.
 
   Then it deletes the daemon pod. After the rollout, the new pod runs on a fresh clone and an empty run directory. `/readyz` passes before the daemon's startup recovery runs, so the script first waits until every recorded claimable launch has a recovery event (`launch.reprepared`, `launch.ended`, `launch.revoked` or `launch.failed`) after the recorded sequence. It asserts that:

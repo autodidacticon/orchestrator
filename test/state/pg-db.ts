@@ -11,6 +11,7 @@ import { randomBytes } from 'node:crypto';
 import pg from 'pg';
 import { inject } from 'vitest';
 import { TABLES } from '../../src/state/journal.js';
+import { DEFAULT_STORE_SCHEMA } from '../../src/state/pg/schema.js';
 import type { TestPostgres } from '../setup/postgres.js';
 
 const provided: TestPostgres = inject('testPostgres') ?? { source: 'none', reason: 'the global setup test/setup/postgres.ts did not run' };
@@ -76,11 +77,23 @@ export async function adminClient(): Promise<pg.Client> {
   return client;
 }
 
-/** Delete one run's rows (a shared `TEST_DATABASE_URL` keeps no test leftovers). */
-export async function dropRun(runId: string): Promise<void> {
+/** The schema the suites' sinks use (none names another unless the test says so): raw SQL names it in each statement. */
+export const TEST_SCHEMA = DEFAULT_STORE_SCHEMA;
+
+/** Values `store.schema` refuses and accepts: the vectors shared by the configuration check and `PgSink.open`'s check. */
+export const REFUSED_SCHEMAS: readonly string[] = ['Orchestrator', 'pg_x', 'information_schema', 'a-b', '1a', '', 'a'.repeat(64)];
+export const ACCEPTED_SCHEMAS: readonly string[] = ['orchestrator', 'public', '_x1', 'user', 'a'.repeat(63)];
+
+/** A schema name no other test uses (schemas are shared by every file on a shared `TEST_DATABASE_URL`). */
+export function freshSchema(label = 's'): string {
+  return `${label}_${randomBytes(6).toString('hex')}`;
+}
+
+/** Delete one run's rows in the suites' schema (a shared `TEST_DATABASE_URL` keeps no test leftovers). */
+export async function dropRun(runId: string, schema: string = TEST_SCHEMA): Promise<void> {
   const c = await adminClient();
   try {
-    for (const { name } of TABLES) await c.query(`DELETE FROM ${name} WHERE run_id = $1`, [runId]).catch(() => undefined);
+    for (const { name } of TABLES) await c.query(`DELETE FROM ${schema}.${name} WHERE run_id = $1`, [runId]).catch(() => undefined);
   } finally {
     await c.end();
   }

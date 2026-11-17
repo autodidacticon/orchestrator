@@ -1,13 +1,14 @@
 /**
  * Store selection: open the run's store by `store.kind`. `sqlite` is the file store under the data directory;
- * `postgres` takes the run lock, loads the memory image for the run, and journals it to the database.
+ * `postgres` takes the run lock, loads the memory image for the run from the tables in `store.schema`, and journals it
+ * to the database.
  * See specs/state-backend "Store selection".
  */
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { type Config, redactUrl } from '../config.js';
+import { type Config, redactUrl, storeSchemaOf } from '../config.js';
 import { type FatalInfo, JournaledStore, type JournalOptions, type ShutdownRejection } from './journal.js';
-import { NewerSchemaError, PgSink, RunLockedError } from './pg/sink.js';
+import { NewerSchemaError, PgSink, RunLockedError, StoreSchemaError } from './pg/sink.js';
 import { SqliteStore } from './sqlite.js';
 import type { Store } from './store.js';
 
@@ -51,7 +52,7 @@ export interface OpenStoreOptions {
 
 /** A clear error for a refused Postgres open, never carrying the password. */
 export class StoreOpenError extends Error {
-  constructor(message: string, readonly code: 'runLocked' | 'noUrl' | 'connect' | 'schemaNewer') {
+  constructor(message: string, readonly code: 'runLocked' | 'noUrl' | 'connect' | 'schemaNewer' | 'schemaRefused') {
     super(message);
     this.name = 'StoreOpenError';
   }
@@ -71,13 +72,22 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
   }
   const url = opts.store.url;
   if (!url) throw new StoreOpenError('store.kind is postgres but no database URL is set: set store.url, store.urlFile, DATABASE_URL_FILE or DATABASE_URL', 'noUrl');
+  const schema = storeSchemaOf(opts.store);
   let sink: PgSink;
   try {
-    sink = await PgSink.open({ connection: url, runId: opts.runId });
+    sink = await PgSink.open({ connection: url, runId: opts.runId, schema });
   } catch (err) {
-    if (err instanceof RunLockedError) throw new StoreOpenError(`${err.message} (database ${redactUrl(url)})`, 'runLocked');
-    if (err instanceof NewerSchemaError) throw new StoreOpenError(`refusing the Postgres store at ${redactUrl(url)}: ${err.message}`, 'schemaNewer');
-    throw new StoreOpenError(`could not open the Postgres store at ${redactUrl(url)}: ${err instanceof Error ? err.message : String(err)}`, 'connect');
+    if (err instanceof RunLockedError) {
+      throw new StoreOpenError(
+        `${err.message} (database ${redactUrl(url)}, schema "${schema}"; the run lock is per database, so a run id is live once per database whatever the schema)`,
+        'runLocked',
+      );
+    }
+    if (err instanceof NewerSchemaError) throw new StoreOpenError(`refusing the Postgres store at ${redactUrl(url)} (schema "${schema}"): ${err.message}`, 'schemaNewer');
+    throw new StoreOpenError(
+      `could not open the Postgres store at ${redactUrl(url)} (schema "${schema}"): ${err instanceof Error ? err.message : String(err)}`,
+      err instanceof StoreSchemaError ? 'schemaRefused' : 'connect',
+    );
   }
   let journal: JournaledStore | undefined;
   let lostEarly: unknown;
@@ -90,7 +100,7 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
     image = await sink.loadImage();
   } catch (err) {
     await sink.close();
-    throw new StoreOpenError(`could not load run ${opts.runId} from ${redactUrl(url)}: ${err instanceof Error ? err.message : String(err)}`, 'connect');
+    throw new StoreOpenError(`could not load run ${opts.runId} from ${redactUrl(url)} (schema "${schema}"):${err instanceof Error ? err.message : String(err)}`, 'connect');
   }
   journal = new JournaledStore(image, sink, {
     flushDeadlineMs: opts.store.flushDeadlineMs,

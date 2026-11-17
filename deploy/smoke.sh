@@ -303,13 +303,13 @@ api_claimable() {
 }
 # Task states from the API as id|state lines, sorted.
 api_states() { status_get '[.byStatus | to_entries[] | .key as $k | .value[] | "\(.)|\($k)"] | sort | .[]'; }
-# The same from Postgres: launch counts by status, claimable launches, task states.
-pg_launch_counts() { psql_q "select status, count(*) from launches where run_id = '$RUN_ID' group by 1 order by 1"; }
+# The same from Postgres (the store's tables are in the schema orchestrator, store.schema's default): launch counts by status, claimable launches, task states.
+pg_launch_counts() { psql_q "select status, count(*) from orchestrator.launches where run_id = '$RUN_ID' group by 1 order by 1"; }
 # Claimable launches as launchId|taskId (to compare with the API) and as launchId|taskId|md5(token): a launch replaced
 # by another for the same task, or given a new token, changes the line.
-pg_claimable() { psql_q "select launch_id || '|' || task_id from launches where run_id = '$RUN_ID' and status = 'claimable' order by 1"; }
-pg_claimable_tokens() { psql_q "select launch_id || '|' || task_id || '|' || md5(token) from launches where run_id = '$RUN_ID' and status = 'claimable' order by 1"; }
-pg_states() { psql_q "select id || '|' || (entry->'status'->>'kind') from overlay where run_id = '$RUN_ID' order by 1"; }
+pg_claimable() { psql_q "select launch_id || '|' || task_id from orchestrator.launches where run_id = '$RUN_ID' and status = 'claimable' order by 1"; }
+pg_claimable_tokens() { psql_q "select launch_id || '|' || task_id || '|' || md5(token) from orchestrator.launches where run_id = '$RUN_ID' and status = 'claimable' order by 1"; }
+pg_states() { psql_q "select id || '|' || (entry->'status'->>'kind') from orchestrator.overlay where run_id = '$RUN_ID' order by 1"; }
 
 # Succeeds when $2 (a function name) prints exactly $1.
 same() {
