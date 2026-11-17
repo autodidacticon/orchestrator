@@ -130,7 +130,9 @@ and call `configure` only with what the user confirms. `configure` also takes `c
 `effort` (the worker defaults of the kind in force, or of `runnerKind` in the same call, for
 launches prepared from then on; effort is `low`, `medium`, `high`, `xhigh`, or `max`, and
 `ultra` is codex-only), `codex` (`{ model, effort }` for codex whichever kind is in force),
-`sandbox` (the codex sandbox), and `commit` (`agent` or `daemon`, the commit policy of the
+`sandbox` (the codex sandbox), `networkAccess` (`codex.networkAccess`, `true` or `false`, for
+launches spawned or claimed after the change; it widens what a Codex worker can reach, so set
+it only when the user says so), and `commit` (`agent` or `daemon`, the commit policy of the
 kind in force); a null clears an override so the value falls back to the file, detection, or
 the default. The integration branch is start-only: pass `integrationBranch` to `start` before
 the run holds any launch; a running daemon refuses it.

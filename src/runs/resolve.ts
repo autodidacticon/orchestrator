@@ -41,7 +41,7 @@ type Namespace = (typeof NAMESPACE_OF)[RunnerKind];
 const NAMESPACES: readonly Namespace[] = ['claude', 'codex', 'opencode'];
 const NAMESPACE_LEAVES: Record<Namespace, readonly string[]> = {
   claude: ['model', 'effort', 'commit'],
-  codex: ['model', 'effort', 'sandbox', 'commit', 'command'],
+  codex: ['model', 'effort', 'sandbox', 'commit', 'command', 'networkAccess'],
   opencode: ['model', 'effort', 'commit', 'command', 'permission', 'dataDir'],
 };
 
@@ -81,6 +81,7 @@ const codexOverridesSchema = z
     sandbox: z.enum(CODEX_SANDBOXES).nullable().optional(),
     commit: z.enum(COMMIT_POLICIES).nullable().optional(),
     command: z.string().min(1).nullable().optional(),
+    networkAccess: z.boolean().nullable().optional(),
   })
   .strict();
 
@@ -308,14 +309,14 @@ export function parseOverridePatch(patch: unknown, kind?: RunnerKind): PatchResu
 }
 
 /**
- * Operator-surface arguments into an override patch: `sandbox` is codex's,
+ * Operator-surface arguments into an override patch: `sandbox` and `networkAccess` are codex's,
  * `permission` and `dataDir` are opencode's, and `commit` lands under the
  * namespace of the patch's own `runnerKind`, else of `kind` (the kind in force).
  * Used by `orchestrator-ctl config` and the MCP `start` and `configure` tools.
  * See specs/operator-control "Configuration route".
  */
 export function foldRunnerArgs(args: Record<string, unknown>, kind: RunnerKind): Record<string, unknown> {
-  const { sandbox, permission, dataDir, commit, ...out } = args;
+  const { sandbox, networkAccess, permission, dataDir, commit, ...out } = args;
   const put = (ns: Namespace, leafKey: string, v: unknown) => {
     if (v === undefined) return;
     // A key cleared and set in one call is a conflict, not a fold: the daemon refuses the same patch shape.
@@ -324,6 +325,7 @@ export function foldRunnerArgs(args: Record<string, unknown>, kind: RunnerKind):
     out[ns] = { ...(isObject(out[ns]) ? out[ns] : {}), [leafKey]: v };
   };
   put('codex', 'sandbox', sandbox);
+  put('codex', 'networkAccess', networkAccess);
   put('opencode', 'permission', permission);
   put('opencode', 'dataDir', dataDir);
   put(NAMESPACE_OF[isRunnerKind(out['runnerKind']) ? out['runnerKind'] : kind], 'commit', commit);
@@ -441,7 +443,7 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
     command: leaf(o.command, fileHas(codexFile, 'command'), c.command, d.command, noFile),
     sandbox,
     commit: leaf<CommitPolicy>(o.commit, fileHas(codexFile, 'commit'), c.commit ?? derivedCommit, derivedCommit, noFile),
-    networkAccess: leaf(undefined, fileHas(codexFile, 'networkAccess'), c.networkAccess, d.networkAccess, noFile),
+    networkAccess: leaf(o.networkAccess, fileHas(codexFile, 'networkAccess'), c.networkAccess, d.networkAccess, noFile),
     ignoreUserConfig: leaf(undefined, fileHas(codexFile, 'ignoreUserConfig'), c.ignoreUserConfig, d.ignoreUserConfig, noFile),
     ephemeral: leaf(undefined, fileHas(codexFile, 'ephemeral'), c.ephemeral, d.ephemeral, noFile),
   };
@@ -505,7 +507,7 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
         ...base.runner,
         kind: kind.value,
         claude: { ...base.runner.claude, model: claudeModel.value, effort: claudeEffort.value, commit: claude.commit.value },
-        codex: { ...c, model: codex.model.value, effort: codex.effort.value, command: codex.command.value, sandbox: codex.sandbox.value, commit: codex.commit.value },
+        codex: { ...c, model: codex.model.value, effort: codex.effort.value, command: codex.command.value, sandbox: codex.sandbox.value, commit: codex.commit.value, networkAccess: codex.networkAccess.value },
         opencode: {
           ...oc,
           model: opencode.model.value,
@@ -633,7 +635,7 @@ const DOTTED_KEYS = BLOCKS.flatMap((b) => (BLOCK_LEAVES[b] ?? []).map((l) => `${
 /**
  * `--set key=value` flags into an override document: `capacity` as an integer,
  * `allowedTools` as a JSON array or one rule per flag (appended), `claude.<leaf>`,
- * `codex.<leaf>` and `opencode.<leaf>` folded into their namespace (or
+ * `codex.<leaf>` and `opencode.<leaf>` folded into their namespace, `codex.networkAccess` as exactly `true` or `false` (or
  * `claude=`/`codex=`/`opencode=` as a JSON object), `budgets.maxLaunchMs`, `health.stuckAfterMs` and
  * `health.stuckFailAfterMs` as decimal digits only (or `budgets=`/`health=` as a JSON object), the rest as strings. With a `runnerKind` flag or a `kind`, the flat
  * `model` and `effort` bind to that kind and `effort` is checked against its set.
@@ -652,6 +654,12 @@ export function parseSetFlags(flags: readonly string[], kind?: RunnerKind): Over
       if (!Number.isSafeInteger(n)) throw new Error(`--set ${key} expects milliseconds as decimal digits, an integer from 0 to ${Number.MAX_SAFE_INTEGER} (0 disables the limit), not ${JSON.stringify(raw)}`);
       const [block, leafKey] = key.split('.') as [LimitBlock, string];
       out[block] = { ...(isObject(out[block]) ? out[block] : {}), [leafKey]: n };
+      continue;
+    }
+    if (key === 'codex.networkAccess') {
+      // Exactly `true` or `false`: `Boolean('false')` is true, and an empty value must never read as a clear.
+      if (raw !== 'true' && raw !== 'false') throw new Error(`--set codex.networkAccess expects true or false, not ${JSON.stringify(raw)}`);
+      out['codex'] = { ...(isObject(out['codex']) ? out['codex'] : {}), networkAccess: raw === 'true' };
       continue;
     }
     if (DOTTED_KEYS.includes(key)) {

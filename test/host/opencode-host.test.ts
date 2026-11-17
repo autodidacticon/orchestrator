@@ -62,7 +62,7 @@ const EDITION_BLOCKS: Record<string, Record<string, string>> = {
     '`codex`, or `opencode`. All three kinds run headless under `spawn`': '35aaf4b54dbca71a',
     'For an `opencode` run name the permission and the commit policy': 'd16a063501b6d383',
     '`runner.opencode.*` (`model` as a `provider/model` id': '9ed9fdfeccffe3b7',
-    '`permission` and `dataDir` (the opencode leaves)': 'ba90099048fa2fec',
+    '`permission` and `dataDir` (the opencode leaves)': '70d93a28d3d7e60d',
     "below the server's `timeout` in `opencode.json`": '799349ea4bcdcf5f',
     'for an `opencode` launch, whose `permission: derived` rejects': '3d450fb87ad5a46a',
   },
@@ -313,6 +313,14 @@ describe('opencode host', () => {
     const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
     const imp = readFileSync(path.join(host, 'skills/import/SKILL.md'), 'utf8');
     expectProfileBlocks(run, imp);
+  });
+
+  // See specs/host-integration "Run skill names the Codex network access override".
+  it('the run skill configure paragraph names networkAccess, what it widens, and that the user decides', () => {
+    const blocks = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8').split(/\n\s*\n/).map((b) => b.replace(/\s+/g, ' ').trim());
+    const configure = blocks.filter((b) => b.includes('`configure` also takes'));
+    expect(configure).toHaveLength(1);
+    for (const word of ['networkAccess', 'widens what a Codex worker can reach', 'only when the user says so']) expect(configure[0], word).toContain(word);
   });
 
   it('the README covers registration, skills install, the plugin, the start-mode rule, and the stdio-close release', () => {

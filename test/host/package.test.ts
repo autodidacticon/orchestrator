@@ -258,6 +258,14 @@ describe('package entrypoints', () => {
     for (const word of ['status.profiles', 'held: true']) expect(work, word).toContain(word);
   });
 
+  // See specs/host-integration "Run skill names the Codex network access override".
+  it('the run skill configure paragraph names networkAccess, what it widens, and that the user decides', () => {
+    const blocks = readFileSync(path.join(plugin, 'skills/run/SKILL.md'), 'utf8').split(/\n\s*\n/).map((b) => b.replace(/\s+/g, ' ').trim());
+    const configure = blocks.filter((b) => b.includes('`configure` also takes'));
+    expect(configure).toHaveLength(1);
+    for (const word of ['networkAccess', 'widens what a Codex worker can reach', 'only when the user says so']) expect(configure[0], word).toContain(word);
+  });
+
   it("the review skill reads the index first, keyed on the answer's view field", () => {
     const review = readFileSync(path.join(root, 'hosts/claude-code/skills/review/SKILL.md'), 'utf8');
     for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable']) expect(review, word).toContain(word);

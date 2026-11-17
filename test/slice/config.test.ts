@@ -155,7 +155,7 @@ describe('orchestrator-ctl config', () => {
     expect(bad.status).toBe(400);
     expect(bad.body).toMatchObject({ key: 'codex.sandbox' });
     const usage = ((await runCli(['--help'])).body as { usage: string }).usage;
-    for (const word of ['--runner-kind', '--sandbox', '--commit', 'runnerKind=claude-code|codex', 'codex.{model,effort,sandbox,commit,command}', 'claude-opus-5-5 at medium', 'gpt-6-astra at medium', 'ultra is codex-only']) expect(usage, word).toContain(word);
+    for (const word of ['--runner-kind', '--sandbox', '--commit', 'runnerKind=claude-code|codex', 'codex.{model,effort,sandbox,commit,command,networkAccess}','claude-opus-5-5 at medium', 'gpt-6-astra at medium', 'ultra is codex-only']) expect(usage, word).toContain(word);
   });
 
   it('selects opencode with --permission and --data-dir, clears an opencode leaf, binds --commit to opencode, and names three kinds in the usage', async () => {
@@ -253,6 +253,31 @@ describe('orchestrator-ctl config', () => {
     for (const word of ['budgets.maxLaunchMs', 'health.stuckAfterMs', 'health.stuckFailAfterMs', '0 disables the limit']) expect(DAEMON_USAGE.replace(/\s+/g, ' '), word).toContain(word);
   });
 
+  // See specs/worker-runners "Codex network access override".
+  it('codex.networkAccess is set through the route, set and cleared through config --set and --clear, and a non-boolean is refused', async () => {
+    h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000 } });
+    const url = h.orch.apiBaseUrl;
+    const raw = () => h!.store.getKv('config.overrides');
+    const stored = () => JSON.parse(raw() ?? '{}') as Record<string, Record<string, unknown> | undefined>;
+    const put = await http(url, 'PUT', '/v1/config', { codex: { networkAccess: true } });
+    expect(put.status).toBe(200);
+    expect(put.body).toMatchObject({ applied: ['codex'], overrides: { codex: { networkAccess: true } }, config: { codex: { networkAccess: { value: true, source: 'argument' } } } });
+    const str = await http(url, 'PUT', '/v1/config', { codex: { networkAccess: 'true' } });
+    expect(str.status).toBe(400);
+    expect(str.body).toMatchObject({ key: 'codex.networkAccess' });
+    const off = await runCli(['--url', url, 'config', '--set', 'codex.networkAccess=false']);
+    expect(off.status).toBe(200);
+    expect((await http(url, 'GET', '/v1/config')).body).toMatchObject({ config: { codex: { networkAccess: { value: false, source: 'argument' } } } });
+    expect(stored()).toEqual({ codex: { networkAccess: false } });
+    const cleared = await runCli(['--url', url, 'config', '--clear', 'codex.networkAccess']);
+    expect(cleared.status).toBe(200);
+    expect(stored()['codex']?.['networkAccess']).toBeUndefined();
+    expect(((cleared.body as Record<string, unknown>)['overrides'] as Record<string, Record<string, unknown> | undefined>)['codex']?.['networkAccess']).toBeUndefined();
+    const before = raw();
+    await expect(runCli(['--url', url, 'config', '--set', 'codex.networkAccess=maybe'])).rejects.toThrow(/codex\.networkAccess/);
+    expect(raw()).toBe(before);
+  });
+
   // See specs/operator-control "Configuration route: a change that would end a live launch".
   it('a limit change that would end a live launch is refused with wouldEnd unless endLive confirms it; config --end-live sends it', async () => {
     h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000, budgets: { maxLaunchMs: 600_000, maxRunCostUsd: 0, prices: {} } } });
@@ -345,6 +370,20 @@ describe('orchestrator-ctl config', () => {
     expect(started.config).toMatchObject({ runnerKind: { value: 'codex', source: 'argument' }, effort: { value: 'ultra', source: 'argument' }, codex: { model: { value: 'gpt-6-pro', source: 'argument' }, sandbox: { value: 'read-only', source: 'argument' }, commit: { value: 'daemon', source: 'default' } } });
     await stopDaemon({ repo, env });
   }, 60_000);
+
+  // See specs/worker-runners "Codex network access override": the leaf travels to a spawned daemon as --set codex=<JSON object>.
+  it('start accepts --set codex.networkAccess, true and false alike', async () => {
+    env = { ...process.env, ORCH_HOME: fresh('orch-kind-home-') };
+    for (const value of [true, false]) {
+      const repo = realpathSync(makeRepo(fresh('orch-kind-repo-')));
+      writeFileSync(path.join(repo, 'orchestrator.yaml'), `runnerCommand: "${scripted}"\ncheckCommand: "true"\nrunner: { codex: { networkAccess: ${!value} } }\n`);
+      const overrides = parseSetFlags(['runnerKind=codex', `codex.networkAccess=${value}`]);
+      expect(overrides).toEqual({ runnerKind: 'codex', codex: { networkAccess: value } });
+      const started = await startDaemon({ repo, env, overrides });
+      expect(started.config).toMatchObject({ codex: { networkAccess: { value, source: 'argument' } } });
+      await stopDaemon({ repo, env });
+    }
+  }, 90_000);
 });
 
 // See specs/toolchain-discovery "Resolved configuration record" and "Integration branch detection and pinning".

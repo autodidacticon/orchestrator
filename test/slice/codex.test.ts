@@ -112,6 +112,38 @@ describe('codex slice (fake codex)', () => {
     expect(log.trimEnd().split('\n').pop()).toContain('"turn.completed"');
   });
 
+  // See specs/worker-runners "Codex network access override".
+  it('codex.networkAccess set before the first launch reaches the command line', async () => {
+    h = await makeSlice({ graph: single('commitAndSubmit'), kind: 'codex' });
+    expect(h.orch.setConfig({ codex: { networkAccess: true } })).toMatchObject({ ok: true, applied: ['codex'] });
+    await h.waitFor(() => h!.store.listLaunches({ taskId: 'T1' }).length > 0);
+    const [launch] = h.store.listLaunches({ taskId: 'T1' });
+    const args = await readArgs(h, launch!.worktree);
+    expect(args.sandbox).toBe('workspace-write');
+    expect(args.overrides['sandbox_workspace_write.network_access']).toBe(true);
+  });
+
+  it('an override of false wins over a file that sets codex.networkAccess true: no flag', async () => {
+    h = await makeSlice({ graph: single('commitAndSubmit'), kind: 'codex', config: { runner: { codex: { networkAccess: true } } } });
+    expect(h.orch.effective().config.runner.codex.networkAccess).toBe(true);
+    expect(h.orch.setConfig({ codex: { networkAccess: false } })).toMatchObject({ ok: true });
+    expect(h.orch.configReport().config.codex.networkAccess).toEqual({ value: false, source: 'argument' });
+    await h.waitFor(() => h!.store.listLaunches({ taskId: 'T1' }).length > 0);
+    const [launch] = h.store.listLaunches({ taskId: 'T1' });
+    const args = await readArgs(h, launch!.worktree);
+    expect(args.overrides).not.toHaveProperty('sandbox_workspace_write.network_access');
+  });
+
+  it('codex.networkAccess is accepted under read-only and the flag is still passed', async () => {
+    h = await makeSlice({ graph: single('commitAndSubmit'), kind: 'codex' });
+    expect(h.orch.setConfig({ codex: { sandbox: 'read-only', networkAccess: true } })).toMatchObject({ ok: true, applied: ['codex'] });
+    await h.waitFor(() => h!.store.listLaunches({ taskId: 'T1' }).length > 0);
+    const [launch] = h.store.listLaunches({ taskId: 'T1' });
+    const args = await readArgs(h, launch!.worktree);
+    expect(args.sandbox).toBe('read-only');
+    expect(args.overrides['sandbox_workspace_write.network_access']).toBe(true);
+  });
+
   it('sums the usage of every turn.completed (two-turns.jsonl, a test decision)', async () => {
     h = await makeSlice({ graph: single('commitAndSubmit', ', codexFixture: two-turns.jsonl'), kind: 'codex' });
     await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');

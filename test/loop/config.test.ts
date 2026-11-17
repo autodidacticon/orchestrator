@@ -122,6 +122,36 @@ describe('effective configuration', () => {
   });
 });
 
+// See specs/worker-runners "Codex network access override".
+describe('codex.networkAccess override', () => {
+  it('sets, reports, carries into the effective config, refuses a string, and clears with null', () => {
+    const h = harness();
+    expect(h.orch.setConfig({ codex: { networkAccess: true } })).toMatchObject({ ok: true, applied: ['codex'] });
+    expect(h.orch.configReport().config.codex.networkAccess).toEqual({ value: true, source: 'argument' });
+    expect(h.orch.effective().config.runner.codex.networkAccess).toBe(true);
+    const stored = h.store.getKv('config.overrides');
+    expect(h.orch.setConfig({ codex: { networkAccess: 'true' } })).toMatchObject({ ok: false, status: 400, key: 'codex.networkAccess' });
+    expect(h.store.getKv('config.overrides')).toBe(stored);
+    expect(h.orch.setConfig({ codex: { networkAccess: false } })).toMatchObject({ ok: true, applied: ['codex'] });
+    expect(h.orch.configReport().config.codex.networkAccess).toEqual({ value: false, source: 'argument' });
+    expect(h.orch.effective().config.runner.codex.networkAccess).toBe(false);
+    expect(h.orch.setConfig({ codex: { networkAccess: null } })).toMatchObject({ ok: true, applied: ['codex'] });
+    expect(h.orch.configReport().config.codex.networkAccess).toEqual({ value: undefined, source: 'default' });
+    expect(h.orch.effective().config.runner.codex.networkAccess).toBeUndefined();
+  });
+
+  it('is accepted and reported with no effect and no warning under claude-code and under a codex template without {codexOverrides}', () => {
+    for (const config of [{ runner: { kind: 'claude-code' as const } }, { runner: { kind: 'codex' as const, codex: { command: 'codex exec -m {model} < {brief}' } } }]) {
+      const h = harness(config);
+      const warnings = h.store.listEvents({ kind: 'config.warning' }).length;
+      expect(h.orch.setConfig({ codex: { networkAccess: true } }), config.runner.kind).toMatchObject({ ok: true, applied: ['codex'] });
+      expect(h.orch.configReport().config.codex.networkAccess).toEqual({ value: true, source: 'argument' });
+      expect(h.orch.configReport().config.runnerKind.value).toBe(config.runner.kind);
+      expect(h.store.listEvents({ kind: 'config.warning' })).toHaveLength(warnings);
+    }
+  });
+});
+
 // See specs/toolchain-discovery "Runtime limit overrides" and specs/operator-control "Status report: limits in force".
 describe('limit overrides', () => {
   it('0 disables a stuck fail limit at runtime, and null falls back to the file value or the default', async () => {

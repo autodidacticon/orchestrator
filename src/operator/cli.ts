@@ -89,7 +89,7 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl start [--repo <path>] [--set key=value]...   start the daemon for a repository (idempotent);
                                                --set checkCommand=..., integrationBranch=..., capacity=..., allowedTools=..., runnerCommand=...,
                                                runnerKind=claude-code|codex|opencode, model=..., effort=..., claude.{model,effort,commit}=...,
-                                               codex.{model,effort,sandbox,commit,command}=...,
+                                               codex.{model,effort,sandbox,commit,command,networkAccess}=... (codex.networkAccess is true or false),
                                                opencode.{model,effort,commit,command,permission,dataDir}=...,
                                                budgets.maxLaunchMs=..., health.stuckAfterMs=..., health.stuckFailAfterMs=...
   orchestrator-ctl stop [--reap] [--repo <path>]

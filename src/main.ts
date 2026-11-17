@@ -76,8 +76,9 @@ for the run before resolving; keys: checkCommand, integrationBranch (start-only)
 capacity, allowedTools (a JSON array, or one rule per flag), runnerCommand,
 runnerKind (claude-code or codex), model and effort (bound to the kind in
 force), and the per-kind keys claude.model, claude.effort, claude.commit,
-codex.model, codex.effort, codex.sandbox, codex.commit, codex.command, and
-the limits budgets.maxLaunchMs, health.stuckAfterMs and health.stuckFailAfterMs
+codex.model, codex.effort, codex.sandbox, codex.commit, codex.command,
+codex.networkAccess (exactly true or false; applies to launches spawned or
+claimed after the change), and the limits budgets.maxLaunchMs, health.stuckAfterMs and health.stuckFailAfterMs
 (milliseconds as decimal digits; 0 disables the limit; with both stuck limits
 above 0, health.stuckFailAfterMs must be above health.stuckAfterMs). An
 unknown key or a bad value is a usage error (exit 2). While checkCommand is

@@ -453,6 +453,14 @@ describe('codex host', () => {
     const imp = readFileSync(path.join(host, 'skills/import/SKILL.md'), 'utf8');
     expectProfileBlocks(run, imp);
   });
+
+  // See specs/host-integration "Run skill names the Codex network access override".
+  it('the run skill configure paragraph names networkAccess, what it widens, and that the user decides', () => {
+    const blocks = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8').split(/\n\s*\n/).map((b) => b.replace(/\s+/g, ' ').trim());
+    const configure = blocks.filter((b) => b.includes('`configure` also takes'));
+    expect(configure).toHaveLength(1);
+    for (const word of ['networkAccess', 'widens what a Codex worker can reach', 'only when the user says so']) expect(configure[0], word).toContain(word);
+  });
 });
 
 /** A block cut out of a skill: from its opening words to the next blank line, or to the next list item for a bullet. Exactly one block opens with the words. */

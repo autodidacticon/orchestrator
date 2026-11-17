@@ -108,6 +108,17 @@ describe('codex work loop (work.mjs, fake codex on PATH)', () => {
     expect(body.codex.env['ORCH_COMMIT_POLICY']).toBe('daemon');
   });
 
+  // See specs/worker-runners "Codex network access override": a launch parked before the change and claimed after it runs with the new value.
+  it('a codex claim made after codex.networkAccess is set carries it, though the launch was parked before', async () => {
+    h = await makeSlice({ graph: 'nodes:\n  - { id: T1, title: One, description: d, acceptanceCriteria: [a], deps: [], behavior: commitAndSubmit }', config: { runner: { mode: 'pull', kind: 'codex' } } });
+    await h.waitFor(() => h!.store.listLaunches({ status: 'claimable' }).length === 1);
+    expect(h.orch.setConfig({ codex: { networkAccess: true } })).toMatchObject({ ok: true, applied: ['codex'] });
+    const res = await fetch(`${h.orch.apiBaseUrl}/v1/claims`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ workerId: 'w', runner: 'codex' }) });
+    const body = (await res.json()) as { codex: { settings: CodexSettings } };
+    expect(res.status).toBe(200);
+    expect(body.codex.settings.networkAccess).toBe(true);
+  });
+
   it('a codex that fails to start is released with keep, and the loop stops after --max-failures', async () => {
     h = await makeSlice({ graph: 'nodes:\n  - { id: T1, title: One, description: d, acceptanceCriteria: [a], deps: [], behavior: commitAndSubmit }', config: { runner: { mode: 'pull', kind: 'codex' } } });
     await h.waitFor(() => h!.store.listLaunches({ status: 'claimable' }).length === 1);

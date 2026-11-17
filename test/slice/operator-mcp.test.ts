@@ -82,7 +82,17 @@ describe('operator MCP server', () => {
     // The wait description quotes the cap in force, which a Codex registration sizes tool_timeout_sec against. See specs/operator-mcp "Wait tool".
     expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain(`cap ${WAIT_CAP_MS}`);
     const configure = tools.tools.find((t) => t.name === 'configure');
-    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'budgets', 'capacity', 'checkCommand', 'claude', 'codex', 'commit', 'dataDir', 'effort', 'endLive', 'health', 'model', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'budgets', 'capacity', 'checkCommand', 'claude', 'codex', 'commit', 'dataDir', 'effort', 'endLive', 'health', 'model', 'networkAccess', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
+    // See specs/worker-runners "Codex network access override".
+    const netStart = tools.tools.find((t) => t.name === 'start');
+    for (const tool of [configure, netStart]) {
+      const props = (tool?.inputSchema as { properties: Record<string, { description?: string }> }).properties;
+      expect(Object.keys(props), tool?.name).toContain('networkAccess');
+      for (const word of ['codex.networkAccess', 'widens what a worker can reach', 'only when the user says so', 'spawned or claimed after the change']) expect(props['networkAccess']?.description, `${tool?.name}: ${word}`).toContain(word);
+    }
+    const netSentence = 'networkAccess (codex.networkAccess, true or false) applies to Codex launches spawned or claimed after the change';
+    expect(configure?.description).toContain(netSentence);
+    expect(configure?.description?.indexOf(netSentence)).toBeGreaterThan(configure?.description?.indexOf('all for every launch prepared afterwards') ?? Infinity);
     // The limit keys. See specs/operator-mcp "Configure and start tools: limit keys".
     for (const word of ['budgets { maxLaunchMs }', 'health { stuckAfterMs, stuckFailAfterMs }', '0 disables a limit', 'applies on the next tick']) expect(configure?.description, word).toContain(word);
     // See specs/operator-mcp "Configure tool: endLive".
@@ -398,13 +408,22 @@ describe('operator MCP server', () => {
     env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
     client = new Client({ name: 'test', version: '0' });
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
-    const started = await tool('start', { runnerKind: 'codex', sandbox: 'read-only', codex: { effort: 'ultra' } });
+    const started = await tool('start', { runnerKind: 'codex', sandbox: 'read-only', codex: { effort: 'ultra' }, networkAccess: true });
     expect(started).toMatchObject({
       status: 200,
       started: true,
       mode: 'spawn',
-      config: { runnerKind: { value: 'codex', source: 'argument' }, effort: { value: 'ultra', source: 'argument' }, codex: { sandbox: { value: 'read-only', source: 'argument' }, commit: { value: 'daemon', source: 'default' } } },
+      config: {
+        runnerKind: { value: 'codex', source: 'argument' },
+        effort: { value: 'ultra', source: 'argument' },
+        codex: { sandbox: { value: 'read-only', source: 'argument' }, commit: { value: 'daemon', source: 'default' }, networkAccess: { value: true, source: 'argument' } },
+      },
     });
+    // false survives the tool filter, the fold and the route; null clears the override. See specs/worker-runners "Codex network access override".
+    expect(await tool('configure', { networkAccess: false })).toMatchObject({ status: 200, config: { codex: { networkAccess: { value: false, source: 'argument' } } } });
+    const netCleared = await tool('configure', { networkAccess: null });
+    expect(netCleared).toMatchObject({ status: 200, config: { codex: { networkAccess: { source: 'default' } } } });
+    expect((netCleared['config'] as { codex: { networkAccess: { value?: unknown } } }).codex.networkAccess.value).toBeUndefined();
     expect(started['modeNote']).toMatch(/codex.*spawn/);
     expect(started['modeNote']).toContain('pull-mode workers for codex come from `orchestrator-work --runner codex`');
     expect((await tool('status'))['runner']).toMatchObject({ mode: 'spawn' });

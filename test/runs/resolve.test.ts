@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { type ConfigInput, defaultConfig } from '../../src/config.js';
 import { DEFAULT_CLAUDE_COMMAND } from '../../src/runner/command.js';
 import { ZodError } from 'zod';
-import { applyOverridePatch, mergeOverrides, parseSetFlags, readOverrides, reportOf, resolveLayers } from '../../src/runs/resolve.js';
+import { applyOverridePatch, foldRunnerArgs, mergeOverrides, parseSetFlags, readOverrides, reportOf, resolveLayers } from '../../src/runs/resolve.js';
 import { readConfigJson, writeConfigJson } from '../../src/runs/runDir.js';
 import type { ToolchainRecord } from '../../src/toolchain/detect.js';
 import { BASE_RULES } from '../../src/toolchain/tools.js';
@@ -269,6 +269,47 @@ describe('runner kinds', () => {
     expect(applyOverridePatch(inputs, { runnerKind: 'codex' }, { codex: null, model: 'gpt-6-pro' })).toMatchObject({ ok: false, key: 'codex' });
     // Clearing the kind in the same patch binds the flat keys to the kind it falls back to.
     expect(applyOverridePatch({ base: defaultConfig({ runner: { kind: 'codex' } }) }, { runnerKind: 'claude-code' }, { runnerKind: null, effort: 'ultra' })).toMatchObject({ ok: true, next: { codex: { effort: 'ultra' } } });
+  });
+});
+
+// See specs/worker-runners "Codex network access override".
+describe('codex.networkAccess override', () => {
+  it('resolves an argument over the file, and an override of false is an argument', () => {
+    const set = resolveLayers(file({}), { codex: { networkAccess: true } });
+    expect(set.codex.networkAccess).toEqual({ value: true, source: 'argument' });
+    expect(set.config.runner.codex.networkAccess).toBe(true);
+    const filed = file({ runner: { codex: { networkAccess: true } } });
+    const off = resolveLayers(filed, { codex: { networkAccess: false } });
+    expect(off.codex.networkAccess).toEqual({ value: false, source: 'argument' });
+    expect(off.config.runner.codex.networkAccess).toBe(false);
+    expect(resolveLayers(filed).codex.networkAccess).toEqual({ value: true, source: 'file' });
+    expect(resolveLayers(file({})).codex.networkAccess).toEqual({ value: undefined, source: 'default' });
+  });
+
+  it('parses --set codex.networkAccess as exactly true or false, and keeps the JSON-object form', () => {
+    expect(parseSetFlags(['codex.networkAccess=true'])).toEqual({ codex: { networkAccess: true } });
+    expect(parseSetFlags(['codex.networkAccess=false'])).toEqual({ codex: { networkAccess: false } });
+    expect(parseSetFlags(['codex={"networkAccess":true}'])).toEqual({ codex: { networkAccess: true } });
+    expect(parseSetFlags(['codex.sandbox=read-only', 'codex.networkAccess=false'])).toEqual({ codex: { sandbox: 'read-only', networkAccess: false } });
+    for (const bad of ['codex.networkAccess=', 'codex.networkAccess=1', 'codex.networkAccess=yes', 'codex.networkAccess=True']) expect(() => parseSetFlags([bad]), bad).toThrow(/^--set codex\.networkAccess/);
+    expect(() => parseSetFlags(['codex={"networkAccess":"true"}'])).toThrow(/codex\.networkAccess/);
+  });
+
+  it('merges and clears only its own leaf', () => {
+    expect(mergeOverrides({ codex: { sandbox: 'read-only', networkAccess: true } }, { codex: { networkAccess: null } })).toEqual({ codex: { sandbox: 'read-only' } });
+    expect(mergeOverrides({ codex: { networkAccess: true } }, { codex: { networkAccess: false } })).toEqual({ codex: { networkAccess: false } });
+  });
+
+  it('folds the flat tool argument under codex whatever the kind, and refuses a clear and a set in one call', () => {
+    expect(foldRunnerArgs({ networkAccess: false }, 'claude-code')).toEqual({ codex: { networkAccess: false } });
+    expect(foldRunnerArgs({ networkAccess: null }, 'codex')).toEqual({ codex: { networkAccess: null } });
+    expect(() => foldRunnerArgs({ codex: null, networkAccess: true }, 'codex')).toThrow(/codex is cleared/);
+    expect(() => foldRunnerArgs({ codex: { networkAccess: null }, networkAccess: true }, 'codex')).toThrow(/both cleared and set/);
+  });
+
+  it('a stored document keeps the leaf through readOverrides', () => {
+    const kv = (doc: unknown) => ({ getKv: (k: string) => (k === 'config.overrides' ? JSON.stringify(doc) : undefined) });
+    expect(readOverrides(kv({ codex: { networkAccess: false } }))).toEqual({ codex: { networkAccess: false } });
   });
 });
 
