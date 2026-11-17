@@ -81,6 +81,11 @@ export const configSchema = z.object({
       claimWindowMs: z.number().int().nonnegative().default(60_000),
       /** The agent CLI launches run under. See specs/worker-runners "Runner kinds and defaults". */
       kind: z.enum(RUNNER_KINDS).default('claude-code'),
+      /**
+       * Hold a task at admission while its model or effort would come from a built-in default; the stored
+       * choice (kv `runner.confirmProfile`) is read first. See specs/model-selection "Profile hold at admission".
+       */
+      confirmProfile: z.boolean().default(false),
       /** The allow list of spawned Claude Code agents. See specs/toolchain-discovery "Derived allowed tools". */
       claude: z
         .object({

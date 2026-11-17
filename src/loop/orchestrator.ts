@@ -171,6 +171,43 @@ export interface OrchestratorDeps {
   resolved?: Resolved;
 }
 
+/** Where a task's model or effort comes from: its payload, or the kind's leaf. See specs/model-selection "Profile sources of a task". */
+export type ProfileSource = 'task' | 'argument' | 'file' | 'default';
+export type ProfileKey = 'model' | 'effort';
+const PROFILE_KEYS: readonly ProfileKey[] = ['model', 'effort'];
+/** At most this many task ids per `status.profiles` entry. */
+const PROFILE_SAMPLE = 5;
+type LeafSource = Exclude<ProfileSource, 'task'>;
+interface KindFacts {
+  modelSource: LeafSource;
+  effortSource: LeafSource;
+  modelApplied: boolean;
+  effortApplied: boolean;
+}
+export interface ProfileContext {
+  hold: boolean;
+  mode: RunnerMode;
+}
+export interface TaskProfile {
+  runner: RunnerKind;
+  model: string;
+  effort: Effort;
+  modelSource: ProfileSource;
+  effortSource: ProfileSource;
+  /** The keys whose value would come from a built-in default while the hold is on; `model` before `effort`. */
+  missing: ProfileKey[];
+}
+export interface ProfileEntry extends TaskProfile {
+  held: boolean;
+  tasks: number;
+  sample: Id[];
+}
+export interface ProfileHeldEntry {
+  runner: RunnerKind;
+  missing: ProfileKey[];
+  tasks: number;
+}
+
 export interface StatusReport {
   finished: boolean;
   stalled: boolean;
@@ -222,7 +259,9 @@ export interface StatusReport {
   /** Pending agent proposals awaiting a human. See specs/operator-control "Status report: proposals". */
   proposals: Array<{ id: string; taskId: Id; title: string }>;
   /** Pull runner: the mode in force, parked launches in claim order, and the workers holding launches. See specs/operator-control "Status report: workers". */
-  runner: { mode: RunnerMode; claimWindowMs: number };
+  runner: { mode: RunnerMode; claimWindowMs: number; confirmProfile: boolean };
+  /** Every unstarted task's profile, grouped, with the hold's verdict. See specs/operator-control "Status report: profiles". */
+  profiles: ProfileEntry[];
   claimable: Id[];
   /** Parked launches per runner kind, so a worker can tell whether any of them is for a CLI it runs. */
   claimableByKind: Record<RunnerKind, number>;
@@ -281,6 +320,8 @@ export class Orchestrator implements OrchestratorCore {
   /** The boot-time resolution; `effective()` re-applies the durable overrides over its inputs. */
   private readonly boot: Resolved;
   private configMemo: { key: string; resolved: Resolved } | undefined;
+  /** Per-kind model and effort facts, keyed on the same override text as `configMemo`. */
+  private kindFactsMemo: { key: string; facts: Map<RunnerKind, KindFacts> } | undefined;
   private readonly heldJobsLogged = new Set<string>();
   /**
    * Jobs recovery could not decide because origin could not be fetched: kept off the verifier and decided by a
@@ -657,20 +698,120 @@ export class Orchestrator implements OrchestratorCore {
    * value asked for when it differed. See specs/model-selection.
    */
   selectionFor(taskId: Id): Selection {
+    return this.selectionOf(taskId).selection;
+  }
+
+  /** `selectionFor`, and whether its model and effort came from the task's payload. See specs/model-selection "Profile sources of a task". */
+  private selectionOf(taskId: Id): { selection: Selection; modelFromTask: boolean; effortFromTask: boolean } {
     const payload = this.payloadOf(this.requireNode(taskId));
     const eff = this.effective();
     const runner: RunnerKind = isRunnerKind(payload['runner']) ? payload['runner'] : eff.kind.value;
     const defaults = runner === 'codex' ? eff.config.runner.codex : runner === 'opencode' ? eff.config.runner.opencode : eff.config.runner.claude;
-    const requested: Effort = isEffort(payload['effort']) ? payload['effort'] : defaults.effort;
+    const asked = isEffort(payload['effort']);
+    const requested: Effort = asked ? (payload['effort'] as Effort) : defaults.effort;
     const fallback = EFFORT_FALLBACK[runner]?.[requested];
-    const effort: Effort = isEffortFor(runner, requested) ? requested : fallback !== undefined && isEffortFor(runner, fallback) ? fallback : defaults.effort;
+    const fits = isEffortFor(runner, requested);
+    const fallsBack = !fits && fallback !== undefined && isEffortFor(runner, fallback);
+    const effort: Effort = fits ? requested : fallsBack ? fallback : defaults.effort;
+    // A model of another kind's shape (a `provider/model` under claude-code or codex) is not bound; the kind's default applies.
+    const modelFromTask = isModelNameFor(runner, payload['model']);
     return {
-      runner,
-      // A model of another kind's shape (a `provider/model` under claude-code or codex) is not bound; the kind's default applies.
-      model: isModelNameFor(runner, payload['model']) ? payload['model'] : defaults.model,
-      effort,
-      ...(effort !== requested ? { effortRequested: requested } : {}),
+      selection: {
+        runner,
+        model: modelFromTask ? (payload['model'] as string) : defaults.model,
+        effort,
+        ...(effort !== requested ? { effortRequested: requested } : {}),
+      },
+      modelFromTask,
+      effortFromTask: asked && (fits || fallsBack),
     };
+  }
+
+  // ---- profile hold (specs/model-selection "Profile hold at admission") ----
+
+  /** The profile hold in force: the stored choice (kv `runner.confirmProfile` `on` or `off`), else the configured key. See specs/operator-control "Profile hold key". */
+  confirmProfile(): boolean {
+    const stored = this.store.getKv('runner.confirmProfile');
+    return stored === 'on' ? true : stored === 'off' ? false : this.config.runner.confirmProfile;
+  }
+
+  /** The sources and slots of one kind's model and effort leaves; memoised on the override document, like `effective()`. */
+  private kindFacts(kind: RunnerKind): KindFacts {
+    const key = this.store.getKv('config.overrides') ?? '';
+    if (this.kindFactsMemo?.key !== key) this.kindFactsMemo = { key, facts: new Map() };
+    let facts = this.kindFactsMemo.facts.get(kind);
+    if (!facts) {
+      // A stored document holds no flat model or effort, so forcing the kind reads that kind's own leaves.
+      const r = resolveLayers(this.boot.inputs, { ...readOverrides(this.store), runnerKind: kind });
+      facts = {
+        modelSource: r.provenance.model as LeafSource,
+        effortSource: r.provenance.effort as LeafSource,
+        modelApplied: r.model.applied,
+        effortApplied: r.effort.applied,
+      };
+      this.kindFactsMemo.facts.set(kind, facts);
+    }
+    return facts;
+  }
+
+  /** The hold and the mode, read once per view and never memoised. */
+  private profileContext(): ProfileContext {
+    return { hold: this.confirmProfile(), mode: this.effectiveMode() };
+  }
+
+  /** The profile a launch of the task would be prepared with, the source of each key, and the keys missing under the hold. */
+  profileOf(taskId: Id, ctx: ProfileContext = this.profileContext()): TaskProfile {
+    const { selection, modelFromTask, effortFromTask } = this.selectionOf(taskId);
+    const facts = this.kindFacts(selection.runner);
+    const modelSource: ProfileSource = modelFromTask ? 'task' : facts.modelSource;
+    const effortSource: ProfileSource = effortFromTask ? 'task' : facts.effortSource;
+    // A key the kind's template has no slot for does not reach a spawned agent; a claimed launch carries it, so pull and mixed ignore the slot.
+    const lacks = (source: ProfileSource, applied: boolean) => ctx.hold && source === 'default' && !(ctx.mode === 'spawn' && !applied);
+    const missing: ProfileKey[] = [];
+    if (lacks(modelSource, facts.modelApplied)) missing.push('model');
+    if (lacks(effortSource, facts.effortApplied)) missing.push('effort');
+    return { runner: selection.runner, model: selection.model, effort: selection.effort, modelSource, effortSource, missing };
+  }
+
+  /** Whether the task is held at admission: the hold is on, it is unstarted, and a key is missing. */
+  hasHeldProfile(taskId: Id, ctx: ProfileContext = this.profileContext()): boolean {
+    if (!ctx.hold) return false;
+    if (this.entry(taskId).status.kind !== 'unstarted') return false;
+    return this.profileOf(taskId, ctx).missing.length > 0;
+  }
+
+  /** Every unstarted task's profile, grouped, ordered by each group's first task in graph order. See specs/operator-control "Status report: profiles". */
+  profiles(): ProfileEntry[] {
+    if (!this.hasGraph()) return [];
+    const ctx = this.profileContext();
+    const groups = new Map<string, ProfileEntry>();
+    for (const node of this.graph().nodes.values()) {
+      if (node.kind !== 'task' || this.entry(node.id).status.kind !== 'unstarted') continue;
+      const p = this.profileOf(node.id, ctx);
+      const key = JSON.stringify([p.runner, p.model, p.effort, p.modelSource, p.effortSource]);
+      const entry = groups.get(key);
+      if (entry) {
+        entry.tasks++;
+        if (entry.sample.length < PROFILE_SAMPLE) entry.sample.push(node.id);
+      } else {
+        groups.set(key, { ...p, held: p.missing.length > 0, tasks: 1, sample: [node.id] });
+      }
+    }
+    return [...groups.values()];
+  }
+
+  /** The wait digest's view: one entry per runner kind with a held task. See specs/operator-mcp "Wait digest: profileHeld". */
+  profileHeld(profiles: ProfileEntry[] = this.profiles()): ProfileHeldEntry[] {
+    const byKind = new Map<RunnerKind, ProfileHeldEntry>();
+    // A group's tasks share their missing keys, so each kind's first held group holds its first held task.
+    for (const p of profiles) {
+      if (!p.held) continue;
+      const entry = byKind.get(p.runner) ?? { runner: p.runner, missing: [], tasks: 0 };
+      entry.tasks += p.tasks;
+      entry.missing = PROFILE_KEYS.filter((k) => entry.missing.includes(k) || p.missing.includes(k));
+      byKind.set(p.runner, entry);
+    }
+    return [...byKind.values()];
   }
 
   commitPolicyFor(kind: RunnerKind): CommitPolicy {
@@ -1953,7 +2094,8 @@ export class Orchestrator implements OrchestratorCore {
       latestSeq: this.store.durability().eventSeq,
       ...storeLag(this.store),
       proposals: this.store.listProposals({ status: 'pending' }).map((p) => ({ id: p.id, taskId: p.taskId, title: p.payload.title })),
-      runner: { mode: this.effectiveMode(), claimWindowMs: this.config.runner.claimWindowMs },
+      runner: { mode: this.effectiveMode(), claimWindowMs: this.config.runner.claimWindowMs, confirmProfile: this.confirmProfile() },
+      profiles: this.profiles(),
       claimable: claimable.map((l) => l.taskId),
       claimableByKind: countByKind(claimable),
       workers: this.store.listLaunches({ status: 'live' }).filter((l) => l.worker).map((l) => ({ id: l.worker!.id, launchId: l.launchId, taskId: l.taskId, claimedAt: l.worker!.claimedAt })),

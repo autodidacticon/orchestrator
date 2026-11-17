@@ -24,13 +24,15 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
   /** Keys still unresolved; `checkCommand` here means submitted work is held until it is set. See specs/operator-control "Status report: configuration". */
   const needsConfig = orch.effective().needsConfig;
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, claimableByKind: zeroByKind(), deferred: 0, needsConfig, ...tracker };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, claimableByKind: zeroByKind(), deferred: 0, needsConfig, profileHeld: [], ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
     graphLoaded: true,
     needsConfig,
     ...tracker,
+    /** Runner kinds with tasks held at admission for a model or effort that would come from a built-in default. See specs/operator-mcp "Wait digest: profileHeld". */
+    profileHeld: orch.profileHeld(s.profiles),
     stuck: s.stuck,
     pausedReason: s.pausedReason,
     proposals: s.proposals,
@@ -226,7 +228,8 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           stuck: [],
           pausedReason: orch.pausedReason(),
           proposals: [],
-          runner: { mode: orch.effectiveMode(), claimWindowMs: orch.config.runner.claimWindowMs },
+          runner: { mode: orch.effectiveMode(), claimWindowMs: orch.config.runner.claimWindowMs, confirmProfile: orch.confirmProfile() },
+          profiles: [],
           claimable: [],
           claimableByKind: zeroByKind(),
           workers: [],

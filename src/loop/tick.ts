@@ -444,7 +444,11 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
     if (node.kind === 'task' && (e.status.kind === 'running' || e.status.kind === 'waiting' || e.status.kind === 'submitted')) held.add(id);
   }
   for (const l of o.store.listLaunches({ status: 'claimable' })) held.add(l.taskId);
-  const admission = admit(resumables, q.ready(g, overlay), {
+  // A task whose model or effort would come from a built-in default under the profile hold is not a candidate:
+  // it takes no capacity and defers nothing. See specs/model-selection "Profile hold at admission".
+  const profileCtx = { hold: o.confirmProfile(), mode: o.effectiveMode() };
+  const candidates = q.ready(g, overlay).filter((id) => !o.hasHeldProfile(id, profileCtx));
+  const admission = admit(resumables, candidates, {
     graph: g,
     overlay,
     // Capacity is read at each admission pass so an override applies on the next tick. See specs/toolchain-discovery "Runtime overrides and start-only keys".
