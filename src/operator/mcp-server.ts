@@ -360,7 +360,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     'configure',
     {
       description:
-        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every Claude Code launch spawned afterwards), runnerKind (claude-code, codex, or opencode), model and effort (the worker defaults of the kind in force, or of runnerKind in the same call), codex { model, effort } and opencode { model, effort } (that kind\'s defaults whichever kind is in force), sandbox (codex.sandbox), permission and dataDir (opencode.permission, opencode.dataDir), and commit (the commit policy of the kind in force), all for every launch prepared afterwards; and the limits budgets { maxLaunchMs } and health { stuckAfterMs, stuckFailAfterMs }, in milliseconds, where 0 disables a limit and a change applies on the next tick to every live launch, to claims made afterwards, and to status (with both stuck limits above 0, stuckFailAfterMs must be above stuckAfterMs, else 400 naming the key). Defaults: claude-code runs claude-opus-5-5 at medium, codex runs gpt-6-astra at medium with sandbox workspace-write, opencode runs anthropic/claude-opus-5-5 (a provider/model id) at medium with permission derived and dataDir shared; effort is low, medium, high, xhigh, or max, and ultra is codex-only (refused with 400 naming the kind for a claude-code or opencode effort); a task payload or a runner:/model:/effort: label overrides them per task. A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start).',
+        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every Claude Code launch spawned afterwards), runnerKind (claude-code, codex, or opencode), model and effort (the worker defaults of the kind in force, or of runnerKind in the same call), codex { model, effort } and opencode { model, effort } (that kind\'s defaults whichever kind is in force), sandbox (codex.sandbox), permission and dataDir (opencode.permission, opencode.dataDir), and commit (the commit policy of the kind in force), all for every launch prepared afterwards; and the limits budgets { maxLaunchMs } and health { stuckAfterMs, stuckFailAfterMs }, in milliseconds, where 0 disables a limit and a change applies on the next tick to every live launch, to claims made afterwards, and to status (with both stuck limits above 0, stuckFailAfterMs must be above stuckAfterMs, else 400 naming the key). Defaults: claude-code runs claude-opus-5-5 at medium, codex runs gpt-6-astra at medium with sandbox workspace-write, opencode runs anthropic/claude-opus-5-5 (a provider/model id) at medium with permission derived and dataDir shared; effort is low, medium, high, xhigh, or max, and ultra is codex-only (refused with 400 naming the kind for a claude-code or opencode effort); a task payload or a runner:/model:/effort: label overrides them per task. A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start). A change that would end a live launch (a lowered, cleared, or switched-on budgets.maxLaunchMs or health.stuckFailAfterMs that a running task\'s live launch is already past) is refused without endLive: a 409 with wouldEnd listing each launch, its taskId, limit, the new value and its elapsedMs or idleMs, and nothing of the call is applied. Show wouldEnd to the user and send endLive true only when the user says so.',
       inputSchema: {
         checkCommand: z.string().nullable().optional(),
         capacity: z.number().int().nullable().optional(),
@@ -376,14 +376,18 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         dataDir: z.enum(OPENCODE_DATA_DIRS).nullable().optional().describe(RUNNER_ARG_TEXT.dataDir),
         commit: z.enum(COMMIT_POLICIES).nullable().optional().describe(RUNNER_ARG_TEXT.commit),
         ...configureLimitArgs,
+        endLive: z
+          .boolean()
+          .optional()
+          .describe('Confirm a change that would end live launches (the 409 wouldEnd list): the change is applied and the next tick ends them, each with an attempt spent. Not a configuration key and never stored. Send it only when the user says so, after showing wouldEnd.'),
       },
     },
-    async (a, c) =>
+    async ({ endLive, ...a }, c) =>
       guarded(async () => {
         const patch = Object.fromEntries(Object.entries(a).filter(([, v]) => v !== undefined));
         // The commit policy binds to runnerKind in the same call, else to the kind in force on the daemon.
         const kind = a.commit === undefined || a.runnerKind ? (a.runnerKind ?? 'claude-code') : (((await c.call('GET', '/v1/config')).body['config'] as { runnerKind?: { value?: RunnerKind } } | undefined)?.runnerKind?.value ?? 'claude-code');
-        return c.call('PUT', '/v1/config', foldRunnerArgs(patch, kind));
+        return c.call('PUT', '/v1/config', { ...foldRunnerArgs(patch, kind), ...(endLive ? { endLive: true } : {}) });
       }),
   );
   tool('stop', { description: 'Stop the daemon. Agents keep running for adoption unless reap is true.', inputSchema: { reap: z.boolean().optional() } }, async (a, c) =>

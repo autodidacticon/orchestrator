@@ -253,6 +253,49 @@ describe('orchestrator-ctl config', () => {
     for (const word of ['budgets.maxLaunchMs', 'health.stuckAfterMs', 'health.stuckFailAfterMs', '0 disables the limit']) expect(DAEMON_USAGE.replace(/\s+/g, ' '), word).toContain(word);
   });
 
+  // See specs/operator-control "Configuration route: a change that would end a live launch".
+  it('a limit change that would end a live launch is refused with wouldEnd unless endLive confirms it; config --end-live sends it', async () => {
+    h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000, budgets: { maxLaunchMs: 600_000, maxRunCostUsd: 0, prices: {} } } });
+    const url = h.orch.apiBaseUrl;
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'running' && h!.store.listLaunches({ taskId: 'T1', status: 'live' }).length === 1);
+    const launch = h.launchOf('T1');
+    const raw = () => h!.store.getKv('config.overrides');
+    // endLive alone: nothing to confirm, nothing stored.
+    const alone = await http(url, 'PUT', '/v1/config', { endLive: true });
+    expect(alone).toMatchObject({ status: 200, body: { ok: true, applied: [] } });
+    expect(raw()).toBeUndefined();
+    expect(h.store.listEvents({ kind: 'operator.config' })).toHaveLength(0);
+    // Any live launch is already past 1 ms.
+    const refused = await http(url, 'PUT', '/v1/config', { budgets: { maxLaunchMs: 1 } });
+    expect(refused).toMatchObject({ status: 409, body: { ok: false, wouldEnd: [{ taskId: 'T1', launchId: launch.launchId, limit: 'budgets.maxLaunchMs', value: 1 }] } });
+    expect(refused.body).not.toHaveProperty('startOnly');
+    expect(String(refused.body['error'])).toContain('T1');
+    expect(String(refused.body['error'])).toContain('endLive');
+    expect(raw()).toBeUndefined();
+    const startOnly = await http(url, 'PUT', '/v1/config', { integrationBranch: 'other' });
+    expect(startOnly).toMatchObject({ status: 409, body: { ok: false, startOnly: ['integrationBranch'] } });
+    expect(startOnly.body).not.toHaveProperty('wouldEnd');
+    const confirmed = await http(url, 'PUT', '/v1/config', { budgets: { maxLaunchMs: 1 }, endLive: true });
+    expect(confirmed).toMatchObject({ status: 200, body: { ok: true, applied: ['budgets'] } });
+    expect(JSON.parse(raw()!)).toEqual({ budgets: { maxLaunchMs: 1 } });
+    expect(h.store.listEvents({ kind: 'operator.config' }).at(-1)?.payload).toMatchObject({ endLive: true });
+    // Clearing it is a raise for the live launch, never refused.
+    expect(await http(url, 'PUT', '/v1/config', { budgets: null })).toMatchObject({ status: 200 });
+    expect(JSON.parse(raw()!)).toEqual({});
+    // The CLI relays the refusal, and --end-live confirms it.
+    const ctl = await runCli(['--url', url, 'config', '--set', 'budgets.maxLaunchMs=1']);
+    expect(ctl).toMatchObject({ status: 409, body: { wouldEnd: [{ taskId: 'T1', launchId: launch.launchId }] } });
+    expect(JSON.parse(raw()!)).toEqual({});
+    const ctlConfirmed = await runCli(['--url', url, 'config', '--set', 'budgets.maxLaunchMs=1', '--end-live']);
+    expect(ctlConfirmed).toMatchObject({ status: 200, body: { applied: ['budgets'] } });
+    expect(JSON.parse(raw()!)).toEqual({ budgets: { maxLaunchMs: 1 } });
+    // --end-live with no key sends the PUT, not the GET.
+    const bare = await runCli(['--url', url, 'config', '--end-live']);
+    expect(bare).toMatchObject({ status: 200, body: { ok: true, applied: [] } });
+    expect(JSON.parse(raw()!)).toEqual({ budgets: { maxLaunchMs: 1 } });
+    expect(((await runCli(['--help'])).body as { usage: string }).usage).toContain('--end-live');
+  });
+
   // See specs/toolchain-discovery "Limit leaves in the resolved configuration record".
   it('GET /v1/config, config.json and config.resolved carry the limit leaves under budgets and health', async () => {
     env = { ...process.env, ORCH_HOME: fresh('orch-limits-home-') };

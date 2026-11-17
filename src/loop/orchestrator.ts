@@ -46,10 +46,10 @@ import { pidAlive } from '../runner/subprocess.js';
 import { runTick } from './tick.js';
 import { defaultPrepareRunner, type PrepareJob, type PrepareRunner, startPrepareCommand, stopPrepareJobs } from '../launch/prepare.js';
 import { deriveEffects } from '../tracker/effects.js';
-import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, priceFor, priceUsage, runCostUsd, tokensOf, unpricedLaunches } from '../health/budgets.js';
+import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, exceedsTimeBudget, priceFor, priceUsage, runCostUsd, tokensOf, unpricedLaunches } from '../health/budgets.js';
 import { recordSignal } from '../health/progress.js';
-import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
-import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
+import { exceedsStuckFail, humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
+import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, type Overrides, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS, type WouldEnd } from '../runs/resolve.js';
 import { codexNetworkAccess, type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, type OpenCodePermission, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
 import { bashPatterns } from '../runner/opencode.js';
@@ -636,7 +636,7 @@ export class Orchestrator implements OrchestratorCore {
    * refuses it whole, and the accepted document is written with its `operator.config`
    * event in one transaction, followed by `config.resolved`, the hook, and a wake.
    */
-  setConfig(patch: unknown): SetConfigResult {
+  setConfig(patch: unknown, opts: { endLive?: boolean } = {}): SetConfigResult {
     // The flat model and effort bind to the kind in force once the patch applies. See specs/toolchain-discovery "Runtime overrides and start-only keys".
     const parsed = applyOverridePatch(this.boot.inputs, readOverrides(this.store), patch ?? {});
     if (!parsed.ok) return { ok: false, status: 400, key: parsed.key, error: `${parsed.key || 'config'}: ${parsed.error}` };
@@ -646,8 +646,23 @@ export class Orchestrator implements OrchestratorCore {
     const startOnly = keys.filter((k) => START_ONLY_KEYS.includes(k));
     if (startOnly.length) return { ok: false, status: 409, startOnly, error: `${startOnly.join(', ')} is start-only: pass it to start, which applies it when the daemon is spawned` };
     const next = parsed.next;
+    const endLive = opts.endLive === true;
+    // A confirmation with nothing to confirm stores nothing.
+    if (endLive && !keys.length) return { ok: true, applied: [], report: this.configReport() };
+    if (!endLive) {
+      const wouldEnd = this.wouldEnd(next);
+      if (wouldEnd.length) {
+        const named = wouldEnd.map((w) => (w.limit === 'budgets.maxLaunchMs' ? `${w.taskId} (launch ${w.launchId}, ${w.elapsedMs}ms elapsed, budgets.maxLaunchMs ${w.value})` : `${w.taskId} (launch ${w.launchId}, ${w.idleMs}ms idle, health.stuckFailAfterMs ${w.value})`));
+        return {
+          ok: false,
+          status: 409,
+          wouldEnd,
+          error: `this change would end the live launch of ${named.join('; ')} on the next tick, spending an attempt and losing uncommitted work; nothing was applied: send it again with endLive true (configure endLive, orchestrator-ctl config --end-live) to end them, or choose a value they are within`,
+        };
+      }
+    }
     this.store.transaction(() => {
-      this.operatorEvent('config', undefined, { patch: parsed.patch, overrides: next });
+      this.operatorEvent('config', undefined, { patch: parsed.patch, overrides: next, ...(endLive ? { endLive: true } : {}) });
       this.store.setKv('config.overrides', JSON.stringify(next));
     });
     const report = this.configReport();
@@ -655,6 +670,34 @@ export class Orchestrator implements OrchestratorCore {
     this.onConfigChanged?.(report);
     this.wake();
     return { ok: true, applied: keys, report };
+  }
+
+  /**
+   * The live launches of running tasks that the limits under `next` end now and the limits in force do not, once per
+   * limit. Reads the store only, through the comparisons the checks use. See specs/operator-control "Configuration
+   * route: a change that would end a live launch".
+   */
+  private wouldEnd(next: Overrides): WouldEnd[] {
+    const before = this.effective().config;
+    const after = resolveLayers(this.boot.inputs, next).config;
+    const was = { budget: before.budgets.maxLaunchMs, fail: before.health.stuckFailAfterMs };
+    const will = { budget: after.budgets.maxLaunchMs, fail: after.health.stuckFailAfterMs };
+    // Only these two limits end a launch; a changed health.stuckAfterMs only flags one.
+    if (was.budget === will.budget && was.fail === will.fail) return [];
+    // A sleep since the last tick is a gap, left out of both times, as at the checks.
+    this.noteClock();
+    const now = this.now();
+    const out: WouldEnd[] = [];
+    for (const l of this.store.listLaunches({ status: 'live' })) {
+      const entry = this.entry(l.taskId);
+      if (entry.status.kind !== 'running' || entry.lease?.launchId !== l.launchId) continue;
+      const cur = this.store.getLaunch(l.launchId) ?? l;
+      const elapsed = elapsedMs(cur, now, this);
+      if (exceedsTimeBudget(elapsed, will.budget) && !exceedsTimeBudget(elapsed, was.budget)) out.push({ taskId: cur.taskId, launchId: cur.launchId, limit: 'budgets.maxLaunchMs', value: will.budget, elapsedMs: elapsed });
+      const idle = idleMsOf(cur, now, this);
+      if (exceedsStuckFail(idle, will.fail) && !exceedsStuckFail(idle, was.fail)) out.push({ taskId: cur.taskId, launchId: cur.launchId, limit: 'health.stuckFailAfterMs', value: will.fail, idleMs: idle });
+    }
+    return out;
   }
 
   overlay(): Overlay {

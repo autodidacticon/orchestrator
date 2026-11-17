@@ -36,6 +36,11 @@ export function idleMsOf(launch: Launch, now: number, clock: AwakeClock): number
   return clock.awakeMs(launch.progressAt ?? launch.spawnedAt ?? launch.createdAt, now);
 }
 
+/** Whether a launch idle for `idleMs` is failed under `health.stuckFailAfterMs` = `limit`; 0 disables it. Shared by the check and the configuration guard. */
+export function exceedsStuckFail(idleMs: number, limit: number): boolean {
+  return limit > 0 && idleMs > limit;
+}
+
 /** Reap, record usage, fail with reason `stuck`, end the launch, remove the worktree. */
 export async function failStuck(o: Orchestrator, launch: Launch, message: string): Promise<void> {
   await o.runner.reap(launch);
@@ -53,7 +58,7 @@ export async function checkStuck(o: Orchestrator, launch: Launch): Promise<boole
   const now = o.now();
   const cur = o.store.getLaunch(launch.launchId) ?? launch;
   const idleMs = idleMsOf(cur, now, o);
-  if (stuckFailAfterMs > 0 && idleMs > stuckFailAfterMs) {
+  if (exceedsStuckFail(idleMs, stuckFailAfterMs)) {
     await failStuck(o, cur, `no progress for ${Math.round(idleMs / 1000)}s`);
     return true;
   }

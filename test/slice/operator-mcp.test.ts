@@ -82,10 +82,14 @@ describe('operator MCP server', () => {
     // The wait description quotes the cap in force, which a Codex registration sizes tool_timeout_sec against. See specs/operator-mcp "Wait tool".
     expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain(`cap ${WAIT_CAP_MS}`);
     const configure = tools.tools.find((t) => t.name === 'configure');
-    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'budgets', 'capacity', 'checkCommand', 'codex', 'commit', 'dataDir', 'effort', 'health', 'model', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'budgets', 'capacity', 'checkCommand', 'codex', 'commit', 'dataDir', 'effort', 'endLive', 'health', 'model', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
     // The limit keys. See specs/operator-mcp "Configure and start tools: limit keys".
     for (const word of ['budgets { maxLaunchMs }', 'health { stuckAfterMs, stuckFailAfterMs }', '0 disables a limit', 'applies on the next tick']) expect(configure?.description, word).toContain(word);
+    // See specs/operator-mcp "Configure tool: endLive".
+    expect(configure?.description).toContain('A change that would end a live launch');
+    expect(configure?.description).toContain('is refused without endLive');
     const startProps = (tools.tools.find((t) => t.name === 'start')?.inputSchema as { properties: Record<string, unknown> }).properties;
+    expect(Object.keys(startProps)).not.toContain('endLive');
     expect(Object.keys(startProps)).toEqual(expect.arrayContaining(['budgets', 'health']));
     expect(JSON.stringify(startProps['health'])).toContain('stuckFailAfterMs');
     expect(JSON.stringify(startProps['budgets'])).toContain('maxLaunchMs');
@@ -215,6 +219,40 @@ describe('operator MCP server', () => {
     expect(await tool('wait', { afterSeq: 0, until: 'review', timeoutMs: 60_000 })).toMatchObject({ matched: true });
     const one = await tool('review', { milestone: 'MVP', task: 'A+1' });
     expect(one).toMatchObject({ status: 200, view: 'task', closure: [{ taskId: 'A+1', acceptanceCriteria: ['a'] }] });
+  }, 120_000);
+
+  // See specs/operator-mcp "Configure tool: endLive".
+  it('configure returns the 409 with wouldEnd for a limit a live launch is past, and applies it with endLive', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), [
+      `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'runner: { mode: spawn }',
+      'checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 1',
+      'budgets: { maxLaunchMs: 600000 }',
+    ].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    expect(await tool('start')).toMatchObject({ status: 200, started: true });
+    const imported = await importAdopted('import_graph', {
+      content: ['nodes:', '  - { id: T1, deps: [], behavior: hang, description: d, acceptanceCriteria: [a] }', ''].join('\n'),
+    });
+    expect(imported).toMatchObject({ status: 200, accepted: true });
+    let live: Array<{ taskId: string; launchId: string }> = [];
+    for (let i = 0; i < 200 && !live.length; i++) {
+      const s = await tool('status');
+      if ((s['byStatus'] as Record<string, string[]> | undefined)?.['running']?.includes('T1')) live = (s['liveLaunches'] as typeof live).filter((l) => l.taskId === 'T1');
+      if (!live.length) await new Promise((r) => setTimeout(r, 100));
+    }
+    expect(live).toHaveLength(1);
+    const refused = await client.callTool({ name: 'configure', arguments: { budgets: { maxLaunchMs: 1 } } });
+    expect(refused.isError).toBe(true);
+    expect(parse(refused)).toMatchObject({ status: 409, ok: false, wouldEnd: [{ taskId: 'T1', launchId: live[0]!.launchId, limit: 'budgets.maxLaunchMs', value: 1 }] });
+    expect(String(parse(refused)['error'])).toContain('endLive');
+    expect(await tool('configure', { budgets: { maxLaunchMs: 1 }, endLive: true })).toMatchObject({ status: 200, ok: true, applied: ['budgets'] });
   }, 120_000);
 
   it('defaults a plugin-started run to pull, yields to a configured mode, and leaves a running daemon alone', async () => {

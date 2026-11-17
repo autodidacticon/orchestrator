@@ -695,7 +695,13 @@ export function parseSetFlags(flags: readonly string[], kind?: RunnerKind): Over
 export type SetConfigResult =
   | { ok: true; applied: OverridableKey[]; report: ConfigReport }
   | { ok: false; status: 400; key: string; error: string }
-  | { ok: false; status: 409; startOnly: OverridableKey[]; error: string };
+  | { ok: false; status: 409; startOnly: OverridableKey[]; error: string }
+  | { ok: false; status: 409; wouldEnd: WouldEnd[]; error: string };
+
+/** A live launch a limit change would end on the next tick. See specs/operator-control "Configuration route: a change that would end a live launch". */
+export type WouldEnd =
+  | { taskId: string; launchId: string; limit: 'budgets.maxLaunchMs'; value: number; elapsedMs: number }
+  | { taskId: string; launchId: string; limit: 'health.stuckFailAfterMs'; value: number; idleMs: number };
 
 export function reportOf(resolved: Resolved, now: number): ConfigReport {
   return {

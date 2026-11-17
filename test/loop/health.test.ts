@@ -565,3 +565,147 @@ describe('health: limits changed at runtime', () => {
     expect(h.workspace.briefs.get(first.launchId)?.limits).toEqual({ stuckAfterMs: 1000, stuckFailAfterMs: 3000, maxLaunchMs: 10_000 });
   });
 });
+
+// See specs/operator-control "Configuration route: a change that would end a live launch".
+describe('health: a limit change that would end a live launch', () => {
+  const one = (config: ConfigInput) => harness({ capacity: 1, ...config });
+  const refusal = (r: ReturnType<Orchestrator['setConfig']>) => (r.ok === false && 'wouldEnd' in r ? r : undefined);
+
+  it('a lowered time budget a live launch is past is refused with wouldEnd; nothing is applied', async () => {
+    const h = one({ budgets: budgets({ maxLaunchMs: 10_000 }), maxAttempts: 2 });
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    h.advance(9_000);
+    await h.orch.tick();
+    const before = h.store.getKv('config.overrides');
+    const r = h.orch.setConfig({ budgets: { maxLaunchMs: 5_000 } });
+    expect(r).toMatchObject({ ok: false, status: 409, wouldEnd: [{ taskId: 'T1', launchId: l1.launchId, limit: 'budgets.maxLaunchMs', value: 5_000, elapsedMs: 9_000 }] });
+    expect(refusal(r)?.wouldEnd).toHaveLength(1);
+    expect(refusal(r)?.wouldEnd[0]).not.toHaveProperty('idleMs');
+    expect(refusal(r)?.error).toContain('T1');
+    expect(refusal(r)?.error).toContain('endLive');
+    expect(h.store.getKv('config.overrides')).toBe(before);
+    expect(h.store.listEvents({ kind: 'operator.config' })).toHaveLength(0);
+    await h.orch.tick();
+    expect(h.statusOf('T1')).toBe('running');
+    expect(h.store.getLaunch(l1.launchId)?.status).toBe('live');
+  });
+
+  it('with endLive the lowering is applied, recorded on the event, not stored, and the next tick ends the launch', async () => {
+    const h = one({ budgets: budgets({ maxLaunchMs: 10_000 }), maxAttempts: 2 });
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    h.advance(9_000);
+    await h.orch.tick();
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 5_000 } }, { endLive: true })).toMatchObject({ ok: true, applied: ['budgets'] });
+    const events = h.store.listEvents({ kind: 'operator.config' });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.payload).toMatchObject({ endLive: true });
+    const stored = JSON.parse(h.store.getKv('config.overrides')!) as Record<string, unknown>;
+    expect(stored).toEqual({ budgets: { maxLaunchMs: 5_000 } });
+    expect(stored).not.toHaveProperty('endLive');
+    await h.orch.tick();
+    expect(h.store.getLaunch(l1.launchId)).toMatchObject({ status: 'ended', endReason: 'timeBudget' });
+  });
+
+  it('a lowered stuck fail limit a launch is idle past is refused; a lowered flag limit is accepted', async () => {
+    const h = one({ health: health({ stuckAfterMs: 1000, stuckFailAfterMs: 3000 }) });
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    h.advance(2_000);
+    await h.orch.tick();
+    const r = h.orch.setConfig({ health: { stuckFailAfterMs: 1_500 } });
+    expect(r).toMatchObject({ ok: false, status: 409, wouldEnd: [{ taskId: 'T1', launchId: l1.launchId, limit: 'health.stuckFailAfterMs', value: 1_500, idleMs: 2_000 }] });
+    expect(refusal(r)?.wouldEnd[0]).not.toHaveProperty('elapsedMs');
+    expect(refusal(r)?.error).toContain('T1');
+    expect(h.orch.effective().config.health.stuckFailAfterMs).toBe(3_000);
+    expect(h.orch.setConfig({ health: { stuckAfterMs: 500 } })).toMatchObject({ ok: true, applied: ['health'] });
+  });
+
+  it('clearing a raise is refused while a launch that relies on it lives, and accepted once it has submitted', async () => {
+    const h = one({ budgets: budgets({ maxLaunchMs: 10_000 }) });
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 0 } })).toMatchObject({ ok: true });
+    h.advance(15_000);
+    await h.orch.tick();
+    expect(h.store.getLaunch(l1.launchId)?.status).toBe('live');
+    const r = h.orch.setConfig({ budgets: { maxLaunchMs: null } });
+    expect(r).toMatchObject({ ok: false, status: 409, wouldEnd: [{ taskId: 'T1', launchId: l1.launchId, limit: 'budgets.maxLaunchMs', value: 10_000, elapsedMs: 15_000 }] });
+    expect(h.orch.effective().budgets.maxLaunchMs).toEqual({ value: 0, source: 'argument' });
+    // A null block clears it as well, and is refused the same way.
+    expect(h.orch.setConfig({ budgets: null })).toMatchObject({ ok: false, status: 409, wouldEnd: [{ launchId: l1.launchId }] });
+    await h.submit('T1');
+    expect(h.statusOf('T1')).not.toBe('running');
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: null } })).toMatchObject({ ok: true, applied: ['budgets'] });
+    expect(h.orch.effective().budgets.maxLaunchMs).toEqual({ value: 10_000, source: 'file' });
+  });
+
+  it('clearing a raised stuck fail limit with a null health block is refused', async () => {
+    const h = one({ health: health({ stuckAfterMs: 1000, stuckFailAfterMs: 3000 }) });
+    await h.orch.tick();
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: 10_000 } })).toMatchObject({ ok: true });
+    h.advance(5_000);
+    await h.orch.tick();
+    expect(h.statusOf('T1')).toBe('running');
+    expect(h.orch.setConfig({ health: null })).toMatchObject({ ok: false, status: 409, wouldEnd: [{ taskId: 'T1', limit: 'health.stuckFailAfterMs', value: 3_000, idleMs: 5_000 }] });
+  });
+
+  it('a limit switched on from 0 that a live launch is past is refused', async () => {
+    const h = one({ budgets: budgets({ maxLaunchMs: 0 }) });
+    await h.orch.tick();
+    h.advance(15_000);
+    await h.orch.tick();
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 10_000 } })).toMatchObject({ ok: false, status: 409, wouldEnd: [{ taskId: 'T1', limit: 'budgets.maxLaunchMs', value: 10_000, elapsedMs: 15_000 }] });
+  });
+
+  it('the boundary follows the checks: elapsed equal to the budget is listed, idle equal to the fail limit is not', async () => {
+    const h = one({ budgets: budgets({ maxLaunchMs: 100_000 }) });
+    await h.orch.tick();
+    h.advance(4_000);
+    await h.orch.tick();
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 4_000 } })).toMatchObject({ ok: false, status: 409, wouldEnd: [{ limit: 'budgets.maxLaunchMs', value: 4_000, elapsedMs: 4_000 }] });
+    // Idle is 4000: one below is past it, equal is not.
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: 3_999 } })).toMatchObject({ ok: false, status: 409, wouldEnd: [{ limit: 'health.stuckFailAfterMs', value: 3_999, idleMs: 4_000 }] });
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: 4_000 } })).toMatchObject({ ok: true });
+  });
+
+  it('never refused: a waiting task, a key other than a limit, a raise, an unchanged value', async () => {
+    const h = harness({ budgets: budgets({ maxLaunchMs: 10_000 }), health: health({ stuckAfterMs: 1000, stuckFailAfterMs: 3000 }) });
+    await h.orch.tick();
+    const l5 = h.launchOf('T5');
+    void h.block('T5', 'which way?');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.statusOf('T5')).toBe('waiting');
+    h.advance(2_000);
+    // Every running launch is idle past 1500 and listed; the waiting one, idle as long, is not.
+    const r = refusal(h.orch.setConfig({ health: { stuckFailAfterMs: 1_500 } }));
+    const listed = r?.wouldEnd.map((w) => w.launchId) ?? [];
+    expect(listed.length).toBeGreaterThan(0);
+    expect(listed).not.toContain(l5.launchId);
+    h.advance(20_000);
+    expect(h.orch.setConfig({ capacity: 3 })).toMatchObject({ ok: true, applied: ['capacity'] });
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 60_000 }, health: { stuckFailAfterMs: 60_000 } })).toMatchObject({ ok: true });
+    // The same values again, and a flag limit beside them, change nothing that ends a launch.
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 60_000 }, health: { stuckAfterMs: 1000, stuckFailAfterMs: 60_000 } })).toMatchObject({ ok: true });
+  });
+
+  it('a refused patch applies none of its keys', async () => {
+    const h = one({ budgets: budgets({ maxLaunchMs: 10_000 }) });
+    await h.orch.tick();
+    h.advance(9_000);
+    await h.orch.tick();
+    expect(h.orch.setConfig({ capacity: 3, budgets: { maxLaunchMs: 5_000 } })).toMatchObject({ ok: false, status: 409, wouldEnd: [{ taskId: 'T1' }] });
+    expect(h.orch.effective().config.capacity).toBe(1);
+    expect(h.store.getKv('config.overrides')).toBeUndefined();
+  });
+
+  it('a start-only key is refused first, with its own body', async () => {
+    const h = one({ budgets: budgets({ maxLaunchMs: 10_000 }) });
+    await h.orch.tick();
+    h.advance(9_000);
+    const r = h.orch.setConfig({ integrationBranch: 'x', budgets: { maxLaunchMs: 5_000 } });
+    expect(r).toMatchObject({ ok: false, status: 409, startOnly: ['integrationBranch'] });
+    expect(r).not.toHaveProperty('wouldEnd');
+  });
+});

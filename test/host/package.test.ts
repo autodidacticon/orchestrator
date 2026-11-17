@@ -194,6 +194,8 @@ describe('package entrypoints', () => {
     expect(more.startsWith('- **a launch needs more time**')).toBe(true);
     for (const word of ['configure', 'health.stuckFailAfterMs', 'budgets.maxLaunchMs', 'elapsedMs', 'applied', 'null']) expect(more, word).toContain(word);
     for (const word of ['health: { stuckFailAfterMs', 'budgets.maxLaunchMs', 'budgets: { maxLaunchMs', 'leaseTtlMs']) expect(more, word).toContain(word);
+    // See specs/host-integration "Run skill confirms a lowering with the user".
+    for (const word of ['endLive', 'wouldEnd', 'only\n  when the user says so']) expect(more, word).toContain(word);
     expect(more).not.toContain('orchestrator-work');
     for (const skill of ['import', 'work']) {
       const text = readFileSync(path.join(plugin, `skills/${skill}/SKILL.md`), 'utf8');

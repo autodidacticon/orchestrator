@@ -178,7 +178,11 @@ digest:
   ending can still end. Tell the worker the new limit with `nudge`. Once the launch has
   reported or ended, clear the override with a null leaf (`budgets: { maxLaunchMs: null }`
   or `health: { stuckFailAfterMs: null }`), or the raise stays for every later launch of
-  the run. A launch held by an `orchestrator-work` loop (listed under `status.workers`,
+  the run. A lowered, cleared or switched-on limit that a live launch is already past is
+  refused with a 409 whose `wouldEnd` lists the launches it would end, and nothing is
+  applied: show `wouldEnd` to the user, and send the call again with `endLive: true` only
+  when the user says so (the next tick then ends those launches, each with an attempt
+  spent). A launch held by an `orchestrator-work` loop (listed under `status.workers`,
   no `pid`) keeps the silence limit its loop took when it claimed.
 - **proposals** non-empty: agents proposed follow-up tasks. For each pending proposal (from
   `proposals`), show its title, description, acceptance criteria, and deps, and wait for the

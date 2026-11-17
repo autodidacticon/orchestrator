@@ -245,8 +245,13 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
   // Configuration: the resolved block with provenance, and runtime overrides. See specs/operator-control "Configuration route".
   server.addRoute('GET', /^\/v1\/config$/, async () => ({ status: 200, body: orch.configReport() as unknown as Record<string, unknown> }));
   server.addRoute('PUT', /^\/v1\/config$/, async (_req, body) => {
-    const r = orch.setConfig(body);
-    if (!r.ok) return r.status === 409 ? { status: 409, body: { ok: false, error: r.error, startOnly: r.startOnly } } : { status: 400, body: { error: r.error, key: r.key } };
+    // endLive confirms a change that would end live launches; it is not a configuration key and is never stored.
+    const { endLive, ...patch } = body;
+    const r = orch.setConfig(patch, { endLive: endLive === true || endLive === 'true' });
+    if (!r.ok) {
+      if (r.status === 400) return { status: 400, body: { error: r.error, key: r.key } };
+      return 'wouldEnd' in r ? { status: 409, body: { ok: false, error: r.error, wouldEnd: r.wouldEnd } } : { status: 409, body: { ok: false, error: r.error, startOnly: r.startOnly } };
+    }
     const { config, toolchain, needsConfig, overrides } = r.report;
     return { status: 200, body: { ok: true, applied: r.applied, config, toolchain, needsConfig, overrides } };
   });

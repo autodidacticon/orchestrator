@@ -98,7 +98,7 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl config                       the resolved configuration: every key with its value and source, the toolchain, needsConfig
   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>]
                           [--model <name>] [--effort <level>] [--sandbox <mode>] [--permission <derived|allow>]
-                          [--data-dir <shared|launch>] [--commit <agent|daemon>] [--set key=value]... [--clear <key>]...
+                          [--data-dir <shared|launch>] [--commit <agent|daemon>] [--set key=value]... [--clear <key>]... [--end-live]
                                                the runner kind is claude-code (default), codex, or opencode; model and effort are the worker
                                                defaults of the kind in force (claude-code: claude-opus-5-5 at medium;
                                                codex: gpt-6-astra at medium; opencode: anthropic/claude-opus-5-5 at medium, a provider/model id);
@@ -113,7 +113,11 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
                                                decimal digits, 0 disables the limit, a change applies on the next tick; with both stuck
                                                limits above 0, health.stuckFailAfterMs must be above health.stuckAfterMs); one call
                                                names each key once: the same key, or a key and a block holding it, given by two
-                                               flags (--set, --clear, or a per-key flag) is refused before anything is sent
+                                               flags (--set, --clear, or a per-key flag) is refused before anything is sent;
+                                               a change that would end a live launch (a lowered, cleared or switched-on
+                                               budgets.maxLaunchMs or health.stuckFailAfterMs it is already past) is refused
+                                               with 409 and wouldEnd, and nothing is applied; --end-live confirms it, and the
+                                               next tick ends those launches
   orchestrator-ctl answer <task> <text>
   orchestrator-ctl cancel <task> [--release] [--reason <text>]
   orchestrator-ctl reopen <task> [--cascade]       cascade resets started dependents and returns the plan
@@ -254,6 +258,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       result: { type: 'string' },
       error: { type: 'string' },
       'override-budget': { type: 'boolean', default: false },
+      'end-live': { type: 'boolean', default: false },
       cascade: { type: 'boolean', default: false },
       status: { type: 'string' },
       'node-id': { type: 'string' },
@@ -347,6 +352,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
         const cur = patch[k];
         patch[k] = isPlainObject(v) && isPlainObject(cur) ? { ...cur, ...v } : v;
       }
+      if (values['end-live']) return call(base, 'PUT', '/v1/config', { ...patch, endLive: true });
       if (!Object.keys(patch).length) return call(base, 'GET', '/v1/config');
       return call(base, 'PUT', '/v1/config', patch);
     }

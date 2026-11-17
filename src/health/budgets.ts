@@ -19,6 +19,11 @@ export function elapsedMs(launch: Launch, now: number, clock: AwakeClock): numbe
   return Math.max(0, clock.awakeMs(start, now) - (launch.waitedMs ?? 0) - waiting);
 }
 
+/** Whether a launch at `elapsedMs` is ended under `budgets.maxLaunchMs` = `limit`; 0 disables it. Shared by the check and the configuration guard. */
+export function exceedsTimeBudget(elapsedMs: number, limit: number): boolean {
+  return limit > 0 && elapsedMs >= limit;
+}
+
 /** Returns true when the launch was ended for exceeding `budgets.maxLaunchMs`. */
 export async function checkTimeBudget(o: Orchestrator, launch: Launch): Promise<boolean> {
   const max = o.effective().config.budgets.maxLaunchMs;
@@ -26,7 +31,7 @@ export async function checkTimeBudget(o: Orchestrator, launch: Launch): Promise<
   // A sleep during the awaits before this check is a gap, left out of the elapsed time.
   o.noteClock();
   const elapsed = elapsedMs(launch, o.now(), o);
-  if (elapsed < max) return false;
+  if (!exceedsTimeBudget(elapsed, max)) return false;
   await o.runner.reap(launch);
   await o.recordUsage(launch);
   o.fail(launch.taskId, { kind: 'timeBudget', message: `launch ran ${Math.round(elapsed / 1000)}s, budget ${Math.round(max / 1000)}s` }, 'orchestrator', 'timeBudget');
