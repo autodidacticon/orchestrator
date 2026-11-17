@@ -125,7 +125,8 @@ Each worker loop runs a cheap claimer agent (`claude-haiku-5-5` at `low` by defa
 `claimModel` and `claimEffort` only when the user asks otherwise) that claims a launch, polling
 up to three times with 90-second waits when nothing is claimable, then runs a worker subagent
 on its brief in the prepared worktree with the launch's model and effort, reports through the
-worker tools, and claims again until nothing is claimable. Agents are labelled `claim
+worker tools, and claims again until nothing is claimable and nothing is being prepared for
+`claude-code` (`status.preparingByKind["claude-code"]`). Agents are labelled `claim
 <workerId>` and `work <workerId> <taskId>`. Workers edit files in worktrees under the run
 directory, outside the repository, so an `acceptEdits` session prompts for each file there
 unless it was started with `--add-dir ~/.orchestrator`. The workflow runs in the background; do

@@ -218,7 +218,8 @@ node /path/to/orchestrator/hosts/codex/bin/work.mjs --workers 2 --run-tag cx --c
   claims again.
 - A codex that fails to start is released with `keep`. After `--max-failures` (default 3)
   launches in a row that ended without codex running or reporting, a loop stops.
-- A loop stops when the run is finished or stalled, when nothing is claimable for codex while
+- A loop stops when the run is finished or stalled, when nothing is claimable and nothing is
+  being prepared for codex (`status.preparingByKind.codex` is 0) while
   a question or review waits on a human, or after `--idle-exit-ms` (default 120000) with
   nothing claimable for codex.
 - The daemon is found by `--url`, `ORCH_URL`, or the run directory of `--repo` (default: the

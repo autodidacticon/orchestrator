@@ -112,7 +112,7 @@ describe('operator MCP server', () => {
     // The ack answer carries the effect's id and state, not its payload. See specs/operator-control "Tracker outbox".
     expect(tools.tools.find((t) => t.name === 'ack')?.description).toContain('payload');
     const statusTool = tools.tools.find((t) => t.name === 'status');
-    for (const word of ['runnerKind', 'runner', 'codex.sandbox', 'claimableByKind']) expect(statusTool?.description, word).toContain(word);
+    for (const word of ['runnerKind', 'runner', 'codex.sandbox', 'claimableByKind', 'preparing:', 'prepareRetry', 'preparingByKind']) expect(statusTool?.description, word).toContain(word);
     const startTool = tools.tools.find((t) => t.name === 'start');
     for (const word of ['claude-opus-5-5', 'gpt-6-astra', 'anthropic/claude-opus-5-5', 'ultra', 'spawn when the runner kind is codex or opencode', 'orchestrator-work --runner', 'permission', 'dataDir']) expect(JSON.stringify(startTool), word).toContain(word);
     // The profile hold. See specs/operator-mcp "Start tool turns the profile hold on".

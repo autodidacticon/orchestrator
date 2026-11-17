@@ -501,3 +501,64 @@ describe('slot validation', () => {
     expect(h.store.listLaunches()).toEqual([]);
   });
 });
+
+// ORC-132. See specs/agent-protocol "Prepare command in the brief".
+describe('prepare command in the Definition of done', () => {
+  const launch = { launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'live', token: 't', branch: 'task/T1/l1', worktree: '/w', baseSha: 'base', graphRev: 'r', createdAt: 1 } as const;
+  const base = {
+    launch: launch as unknown as Parameters<typeof composeBrief>[0]['launch'],
+    node: { id: 'T1', kind: 'task' as const, payload: { title: 'x', description: 'd', acceptanceCriteria: ['a'] }, deps: [] },
+    depReports: [],
+    apiBaseUrl: 'http://127.0.0.1:1',
+    retryWindowMs: 1000,
+    checkCommand: 'npm test',
+    integrationBranch: 'main',
+  };
+  const BULLET = '- Dependencies are installed: the orchestrator ran `npm ci` in this worktree before you started, outside any sandbox. Do not run it again unless your change needs it.';
+  const done = (md: string) => md.split('## Definition of done\n')[1]!.split('\n## ')[0]!.split('\n');
+  let hp: Harness | undefined;
+  afterEach(() => {
+    hp?.cleanup();
+    hp = undefined;
+  });
+
+  it('the bullet is on the line after the check command bullet, and brief.json carries prepareCommand', () => {
+    const { markdown, json } = composeBrief({ ...base, prepareCommand: 'npm ci' }, { fallbackPath: '/x' });
+    const lines = done(markdown);
+    const check = lines.findIndex((l) => l.startsWith('- Run the check command before submitting'));
+    expect(check).toBeGreaterThanOrEqual(0);
+    expect(lines[check + 1]).toBe(BULLET);
+    expect(json.prepareCommand).toBe('npm ci');
+  });
+
+  it('a codex launch without network access: check command, prepare and network bullets in that order', () => {
+    const { markdown } = composeBrief({ ...base, prepareCommand: 'npm ci', runner: { kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write', networkAccess: false } }, { fallbackPath: '/x' });
+    const lines = done(markdown);
+    const check = lines.findIndex((l) => l.startsWith('- Run the check command before submitting'));
+    const prepare = lines.indexOf(BULLET);
+    const network = lines.findIndex((l) => l.includes('no network access'));
+    expect(check).toBeGreaterThanOrEqual(0);
+    expect(prepare).toBe(check + 1);
+    expect(network).toBeGreaterThan(prepare);
+  });
+
+  it('without prepareCommand there is no bullet and no field', () => {
+    const { markdown, json } = composeBrief(base, { fallbackPath: '/x' });
+    expect(markdown).not.toContain('Dependencies are installed');
+    expect('prepareCommand' in json).toBe(false);
+  });
+
+  it('briefInput carries prepareCommand only when the key is set', async () => {
+    const g = 'nodes:\n  - { id: A, deps: [], description: d, acceptanceCriteria: [a] }';
+    hp = makeHarness({ graph: g, config: { prepareCommand: 'install' } });
+    hp.orch.prepareRunner = () => new Promise(() => {});
+    await hp.orch.tick();
+    const [withKey] = hp.store.listLaunches({ taskId: 'A' });
+    expect(hp.orch.briefInput(withKey!).prepareCommand).toBe('install');
+    hp.cleanup();
+    hp = makeHarness({ graph: g });
+    await hp.orch.tick();
+    const input = hp.orch.briefInput(hp.launchOf('A'));
+    expect('prepareCommand' in input).toBe(false);
+  });
+});

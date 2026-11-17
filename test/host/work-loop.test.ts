@@ -575,6 +575,21 @@ describe('work.mjs by kind', () => {
     expect(stopVerdict({ ...base, openQuestions: ['T1'] }, undefined, 0, 1000, 'opencode').why).toMatch(/for opencode and the run waits on a human/);
   });
 
+  // ORC-132: a launch being prepared, or a task waiting for a prepare retry, keeps a loop of its kind up.
+  it('the stop rule counts preparingByKind for the chosen kind; a status without it counts as 0', () => {
+    const quiet = { finished: false, stalled: false, paused: false, claimableByKind: { 'claude-code': 0, codex: 0, opencode: 0 }, liveLaunches: [], verifying: [], openQuestions: ['T1'], awaitingReview: [] };
+    const preparing = { ...quiet, preparingByKind: { codex: 1 } };
+    expect(stopVerdict(preparing, undefined, 0, 1000, 'codex')).toEqual({ stop: false, quiet: false });
+    expect(stopVerdict(preparing, undefined, 0, 1000, 'opencode')).toEqual({ stop: true, why: 'nothing is claimable for opencode and the run waits on a human' });
+    const noQuestion = { ...preparing, openQuestions: [] };
+    expect(stopVerdict(noQuestion, 0, 120_000, 120_000, 'codex').stop).toBe(false);
+    expect(stopVerdict(noQuestion, 0, 500_000, 120_000, 'codex').stop).toBe(false);
+    // An older daemon: no preparingByKind, so today's verdicts.
+    expect(stopVerdict(quiet, undefined, 0, 1000, 'codex')).toEqual({ stop: true, why: 'nothing is claimable for codex and the run waits on a human' });
+    expect(stopVerdict({ ...quiet, openQuestions: [] }, 0, 1000, 1000, 'codex')).toEqual({ stop: true, why: 'nothing claimable for codex for 1000ms' });
+    expect(stopVerdict({ ...quiet, openQuestions: [] }, 0, 500, 1000, 'codex')).toEqual({ stop: false, quiet: true });
+  });
+
   it('the silence limit: --max-silence-ms, else the claim, else 45 minutes; 0 is off', () => {
     expect(parseWorkArgs([]).maxSilenceMs).toBeUndefined();
     expect(parseWorkArgs(['--max-silence-ms', '0']).maxSilenceMs).toBe(0);
@@ -833,5 +848,24 @@ describe('work.mjs lease renewal (ORC-85)', () => {
     const work = prompts.find((p) => p.label.startsWith('work'))!;
     expect(work.prompt).toContain('Your lease lasts 90000ms');
     expect(work.prompt).toContain('at least every 30000ms');
+  });
+
+  // ORC-132: the claimer reads preparingByKind["claude-code"] and the stop rule needs it to be 0.
+  it('the Claude Code workflow claimer counts launches being prepared in its stop rule', async () => {
+    const src = readFileSync(path.resolve(here, '../../hosts/claude-code/workflows/work.js'), 'utf8').replace(/^export const meta/m, 'const meta');
+    const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (...a: string[]) => (...v: unknown[]) => Promise<unknown>;
+    const run = new AsyncFunction('args', 'agent', 'parallel', 'log', src);
+    const prompts: Array<{ label: string; prompt: string }> = [];
+    const agent = async (prompt: string, opts: { label: string }) => {
+      prompts.push({ label: opts.label, prompt });
+      return { claimed: false, stop: true };
+    };
+    const parallel = async (fns: Array<() => Promise<unknown>>) => Promise.all(fns.map((f) => f()));
+    await run({ workers: 1 }, agent, parallel, () => {});
+    const claim = prompts.find((p) => p.label.startsWith('claim'))!;
+    expect(claim.prompt).toContain('take preparing as status preparingByKind["claude-code"] (0 when status has no preparingByKind)');
+    const stopRule = claim.prompt.split('\n').find((line) => line.includes('stop is true when'))!;
+    expect(stopRule).toContain('preparing is 0');
+    expect(stopRule).toMatch(/claimable is 0 and preparing is 0 and verifying is empty/);
   });
 });

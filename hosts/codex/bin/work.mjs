@@ -120,7 +120,9 @@ export function parseWorkArgs(argv) {
 
 /**
  * The stop rule, read from GET /v1/status: the run finished or stalled; or nothing is claimable
- * for the kind and no launch of it is live while questions or reviews wait on a human; or that
+ * for the kind, nothing is being prepared for it (`preparingByKind`: launches whose prepare command
+ * runs and tasks waiting for a prepare retry; a status without the field counts as 0) and no launch
+ * of it is live while questions or reviews wait on a human; or that
  * quiet has lasted `idleExitMs` (a run whose remaining work is for another kind, or not yet
  * prepared). A paused run is never quiet, and neither is one with a task awaiting the verifier
  * (`verifying`): its result can unlock dependents or send it back for another launch. A review is
@@ -130,9 +132,10 @@ export function stopVerdict(s, quietSinceMs, now, idleExitMs, kind = DEFAULT_RUN
   if (s.finished === true) return { stop: true, why: 'the run is finished' };
   if (s.stalled === true) return { stop: true, why: 'the run is stalled' };
   const claimable = Number(s.claimableByKind?.[kind] ?? 0);
+  const preparing = Number(s.preparingByKind?.[kind] ?? 0);
   const live = (s.liveLaunches ?? []).some((l) => (l.runner ?? 'claude-code') === kind);
   const verifying = new Set(s.verifying ?? []);
-  const quiet = claimable === 0 && !live && verifying.size === 0 && s.paused !== true;
+  const quiet = claimable === 0 && preparing === 0 && !live && verifying.size === 0 && s.paused !== true;
   if (!quiet) return { stop: false, quiet: false };
   const reviews = (s.awaitingReview ?? []).filter((id) => !verifying.has(id));
   if ((s.openQuestions ?? []).length || reviews.length) return { stop: true, why: `nothing is claimable for ${kind} and the run waits on a human` };

@@ -78,7 +78,7 @@ with `afterSeq` from the previous call and `until: "any"`, and act on each diges
   collects the answer.
 - **awaitingReview** non-empty: invoke the `review` skill for each milestone.
 - **finished** true: report the final state and stop looping.
-- **stalled** true, or `claimable` is 0 with no `workers` in `status` and the workflow has
+- **stalled** true, or `claimable` is 0 and `preparing` is 0 with no `workers` in `status` and the workflow has
   ended: report `stallRoots` and offer the `run` skill's remedies (unblock, cancel with
   release, reopen with cascade, re-import).
 

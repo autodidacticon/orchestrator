@@ -44,6 +44,8 @@ export interface BriefInput {
   limits?: BriefLimits;
   /** Absent while no check command is configured. */
   checkCommand?: string;
+  /** The prepare command the orchestrator ran in the worktree; absent while `prepareCommand` is unset. See specs/agent-protocol "Prepare command in the brief". */
+  prepareCommand?: string;
   integrationBranch: string;
   /** The Bash rules in force for a launch the daemon spawns; absent when the runner command carries its own list. */
   allowedTools?: string[];

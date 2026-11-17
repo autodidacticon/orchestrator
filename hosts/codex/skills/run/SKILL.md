@@ -56,7 +56,8 @@ the repository:
 (`npx orchestrator-work ...` from an install of the package.) The loop claims only `codex`
 launches (`status.claimableByKind.codex`). For each one it runs `codex exec` with the command
 a spawned launch gets, then posts the usage. It stops when the run is finished or stalled, or
-when nothing is claimable for codex while a question or review waits. Do not start it from
+when nothing is claimable and nothing is being prepared for codex
+(`status.preparingByKind.codex` is 0) while a question or review waits. Do not start it from
 this session as a background command: nobody has verified that such a process outlives the
 turn. `claude-code` launches still need `spawn` or a Claude Code session. While the loop
 runs, monitor as usual; its workers show in `status.workers` as `<tag>-<n>`. After you answer

@@ -28,6 +28,8 @@ export interface BriefJson {
   graphRev: string;
   integrationBranch: string;
   checkCommand?: string;
+  /** Absent while `prepareCommand` is unset. */
+  prepareCommand?: string;
   allowedTools?: string[];
   /** The launch's runner kind, commit policy, (codex) sandbox and (opencode) permission; absent when the brief input had none. See specs/worker-runners. */
   runner?: BriefRunner;
@@ -129,6 +131,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     graphRev: launch.graphRev,
     integrationBranch: input.integrationBranch,
     checkCommand: input.checkCommand,
+    ...(input.prepareCommand ? { prepareCommand: input.prepareCommand } : {}),
     allowedTools: input.allowedTools,
     ...(input.runner ? { runner: input.runner } : {}),
     retryWindowMs: input.retryWindowMs,
@@ -174,6 +177,10 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     input.checkCommand
       ? `- Run the check command before submitting: \`${input.checkCommand}\`.`
       : '- No check command is configured for this repository yet; the operator is being asked. Run the project\'s documented test suite before submitting.',
+    // The prepare command already ran in the worktree (ORC-132). See specs/agent-protocol "Prepare command in the brief".
+    ...(input.prepareCommand
+      ? [`- Dependencies are installed: the orchestrator ran \`${input.prepareCommand}\` in this worktree before you started, outside any sandbox. Do not run it again unless your change needs it.`]
+      : []),
     // A sandboxed Codex worker submits when the check cannot run for lack of network (ORC-84). See specs/agent-protocol "Codex brief states the network limit".
     ...(kind === 'codex' ? codexNetworkRule(input.runner, input.checkCommand) : []),
     // Workers that edited openspec/specs directly lost the per-change record and collided on the main spec files (ORC-74).

@@ -58,7 +58,7 @@ const EDITION_BLOCKS: Record<string, Record<string, string>> = {
     "`spawn` is the OpenCode host's default. In pull mode the work loop (`orchestrator-work --runner opencode`": '24ddb5d0b33a95db',
     'When the run holds `opencode` launches, also offer the work loop the `modeNote` names': '5ef6baa4c8cdd998',
     'work.mjs --runner opencode --workers <n>': 'f43ddb954e8c1d06',
-    '(`--runner codex`, the default, for `codex` launches;': '8a61030e5bda8f22',
+    '(`--runner codex`, the default, for `codex` launches;': '9af57487e50f8703',
     '`codex`, or `opencode`. All three kinds run headless under `spawn`': '35aaf4b54dbca71a',
     'For an `opencode` run name the permission and the commit policy': 'd16a063501b6d383',
     '`runner.opencode.*` (`model` as a `provider/model` id': '9ed9fdfeccffe3b7',

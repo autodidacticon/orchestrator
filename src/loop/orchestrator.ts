@@ -270,6 +270,12 @@ export interface StatusReport {
   claimable: Id[];
   /** Parked launches per runner kind, so a worker can tell whether any of them is for a CLI it runs. */
   claimableByKind: Record<RunnerKind, number>;
+  /** Tasks whose launch is being prepared (`preparing` or `launching`), oldest first. See specs/operator-control "Status report: launches being prepared". */
+  preparing: Id[];
+  /** Unstarted tasks with a prepare retry entry, by `retryAt`, then task id. */
+  prepareRetry: Array<{ taskId: Id; failures: number; retryAt: number }>;
+  /** Per runner kind, the launches being prepared plus the tasks in `prepareRetry`; every kind present. */
+  preparingByKind: Record<RunnerKind, number>;
   workers: Array<{ id: string; launchId: string; taskId: Id; claimedAt: number }>;
   /** Tracker sync: the recorded tracker, pending effects, and effects that failed at the retry cap. */
   tracker: TrackerRecord | undefined;
@@ -954,6 +960,8 @@ export class Orchestrator implements OrchestratorCore {
       // spawned (status `launching`). See specs/agent-protocol "No lease line for a spawned launch".
       ...(this.effectiveMode() === 'spawn' || launch.status === 'launching' ? {} : { leaseTtlMs: this.config.leaseTtlMs }),
       checkCommand: eff.config.checkCommand,
+      // The worktree of a launch prepared under `prepareCommand` had it run before the agent starts. See specs/agent-protocol "Prepare command in the brief".
+      ...(this.config.prepareCommand ? { prepareCommand: this.config.prepareCommand } : {}),
       integrationBranch: this.config.integrationBranch,
       // Only a launch the daemon spawns gets the list; in pull mode every launch is claimed and the worker runs under its own permissions.
       // The list is a Claude Code permission flag, so a launch of another kind never gets it. See specs/worker-runners.
@@ -2146,6 +2154,14 @@ export class Orchestrator implements OrchestratorCore {
       effort: l.effort,
     }));
     const claimable = [...this.store.listLaunches({ status: 'claimable' })].sort((a, b) => (a.claimableAt ?? a.createdAt) - (b.claimableAt ?? b.createdAt));
+    // Launches being prepared and prepare retries, from the store only. See specs/operator-control "Status report: launches being prepared".
+    const preparing = [...this.store.listLaunches({ status: ['preparing', 'launching'] })].sort((a, b) => a.createdAt - b.createdAt);
+    const preparingTasks = new Set(preparing.map((l) => l.taskId));
+    const prepareRetry = (this.config.prepareCommand ? pendingPrepareRetries(this) : [])
+      .filter((r) => !preparingTasks.has(r.taskId))
+      .sort((a, b) => a.retryAt - b.retryAt || (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));
+    const preparingByKind = countByKind(preparing);
+    for (const r of prepareRetry) preparingByKind[this.selectionFor(r.taskId).runner] += 1;
     return {
       finished: q.finished(g, o),
       stalled: q.stalled(g, o, live),
@@ -2183,6 +2199,9 @@ export class Orchestrator implements OrchestratorCore {
       profiles: this.profiles(),
       claimable: claimable.map((l) => l.taskId),
       claimableByKind: countByKind(claimable),
+      preparing: preparing.map((l) => l.taskId),
+      prepareRetry,
+      preparingByKind,
       workers: this.store.listLaunches({ status: 'live' }).filter((l) => l.worker).map((l) => ({ id: l.worker!.id, launchId: l.launchId, taskId: l.taskId, claimedAt: l.worker!.claimedAt })),
       tracker: trackerOf(this.store),
       outboxPending: this.store.countOutbox('pending'),

@@ -57,7 +57,8 @@ working the run. When the run holds `opencode` launches, also offer the work loo
 install of a package release that has `--runner`.) Each loop claims only launches of its kind
 (`status.claimableByKind.opencode` or `.codex`). For each one it runs `opencode run` (or
 `codex exec`) with the command and per-launch config a spawned launch gets, then posts the
-usage. It stops when the run is finished or stalled, or when nothing is claimable for its kind
+usage. It stops when the run is finished or stalled, or when nothing is claimable and nothing
+is being prepared for its kind (`status.preparingByKind.opencode` or `.codex` is 0)
 while a question or review waits. Do not start it from this session as a background command:
 nobody has verified that such a process outlives the turn. `claude-code` launches still need
 `spawn` or a Claude Code session. While the loop

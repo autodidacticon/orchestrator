@@ -14,7 +14,7 @@ import type { AwakeClock } from './gaps.js';
  * awake time of a wait in progress). Gaps in the daemon's clock are left out. See specs/health-monitoring "Launch time budget".
  */
 export function elapsedMs(launch: Launch, now: number, clock: AwakeClock): number {
-  const start = launch.spawnedAt ?? launch.createdAt;
+  const start = launch.spawnedAt ?? launch.claimableAt ?? launch.createdAt;
   const waiting = launch.waitingSince !== undefined ? clock.awakeMs(launch.waitingSince, now) : 0;
   return Math.max(0, clock.awakeMs(start, now) - (launch.waitedMs ?? 0) - waiting);
 }
