@@ -4,7 +4,8 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { runCli } from '../../src/operator/cli.js';
+import { USAGE as DAEMON_USAGE } from '../../src/main.js';
+import { runCli, USAGE as CTL_USAGE } from '../../src/operator/cli.js';
 import { digestOf } from '../../src/operator/routes.js';
 import { health, listRuns, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
 import { parseSetFlags } from '../../src/runs/resolve.js';
@@ -208,6 +209,75 @@ describe('orchestrator-ctl config', () => {
     const usage = ((await runCli(['--help'])).body as { usage: string }).usage;
     for (const word of ['--permission', '--data-dir <shared|launch>', 'runnerKind=claude-code|codex|opencode', 'opencode.{model,effort,commit,command,permission,dataDir}', 'anthropic/claude-opus-5-5 at medium', 'opencode.permission']) expect(usage, word).toContain(word);
   });
+
+  // See specs/operator-control "Configuration command: set flags".
+  it('config --set stores any key in the one PUT, and a leaf named twice is refused before anything is sent', async () => {
+    h = await makeSlice({ graph: single('hang'), config: { leaseTtlMs: 60_000 } });
+    const url = h.orch.apiBaseUrl;
+    const stored = () => JSON.parse(h!.store.getKv('config.overrides') ?? '{}') as Record<string, unknown>;
+    const set = await runCli(['--url', url, 'config', '--set', 'budgets.maxLaunchMs=10800000']);
+    expect(set.status).toBe(200);
+    expect(set.body).toMatchObject({ applied: ['budgets'], config: { budgets: { maxLaunchMs: { value: 10_800_000, source: 'argument' } } } });
+    expect(stored()).toEqual({ budgets: { maxLaunchMs: 10_800_000 } });
+    const cleared = await runCli(['--url', url, 'config', '--clear', 'budgets.maxLaunchMs']);
+    expect(cleared.status).toBe(200);
+    expect(stored()).toEqual({});
+    await expect(runCli(['--url', url, 'config', '--set', 'nope=1'])).rejects.toThrow(/unknown key "nope"/);
+    await expect(runCli(['--url', url, 'config', '--set', 'budgets.maxLaunchMs='])).rejects.toThrow(/budgets\.maxLaunchMs expects milliseconds/);
+    expect(h.store.listEvents({ kind: 'operator.config' })).toHaveLength(2);
+    for (const argv of [
+      ['--set', 'capacity=3', '--capacity', '4'],
+      ['--clear', 'budgets.maxLaunchMs', '--set', 'budgets.maxLaunchMs=1'],
+      ['--set', 'capacity=3', '--set', 'capacity=4'],
+      ['--clear', 'health', '--set', 'health.stuckAfterMs=1'],
+      ['--clear', 'codex', '--set', 'codex.model=gpt-6-pro'],
+      ['--set', 'codex.sandbox=read-only', '--sandbox', 'workspace-write'],
+      ['--set', 'health={"stuckAfterMs":1}', '--set', 'health.stuckAfterMs=2'],
+      ['--clear', 'allowedTools', '--allow', 'Bash(make:*)'],
+    ]) {
+      await expect(runCli(['--url', url, 'config', ...argv]), argv.join(' ')).rejects.toThrow(/^config: .* both name /);
+      expect(stored(), argv.join(' ')).toEqual({});
+    }
+    expect(h.store.listEvents({ kind: 'operator.config' })).toHaveLength(2);
+    // Different leaves of one block merge, and a repeated --set allowedTools appends.
+    const merged = await runCli(['--url', url, 'config', '--set', 'codex.model=gpt-6-pro', '--sandbox', 'read-only', '--set', 'health.stuckAfterMs=600000', '--set', 'health.stuckFailAfterMs=1200000', '--set', 'allowedTools=Bash(make:*)', '--set', 'allowedTools=Bash(docker:*)']);
+    expect(merged.status).toBe(200);
+    expect(stored()).toEqual({ codex: { model: 'gpt-6-pro', sandbox: 'read-only' }, health: { stuckAfterMs: 600_000, stuckFailAfterMs: 1_200_000 }, allowedTools: ['Bash(make:*)', 'Bash(docker:*)'] });
+    // The daemon's refusal is relayed: the pair rule names the key.
+    const pair = await runCli(['--url', url, 'config', '--set', 'health.stuckFailAfterMs=600000']);
+    expect(pair.status).toBe(400);
+    expect(pair.body).toMatchObject({ key: 'health.stuckFailAfterMs' });
+    const usage = ((await runCli(['--help'])).body as { usage: string }).usage;
+    expect(usage).toBe(CTL_USAGE);
+    for (const word of ['--set key=value', 'budgets.maxLaunchMs', 'health.stuckAfterMs', 'health.stuckFailAfterMs', '0 disables the limit']) expect(CTL_USAGE, word).toContain(word);
+    for (const word of ['budgets.maxLaunchMs', 'health.stuckAfterMs', 'health.stuckFailAfterMs', '0 disables the limit']) expect(DAEMON_USAGE.replace(/\s+/g, ' '), word).toContain(word);
+  });
+
+  // See specs/toolchain-discovery "Limit leaves in the resolved configuration record".
+  it('GET /v1/config, config.json and config.resolved carry the limit leaves under budgets and health', async () => {
+    env = { ...process.env, ORCH_HOME: fresh('orch-limits-home-') };
+    const repo = realpathSync(makeRepo(fresh('orch-limits-repo-')));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), `runnerCommand: "${scripted}"\ncheckCommand: "true"\nhealth:\n  stuckFailAfterMs: 1800000\n`);
+    const paths = runPaths(repo, env);
+    const started = await startDaemon({ repo, env, overrides: { budgets: { maxLaunchMs: 10_800_000 } } });
+    const leaves = {
+      budgets: { maxLaunchMs: { value: 10_800_000, source: 'argument' } },
+      health: { stuckAfterMs: { value: 900_000, source: 'default' }, stuckFailAfterMs: { value: 1_800_000, source: 'file' } },
+    };
+    expect((await http(started.url, 'GET', '/v1/config')).body['config']).toMatchObject(leaves);
+    expect(readConfigJson(paths.runDir)?.config).toMatchObject(leaves);
+    const put = await http(started.url, 'PUT', '/v1/config', { health: { stuckAfterMs: 0 } });
+    expect(put).toMatchObject({ status: 200, body: { applied: ['health'] } });
+    expect(readConfigJson(paths.runDir)?.config.health).toEqual({ stuckAfterMs: { value: 0, source: 'argument' }, stuckFailAfterMs: { value: 1_800_000, source: 'file' } });
+    const bad = await http(started.url, 'PUT', '/v1/config', { health: { stuckAfterMs: 1.5 } });
+    expect(bad).toMatchObject({ status: 400, body: { key: 'health.stuckAfterMs' } });
+    await stopDaemon({ repo, env });
+    const store = new SqliteStore(path.join(paths.runDir, 'store.sqlite'));
+    const resolved = store.listEvents({ kind: 'config.resolved' }).map((e) => e.payload);
+    expect(resolved[0]).toMatchObject(leaves);
+    expect(resolved.at(-1)).toMatchObject({ budgets: leaves.budgets, health: { stuckAfterMs: { value: 0, source: 'argument' } }, overrides: ['budgets', 'health'] });
+    store.close();
+  }, 60_000);
 
   it('start accepts --set runnerKind=opencode and reports the opencode leaves with their sources', async () => {
     env = { ...process.env, ORCH_HOME: fresh('orch-kind-home-') };

@@ -270,6 +270,51 @@ describe('run directory and daemon lifecycle', () => {
     await stopDaemon({ repo, env });
   }, 60_000);
 
+  // See specs/operator-control "Configuration route: limit keys" and specs/toolchain-discovery "Runtime limit overrides".
+  it('passes the limit blocks to a spawned daemon, and a pair refusal at spawn is readable from the error', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home };
+    const repo = realpathSync(makeRepo(fresh()));
+    configFor(repo);
+    const first = await startDaemon({ repo, env, overrides: { budgets: { maxLaunchMs: 10_800_000 }, health: { stuckAfterMs: 0 } } });
+    expect(first.started).toBe(true);
+    expect([...(first.applied ?? [])].sort()).toEqual(['budgets', 'health']);
+    const res = await fetch(`${first.url}/v1/config`);
+    const body = (await res.json()) as { config: Record<string, unknown>; overrides: unknown };
+    expect(body.config).toMatchObject({
+      budgets: { maxLaunchMs: { value: 10_800_000, source: 'argument' } },
+      health: { stuckAfterMs: { value: 0, source: 'argument' }, stuckFailAfterMs: { value: 2_700_000, source: 'default' } },
+    });
+    expect(body.overrides).toEqual({ budgets: { maxLaunchMs: 10_800_000 }, health: { stuckAfterMs: 0 } });
+    await stopDaemon({ repo, env });
+
+    // A fresh run with the default limits: a fail limit below the flag limit is refused at spawn, and the error ends with the refusal.
+    const other = realpathSync(makeRepo(fresh()));
+    configFor(other);
+    const err = await startDaemon({ repo: other, env, overrides: { health: { stuckFailAfterMs: 600_000 } } }).then(
+      () => undefined,
+      (e: unknown) => String(e),
+    );
+    expect(err).toMatch(/--set health\.stuckFailAfterMs: health\.stuckFailAfterMs 600000 \(argument\) must be above health\.stuckAfterMs 900000 \(default\)[^\n]*\n?$/);
+    const log = readFileSync(runPaths(other, env).daemonLog, 'utf8');
+    expect(log.trimEnd().split('\n').at(-1)).toMatch(/^--set health\.stuckFailAfterMs: .*600000.*900000/);
+    expect((await daemonState(runPaths(other, env).runDir)).healthy).toBe(false);
+
+    // A file whose own pair breaks the rule still starts, with one warning naming both values and their sources.
+    const broken = realpathSync(makeRepo(fresh()));
+    configFor(broken);
+    writeFileSync(path.join(broken, 'orchestrator.yaml'), `${readFileSync(path.join(broken, 'orchestrator.yaml'), 'utf8')}health:\n  stuckFailAfterMs: 600000\n`);
+    const started = await startDaemon({ repo: broken, env });
+    expect(started.config).toMatchObject({ health: { stuckFailAfterMs: { value: 600_000, source: 'file' }, stuckAfterMs: { value: 900_000, source: 'default' } } });
+    const warned = readFileSync(runPaths(broken, env).daemonLog, 'utf8').split('\n').filter((l) => l.includes('stuck limits:'));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('health.stuckFailAfterMs 600000 (file)');
+    expect(warned[0]).toContain('health.stuckAfterMs 900000 (default)');
+    // A patch of another key is accepted over it.
+    expect((await startDaemon({ repo: broken, env, overrides: { capacity: 3 } })).applied).toEqual(['capacity']);
+    await stopDaemon({ repo: broken, env });
+  }, 60_000);
+
   it('adopts --default-mode only when nothing chose a mode, and keeps it across restarts', async () => {
     home = fresh();
     env = { ...process.env, ORCH_HOME: home };

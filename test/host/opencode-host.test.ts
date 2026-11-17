@@ -288,6 +288,12 @@ describe('opencode host', () => {
     for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable']) expect(review, word).toContain(word);
     expect(review).not.toContain('completion summaries');
     const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
+    // The raise offer, cut out and read alone. See specs/host-integration "Run skill offers a raised limit".
+    const more = run.slice(run.indexOf('- **a launch needs more time**'), run.indexOf('\n- **', run.indexOf('- **a launch needs more time**') + 1));
+    expect(more.startsWith('- **a launch needs more time**')).toBe(true);
+    for (const word of ['configure', 'health.stuckFailAfterMs', 'budgets.maxLaunchMs', 'elapsedMs', 'applied', 'null']) expect(more, word).toContain(word);
+    for (const word of ['health: { stuckFailAfterMs', 'budgets.maxLaunchMs', 'budgets: { maxLaunchMs', 'orchestrator-work']) expect(more, word).toContain(word);
+    expect(more).not.toContain("this session's workers");
     const opencodeLine = 'detected: npm test on main; workers opencode anthropic/claude-opus-5-5 at medium (default); permission derived, agent commits';
     for (const word of ['mode: "spawn"', 'modeNote', 'needsConfig', 'AGENTS.md', 'needsAccess', 'permission: "allow"', opencodeLine, 'runner.opencode.*', '"orchestrator_operator_*"', 'opencode.json']) expect(run, word).toContain(word);
     for (const word of ['/project/', "never change the project's state", 'applied: false', 'reason', 'status update', 'statusUpdateId', 'Milestone accepted:', 'Milestone rejected:']) expect(run.replace(/\s+/g, ' '), word).toContain(word);

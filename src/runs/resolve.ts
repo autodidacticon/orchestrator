@@ -31,12 +31,12 @@ import {
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { type AllowedToolsParts, composeAllowedTools, isSafeRule } from '../toolchain/tools.js';
 
-export const OVERRIDABLE_KEYS = ['checkCommand', 'integrationBranch', 'capacity', 'allowedTools', 'runnerCommand', 'runnerKind', 'model', 'effort', 'claude', 'codex', 'opencode'] as const;
+export const OVERRIDABLE_KEYS = ['checkCommand', 'integrationBranch', 'capacity', 'allowedTools', 'runnerCommand', 'runnerKind', 'model', 'effort', 'claude', 'codex', 'opencode', 'budgets', 'health'] as const;
 export type OverridableKey = (typeof OVERRIDABLE_KEYS)[number];
 export const START_ONLY_KEYS: readonly OverridableKey[] = ['integrationBranch'];
 
 /** The override namespace of each runner kind, and the leaves it holds. */
-const NAMESPACE_OF = { 'claude-code': 'claude', codex: 'codex', opencode: 'opencode' } as const satisfies Record<RunnerKind, string>;
+export const NAMESPACE_OF = { 'claude-code': 'claude', codex: 'codex', opencode: 'opencode' } as const satisfies Record<RunnerKind, string>;
 type Namespace = (typeof NAMESPACE_OF)[RunnerKind];
 const NAMESPACES: readonly Namespace[] = ['claude', 'codex', 'opencode'];
 const NAMESPACE_LEAVES: Record<Namespace, readonly string[]> = {
@@ -44,6 +44,25 @@ const NAMESPACE_LEAVES: Record<Namespace, readonly string[]> = {
   codex: ['model', 'effort', 'sandbox', 'commit', 'command'],
   opencode: ['model', 'effort', 'commit', 'command', 'permission', 'dataDir'],
 };
+
+/**
+ * The limit blocks and the leaves an override may hold in each: the launch time budget and the two stuck limits.
+ * The other keys of `budgets` and `health` stay start-time keys. See specs/toolchain-discovery "Runtime limit overrides".
+ */
+type LimitBlock = 'budgets' | 'health';
+const LIMIT_BLOCKS: readonly LimitBlock[] = ['budgets', 'health'];
+const LIMIT_LEAVES: Record<LimitBlock, readonly string[]> = {
+  budgets: ['maxLaunchMs'],
+  health: ['stuckAfterMs', 'stuckFailAfterMs'],
+};
+/** Every nested override block: the runner-kind namespaces and the limit blocks. */
+const BLOCKS: readonly string[] = [...NAMESPACES, ...LIMIT_BLOCKS];
+const BLOCK_LEAVES: Record<string, readonly string[]> = { ...NAMESPACE_LEAVES, ...LIMIT_LEAVES };
+const LIMIT_DOTTED = LIMIT_BLOCKS.flatMap((b) => LIMIT_LEAVES[b].map((l) => `${b}.${l}`));
+const isBlock = (k: unknown): boolean => BLOCKS.includes(k as string);
+
+/** A limit in milliseconds: an integer from 0 to Number.MAX_SAFE_INTEGER; 0 disables it. */
+const limitMs = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
 const rule = z.string().refine(isSafeRule, (r) => ({ message: `rule ${JSON.stringify(r)} must not be empty or contain a double quote, backslash, dollar sign, or backtick` }));
 
@@ -96,6 +115,8 @@ export const overridesSchema = z
     claude: claudeOverridesSchema.nullable().optional(),
     codex: codexOverridesSchema.nullable().optional(),
     opencode: opencodeOverridesSchema.nullable().optional(),
+    budgets: z.object({ maxLaunchMs: limitMs.nullable().optional() }).strict().nullable().optional(),
+    health: z.object({ stuckAfterMs: limitMs.nullable().optional(), stuckFailAfterMs: limitMs.nullable().optional() }).strict().nullable().optional(),
   })
   .strict();
 export type Overrides = z.infer<typeof overridesSchema>;
@@ -173,10 +194,23 @@ export interface Resolved {
   claude: ClaudeLeaves;
   codex: CodexLeaves;
   opencode: OpenCodeLeaves;
+  /** The launch time budget in force. See specs/toolchain-discovery "Limit leaves in the resolved configuration record". */
+  budgets: BudgetLeaves;
+  /** The stuck limits in force. */
+  health: HealthLeaves;
   toolchain: ToolchainRecord | undefined;
   needsConfig: OverridableKey[];
   overrides: Overrides;
   inputs: ResolveInputs;
+}
+
+export interface BudgetLeaves {
+  maxLaunchMs: ConfigLeaf<number>;
+}
+
+export interface HealthLeaves {
+  stuckAfterMs: ConfigLeaf<number>;
+  stuckFailAfterMs: ConfigLeaf<number>;
 }
 
 const DEFAULTS = configSchema.parse({});
@@ -201,13 +235,19 @@ function fileRunner(raw: Record<string, unknown> | undefined, ns: Namespace): Re
   return isObject(block) ? block : {};
 }
 
-/** Merge a patch into an override document: a null clears the key; inside a kind's namespace a null clears one leaf. */
+/** The file's `budgets` or `health` block as written. */
+function fileLimits(raw: Record<string, unknown> | undefined, block: LimitBlock): Record<string, unknown> {
+  const b = raw?.[block];
+  return isObject(b) ? b : {};
+}
+
+/** Merge a patch into an override document: a null clears the key; inside a nested block (a kind's namespace, `budgets`, `health`) a null clears one leaf. */
 export function mergeOverrides(current: Overrides, patch: Overrides): Overrides {
   const out: Record<string, unknown> = { ...current };
   for (const [k, v] of Object.entries(patch)) {
     if (v === null) delete out[k];
     else if (v === undefined) continue;
-    else if ((NAMESPACES as readonly string[]).includes(k) && isObject(v)) {
+    else if (isBlock(k) && isObject(v)) {
       const ns: Record<string, unknown> = isObject(out[k]) ? { ...(out[k] as Record<string, unknown>) } : {};
       for (const [leaf, lv] of Object.entries(v)) {
         if (lv === null) delete ns[leaf];
@@ -262,7 +302,7 @@ export function parseOverridePatch(patch: unknown, kind?: RunnerKind): PatchResu
   const issue = parsed.error.issues[0];
   const path = issue?.code === 'unrecognized_keys' ? [...issue.path, String(issue.keys[0] ?? '')] : (issue?.path ?? []);
   // A flat key bound to the kind keeps its own name in the refusal; the message names the kind.
-  const named = (NAMESPACES as readonly unknown[]).includes(path[0]) ? path.slice(0, 2) : path.slice(0, 1);
+  const named = isBlock(path[0]) ? path.slice(0, 2) : path.slice(0, 1);
   const key = named.length === 2 && named[0] === ns && bound.has(String(named[1])) ? String(named[1]) : named.map(String).join('.');
   return { ok: false, key, error: issue?.message ?? 'invalid value' };
 }
@@ -302,7 +342,32 @@ export function applyOverridePatch(inputs: ResolveInputs, current: Overrides, pa
   const kind = isRunnerKind(raw) ? raw : resolveLayers(inputs, raw === null ? { ...current, runnerKind: undefined } : current).kind.value;
   const parsed = parseOverridePatch(patch, kind);
   if (!parsed.ok) return parsed;
-  return { ok: true, patch: parsed.patch, next: mergeOverrides(current, parsed.patch) };
+  const next = mergeOverrides(current, parsed.patch);
+  // The pair rule is evaluated only for a patch that touches a stuck limit, so a file whose own pair breaks it still starts and takes other keys.
+  const h = parsed.patch.health;
+  if (h === null || (h !== undefined && (h.stuckAfterMs !== undefined || h.stuckFailAfterMs !== undefined))) {
+    const problem = stuckPairProblem(resolveLayers(inputs, next).health);
+    if (problem) {
+      const key = h === null || h.stuckFailAfterMs !== undefined ? 'health.stuckFailAfterMs' : 'health.stuckAfterMs';
+      return { ok: false, key, error: problem };
+    }
+  }
+  return { ok: true, patch: parsed.patch, next };
+}
+
+/**
+ * The stuck pair rule: with both limits above 0, `health.stuckFailAfterMs` must be above `health.stuckAfterMs`,
+ * or a silent launch is failed before it is ever flagged stuck. Returns the problem, naming both keys, values and
+ * sources, or undefined. See specs/toolchain-discovery "Runtime limit overrides".
+ */
+export function stuckPairProblem(h: HealthLeaves): string | undefined {
+  const flag = h.stuckAfterMs;
+  const fail = h.stuckFailAfterMs;
+  if (!(flag.value > 0 && fail.value > 0 && fail.value <= flag.value)) return undefined;
+  return (
+    `health.stuckFailAfterMs ${fail.value} (${fail.source}) must be above health.stuckAfterMs ${flag.value} (${flag.source}) when both are above 0, ` +
+    'or a silent launch is failed without being flagged stuck first; raise health.stuckFailAfterMs, lower health.stuckAfterMs, or set one of them to 0'
+  );
 }
 
 /** A scalar leaf: argument over file over default; an in-memory config with no file stands for the file layer. */
@@ -394,6 +459,16 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
     pure: leaf(undefined, fileHas(opencodeFile, 'pure'), oc.pure, od.pure, noFile),
     snapshots: leaf(undefined, fileHas(opencodeFile, 'snapshots'), oc.snapshots, od.snapshots, noFile),
   };
+  // The limits: argument over file over default. The file's nested blocks are read as written, and an override of 0 is an argument.
+  const healthFile = fileLimits(fileRaw, 'health');
+  const budgetsFile = fileLimits(fileRaw, 'budgets');
+  const health: HealthLeaves = {
+    stuckAfterMs: leaf(overrides.health?.stuckAfterMs, fileHas(healthFile, 'stuckAfterMs'), base.health.stuckAfterMs, DEFAULTS.health.stuckAfterMs, noFile),
+    stuckFailAfterMs: leaf(overrides.health?.stuckFailAfterMs, fileHas(healthFile, 'stuckFailAfterMs'), base.health.stuckFailAfterMs, DEFAULTS.health.stuckFailAfterMs, noFile),
+  };
+  const budgets: BudgetLeaves = {
+    maxLaunchMs: leaf(overrides.budgets?.maxLaunchMs, fileHas(budgetsFile, 'maxLaunchMs'), base.budgets.maxLaunchMs, DEFAULTS.budgets.maxLaunchMs, noFile),
+  };
   const isCodex = kind.value === 'codex';
   const isOpenCode = kind.value === 'opencode';
   const model = isCodex ? codex.model : isOpenCode ? opencode.model : claudeModel;
@@ -441,6 +516,8 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
           dataDir: opencode.dataDir.value,
         },
       },
+      health: { ...base.health, stuckAfterMs: health.stuckAfterMs.value, stuckFailAfterMs: health.stuckFailAfterMs.value },
+      budgets: { ...base.budgets, maxLaunchMs: budgets.maxLaunchMs.value },
     },
     provenance,
     kind,
@@ -450,6 +527,8 @@ export function resolveLayers(inputs: ResolveInputs, overrides: Overrides = {}):
     claude,
     codex,
     opencode,
+    budgets,
+    health,
     toolchain: detected?.toolchain,
     needsConfig,
     overrides,
@@ -473,6 +552,8 @@ export interface ConfigReport {
     claude: ClaudeLeaves;
     codex: CodexLeaves;
     opencode: OpenCodeLeaves;
+    budgets: BudgetLeaves;
+    health: HealthLeaves;
   };
   toolchain: ToolchainRecord | undefined;
   overrides: Overrides;
@@ -509,6 +590,8 @@ export function configSummary(report: ConfigReport): Record<string, unknown> {
     allowedTools: { source: c.allowedTools.source, count: c.allowedTools.value.length, applied: c.allowedTools.applied, parts: Object.fromEntries(Object.entries(c.allowedTools.parts).map(([k, v]) => [k, v.length])) },
     model: c.model,
     effort: c.effort,
+    budgets: c.budgets,
+    health: c.health,
     toolchain: report.toolchain ? { kinds: report.toolchain.kinds, checkCommand: report.toolchain.checkCommand, checkFrom: report.toolchain.checkFrom, packageManager: report.toolchain.packageManager } : undefined,
     needsConfig: report.needsConfig,
     overrides: Object.keys(report.overrides),
@@ -538,13 +621,14 @@ export function readOverrides(store: { getKv(key: string): string | undefined })
   }
 }
 
-const DOTTED_KEYS = NAMESPACES.flatMap((ns) => NAMESPACE_LEAVES[ns].map((l) => `${ns}.${l}`));
+const DOTTED_KEYS = BLOCKS.flatMap((b) => (BLOCK_LEAVES[b] ?? []).map((l) => `${b}.${l}`));
 
 /**
  * `--set key=value` flags into an override document: `capacity` as an integer,
  * `allowedTools` as a JSON array or one rule per flag (appended), `claude.<leaf>`,
  * `codex.<leaf>` and `opencode.<leaf>` folded into their namespace (or
- * `claude=`/`codex=`/`opencode=` as a JSON object), the rest as strings. With a `runnerKind` flag or a `kind`, the flat
+ * `claude=`/`codex=`/`opencode=` as a JSON object), `budgets.maxLaunchMs`, `health.stuckAfterMs` and
+ * `health.stuckFailAfterMs` as decimal digits only (or `budgets=`/`health=` as a JSON object), the rest as strings. With a `runnerKind` flag or a `kind`, the flat
  * `model` and `effort` bind to that kind and `effort` is checked against its set.
  * Throws a usage error on an unknown key or a bad value.
  */
@@ -555,21 +639,29 @@ export function parseSetFlags(flags: readonly string[], kind?: RunnerKind): Over
     if (eq <= 0) throw new Error(`--set expects key=value, not ${JSON.stringify(flag)}`);
     const key = flag.slice(0, eq).trim();
     const raw = flag.slice(eq + 1);
+    if (LIMIT_DOTTED.includes(key)) {
+      // Decimal digits only: `Number('')` is 0 and `Number('0x10')` is 16, and an empty value must never disable a limit.
+      const n = /^\d+$/.test(raw) ? Number(raw) : NaN;
+      if (!Number.isSafeInteger(n)) throw new Error(`--set ${key} expects milliseconds as decimal digits, an integer from 0 to ${Number.MAX_SAFE_INTEGER} (0 disables the limit), not ${JSON.stringify(raw)}`);
+      const [block, leafKey] = key.split('.') as [LimitBlock, string];
+      out[block] = { ...(isObject(out[block]) ? out[block] : {}), [leafKey]: n };
+      continue;
+    }
     if (DOTTED_KEYS.includes(key)) {
       const [ns, leafKey] = key.split('.') as [Namespace, string];
       if (!raw.trim()) throw new Error(`--set ${key} expects a non-empty value`);
       out[ns] = { ...(isObject(out[ns]) ? out[ns] : {}), [leafKey]: raw };
       continue;
     }
-    if (!(OVERRIDABLE_KEYS as readonly string[]).includes(key)) throw new Error(`--set: unknown key ${JSON.stringify(key)}; one of ${[...OVERRIDABLE_KEYS.filter((k) => !(NAMESPACES as readonly string[]).includes(k)), ...DOTTED_KEYS].join(', ')}`);
-    if ((NAMESPACES as readonly string[]).includes(key)) {
+    if (!(OVERRIDABLE_KEYS as readonly string[]).includes(key)) throw new Error(`--set: unknown key ${JSON.stringify(key)}; one of ${[...OVERRIDABLE_KEYS.filter((k) => !isBlock(k)), ...DOTTED_KEYS].join(', ')}`);
+    if (isBlock(key)) {
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
       } catch {
         parsed = undefined;
       }
-      if (!isObject(parsed)) throw new Error(`--set ${key} expects a JSON object, or use ${NAMESPACE_LEAVES[key as Namespace].map((l) => `${key}.${l}`).join(', ')}`);
+      if (!isObject(parsed)) throw new Error(`--set ${key} expects a JSON object, or use ${(BLOCK_LEAVES[key] ?? []).map((l) => `${key}.${l}`).join(', ')}`);
       out[key] = { ...(isObject(out[key]) ? out[key] : {}), ...parsed };
     } else if (key === 'capacity') {
       const n = Number(raw);
@@ -621,6 +713,8 @@ export function reportOf(resolved: Resolved, now: number): ConfigReport {
       claude: resolved.claude,
       codex: resolved.codex,
       opencode: resolved.opencode,
+      budgets: resolved.budgets,
+      health: resolved.health,
     },
     toolchain: resolved.toolchain,
     overrides: resolved.overrides,

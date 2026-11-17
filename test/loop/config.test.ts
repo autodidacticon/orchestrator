@@ -121,3 +121,71 @@ describe('effective configuration', () => {
     expect(h.orch.setConfig({})).toMatchObject({ ok: true, applied: [] });
   });
 });
+
+// See specs/toolchain-discovery "Runtime limit overrides" and specs/operator-control "Status report: limits in force".
+describe('limit overrides', () => {
+  it('0 disables a stuck fail limit at runtime, and null falls back to the file value or the default', async () => {
+    const h = harness({ health: { stuckAfterMs: 1000, stuckFailAfterMs: 3000 } });
+    await h.orch.tick();
+    const a = h.store.listLaunches({ status: 'live' }).find((l) => l.taskId === 'A')!;
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: 0 } })).toMatchObject({ ok: true, applied: ['health'] });
+    expect(h.orch.status().budgets.stuckFailAfterMs).toBe(0);
+    expect(h.orch.configReport().config.health.stuckFailAfterMs).toEqual({ value: 0, source: 'argument' });
+    expect(h.orch.status().config.health.stuckFailAfterMs).toEqual({ value: 0, source: 'argument' });
+    h.advance(10_000);
+    await h.orch.tick();
+    expect(h.store.getLaunch(a.launchId)).toMatchObject({ status: 'live' });
+    expect(h.orch.entry('A')).toMatchObject({ attempts: 0, status: { kind: 'running' } });
+    expect(h.orch.status().stuck).toContain('A');
+
+    // On a run with no live launch, a null brings back the file value, or the default.
+    const file = harness({ health: { stuckAfterMs: 1000, stuckFailAfterMs: 3000 } });
+    await file.orch.loadGraph();
+    expect(file.orch.setConfig({ health: { stuckFailAfterMs: 0 } })).toMatchObject({ ok: true });
+    expect(file.orch.setConfig({ health: { stuckFailAfterMs: null } })).toMatchObject({ ok: true, applied: ['health'] });
+    expect(file.orch.status().budgets.stuckFailAfterMs).toBe(3000);
+    expect(file.orch.configReport().config.health.stuckFailAfterMs).toEqual({ value: 3000, source: 'file' });
+    expect(file.orch.configReport().overrides).toEqual({});
+    const dflt = harness();
+    await dflt.orch.loadGraph();
+    expect(dflt.orch.setConfig({ health: { stuckFailAfterMs: 0 } })).toMatchObject({ ok: true });
+    expect(dflt.orch.setConfig({ health: { stuckFailAfterMs: null } })).toMatchObject({ ok: true });
+    expect(dflt.orch.status().budgets.stuckFailAfterMs).toBe(2_700_000);
+    expect(dflt.orch.configReport().config.health.stuckFailAfterMs).toEqual({ value: 2_700_000, source: 'default' });
+    expect(dflt.orch.status().budgets).toEqual({ maxLaunchMs: 7_200_000, maxRunCostUsd: 0, stuckAfterMs: 900_000, stuckFailAfterMs: 2_700_000 });
+  });
+
+  it('refuses bad limit values with 400 naming the dotted key, and applies nothing', () => {
+    const h = harness();
+    for (const v of [-1, 1.5, '5000', Number.MAX_SAFE_INTEGER + 2]) {
+      expect(h.orch.setConfig({ budgets: { maxLaunchMs: v } }), String(v)).toMatchObject({ ok: false, status: 400, key: 'budgets.maxLaunchMs' });
+      expect(h.orch.setConfig({ health: { stuckAfterMs: v } }), String(v)).toMatchObject({ ok: false, status: 400, key: 'health.stuckAfterMs' });
+    }
+    const unknown = h.orch.setConfig({ health: { reportGraceMs: 1 } });
+    expect(unknown).toMatchObject({ ok: false, status: 400, key: 'health.reportGraceMs' });
+    expect(h.orch.setConfig({ budgets: { maxRunCostUsd: 5 } })).toMatchObject({ ok: false, status: 400, key: 'budgets.maxRunCostUsd' });
+    const pair = h.orch.setConfig({ health: { stuckFailAfterMs: 600_000 } });
+    expect(pair).toMatchObject({ ok: false, status: 400, key: 'health.stuckFailAfterMs' });
+    expect((pair as { error: string }).error).toMatch(/^health\.stuckFailAfterMs: .*600000.*900000/);
+    expect(h.store.getKv('config.overrides')).toBeUndefined();
+    expect(h.store.listEvents({ kind: 'operator.config' })).toEqual([]);
+  });
+
+  it('a stored limit survives a restart: the new orchestrator reports it as an argument and its first tick uses it', async () => {
+    const h = harness({ budgets: { maxLaunchMs: 10_000 } });
+    await h.orch.tick();
+    const a = h.store.listLaunches({ status: 'live' }).find((l) => l.taskId === 'A')!;
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 40_000 } })).toMatchObject({ ok: true });
+    const again = new Orchestrator({ store: h.store, config: h.orch.config, graphSource: h.source, runner: h.runner, workspace: h.workspace, verifier: h.verifier, clock: () => h.now.value });
+    expect(again.configReport().config.budgets.maxLaunchMs).toEqual({ value: 40_000, source: 'argument' });
+    await again.loadGraph();
+    expect(again.status().budgets.maxLaunchMs).toBe(40_000);
+    h.advance(15_000);
+    await again.tick();
+    expect(h.store.getLaunch(a.launchId)).toMatchObject({ status: 'live' });
+    expect(again.entry('A')).toMatchObject({ attempts: 0, status: { kind: 'running' } });
+    h.advance(26_000);
+    await again.tick();
+    expect(h.store.getLaunch(a.launchId)).toMatchObject({ status: 'ended', endReason: 'timeBudget' });
+  });
+});

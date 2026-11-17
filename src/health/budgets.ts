@@ -21,7 +21,7 @@ export function elapsedMs(launch: Launch, now: number, clock: AwakeClock): numbe
 
 /** Returns true when the launch was ended for exceeding `budgets.maxLaunchMs`. */
 export async function checkTimeBudget(o: Orchestrator, launch: Launch): Promise<boolean> {
-  const max = o.config.budgets.maxLaunchMs;
+  const max = o.effective().config.budgets.maxLaunchMs;
   if (!max) return false;
   // A sleep during the awaits before this check is a gap, left out of the elapsed time.
   o.noteClock();

@@ -271,3 +271,78 @@ describe('runner kinds', () => {
     expect(applyOverridePatch({ base: defaultConfig({ runner: { kind: 'codex' } }) }, { runnerKind: 'claude-code' }, { runnerKind: null, effort: 'ultra' })).toMatchObject({ ok: true, next: { codex: { effort: 'ultra' } } });
   });
 });
+
+// See specs/toolchain-discovery "Runtime limit overrides" and "Limit leaves in the resolved configuration record".
+describe('limit overrides', () => {
+  it('reads the sources from the file nested blocks, and an override of 0 is an argument', () => {
+    const r = reportOf(resolveLayers(file({ health: { stuckFailAfterMs: 1_800_000 } })), 1);
+    expect(r.config.health).toEqual({ stuckFailAfterMs: { value: 1_800_000, source: 'file' }, stuckAfterMs: { value: 900_000, source: 'default' } });
+    expect(r.config.budgets).toEqual({ maxLaunchMs: { value: 7_200_000, source: 'default' } });
+    const zero = resolveLayers(file({ health: { stuckFailAfterMs: 1_800_000 }, budgets: { maxLaunchMs: 600_000 } }), { health: { stuckFailAfterMs: 0 }, budgets: { maxLaunchMs: 0 } });
+    expect(zero.health.stuckFailAfterMs).toEqual({ value: 0, source: 'argument' });
+    expect(zero.budgets.maxLaunchMs).toEqual({ value: 0, source: 'argument' });
+    expect(zero.config.health).toMatchObject({ stuckFailAfterMs: 0, stuckAfterMs: 900_000, reportGraceMs: 30_000 });
+    expect(zero.config.budgets).toMatchObject({ maxLaunchMs: 0, maxRunCostUsd: 0 });
+    expect(resolveLayers(file({ budgets: { maxLaunchMs: 600_000 } })).budgets.maxLaunchMs).toEqual({ value: 600_000, source: 'file' });
+  });
+
+  it('parses the dotted limit keys as decimal digits only, and keeps the JSON-object form', () => {
+    expect(parseSetFlags(['health.stuckAfterMs=0'])).toEqual({ health: { stuckAfterMs: 0 } });
+    expect(parseSetFlags(['health.stuckAfterMs=1', 'health.stuckFailAfterMs=2'])).toEqual({ health: { stuckAfterMs: 1, stuckFailAfterMs: 2 } });
+    expect(parseSetFlags(['budgets.maxLaunchMs=10800000'])).toEqual({ budgets: { maxLaunchMs: 10_800_000 } });
+    expect(parseSetFlags([`budgets.maxLaunchMs=${Number.MAX_SAFE_INTEGER}`])).toEqual({ budgets: { maxLaunchMs: Number.MAX_SAFE_INTEGER } });
+    for (const raw of ['', 'abc', '1.5', '-1', '1e3', '0x10', ' 5', String(2 ** 53), '99999999999999999999']) {
+      expect(() => parseSetFlags([`budgets.maxLaunchMs=${raw}`]), raw).toThrow(/^--set budgets\.maxLaunchMs expects milliseconds as decimal digits/);
+    }
+    // The spawn path passes a block as a JSON object, a null leaf included.
+    expect(parseSetFlags(['health={"stuckAfterMs":0,"stuckFailAfterMs":null}'])).toEqual({ health: { stuckAfterMs: 0, stuckFailAfterMs: null } });
+    expect(() => parseSetFlags(['health={"stuckAfterMs":-1}'])).toThrow(/^--set health\.stuckAfterMs/);
+    expect(() => parseSetFlags(['health.reportGraceMs=1'])).toThrow(/unknown key "health.reportGraceMs".*health\.stuckFailAfterMs/);
+    expect(() => parseSetFlags(['budgets.maxRunCostUsd=1'])).toThrow(/unknown key "budgets.maxRunCostUsd"/);
+    expect(() => parseSetFlags(['health=5'])).toThrow(/health\.stuckAfterMs, health\.stuckFailAfterMs/);
+  });
+
+  it('refuses a bad value naming the dotted key, and merges and clears leaves', () => {
+    const inputs = { base: defaultConfig() };
+    for (const v of [-1, 1.5, '5000', Number.MAX_SAFE_INTEGER + 2]) {
+      expect(applyOverridePatch(inputs, {}, { budgets: { maxLaunchMs: v } }), String(v)).toMatchObject({ ok: false, key: 'budgets.maxLaunchMs' });
+    }
+    expect(applyOverridePatch(inputs, {}, { health: { reportGraceMs: 1 } })).toMatchObject({ ok: false, key: 'health.reportGraceMs' });
+    const doc = { health: { stuckAfterMs: 300_000, stuckFailAfterMs: 600_000 }, budgets: { maxLaunchMs: 1 } };
+    expect(mergeOverrides(doc, { health: { stuckAfterMs: null } })).toEqual({ health: { stuckFailAfterMs: 600_000 }, budgets: { maxLaunchMs: 1 } });
+    expect(mergeOverrides(doc, { health: null, budgets: { maxLaunchMs: null } })).toEqual({});
+    expect(readOverrides({ getKv: () => JSON.stringify(doc) })).toEqual(doc);
+  });
+
+  it('applies the pair rule to a patch that touches a stuck limit, naming both keys, values and sources', () => {
+    const inputs = file({ health: { stuckAfterMs: 900_000, stuckFailAfterMs: 2_700_000 } });
+    const lower = applyOverridePatch(inputs, {}, { health: { stuckFailAfterMs: 600_000 } });
+    expect(lower).toMatchObject({ ok: false, key: 'health.stuckFailAfterMs' });
+    expect((lower as { error: string }).error).toMatch(/600000[\s\S]*900000/);
+    expect(applyOverridePatch(inputs, {}, { health: { stuckAfterMs: 3_000_000 } })).toMatchObject({ ok: false, key: 'health.stuckAfterMs' });
+    // Equal values are refused too.
+    expect(applyOverridePatch(inputs, {}, { health: { stuckAfterMs: 2_700_000 } })).toMatchObject({ ok: false, key: 'health.stuckAfterMs' });
+    expect(applyOverridePatch(inputs, {}, { health: { stuckAfterMs: 300_000, stuckFailAfterMs: 600_000 } })).toMatchObject({ ok: true, next: { health: { stuckAfterMs: 300_000, stuckFailAfterMs: 600_000 } } });
+    expect(applyOverridePatch(inputs, {}, { health: { stuckAfterMs: 0, stuckFailAfterMs: 600_000 } })).toMatchObject({ ok: true });
+    expect(applyOverridePatch(inputs, {}, { health: { stuckAfterMs: 900_000, stuckFailAfterMs: 0 } })).toMatchObject({ ok: true });
+    expect(applyOverridePatch(inputs, {}, { health: { stuckAfterMs: null, stuckFailAfterMs: null } })).toMatchObject({ ok: true, next: {} });
+    // Over stored overrides, a null leaf that brings back the file value is refused.
+    const stored = { health: { stuckAfterMs: 300_000, stuckFailAfterMs: 600_000 } };
+    const back = applyOverridePatch(inputs, stored, { health: { stuckAfterMs: null } });
+    expect(back).toMatchObject({ ok: false, key: 'health.stuckAfterMs' });
+    const msg = (back as { error: string }).error;
+    for (const word of ['health.stuckAfterMs 900000 (file)', 'health.stuckFailAfterMs 600000 (argument)']) expect(msg, word).toContain(word);
+    // A null block counts as touching the pair.
+    expect(applyOverridePatch(file({ health: { stuckAfterMs: 3_000_000 } }), stored, { health: null })).toMatchObject({ ok: false, key: 'health.stuckFailAfterMs' });
+    expect(applyOverridePatch({ base: defaultConfig() }, stored, { health: null })).toMatchObject({ ok: true, next: {} });
+  });
+
+  it('skips the pair rule for a patch that touches neither stuck limit', () => {
+    const broken = file({ health: { stuckFailAfterMs: 600_000 } });
+    expect(applyOverridePatch(broken, {}, {})).toMatchObject({ ok: true, next: {} });
+    expect(applyOverridePatch(broken, {}, { capacity: 3 })).toMatchObject({ ok: true, next: { capacity: 3 } });
+    expect(applyOverridePatch(broken, {}, { budgets: { maxLaunchMs: 1 } })).toMatchObject({ ok: true });
+    expect(applyOverridePatch(broken, {}, { health: {} })).toMatchObject({ ok: true });
+    expect(applyOverridePatch(broken, {}, { health: { stuckAfterMs: 1 } })).toMatchObject({ ok: true });
+  });
+});

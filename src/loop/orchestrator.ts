@@ -1723,8 +1723,8 @@ export class Orchestrator implements OrchestratorCore {
       effort: launch.effort,
       // The lease: a worker must not go longer than renewEveryMs between calls. See specs/pull-runner "Lease facts in the claim".
       ...(lease ? { leaseTtlMs: lease.ttlMs, leaseExpiresAt: lease.expiresAt, lease } : {}),
-      // The daemon's stuck-fail threshold, which a work loop takes as its silence limit (0: off). See specs/pull-runner "Silence limit in the claim".
-      health: { stuckFailAfterMs: this.config.health.stuckFailAfterMs },
+      // The daemon's stuck-fail threshold in force (an override applied), which a work loop takes as its silence limit (0: off). See specs/pull-runner "Silence limit in the claim" and "Claim states the limit in force".
+      health: { stuckFailAfterMs: this.effective().config.health.stuckFailAfterMs },
       // A codex worker loop composes the same `codex exec` as a spawned launch: the effective runner.codex keys, the long-poll ceiling, and the agent environment. See specs/pull-runner "Claim".
       ...(runnerOf(launch) === 'codex' ? { codex: { settings: this.effective().config.runner.codex, maxWaitMs: this.config.maxWaitMs, retryWindowMs: this.config.retryWindowMs, env: this.agentEnv(launch) } } : {}),
       // An opencode loop likewise composes the same `opencode run` and per-launch config; `allowedTools` are the rules the derived permission ruleset comes from.
@@ -1937,11 +1937,12 @@ export class Orchestrator implements OrchestratorCore {
       pausedReason: this.pausedReason(),
       cost: { runUsd: runCostUsd(this.store), byTask: costByTask(this.store), ceilingUsd: ceilingUsd(this.config, this.store), overrides: budgetOverrides(this.store), unpricedLaunches: unpricedLaunches(this.store) },
       tokens: tokensOf(this.store),
+      // The limits in force, overrides applied; the run cost budget is a start-time key. See specs/operator-control "Status report: limits in force".
       budgets: {
-        maxLaunchMs: this.config.budgets.maxLaunchMs,
+        maxLaunchMs: this.effective().config.budgets.maxLaunchMs,
         maxRunCostUsd: this.config.budgets.maxRunCostUsd,
-        stuckAfterMs: this.config.health.stuckAfterMs,
-        stuckFailAfterMs: this.config.health.stuckFailAfterMs,
+        stuckAfterMs: this.effective().config.health.stuckAfterMs,
+        stuckFailAfterMs: this.effective().config.health.stuckFailAfterMs,
       },
       foreignCommits: this.foreignCommits,
       runDir: this.config.runDir ?? this.config.dataDir,

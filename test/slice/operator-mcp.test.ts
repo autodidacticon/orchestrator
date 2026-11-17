@@ -82,7 +82,13 @@ describe('operator MCP server', () => {
     // The wait description quotes the cap in force, which a Codex registration sizes tool_timeout_sec against. See specs/operator-mcp "Wait tool".
     expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain(`cap ${WAIT_CAP_MS}`);
     const configure = tools.tools.find((t) => t.name === 'configure');
-    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'capacity', 'checkCommand', 'codex', 'commit', 'dataDir', 'effort', 'model', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'budgets', 'capacity', 'checkCommand', 'codex', 'commit', 'dataDir', 'effort', 'health', 'model', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
+    // The limit keys. See specs/operator-mcp "Configure and start tools: limit keys".
+    for (const word of ['budgets { maxLaunchMs }', 'health { stuckAfterMs, stuckFailAfterMs }', '0 disables a limit', 'applies on the next tick']) expect(configure?.description, word).toContain(word);
+    const startProps = (tools.tools.find((t) => t.name === 'start')?.inputSchema as { properties: Record<string, unknown> }).properties;
+    expect(Object.keys(startProps)).toEqual(expect.arrayContaining(['budgets', 'health']));
+    expect(JSON.stringify(startProps['health'])).toContain('stuckFailAfterMs');
+    expect(JSON.stringify(startProps['budgets'])).toContain('maxLaunchMs');
     const codexArg = (configure?.inputSchema as { properties: Record<string, { anyOf?: Array<{ properties?: Record<string, unknown> }>; properties?: Record<string, unknown> }> }).properties['codex'];
     expect(JSON.stringify(codexArg)).toContain('"model"');
     expect(JSON.stringify(codexArg)).toContain('"ultra"');
@@ -118,6 +124,16 @@ describe('operator MCP server', () => {
     expect(await tool('configure', { model: 'claude-sonnet-5-5' })).toMatchObject({ status: 200, ok: true, applied: ['model'], config: { model: { value: 'claude-sonnet-5-5', source: 'argument', applied: false } } });
     expect(await tool('start', { effort: 'high' })).toMatchObject({ started: false, applied: ['effort'], config: { effort: { value: 'high', source: 'argument', applied: false }, model: { value: 'claude-sonnet-5-5', source: 'argument' } } });
     expect(await tool('configure', { model: null, effort: null })).toMatchObject({ status: 200, ok: true, config: { model: { value: 'claude-opus-5-5', source: 'default' }, effort: { value: 'medium', source: 'default' } } });
+    // The limit keys: a set leaf reports as an argument; a mistyped leaf is refused by the tool, not dropped.
+    const raised = await tool('configure', { health: { stuckFailAfterMs: 5_400_000 } });
+    expect(raised).toMatchObject({ status: 200, ok: true, config: { health: { stuckFailAfterMs: { value: 5_400_000, source: 'argument' } } } });
+    expect(raised['applied']).toContain('health');
+    const mistyped = await client.callTool({ name: 'configure', arguments: { health: { stuckFailAfterMS: 1 } } });
+    expect(mistyped.isError).toBe(true);
+    expect(JSON.stringify(mistyped.content)).toContain('stuckFailAfterMS');
+    expect((await client.callTool({ name: 'configure', arguments: { budgets: { maxLaunchMs: -1 } } })).isError).toBe(true);
+    expect(await tool('start', { budgets: { maxLaunchMs: 10_800_000 } })).toMatchObject({ started: false, applied: ['budgets'], config: { budgets: { maxLaunchMs: { value: 10_800_000, source: 'argument' } } } });
+    expect(await tool('configure', { health: null, budgets: { maxLaunchMs: null } })).toMatchObject({ status: 200, ok: true, config: { health: { stuckFailAfterMs: { value: 2_700_000, source: 'default' } }, budgets: { maxLaunchMs: { value: 7_200_000, source: 'default' } } } });
 
     const imported = await importAdopted('import_graph', {
       content: ['nodes:',

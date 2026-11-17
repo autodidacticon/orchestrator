@@ -264,3 +264,32 @@ describe('claimed-launch leases', () => {
     expect(h.orch.entry('T1')).toMatchObject({ attempts: 1, interruptions: 1 });
   });
 });
+
+// See specs/pull-runner "Claim states the limit in force".
+describe('the claim states the stuck fail limit in force', () => {
+  it('a claim made after an override carries it, and a repeated claim after a further change carries the newer value', async () => {
+    const h = harness({ stuckFailAfterMs: 2_700_000 });
+    await h.orch.tick();
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: 1_800_000 } })).toMatchObject({ ok: true });
+    const c = await h.orch.claim({ workerId: 'w1', taskId: 'T1' });
+    expect(c.status).toBe(200);
+    expect(c.body['health']).toEqual({ stuckFailAfterMs: 1_800_000 });
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: 3_600_000 } })).toMatchObject({ ok: true });
+    const again = await h.orch.claim({ workerId: 'w1' });
+    expect(again.body).toMatchObject({ repeated: true, launchId: c.body['launchId'], health: { stuckFailAfterMs: 3_600_000 } });
+  });
+
+  it('a claim made after an override of 0 carries 0, and after a null the file value', async () => {
+    const h = harness({ stuckFailAfterMs: 2_700_000 });
+    await h.orch.tick();
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: 0 } })).toMatchObject({ ok: true });
+    const c = await h.orch.claim({ workerId: 'w1', taskId: 'T1' });
+    expect(c.body['health']).toEqual({ stuckFailAfterMs: 0 });
+    expect(h.orch.status().budgets.stuckFailAfterMs).toBe(0);
+    expect(h.orch.configReport().config.health.stuckFailAfterMs).toEqual({ value: 0, source: 'argument' });
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: null } })).toMatchObject({ ok: true });
+    const again = await h.orch.claim({ workerId: 'w1' });
+    expect(again.body['health']).toEqual({ stuckFailAfterMs: 2_700_000 });
+    expect(h.orch.configReport().config.health.stuckFailAfterMs).toEqual({ value: 2_700_000, source: 'default' });
+  });
+});

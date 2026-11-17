@@ -164,7 +164,22 @@ digest:
   `lastSignal` from `liveLaunches`. Offer the user three choices: a nudge with a message
   (send it with `nudge`; the agent sees it on its next inbox call), cancellation (`cancel`),
   or waiting. The daemon fails a launch that stays stuck past `budgets.stuckFailAfterMs`
-  and retries it like any other failure; say so.
+  and retries it like any other failure; say so. To let a stuck launch keep running, see
+  **a launch needs more time** below.
+- **a launch needs more time**: whenever you read `status`, compare the `elapsedMs` of each
+  running launch in `liveLaunches` with `budgets.maxLaunchMs` (when it is above 0) and tell
+  the user when less than 15 minutes remain; offer the same when the user wants a stuck
+  launch to keep running. To raise the time budget, offer `configure` with
+  `budgets: { maxLaunchMs: <ms> }`; for a stuck launch that has a `pid` in
+  `status.liveLaunches`, offer `configure` with `health: { stuckFailAfterMs: <ms> }`
+  (`health.stuckFailAfterMs`; `budgets.maxLaunchMs` is the time budget). Values are
+  milliseconds, and the daemon applies a change on its next tick. Check that
+  `applied` in the answer lists `budgets` or `health`; a launch the daemon was already
+  ending can still end. Tell the worker the new limit with `nudge`. Once the launch has
+  reported or ended, clear the override with a null leaf (`budgets: { maxLaunchMs: null }`
+  or `health: { stuckFailAfterMs: null }`), or the raise stays for every later launch of
+  the run. A launch held by an `orchestrator-work` loop (listed under `status.workers`,
+  no `pid`) keeps the silence limit its loop took when it claimed.
 - **proposals** non-empty: agents proposed follow-up tasks. For each pending proposal (from
   `proposals`), show its title, description, acceptance criteria, and deps, and wait for the
   user's decision. On acceptance in a run imported from a tracker, first create the issue

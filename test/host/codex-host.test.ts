@@ -422,6 +422,12 @@ describe('codex host', () => {
       expect(text, name).toContain('mcp__orchestrator_operator__');
     }
     const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
+    // The raise offer, cut out and read alone. See specs/host-integration "Run skill offers a raised limit".
+    const more = run.slice(run.indexOf('- **a launch needs more time**'), run.indexOf('\n- **', run.indexOf('- **a launch needs more time**') + 1));
+    expect(more.startsWith('- **a launch needs more time**')).toBe(true);
+    for (const word of ['configure', 'health.stuckFailAfterMs', 'budgets.maxLaunchMs', 'elapsedMs', 'applied', 'null']) expect(more, word).toContain(word);
+    for (const word of ['health: { stuckFailAfterMs', 'budgets.maxLaunchMs', 'budgets: { maxLaunchMs', 'orchestrator-work']) expect(more, word).toContain(word);
+    expect(more).not.toContain("this session's workers");
     const codexLine = 'workers codex gpt-6-astra at medium (file); sandbox workspace-write, daemon commits';
     for (const word of ['mode: "spawn"', 'modeNote', 'needsConfig', 'configure', 'AGENTS.md', 'needsAccess', 'detected: npm test on main', 'start-only', codexLine, 'omit the allow-list part', 'runner.kind', 'runner.codex.*', 'budgets.prices', 'config.runnerKind', 'claimableByKind', 'tool_timeout_sec', 'codex exec', 'default_tools_approval_mode', 'interactive']) expect(run, word).toContain(word);
     for (const word of ['/project/', "never change the project's state", 'applied: false', 'reason', 'status update', 'statusUpdateId', 'Milestone accepted:', 'Milestone rejected:']) expect(run.replace(/\s+/g, ' '), word).toContain(word);

@@ -1,0 +1,8 @@
+## ADDED Requirements
+
+### Requirement: Run skill offers a raised limit
+Each run skill SHALL hold, in its monitor list after the stuck bullet, a bullet that starts with `- **a launch needs more time**`. It SHALL tell the agent to compare, whenever it reads `status`, each running launch's `elapsedMs` in `liveLaunches` with `budgets.maxLaunchMs` when that is above 0, and to tell the user when less than 15 minutes remain, and to offer the same when the user wants a stuck launch to keep running. It SHALL offer `configure` with `budgets: { maxLaunchMs }` for the time budget and with `health: { stuckFailAfterMs }` (`health.stuckFailAfterMs`) for a stuck launch that has a `pid`, say that values are milliseconds, tell the agent to check that `applied` lists `budgets` or `health`, to tell the worker the new limit with `nudge`, and to clear the override with a null leaf once the launch has reported or ended. The Claude Code edition SHALL say that a launch held by this session's workers has no `pid` and is bound by its lease, `leaseTtlMs`, a start-time key. The Codex and OpenCode editions SHALL hold the same bullet and SHALL say that a launch held by an `orchestrator-work` loop keeps the silence limit its loop took when it claimed. The stuck bullet SHALL point to the new bullet.
+
+#### Scenario: The bullet in each edition
+- **WHEN** the bullet is cut out of each run skill
+- **THEN** it holds `configure`, `health.stuckFailAfterMs`, `budgets.maxLaunchMs`, `elapsedMs`, `applied` and `null`; the Claude Code bullet holds `leaseTtlMs`, and the Codex and OpenCode bullets hold `orchestrator-work` and not "this session's workers"

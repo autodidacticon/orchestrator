@@ -2,7 +2,7 @@
 /**
  * Operator CLI over the daemon's HTTP API.
  *   orchestrator-ctl status
- *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>] [--model <name>] [--effort <level>] [--sandbox <mode>] [--permission <derived|allow>] [--data-dir <shared|launch>] [--commit <agent|daemon>] [--clear <key>]...
+ *   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>] [--model <name>] [--effort <level>] [--sandbox <mode>] [--permission <derived|allow>] [--data-dir <shared|launch>] [--commit <agent|daemon>] [--set key=value]... [--clear <key>]...
  *   orchestrator-ctl answer <task> <text>
  *   orchestrator-ctl cancel <task> [--release] [--reason <text>]
  *   orchestrator-ctl reopen <task> [--cascade]
@@ -28,7 +28,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { daemonState, listRuns, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
-import { foldRunnerArgs, parseSetFlags } from '../runs/resolve.js';
+import { foldRunnerArgs, NAMESPACE_OF, type Overrides, parseSetFlags } from '../runs/resolve.js';
 import { isRunnerKind, OPENCODE_DATA_DIRS, type RunnerKind } from '../runner/selection.js';
 import { remoteRunError, resolveRepoPath, runPaths, runStoreKind } from '../runs/runDir.js';
 import { SqliteStore } from '../state/sqlite.js';
@@ -90,14 +90,15 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
                                                --set checkCommand=..., integrationBranch=..., capacity=..., allowedTools=..., runnerCommand=...,
                                                runnerKind=claude-code|codex|opencode, model=..., effort=..., claude.{model,effort,commit}=...,
                                                codex.{model,effort,sandbox,commit,command}=...,
-                                               opencode.{model,effort,commit,command,permission,dataDir}=...
+                                               opencode.{model,effort,commit,command,permission,dataDir}=...,
+                                               budgets.maxLaunchMs=..., health.stuckAfterMs=..., health.stuckFailAfterMs=...
   orchestrator-ctl stop [--reap] [--repo <path>]
   orchestrator-ctl runs                         list runs under ORCH_HOME
   orchestrator-ctl status
   orchestrator-ctl config                       the resolved configuration: every key with its value and source, the toolchain, needsConfig
   orchestrator-ctl config [--check-command <cmd>] [--capacity <n>] [--allow <rule>]... [--runner-command <cmd>] [--runner-kind <kind>]
                           [--model <name>] [--effort <level>] [--sandbox <mode>] [--permission <derived|allow>]
-                          [--data-dir <shared|launch>] [--commit <agent|daemon>] [--clear <key>]...
+                          [--data-dir <shared|launch>] [--commit <agent|daemon>] [--set key=value]... [--clear <key>]...
                                                the runner kind is claude-code (default), codex, or opencode; model and effort are the worker
                                                defaults of the kind in force (claude-code: claude-opus-5-5 at medium;
                                                codex: gpt-6-astra at medium; opencode: anthropic/claude-opus-5-5 at medium, a provider/model id);
@@ -107,7 +108,12 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
                                                --url nor ORCH_URL any other value names the store location, as on every command, and
                                                with --url or ORCH_URL it is refused; --commit sets the commit policy of --runner-kind,
                                                else of the kind in force; --clear takes a key or one such as codex.sandbox or
-                                               opencode.permission
+                                               opencode.permission; --set takes every key start --set takes, and the limits
+                                               budgets.maxLaunchMs, health.stuckAfterMs and health.stuckFailAfterMs (milliseconds as
+                                               decimal digits, 0 disables the limit, a change applies on the next tick; with both stuck
+                                               limits above 0, health.stuckFailAfterMs must be above health.stuckAfterMs); one call
+                                               names each key once: the same key, or a key and a block holding it, given by two
+                                               flags (--set, --clear, or a per-key flag) is refused before anything is sent
   orchestrator-ctl answer <task> <text>
   orchestrator-ctl cancel <task> [--release] [--reason <text>]
   orchestrator-ctl reopen <task> [--cascade]       cascade resets started dependents and returns the plan
@@ -147,6 +153,79 @@ function joinNumericValues(argv: string[]): string[] {
     } else out.push(arg);
   }
   return out;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** The nested override blocks: a block named whole (`--clear health`) names every leaf under it. */
+const CONFIG_BLOCKS = ['claude', 'codex', 'opencode', 'budgets', 'health'];
+
+interface Naming {
+  /** The leaves a flag names: a key, or `block.leaf`; more than one when the target is not known before the call. */
+  leaves: string[];
+  by: string;
+}
+
+/**
+ * The leaves each source of one `config` call names: `--clear`, the per-key flags as `foldRunnerArgs` places them,
+ * `--allow` as `allowedTools`, and `--set` (a repeated `--set allowedTools` appends, so it names the key once).
+ */
+function configNamings(values: Record<string, unknown>, dataDirLeaf: string | undefined): Naming[] {
+  const out: Naming[] = [];
+  for (const k of (values['clear'] as string[] | undefined) ?? []) out.push({ leaves: [k], by: `--clear ${k}` });
+  const flag = (opt: string, leaf: string) => {
+    if (values[opt] !== undefined) out.push({ leaves: [leaf], by: `--${opt}` });
+  };
+  flag('check-command', 'checkCommand');
+  flag('capacity', 'capacity');
+  flag('runner-command', 'runnerCommand');
+  flag('runner-kind', 'runnerKind');
+  flag('model', 'model');
+  flag('effort', 'effort');
+  flag('sandbox', 'codex.sandbox');
+  flag('permission', 'opencode.permission');
+  if (dataDirLeaf !== undefined) out.push({ leaves: ['opencode.dataDir'], by: '--data-dir' });
+  if (values['commit'] !== undefined) {
+    // The policy binds to --runner-kind, else to the kind in force, which is not known before the call: it then names every kind's commit leaf.
+    const kind = values['runner-kind'];
+    out.push({ leaves: isRunnerKind(kind) ? [`${NAMESPACE_OF[kind]}.commit`] : Object.values(NAMESPACE_OF).map((ns) => `${ns}.commit`), by: '--commit' });
+  }
+  if ((values['allow'] as string[] | undefined)?.length) out.push({ leaves: ['allowedTools'], by: '--allow' });
+  let setAllowed = false;
+  for (const raw of (values['set'] as string[] | undefined) ?? []) {
+    const eq = raw.indexOf('=');
+    const key = raw.slice(0, eq).trim();
+    if (key === 'allowedTools') {
+      if (setAllowed) continue;
+      setAllowed = true;
+    }
+    let leaves = [key];
+    if (CONFIG_BLOCKS.includes(key)) {
+      try {
+        const parsed: unknown = JSON.parse(raw.slice(eq + 1));
+        if (isPlainObject(parsed)) leaves = Object.keys(parsed).map((l) => `${key}.${l}`);
+      } catch {
+        /* parseSetFlags has refused it */
+      }
+    }
+    if (leaves.length) out.push({ leaves, by: `--set ${key}` });
+  }
+  return out;
+}
+
+/** One leaf named twice in one call, or a block and a leaf under it, is refused before anything is sent. */
+function refuseNamedTwice(namings: Naming[]): void {
+  const overlaps = (a: string, b: string) => a === b || a.startsWith(`${b}.`) || b.startsWith(`${a}.`);
+  for (let i = 0; i < namings.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const a = namings[j] as Naming;
+      const b = namings[i] as Naming;
+      const hit = a.leaves.flatMap((x) => b.leaves.filter((y) => overlaps(x, y)).map((y) => (x.length >= y.length ? x : y)))[0];
+      if (hit !== undefined) throw new Error(`config: ${a.by} and ${b.by} both name ${hit}; give each key once per call`);
+    }
+  }
 }
 
 export async function runCli(argv: string[]): Promise<CliResult> {
@@ -221,6 +300,12 @@ export async function runCli(argv: string[]): Promise<CliResult> {
   }
   // Refused before the daemon is looked up, so a missing argument never revives one.
   if (cmd === 'review' && !a) throw new Error('review needs a milestone id');
+  // `config --set` is parsed, and a leaf named twice refused, before anything is sent. See specs/operator-control "Configuration command: set flags".
+  let setPatch: Overrides = {};
+  if (cmd === 'config') {
+    setPatch = values.set?.length ? parseSetFlags(values.set) : {};
+    refuseNamedTwice(configNamings(values, dataDirLeaf));
+  }
   const base = await resolveUrl({ url: values.url, dataDir: dataDirLeaf === undefined ? values['data-dir'] : undefined, repo: values.repo });
   switch (cmd) {
     case 'status':
@@ -253,8 +338,14 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       patch = foldRunnerArgs(patch, kind ?? 'claude-code');
       if (values.allow?.length) {
         const cur = await call(base, 'GET', '/v1/config');
-        const existing = patch['allowedTools'] === null ? [] : ((cur.body as { overrides?: { allowedTools?: string[] } }).overrides?.allowedTools ?? []);
+        const existing = (cur.body as { overrides?: { allowedTools?: string[] } }).overrides?.allowedTools ?? [];
         patch['allowedTools'] = [...existing, ...values.allow.filter((r) => !existing.includes(r))];
+      }
+      // --set merges per leaf: different leaves of one block (--set codex.model=... --sandbox read-only) land together.
+      for (const [k, v] of Object.entries(setPatch)) {
+        if (v === undefined) continue;
+        const cur = patch[k];
+        patch[k] = isPlainObject(v) && isPlainObject(cur) ? { ...cur, ...v } : v;
       }
       if (!Object.keys(patch).length) return call(base, 'GET', '/v1/config');
       return call(base, 'PUT', '/v1/config', patch);

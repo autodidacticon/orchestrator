@@ -47,7 +47,7 @@ export async function failStuck(o: Orchestrator, launch: Launch, message: string
 
 /** Returns true when the launch was ended. Only for `running` tasks whose process is alive. */
 export async function checkStuck(o: Orchestrator, launch: Launch): Promise<boolean> {
-  const { stuckAfterMs, stuckFailAfterMs } = o.config.health;
+  const { stuckAfterMs, stuckFailAfterMs } = o.effective().config.health;
   // A sleep during the awaits before this check is a gap, left out of the idle time.
   o.noteClock();
   const now = o.now();

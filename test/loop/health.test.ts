@@ -479,3 +479,89 @@ describe('health: budgets and usage', () => {
     expect(h.orch.status().cost).toMatchObject({ runUsd: 0.5, byTask: { T1: 0.5 }, unpricedLaunches: 0 });
   });
 });
+
+// See specs/health-monitoring "Limits read at every check" and specs/toolchain-discovery "Runtime limit overrides".
+describe('health: limits changed at runtime', () => {
+  it('a raised time budget saves a spawned launch, which then ends at the new budget', async () => {
+    const h = harness({ budgets: budgets({ maxLaunchMs: 10_000 }) });
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    h.advance(9_500);
+    await h.orch.tick();
+    expect(h.statusOf('T1')).toBe('running');
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 20_000 } })).toMatchObject({ ok: true, applied: ['budgets'] });
+    expect(h.orch.status().budgets.maxLaunchMs).toBe(20_000);
+    h.advance(1_000);
+    await h.orch.tick();
+    expect(h.statusOf('T1')).toBe('running');
+    expect(h.store.getLaunch(l1.launchId)?.status).toBe('live');
+    h.advance(9_600);
+    await h.orch.tick();
+    expect(h.store.getLaunch(l1.launchId)).toMatchObject({ status: 'ended', endReason: 'timeBudget' });
+    expect(h.orch.entry('T1').attempts).toBe(1);
+  });
+
+  it('a raised time budget saves a claimed launch in pull mode', async () => {
+    const h = harness({ runner: { mode: 'pull', claimWindowMs: 60_000 }, budgets: budgets({ maxLaunchMs: 10_000 }) });
+    await h.orch.tick();
+    const c = await h.orch.claim({ workerId: 'w1', taskId: 'T1' });
+    expect(c.status).toBe(200);
+    const launch = h.store.getLaunch(String(c.body['launchId']))!;
+    expect(launch.pid).toBeUndefined();
+    h.advance(9_500 - (h.now.value - launch.createdAt));
+    expect(h.now.value - launch.createdAt).toBe(9_500);
+    await h.orch.tick();
+    expect(h.statusOf('T1')).toBe('running');
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 20_000 } })).toMatchObject({ ok: true });
+    h.advance(1_000);
+    await h.orch.tick();
+    expect(h.statusOf('T1')).toBe('running');
+    expect(h.store.getLaunch(launch.launchId)?.status).toBe('live');
+    h.advance(10_000);
+    await h.orch.tick();
+    expect(h.store.getLaunch(launch.launchId)).toMatchObject({ status: 'ended', endReason: 'timeBudget' });
+  });
+
+  it('a raised stuck fail limit saves a silent launch, which stays flagged and fails at the new limit', async () => {
+    const h = harness({ health: health({ stuckAfterMs: 1000, stuckFailAfterMs: 3000 }) });
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    h.advance(2_500);
+    await h.orch.tick();
+    expect(h.store.getLaunch(l1.launchId)?.stuckSince).toBeDefined();
+    expect(h.orch.setConfig({ health: { stuckFailAfterMs: 6000 } })).toMatchObject({ ok: true, applied: ['health'] });
+    h.advance(1_000);
+    await h.orch.tick();
+    expect(h.statusOf('T1')).toBe('running');
+    expect(h.store.getLaunch(l1.launchId)).toMatchObject({ status: 'live' });
+    expect(h.store.getLaunch(l1.launchId)?.stuckSince).toBeDefined();
+    // A raised flag limit leaves a flagged launch flagged until progress clears it.
+    expect(h.orch.setConfig({ health: { stuckAfterMs: 5000 } })).toMatchObject({ ok: true });
+    h.advance(500);
+    await h.orch.tick();
+    expect(h.orch.status().stuck).toContain('T1');
+    expect(h.store.listEvents({ kind: 'launch.stuck', launchId: l1.launchId })).toHaveLength(1);
+    h.advance(2_100);
+    await h.orch.tick();
+    expect(h.store.getLaunch(l1.launchId)).toMatchObject({ status: 'ended', endReason: 'stuck' });
+    expect(h.orch.entry('T1')).toMatchObject({ attempts: 1 });
+    expect(h.workspace.briefs.get(h.launchOf('T1').launchId)?.carry).toMatchObject({ priorFailure: { kind: 'stuck' } });
+  });
+
+  it('a brief composed after an override carries the overridden limits', async () => {
+    const h = harness({ health: health({ stuckAfterMs: 1000, stuckFailAfterMs: 3000 }), budgets: budgets({ maxLaunchMs: 10_000 }), capacity: 1 });
+    await h.orch.tick();
+    const first = h.launchOf('T1');
+    expect(h.orch.briefInput(first).limits).toEqual({ stuckAfterMs: 1000, stuckFailAfterMs: 3000, maxLaunchMs: 10_000 });
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 20_000 }, health: { stuckAfterMs: 2000, stuckFailAfterMs: 9000 } })).toMatchObject({ ok: true });
+    await h.submit('T1');
+    await h.orch.settle();
+    await h.orch.tick();
+    const next = h.store.listLaunches({ status: 'live' })[0]!;
+    expect(next.taskId).not.toBe('T1');
+    expect(h.orch.briefInput(next).limits).toEqual({ stuckAfterMs: 2000, stuckFailAfterMs: 9000, maxLaunchMs: 20_000 });
+    expect(h.workspace.briefs.get(next.launchId)?.limits).toEqual({ stuckAfterMs: 2000, stuckFailAfterMs: 9000, maxLaunchMs: 20_000 });
+    // A brief written before the change keeps its numbers.
+    expect(h.workspace.briefs.get(first.launchId)?.limits).toEqual({ stuckAfterMs: 1000, stuckFailAfterMs: 3000, maxLaunchMs: 10_000 });
+  });
+});

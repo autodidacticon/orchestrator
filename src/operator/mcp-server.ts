@@ -54,6 +54,27 @@ export function digestSatisfies(digest: Record<string, unknown>, until: Until | 
   }
 }
 
+/** The limit keys: durable overrides that every reader follows on the next tick. See specs/operator-mcp "Configure and start tools: limit keys". */
+const limitMs = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const LIMIT_ARG_TEXT = {
+  budgets: 'budgets.maxLaunchMs: the launch time budget in milliseconds (default 7200000); 0 disables it. A change applies on the next tick to every live launch and to status.',
+  health:
+    'health.stuckAfterMs (default 900000) flags a silent launch stuck; health.stuckFailAfterMs (default 2700000) fails it; milliseconds, and 0 disables a limit. With both above 0, stuckFailAfterMs must be above stuckAfterMs. A change applies on the next tick to every live launch, to claims made afterwards, and to status.',
+};
+const startLimitArgs = {
+  budgets: z.object({ maxLaunchMs: limitMs.optional() }).strict().optional().describe(LIMIT_ARG_TEXT.budgets),
+  health: z.object({ stuckAfterMs: limitMs.optional(), stuckFailAfterMs: limitMs.optional() }).strict().optional().describe(LIMIT_ARG_TEXT.health),
+};
+const configureLimitArgs = {
+  budgets: z.object({ maxLaunchMs: limitMs.nullable().optional() }).strict().nullable().optional().describe(`${LIMIT_ARG_TEXT.budgets} A null leaf or a null budgets clears the override, so the value falls back to the file or the default.`),
+  health: z
+    .object({ stuckAfterMs: limitMs.nullable().optional(), stuckFailAfterMs: limitMs.nullable().optional() })
+    .strict()
+    .nullable()
+    .optional()
+    .describe(`${LIMIT_ARG_TEXT.health} A null leaf clears that override and a null health clears both, so the value falls back to the file or the default.`),
+};
+
 /** The runner arguments `start` and `configure` share. See specs/operator-mcp "Start tool" and "Configure tool". */
 const RUNNER_ARG_TEXT = {
   runnerKind: 'The runner kind for launches prepared from now on: claude-code (the default), codex, or opencode. A task payload runner or a runner:<kind> label overrides it per task.',
@@ -300,7 +321,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     'start',
     {
       description:
-        'Start the daemon for this repository (idempotent): the repository named by repo, else the one this session last passed, else the server\'s --repo, ORCH_REPO, or working directory. Returns url, pid, run directory, graph path, the runner mode in force, and the resolved configuration: config (every key as { value, source }: argument, file, pinned, detected, default, or unresolved; runnerKind and the claude, codex, and opencode leaves included), toolchain (what detection found in the repository root), needsConfig (keys no layer supplied; checkCommand there means submitted work is held until it is set), and applied / rejected for the configuration arguments. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull, or to spawn when the runner kind is codex or opencode (runnerKind here, or already in force for the run), because pull-mode workers are this session\'s Claude subagents and never claim codex or opencode launches (pull-mode workers for those kinds come from orchestrator-work --runner <kind>); orchestrator.yaml runner.mode, or a mode the run chose before, wins, and a running daemon keeps its mode. modeNote in the result says when the spawn default applied, or warns that a codex or opencode run is in pull mode, naming the kind. Configuration arguments become durable overrides for the run: passed to a daemon this call spawns, applied through the configuration route to one already running; integrationBranch is start-only and lands under rejected on a running daemon. After an idle exit or a crash every other tool revives the daemon by itself.',
+        'Start the daemon for this repository (idempotent): the repository named by repo, else the one this session last passed, else the server\'s --repo, ORCH_REPO, or working directory. Returns url, pid, run directory, graph path, the runner mode in force, and the resolved configuration: config (every key as { value, source }: argument, file, pinned, detected, default, or unresolved; runnerKind and the claude, codex, and opencode leaves included), toolchain (what detection found in the repository root), needsConfig (keys no layer supplied; checkCommand there means submitted work is held until it is set), and applied / rejected for the configuration arguments. mode: spawn (the daemon runs headless agents), pull (workers claim launches; this session works them through the run skill), or mixed; applied to a daemon already running too. Without mode, a run started from this plugin defaults to pull, or to spawn when the runner kind is codex or opencode (runnerKind here, or already in force for the run), because pull-mode workers are this session\'s Claude subagents and never claim codex or opencode launches (pull-mode workers for those kinds come from orchestrator-work --runner <kind>); orchestrator.yaml runner.mode, or a mode the run chose before, wins, and a running daemon keeps its mode. modeNote in the result says when the spawn default applied, or warns that a codex or opencode run is in pull mode, naming the kind. budgets { maxLaunchMs } and health { stuckAfterMs, stuckFailAfterMs } set the limits in milliseconds (0 disables one). Configuration arguments become durable overrides for the run: passed to a daemon this call spawns, applied through the configuration route to one already running; integrationBranch is start-only and lands under rejected on a running daemon. After an idle exit or a crash every other tool revives the daemon by itself.',
       inputSchema: {
         mode: z.enum(['spawn', 'pull', 'mixed']).optional(),
         checkCommand: z.string().optional().describe('The command the verifier runs on every rebased submission, e.g. "npm test".'),
@@ -317,6 +338,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         permission: z.enum(OPENCODE_PERMISSIONS).optional().describe(RUNNER_ARG_TEXT.permission),
         dataDir: z.enum(OPENCODE_DATA_DIRS).optional().describe(RUNNER_ARG_TEXT.dataDir),
         commit: z.enum(COMMIT_POLICIES).optional().describe(RUNNER_ARG_TEXT.commit),
+        ...startLimitArgs,
       },
     },
     async (a, c) =>
@@ -338,7 +360,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     'configure',
     {
       description:
-        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every Claude Code launch spawned afterwards), runnerKind (claude-code, codex, or opencode), model and effort (the worker defaults of the kind in force, or of runnerKind in the same call), codex { model, effort } and opencode { model, effort } (that kind\'s defaults whichever kind is in force), sandbox (codex.sandbox), permission and dataDir (opencode.permission, opencode.dataDir), and commit (the commit policy of the kind in force), all for every launch prepared afterwards. Defaults: claude-code runs claude-opus-5-5 at medium, codex runs gpt-6-astra at medium with sandbox workspace-write, opencode runs anthropic/claude-opus-5-5 (a provider/model id) at medium with permission derived and dataDir shared; effort is low, medium, high, xhigh, or max, and ultra is codex-only (refused with 400 naming the kind for a claude-code or opencode effort); a task payload or a runner:/model:/effort: label overrides them per task. A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start).',
+        'Set or clear configuration overrides on the running daemon through the configuration route: checkCommand (applies to every verifier job that starts checking afterwards), capacity (the next admission pass), allowedTools and runnerCommand (every Claude Code launch spawned afterwards), runnerKind (claude-code, codex, or opencode), model and effort (the worker defaults of the kind in force, or of runnerKind in the same call), codex { model, effort } and opencode { model, effort } (that kind\'s defaults whichever kind is in force), sandbox (codex.sandbox), permission and dataDir (opencode.permission, opencode.dataDir), and commit (the commit policy of the kind in force), all for every launch prepared afterwards; and the limits budgets { maxLaunchMs } and health { stuckAfterMs, stuckFailAfterMs }, in milliseconds, where 0 disables a limit and a change applies on the next tick to every live launch, to claims made afterwards, and to status (with both stuck limits above 0, stuckFailAfterMs must be above stuckAfterMs, else 400 naming the key). Defaults: claude-code runs claude-opus-5-5 at medium, codex runs gpt-6-astra at medium with sandbox workspace-write, opencode runs anthropic/claude-opus-5-5 (a provider/model id) at medium with permission derived and dataDir shared; effort is low, medium, high, xhigh, or max, and ultra is codex-only (refused with 400 naming the kind for a claude-code or opencode effort); a task payload or a runner:/model:/effort: label overrides them per task. A value sets the key; null clears it so the value falls back to the file, detection, or the default. Returns the new config block with applied; a 400 names an invalid key and value, a 409 names a start-only key (integrationBranch belongs to start).',
       inputSchema: {
         checkCommand: z.string().nullable().optional(),
         capacity: z.number().int().nullable().optional(),
@@ -353,6 +375,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         permission: z.enum(OPENCODE_PERMISSIONS).nullable().optional().describe(RUNNER_ARG_TEXT.permission),
         dataDir: z.enum(OPENCODE_DATA_DIRS).nullable().optional().describe(RUNNER_ARG_TEXT.dataDir),
         commit: z.enum(COMMIT_POLICIES).nullable().optional().describe(RUNNER_ARG_TEXT.commit),
+        ...configureLimitArgs,
       },
     },
     async (a, c) =>

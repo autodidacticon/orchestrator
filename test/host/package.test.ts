@@ -189,6 +189,12 @@ describe('package entrypoints', () => {
     const run = readFileSync(path.join(plugin, 'skills/run/SKILL.md'), 'utf8');
     for (const word of ['configure', 'needsConfig', 'CLAUDE.md', 'needsAccess', 'detected: npm test on main', 'start-only']) expect(run, word).toContain(word);
     expect(run).toContain('omit the allow-list part');
+    // The raise offer, cut out and read alone. See specs/host-integration "Run skill offers a raised limit".
+    const more = run.slice(run.indexOf('- **a launch needs more time**'), run.indexOf('\n- **', run.indexOf('- **a launch needs more time**') + 1));
+    expect(more.startsWith('- **a launch needs more time**')).toBe(true);
+    for (const word of ['configure', 'health.stuckFailAfterMs', 'budgets.maxLaunchMs', 'elapsedMs', 'applied', 'null']) expect(more, word).toContain(word);
+    for (const word of ['health: { stuckFailAfterMs', 'budgets.maxLaunchMs', 'budgets: { maxLaunchMs', 'leaseTtlMs']) expect(more, word).toContain(word);
+    expect(more).not.toContain('orchestrator-work');
     for (const skill of ['import', 'work']) {
       const text = readFileSync(path.join(plugin, `skills/${skill}/SKILL.md`), 'utf8');
       expect(text, skill).toContain('needsConfig');

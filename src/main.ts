@@ -26,7 +26,7 @@ import { openStore, type OpenedStore } from './state/open.js';
 import { GitVerifierBackend } from './verify/verifier.js';
 import { chooseRunId, CONFIG_FILE, DAEMON_PID, ensureRunDir, repoRunId, type RunIdChoice, runIdInputOf, runIdWarning, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, trackedInRepo, writeConfigJson, writeDaemonJson, writeExitRecord, type ExitRecord, exitStoreFields } from './runs/runDir.js';
 import { databaseVariablesIn, postgresInputsWithoutKind, setStoreWithholding, storeWithholding, storeWithholdingFor, withholdStoreUrl } from './runs/childEnv.js';
-import { applyOverridePatch, configSummary, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved, resolveLayers } from './runs/resolve.js';
+import { applyOverridePatch, configSummary, type Overrides, parseSetFlags, readOverrides, reportOf, type Resolved, resolveLayers, stuckPairProblem } from './runs/resolve.js';
 import { digestOf } from './operator/routes.js';
 import { runIdOf, setRunId } from './state/store.js';
 import { randomUUID } from 'node:crypto';
@@ -76,7 +76,10 @@ for the run before resolving; keys: checkCommand, integrationBranch (start-only)
 capacity, allowedTools (a JSON array, or one rule per flag), runnerCommand,
 runnerKind (claude-code or codex), model and effort (bound to the kind in
 force), and the per-kind keys claude.model, claude.effort, claude.commit,
-codex.model, codex.effort, codex.sandbox, codex.commit, codex.command. An
+codex.model, codex.effort, codex.sandbox, codex.commit, codex.command, and
+the limits budgets.maxLaunchMs, health.stuckAfterMs and health.stuckFailAfterMs
+(milliseconds as decimal digits; 0 disables the limit; with both stuck limits
+above 0, health.stuckFailAfterMs must be above health.stuckAfterMs). An
 unknown key or a bad value is a usage error (exit 2). While checkCommand is
 unresolved, submitted work is held until it is set (orchestrator-ctl config).
 
@@ -110,7 +113,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   try {
     flags = parseSetFlags(values.set ?? []);
   } catch (err) {
-    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n\n${USAGE}`);
+    // The usage text first and the refusal last: a caller that reads the tail of the log sees the refusal whole.
+    process.stderr.write(`${USAGE}\n${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(2);
   }
   let runId: string | undefined;
@@ -219,7 +223,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const patched = applyOverridePatch(first.inputs, current, flags);
   if (!patched.ok) {
     await opened.close();
-    process.stderr.write(`--set ${patched.key}: ${patched.error}\n\n${USAGE}`);
+    process.stderr.write(`${USAGE}\n--set ${patched.key}: ${patched.error}\n`);
     process.exit(2);
   }
   const overrides = patched.next;
@@ -249,6 +253,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   writeConfigJson(dataDir, report);
   store.appendEvent({ kind: 'config.resolved', payload: configSummary(report) }, Date.now());
   stderrLogger.info('configuration resolved', configSummary(report));
+  // A pair in force that breaks the stuck pair rule is warned about, not refused: a patch that touches neither key never evaluates it. See specs/toolchain-discovery "Runtime limit overrides".
+  const pairProblem = stuckPairProblem(resolved.health);
+  if (pairProblem) stderrLogger.warn(`stuck limits: ${pairProblem}`, { stuckAfterMs: resolved.health.stuckAfterMs, stuckFailAfterMs: resolved.health.stuckFailAfterMs });
 
   // The runner command, its allow list, and the check command are read from the effective configuration at every spawn and at every job start. See specs/toolchain-discovery "Runtime overrides and start-only keys".
   // One runner per kind; each launch is dispatched by the kind fixed on its row. The codex template, sandbox, and MCP keys are likewise read at every spawn. See specs/worker-runners "Runner dispatch by launch kind".
