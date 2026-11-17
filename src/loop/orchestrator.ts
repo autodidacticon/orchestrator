@@ -126,6 +126,8 @@ export type ReopenResult =
 
 /** How often a resolution pass for deferred verifier jobs is tried while origin cannot be fetched. */
 const DEFERRED_RETRY_MS = 1000;
+/** Failure kinds of a check run that a gap in the daemon's clock may have caused. See specs/integration-pipeline "Failed check across a gap". */
+const GAP_REQUEUE_KINDS: ReadonlySet<string> = new Set(['checkFailed', 'checkTimeout']);
 
 /** The inbox's answer to a caller that went away during its durable wait: nobody reads it, and nothing was removed. */
 const INBOX_CALLER_GONE: ApiResponse = { status: 499, body: { error: 'the caller went away; the notices stay for the next read' } };
@@ -2225,7 +2227,10 @@ export class Orchestrator implements OrchestratorCore {
     if (!job) return;
     this.heldJobsLogged.delete(job.jobId);
     crashPoint('verify.afterQueued');
-    this.verifierInFlight = this.runVerifierJob(job)
+    // The run's start, after a note: a failed check whose run overlapped a gap is run again once. See specs/integration-pipeline "Failed check across a gap".
+    this.noteClock();
+    const startedAt = this.now();
+    this.verifierInFlight = this.runVerifierJob(job, startedAt)
       .catch((err) => {
         if (err instanceof JobDroppedError) {
           this.log.info('verifier job dropped mid-flight', { jobId: job.jobId });
@@ -2237,7 +2242,7 @@ export class Orchestrator implements OrchestratorCore {
           return;
         }
         this.log.error('verifier job crashed', { jobId: job.jobId, err: String(err) });
-        this.store.updateJob(job.jobId, { status: 'failed', failureKind: 'checkFailed', output: String(err), updatedAt: this.now() });
+        this.failVerifierJob(job, startedAt, 'checkFailed', String(err));
       })
       .finally(() => {
         this.verifierInFlight = undefined;
@@ -2245,7 +2250,32 @@ export class Orchestrator implements OrchestratorCore {
       });
   }
 
-  private async runVerifierJob(job: VerifierJob): Promise<void> {
+  /**
+   * Write a failed verifier run. A run that failed its check (`checkFailed`, `checkTimeout`, or a thrown run) and
+   * overlapped a gap in the daemon's clock is put back to `queued` once per job instead: no attempt is spent, and
+   * `verify.requeued` carries the reason and `gap: { failureKind, gapMs }`. A second such failure is written as
+   * `failed`, gap or no gap. The clock is noted first, so a gap not yet seen by the note timer still counts.
+   * See specs/integration-pipeline "Failed check across a gap".
+   */
+  private failVerifierJob(job: VerifierJob, startedAt: number, failureKind: string, output: string | undefined): void {
+    this.noteClock();
+    const endedAt = this.now();
+    const gapMs = endedAt - startedAt - this.awakeMs(startedAt, endedAt);
+    const current = this.store.getJob(job.jobId);
+    const live = current !== undefined && current.status !== 'dropped' && !current.applied;
+    if (live && gapMs > 0 && GAP_REQUEUE_KINDS.has(failureKind) && (current.gapRequeues ?? 0) < 1) {
+      const reason = `check ${failureKind} after a run that overlapped a ${gapMs}ms gap in the daemon's clock; run again once without spending an attempt`;
+      this.log.warn('verifier job requeued after a gap', { jobId: job.jobId, taskId: job.taskId, failureKind, gapMs });
+      this.store.transaction(() => {
+        this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, reason, gap: { failureKind, gapMs } } }, endedAt);
+        this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, gapRequeues: (current.gapRequeues ?? 0) + 1, updatedAt: endedAt });
+      });
+      return;
+    }
+    this.store.updateJob(job.jobId, { status: 'failed', failureKind, output, updatedAt: endedAt });
+  }
+
+  private async runVerifierJob(job: VerifierJob, startedAt: number): Promise<void> {
     const report = this.store.getReport(job.launchId);
     const summary = String(report?.body['summary'] ?? job.taskId);
     const noChanges = Boolean(report?.body['noChanges']);
@@ -2284,7 +2314,7 @@ export class Orchestrator implements OrchestratorCore {
       this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, ...(outcome.reason ? { reason: outcome.reason } : {}), ...(retry && outcome.retry ? { retry: outcome.retry.kind, retryAt: retry.state.retryAt, retryInMs: retry.delayMs, refusals: retry.state.refusals } : {}) } }, this.now());
       this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, updatedAt: this.now() });
     } else if (outcome.kind === 'failed') {
-      this.store.updateJob(job.jobId, { status: 'failed', failureKind: outcome.reason.kind, output: outcome.reason.output ?? outcome.reason.message, updatedAt: this.now() });
+      this.failVerifierJob(job, startedAt, outcome.reason.kind, outcome.reason.output ?? outcome.reason.message);
     } else {
       this.store.updateJob(job.jobId, { status: 'conflict', conflictFiles: outcome.files, conflictSince: outcome.since, updatedAt: this.now() });
     }

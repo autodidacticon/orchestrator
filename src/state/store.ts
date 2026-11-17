@@ -105,6 +105,11 @@ export interface VerifierJob {
   conflictFiles?: string[];
   conflictSince?: Id[];
   failureKind?: string;
+  /**
+   * Times a failed check whose run overlapped a gap in the daemon's clock was put back to `queued` without spending
+   * an attempt (at most 1). Never cleared. See specs/integration-pipeline "Failed check across a gap".
+   */
+  gapRequeues?: number;
   /** Terminal result applied to the overlay by the tick. */
   applied: boolean;
   createdAt: number;
