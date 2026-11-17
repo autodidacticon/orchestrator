@@ -26,7 +26,7 @@ export const PACKAGE_NAME = '@autodidacticon/orchestrator';
 export const RUNNER_KINDS = ['codex', 'opencode'];
 const DEFAULT_RUNNER = 'codex';
 const WAKE_KINDS = 'launch.claimable,launch.ended,launch.released';
-/** The silence limit when neither --max-silence-ms nor the claim names one: the daemon's default health.stuckFailAfterMs. */
+/** The silence limit when neither --max-silence-ms nor the daemon names a positive one (or the claim has no health field): the daemon's default health.stuckFailAfterMs. */
 export const DEFAULT_MAX_SILENCE_MS = 45 * 60_000;
 /** Two notes of the loop's clock further apart than this are a sleep of this machine (--gap-after-ms; the daemon's health.gapAfterMs default). */
 export const DEFAULT_GAP_AFTER_MS = 60_000;
@@ -111,7 +111,7 @@ export function parseWorkArgs(argv) {
     idleExitMs: Math.max(0, Number(values['idle-exit-ms']) || 0),
     pollMs: Math.max(100, Number(values['poll-ms']) || 2000),
     maxFailures: Math.max(1, Number.parseInt(values['max-failures'], 10) || 3),
-    // Undefined: learnt from the claim, else DEFAULT_MAX_SILENCE_MS. 0 turns the silence limit off.
+    // Undefined: learnt from the claim, then from each status read (silenceLimitMs). 0 turns the silence limit off.
     maxSilenceMs: values['max-silence-ms'] === undefined ? undefined : Math.max(0, Number(values['max-silence-ms']) || 0),
     // A step of the loop's clock longer than this is a sleep and is left out of the silence. 0 turns the rule off.
     gapAfterMs: Math.max(0, Number(values['gap-after-ms']) || 0),
@@ -141,15 +141,23 @@ export function stopVerdict(s, quietSinceMs, now, idleExitMs, kind = DEFAULT_RUN
 }
 
 /**
- * The silence limit for one claimed launch: --max-silence-ms when given, else the daemon's stuck-fail
- * threshold when the claim carries a positive one (`health.stuckFailAfterMs`, which every claim response states),
- * else DEFAULT_MAX_SILENCE_MS: a daemon that never fails a stuck launch (0) still gets a bound on a hung agent that the
- * loop keeps renewing. --max-silence-ms 0 is off.
+ * The silence limit for one claimed launch, in this order: --max-silence-ms when given, never replaced (0 is off).
+ * Else, when the claim carries no `health` field (a 0.5.1 daemon), DEFAULT_MAX_SILENCE_MS, and `status` is not read
+ * for it. Else, with a `status` body (`statusBody`, from GET /v1/status), its `budgets.stuckFailAfterMs` when that is
+ * a number: positive is the limit, 0 is DEFAULT_MAX_SILENCE_MS, so a hung agent whose lease the loop renews is still
+ * bounded. A status body that holds no number there, or none at all, keeps `previous`. With neither status nor
+ * previous (the claim), the claim's `health.stuckFailAfterMs` when positive, else DEFAULT_MAX_SILENCE_MS.
+ * See specs/host-integration "Work loop silence limit".
  */
-export function silenceLimitMs(optMs, claim) {
+export function silenceLimitMs(optMs, claim, statusBody, previous) {
   if (optMs !== undefined) return optMs;
-  const fromClaim = Number(claim?.health?.stuckFailAfterMs);
-  return Number.isFinite(fromClaim) && fromClaim > 0 ? fromClaim : DEFAULT_MAX_SILENCE_MS;
+  if (claim?.health === undefined || claim?.health === null) return DEFAULT_MAX_SILENCE_MS;
+  const positive = (v) => (v > 0 ? v : DEFAULT_MAX_SILENCE_MS);
+  const fromStatus = statusBody?.budgets?.stuckFailAfterMs;
+  if (typeof fromStatus === 'number' && Number.isFinite(fromStatus) && fromStatus >= 0) return positive(fromStatus);
+  if (previous !== undefined) return previous;
+  const fromClaim = Number(claim.health.stuckFailAfterMs);
+  return Number.isFinite(fromClaim) ? positive(fromClaim) : DEFAULT_MAX_SILENCE_MS;
 }
 
 /**
@@ -436,7 +444,8 @@ export async function runWork(opts, mods) {
     let spawnError;
     let terminated;
     let renewal;
-    const maxSilenceMs = silenceLimitMs(opts.maxSilenceMs, c);
+    // Follows the daemon's health.stuckFailAfterMs from status at every look, unless --max-silence-ms pins it.
+    let maxSilenceMs = silenceLimitMs(opts.maxSilenceMs, c);
     log(`${workerId}: ${c.taskId} (launch ${c.launchId.slice(0, 8)}) ${adapter.label} -m ${c.model ?? '(default)'}; log ${logFile}; silence limit ${maxSilenceMs ? `${maxSilenceMs}ms` : 'off'}`);
     const exit = await new Promise((resolve) => {
       let child;
@@ -495,6 +504,12 @@ export async function runWork(opts, mods) {
           try {
             const s = await http('GET', '/v1/status');
             state = s.status === 200 ? launchState(s.body, workerId, c) : 'running';
+            // An answer that is not 200 keeps the limit the loop had.
+            if (s.status === 200) {
+              const limit = silenceLimitMs(opts.maxSilenceMs, c, s.body, maxSilenceMs);
+              if (limit !== maxSilenceMs) log(`${workerId}: ${c.taskId} silence limit ${maxSilenceMs}ms -> ${limit}ms (the daemon's health.stuckFailAfterMs)`);
+              maxSilenceMs = limit;
+            }
           } catch {
             state = 'running'; // the daemon is unreachable: only the silence limit applies
           }
@@ -619,7 +634,9 @@ Claims launches of one runner kind from the orchestrator daemon and runs the age
 codex exec for --runner codex (the default), opencode run for --runner opencode. The daemon is
 found by --url, ORCH_URL, or the run directory of --repo (default: the current directory).
 The agent's process group is ended when the daemon ends its launch, or when the agent writes no
-output for --max-silence-ms (default: the claim's health.stuckFailAfterMs, else 45 minutes; 0 is off).
+output for the silence limit. --max-silence-ms MS fixes it (0 is off). Without it the limit follows
+the daemon's health.stuckFailAfterMs: the claim's value first, then budgets.stuckFailAfterMs from
+status at every poll; 0 there, or a claim with no health field, means 45 minutes.
 A step of the loop's own clock longer than --gap-after-ms (default 60000; 0 is off) is a sleep of
 this machine, and is left out of the agent's silence.\n`;
 

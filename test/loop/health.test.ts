@@ -566,6 +566,113 @@ describe('health: limits changed at runtime', () => {
   });
 });
 
+// See specs/agent-protocol "Limit change notice".
+describe('health: a limit change is a notice to each affected worker', () => {
+  const limited = (config: ConfigInput = {}) => harness({ budgets: budgets({ maxLaunchMs: 10_000 }), health: health({ stuckAfterMs: 1000, stuckFailAfterMs: 3000 }), ...config });
+  const configNotices = (h: Harness, launchId: string) => (h.store.getLaunch(launchId)?.notices ?? []).filter((n) => n['source'] === 'config');
+
+  it('a changed time budget queues one nudge per live launch, with the values in force and the elapsed time; the same value again queues nothing', async () => {
+    const h = limited();
+    await h.orch.tick();
+    const live = h.store.listLaunches({ status: 'live' });
+    expect(live.length).toBeGreaterThan(1);
+    h.advance(2_000);
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 20_000 } })).toMatchObject({ ok: true });
+    const limits = { budgets: { maxLaunchMs: 20_000 }, health: { stuckAfterMs: 1000, stuckFailAfterMs: 3000 } };
+    for (const l of live) {
+      expect(h.store.listEvents({ kind: 'launch.notice', launchId: l.launchId }).map((e) => e.payload)).toEqual([{ kind: 'nudge' }]);
+      const notices = await h.inbox(l.taskId);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toEqual({ kind: 'nudge', source: 'config', changed: ['budgets.maxLaunchMs'], limits, message: expect.any(String) });
+      const message = String(notices[0]!['message']);
+      for (const word of ['budgets.maxLaunchMs', '10000ms', '20000ms', 'has run 2000ms', '0 means the limit is off']) expect(message, word).toContain(word);
+      expect(message).not.toContain('health.');
+    }
+    // The same value, and the same values beside it from the file, change nothing in force.
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 20_000 } })).toMatchObject({ ok: true });
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 20_000 }, health: { stuckAfterMs: 1000, stuckFailAfterMs: 3000 } })).toMatchObject({ ok: true });
+    expect(h.orch.setConfig({})).toMatchObject({ ok: true });
+    for (const l of live) expect(await h.inbox(l.taskId)).toEqual([]);
+    expect(h.store.listEvents({ kind: 'launch.notice' })).toHaveLength(live.length);
+  });
+
+  it('a patch that changes two limits queues one notice per launch naming both', async () => {
+    const h = limited();
+    await h.orch.tick();
+    const live = h.store.listLaunches({ status: 'live' });
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 30_000 }, health: { stuckFailAfterMs: 9_000 } })).toMatchObject({ ok: true });
+    for (const l of live) {
+      const notices = await h.inbox(l.taskId);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({ kind: 'nudge', source: 'config', changed: ['budgets.maxLaunchMs', 'health.stuckFailAfterMs'], limits: { budgets: { maxLaunchMs: 30_000 }, health: { stuckAfterMs: 1000, stuckFailAfterMs: 9_000 } } });
+      for (const word of ['3000ms -> 9000ms', '10000ms -> 30000ms']) expect(String(notices[0]!['message'])).toContain(word);
+    }
+  });
+
+  it('a waiting task\'s launch gets the notice; an ended launch gets none', async () => {
+    const h = limited();
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    const l5 = h.launchOf('T5');
+    void h.block('T5', 'which way?');
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.statusOf('T5')).toBe('waiting');
+    await h.submit('T1');
+    await h.orch.tick();
+    expect(h.store.getLaunch(l1.launchId)?.status).toBe('ended');
+    expect(h.orch.setConfig({ health: { stuckAfterMs: 2000 } })).toMatchObject({ ok: true });
+    expect(configNotices(h, l5.launchId)).toEqual([expect.objectContaining({ kind: 'nudge', changed: ['health.stuckAfterMs'] })]);
+    expect(configNotices(h, l1.launchId)).toEqual([]);
+    expect(h.store.listEvents({ kind: 'launch.notice', launchId: l1.launchId })).toEqual([]);
+  });
+
+  it('in pull mode a parked launch gets the notice, and returns it on its first inbox call after the claim', async () => {
+    const h = limited({ runner: { mode: 'pull', claimWindowMs: 60_000 } });
+    await h.orch.tick();
+    expect(h.store.listLaunches({ status: 'claimable' }).length).toBeGreaterThan(0);
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 0 } })).toMatchObject({ ok: true });
+    const c = await h.orch.claim({ workerId: 'w1', taskId: 'T1' });
+    expect(c.status).toBe(200);
+    const notices = await h.inbox('T1');
+    expect(notices).toEqual([expect.objectContaining({ kind: 'nudge', source: 'config', changed: ['budgets.maxLaunchMs'], limits: { budgets: { maxLaunchMs: 0 }, health: { stuckAfterMs: 1000, stuckFailAfterMs: 3000 } } })]);
+    expect(String(notices[0]!['message'])).toContain('10000ms -> 0ms');
+  });
+
+  it('no notice for another key, a 400, a start-only 409 or a wouldEnd 409', async () => {
+    const h = limited({ capacity: 1 });
+    await h.orch.tick();
+    h.advance(9_000);
+    expect(h.orch.setConfig({ capacity: 3 })).toMatchObject({ ok: true, applied: ['capacity'] });
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: -1 } })).toMatchObject({ ok: false, status: 400 });
+    expect(h.orch.setConfig({ integrationBranch: 'x', budgets: { maxLaunchMs: 20_000 } })).toMatchObject({ ok: false, status: 409, startOnly: ['integrationBranch'] });
+    expect(h.orch.setConfig({ budgets: { maxLaunchMs: 5_000 } })).toMatchObject({ ok: false, status: 409, wouldEnd: [{ taskId: 'T1' }] });
+    expect(h.store.listEvents({ kind: 'launch.notice' })).toEqual([]);
+    for (const l of h.store.listLaunches()) expect(l.notices ?? []).toEqual([]);
+  });
+
+  it('the notices are written in the transaction of the document: a failed write leaves neither', async () => {
+    const h = limited();
+    await h.orch.tick();
+    const live = h.store.listLaunches({ status: 'live' });
+    expect(live.length).toBeGreaterThan(1);
+    // The second notice's event fails, after the document and the first notice were written in the transaction.
+    const append = h.store.appendEvent.bind(h.store);
+    let notices = 0;
+    h.store.appendEvent = (e, ts) => {
+      if (e.kind === 'launch.notice' && ++notices === 2) throw new Error('disk full');
+      return append(e, ts);
+    };
+    expect(() => h.orch.setConfig({ budgets: { maxLaunchMs: 20_000 } })).toThrow('disk full');
+    h.store.appendEvent = append;
+    expect(notices).toBe(2);
+    expect(h.store.getKv('config.overrides')).toBeUndefined();
+    expect(h.store.listEvents({ kind: 'operator.config' })).toEqual([]);
+    expect(h.store.listEvents({ kind: 'launch.notice' })).toEqual([]);
+    for (const l of live) expect(h.store.getLaunch(l.launchId)?.notices ?? []).toEqual([]);
+    expect(h.orch.effective().config.budgets.maxLaunchMs).toBe(10_000);
+  });
+});
+
 // See specs/operator-control "Configuration route: a change that would end a live launch".
 describe('health: a limit change that would end a live launch', () => {
   const one = (config: ConfigInput) => harness({ capacity: 1, ...config });

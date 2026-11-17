@@ -326,7 +326,22 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     return { hit: () => hit };
   }
 
-  async function hangThenRun(config: Record<string, unknown>, args: string[] = [], mode: 'hang' | 'orphan' = 'hang') {
+  /** Wait, without ticking the daemon, until the loop has claimed T1 and logged the limit it took from the claim, just before the spawn. */
+  async function claimed(h: SliceHarness, loop: { stderr: () => string }): Promise<Launch> {
+    for (const deadline = Date.now() + 30_000; ; await new Promise((r) => setTimeout(r, 20))) {
+      const [l] = h.store.listLaunches({ taskId: 'T1', status: 'live' });
+      if (l?.worker && /; silence limit \d+ms/.test(loop.stderr())) return l;
+      if (Date.now() > deadline) throw new Error(`the loop never claimed T1; loop stderr:\n${loop.stderr()}`);
+    }
+  }
+
+  /** Raise the daemon's stuck fail limit through PUT /v1/config, as an operator would. */
+  async function raiseStuckFail(h: SliceHarness, ms: number): Promise<void> {
+    const res = await fetch(`${h.orch.apiBaseUrl}/v1/config`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ health: { stuckFailAfterMs: ms } }) });
+    expect(res.status, await res.clone().text()).toBe(200);
+  }
+
+  async function hangThenRun(config: Record<string, unknown>, args: string[] = [], mode: 'hang' | 'orphan' = 'hang', onClaimed?: () => Promise<void>) {
     h = await makeSlice({ graph: one(`, opencodeMode: ${mode}`), config: { ...opencodePull, ...config } });
     const repro = process.env['ORCH_TEST_REPRO'] === 'silent-agent-progress' ? injectRemovalRace(h) : undefined;
     const atRemoval = rowsAtRemoval(h);
@@ -335,6 +350,10 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     const marker = path.join(captureDir(h), 'hung-T1');
     let timer: NodeJS.Timeout | undefined;
     try {
+      if (onClaimed) {
+        await claimed(h, loop);
+        await onClaimed();
+      }
       // Tick only once the fake hangs, so that a slow start under load is not what the daemon ends.
       // A plain poll: the harness's waitFor ticks the daemon.
       for (const deadline = Date.now() + 30_000; !existsSync(marker); await new Promise((r) => setTimeout(r, 50))) {
@@ -474,6 +493,50 @@ describe('work loop ends a hung agent (ORC-79)', () => {
     expect(releases[0]!.keep).toBe(false);
     expect(releases[0]!.reason).toMatch(/opencode was terminated by the work loop: no output for/);
   }, 150_000);
+
+  // See specs/host-integration "Work loop silence limit": the limit follows status unless --max-silence-ms pins it.
+  const OLD_LIMIT = 4000;
+  const NEW_LIMIT = 60_000;
+
+  it('without --max-silence-ms the loop follows a raised stuck limit: the agent outlives the old limit', async () => {
+    h = await makeSlice({ graph: one(', opencodeMode: hang'), config: { ...opencodePull, leaseTtlMs: 60_000, health: health({ stuckFailAfterMs: OLD_LIMIT }) } });
+    await h.waitFor(() => h!.store.listLaunches({ status: 'claimable' }).length === 1);
+    const loop = startLoop(h, binDir(h), ['--runner', 'opencode', '--workers', '1', '--run-tag', 'fl', '--idle-exit-ms', '20000']);
+    const marker = path.join(captureDir(h), 'hung-T1');
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      const l = await claimed(h, loop);
+      // Raised at once, well before the old limit, while the agent is silent.
+      expect(loop.stderr()).toContain(`silence limit ${OLD_LIMIT}ms`);
+      await raiseStuckFail(h, NEW_LIMIT);
+      const raisedAt = Date.now();
+      for (const deadline = Date.now() + 30_000; !existsSync(marker); await new Promise((r) => setTimeout(r, 50))) {
+        if (Date.now() > deadline) throw new Error(`the fake never hung; loop stderr:\n${loop.stderr()}`);
+      }
+      timer = setInterval(() => void h?.orch.tick(), 100);
+      // Several seconds past the old limit, counted from the raise (the loop's clock started before it, at spawn).
+      await new Promise((r) => setTimeout(r, OLD_LIMIT + 5000 - (Date.now() - raisedAt)));
+      expect(loop.stderr()).toContain(`silence limit ${OLD_LIMIT}ms -> ${NEW_LIMIT}ms`);
+      expect(loop.stderr()).not.toMatch(/ending opencode/);
+      expect(h.store.getLaunch(l.launchId)?.status).toBe('live');
+      const cap = JSON.parse(readFileSync(path.join(captureDir(h), `${l.launchId}.json`), 'utf8')) as Capture & { pid: number };
+      expect(pidAlive(cap.pid)).toBe(true);
+      expect(h.store.listEvents({ kind: 'operator.release' })).toEqual([]);
+    } finally {
+      clearInterval(timer);
+      child?.kill('SIGKILL');
+      killOwnFake(marker, h!.dir);
+    }
+  }, 150_000);
+
+  it('with --max-silence-ms at the old limit the raise does not move the loop: it ends the agent at that limit', async () => {
+    const { first, out } = await hangThenRun({ leaseTtlMs: 60_000, health: health({ stuckFailAfterMs: OLD_LIMIT }) }, ['--max-silence-ms', String(OLD_LIMIT)], 'hang', () => raiseStuckFail(h!, NEW_LIMIT));
+    // The daemon's limit was raised, so the loop, not the daemon, ended the launch.
+    expect(first).toMatchObject({ status: 'ended', endReason: 'released' });
+    expect(out.stderr).toMatch(new RegExp(`T1 ending opencode \\(process group \\d+\\): no output for \\d+s \\(limit ${OLD_LIMIT}ms\\)`));
+    expect(out.stderr).not.toContain('silence limit 4000ms ->');
+    expect(h!.orch.effective().config.health.stuckFailAfterMs).toBe(NEW_LIMIT);
+  }, 150_000);
 });
 
 describe('composeOpenCodeCommand in the loop', () => {
@@ -521,6 +584,33 @@ describe('work.mjs by kind', () => {
     expect(silenceLimitMs(undefined, { health: { stuckFailAfterMs: 0 } })).toBe(DEFAULT_MAX_SILENCE_MS);
     expect(silenceLimitMs(2000, { health: { stuckFailAfterMs: 7000 } })).toBe(2000);
     expect(silenceLimitMs(0, { health: { stuckFailAfterMs: 7000 } })).toBe(0);
+  });
+
+  // See specs/host-integration "Work loop silence limit".
+  it('the silence limit follows status: --max-silence-ms wins, a claim without health stays at 45 minutes, 0 is 45 minutes, unreadable keeps the previous', () => {
+    const claim = { health: { stuckFailAfterMs: 7000 } };
+    const status = (v: unknown) => ({ budgets: { stuckFailAfterMs: v } });
+    expect(silenceLimitMs(2000, claim, status(60_000), 7000)).toBe(2000);
+    expect(silenceLimitMs(2000, {}, status(60_000), 2000)).toBe(2000);
+    expect(silenceLimitMs(0, claim, status(60_000), 0)).toBe(0);
+    expect(silenceLimitMs(undefined, {}, status(60_000), DEFAULT_MAX_SILENCE_MS)).toBe(DEFAULT_MAX_SILENCE_MS);
+    expect(silenceLimitMs(undefined, {}, status(1000), undefined)).toBe(DEFAULT_MAX_SILENCE_MS);
+    expect(silenceLimitMs(undefined, claim, status(60_000), 7000)).toBe(60_000);
+    expect(silenceLimitMs(undefined, claim, status(0), 7000)).toBe(DEFAULT_MAX_SILENCE_MS);
+    // A claim of 0 still follows a positive status value later.
+    expect(silenceLimitMs(undefined, { health: { stuckFailAfterMs: 0 } }, status(9000), DEFAULT_MAX_SILENCE_MS)).toBe(9000);
+    // No readable status: the previous limit.
+    expect(silenceLimitMs(undefined, claim, undefined, 60_000)).toBe(60_000);
+    expect(silenceLimitMs(undefined, claim, {}, 60_000)).toBe(60_000);
+    expect(silenceLimitMs(undefined, claim, status('x'), 60_000)).toBe(60_000);
+    expect(silenceLimitMs(undefined, claim, status(-1), 60_000)).toBe(60_000);
+  });
+
+  it('--help says the silence limit follows the daemon\'s status without --max-silence-ms', async () => {
+    const { stdout } = await execFileP(process.execPath, [workMjs, '--help']);
+    const text = stdout.replace(/\s+/g, ' ');
+    expect(text).toContain('Without it the limit follows the daemon\'s health.stuckFailAfterMs');
+    expect(text).toContain('budgets.stuckFailAfterMs from status at every poll');
   });
 
   it('--gap-after-ms: 60000 by default, 0 is off, else the given threshold', () => {

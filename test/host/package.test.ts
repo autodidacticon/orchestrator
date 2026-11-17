@@ -197,6 +197,9 @@ describe('package entrypoints', () => {
     // See specs/host-integration "Run skill confirms a lowering with the user".
     for (const word of ['endLive', 'wouldEnd', 'only\n  when the user says so']) expect(more, word).toContain(word);
     expect(more).not.toContain('orchestrator-work');
+    // See specs/host-integration "Run skill: workers are told of a limit change".
+    expect(more).toContain('inbox');
+    expect(more).not.toContain('Tell the worker the new limit');
     for (const skill of ['import', 'work']) {
       const text = readFileSync(path.join(plugin, `skills/${skill}/SKILL.md`), 'utf8');
       expect(text, skill).toContain('needsConfig');

@@ -296,6 +296,9 @@ describe('opencode host', () => {
     // See specs/host-integration "Run skill confirms a lowering with the user".
     for (const word of ['endLive', 'wouldEnd', 'only\n  when the user says so']) expect(more, word).toContain(word);
     expect(more).not.toContain("this session's workers");
+    // See specs/host-integration "Run skill: workers are told of a limit change".
+    for (const word of ['inbox', '--max-silence-ms', 'follows the new stuck limit']) expect(more, word).toContain(word);
+    for (const word of ['Tell the worker the new limit', 'took when it claimed']) expect(more, word).not.toContain(word);
     const opencodeLine = 'detected: npm test on main; workers opencode anthropic/claude-opus-5-5 at medium (default); permission derived, agent commits';
     for (const word of ['mode: "spawn"', 'modeNote', 'needsConfig', 'AGENTS.md', 'needsAccess', 'permission: "allow"', opencodeLine, 'runner.opencode.*', '"orchestrator_operator_*"', 'opencode.json']) expect(run, word).toContain(word);
     for (const word of ['/project/', "never change the project's state", 'applied: false', 'reason', 'status update', 'statusUpdateId', 'Milestone accepted:', 'Milestone rejected:']) expect(run.replace(/\s+/g, ' '), word).toContain(word);

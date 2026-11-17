@@ -663,15 +663,48 @@ export class Orchestrator implements OrchestratorCore {
         };
       }
     }
+    // Built after every refusal, so a refused patch tells no worker anything.
+    const notices = this.limitNotices(next);
     this.store.transaction(() => {
       this.operatorEvent('config', undefined, { patch: parsed.patch, overrides: next, ...(endLive ? { endLive: true } : {}) });
       this.store.setKv('config.overrides', JSON.stringify(next));
+      // Written with the document: no worker is told of a limit that is not in force.
+      for (const n of notices) this.queueNotice(n.launchId, n.notice);
     });
     const report = this.configReport();
     this.store.appendEvent({ kind: 'config.resolved', payload: configSummary(report) }, this.now());
     this.onConfigChanged?.(report);
     this.wake();
     return { ok: true, applied: keys, report };
+  }
+
+  /**
+   * The `nudge` notices with `source: 'config'` that a change of the three runtime limits sends, one per affected launch:
+   * a `live` or `launching` launch that holds the lease of a `running` or `waiting` task, and a `claimable` launch, whose
+   * brief was written before the change. Values in force are compared, not patch keys, so a patch that changes none of
+   * the three sends nothing. See specs/agent-protocol "Limit change notice".
+   */
+  private limitNotices(next: Overrides): Array<{ launchId: string; notice: { kind: string; [k: string]: unknown } }> {
+    const values = (c: Config) => ({ 'budgets.maxLaunchMs': c.budgets.maxLaunchMs, 'health.stuckAfterMs': c.health.stuckAfterMs, 'health.stuckFailAfterMs': c.health.stuckFailAfterMs });
+    const was = values(this.effective().config);
+    const will = values(resolveLayers(this.boot.inputs, next).config);
+    const changed = (Object.keys(will) as Array<keyof typeof will>).filter((k) => will[k] !== was[k]);
+    if (!changed.length) return [];
+    const limits = { budgets: { maxLaunchMs: will['budgets.maxLaunchMs'] }, health: { stuckAfterMs: will['health.stuckAfterMs'], stuckFailAfterMs: will['health.stuckFailAfterMs'] } };
+    // The elapsed time leaves out a sleep since the last tick, as the time budget check does.
+    this.noteClock();
+    const now = this.now();
+    const affected = this.store.listLaunches({ status: ['live', 'launching', 'claimable'] }).filter((l) => {
+      if (l.status === 'claimable') return true;
+      const entry = this.entry(l.taskId);
+      return (entry.status.kind === 'running' || entry.status.kind === 'waiting') && entry.lease?.launchId === l.launchId;
+    });
+    return affected.map((l) => {
+      const elapsed = elapsedMs(l, now, this);
+      const lines = changed.map((k) => `${k} ${was[k]}ms -> ${will[k]}ms${k === 'budgets.maxLaunchMs' ? ` (this launch has run ${elapsed}ms of it)` : ''}`);
+      const message = `The operator changed a limit of this run: ${lines.join('; ')}. 0 means the limit is off. This replaces what your brief states for ${changed.join(' and ')}.`;
+      return { launchId: l.launchId, notice: { kind: 'nudge', source: 'config', message, changed, limits } };
+    });
   }
 
   /**

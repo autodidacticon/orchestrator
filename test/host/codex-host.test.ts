@@ -430,6 +430,9 @@ describe('codex host', () => {
     // See specs/host-integration "Run skill confirms a lowering with the user".
     for (const word of ['endLive', 'wouldEnd', 'only\n  when the user says so']) expect(more, word).toContain(word);
     expect(more).not.toContain("this session's workers");
+    // See specs/host-integration "Run skill: workers are told of a limit change".
+    for (const word of ['inbox', '--max-silence-ms', 'follows the new stuck limit']) expect(more, word).toContain(word);
+    for (const word of ['Tell the worker the new limit', 'took when it claimed']) expect(more, word).not.toContain(word);
     const codexLine = 'workers codex gpt-6-astra at medium (file); sandbox workspace-write, daemon commits';
     for (const word of ['mode: "spawn"', 'modeNote', 'needsConfig', 'configure', 'AGENTS.md', 'needsAccess', 'detected: npm test on main', 'start-only', codexLine, 'omit the allow-list part', 'runner.kind', 'runner.codex.*', 'budgets.prices', 'config.runnerKind', 'claimableByKind', 'tool_timeout_sec', 'codex exec', 'default_tools_approval_mode', 'interactive']) expect(run, word).toContain(word);
     for (const word of ['/project/', "never change the project's state", 'applied: false', 'reason', 'status update', 'statusUpdateId', 'Milestone accepted:', 'Milestone rejected:']) expect(run.replace(/\s+/g, ' '), word).toContain(word);

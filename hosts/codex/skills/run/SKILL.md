@@ -162,15 +162,17 @@ digest:
   (`health.stuckFailAfterMs`; `budgets.maxLaunchMs` is the time budget). Values are
   milliseconds, and the daemon applies a change on its next tick. Check that
   `applied` in the answer lists `budgets` or `health`; a launch the daemon was already
-  ending can still end. Tell the worker the new limit with `nudge`. Once the launch has
-  reported or ended, clear the override with a null leaf (`budgets: { maxLaunchMs: null }`
+  ending can still end. You need not send a `nudge`: the daemon tells each affected worker
+  itself, with a `nudge` notice (`source: "config"`) that the worker sees on its next inbox
+  call. Once the launch has reported or ended, clear the override with a null leaf (`budgets: { maxLaunchMs: null }`
   or `health: { stuckFailAfterMs: null }`), or the raise stays for every later launch of
   the run. A lowered, cleared or switched-on limit that a live launch is already past is
   refused with a 409 whose `wouldEnd` lists the launches it would end, and nothing is
   applied: show `wouldEnd` to the user, and send the call again with `endLive: true` only
   when the user says so (the next tick then ends those launches, each with an attempt
   spent). A launch held by an `orchestrator-work` loop (listed under `status.workers`,
-  no `pid`) keeps the silence limit its loop took when it claimed.
+  no `pid`): the loop follows the new stuck limit from `status` at its next poll, unless
+  it was started with `--max-silence-ms`, which keeps that value.
 - **proposals** non-empty: agents proposed follow-up tasks. For each pending proposal (from
   `proposals`), show its title, description, acceptance criteria, and deps, and wait for the
   user's decision. On acceptance in a run imported from a tracker, first create the issue

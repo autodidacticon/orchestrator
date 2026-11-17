@@ -160,8 +160,9 @@ answers (section 2b), then act on the digest:
   (`health.stuckFailAfterMs`; `budgets.maxLaunchMs` is the time budget). Values are
   milliseconds, and the daemon applies a change on its next tick. Check that
   `applied` in the answer lists `budgets` or `health`; a launch the daemon was already
-  ending can still end. Tell the worker the new limit with `nudge`. Once the launch has
-  reported or ended, clear the override with a null leaf (`budgets: { maxLaunchMs: null }`
+  ending can still end. You need not send a `nudge`: the daemon tells each affected worker
+  itself, with a `nudge` notice (`source: "config"`) that the worker sees on its next inbox
+  call. Once the launch has reported or ended, clear the override with a null leaf (`budgets: { maxLaunchMs: null }`
   or `health: { stuckFailAfterMs: null }`), or the raise stays for every later launch of
   the run. A lowered, cleared or switched-on limit that a live launch is already past is
   refused with a 409 whose `wouldEnd` lists the launches it would end, and nothing is
