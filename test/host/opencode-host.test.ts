@@ -285,7 +285,7 @@ describe('opencode host', () => {
       expect(text, name).not.toMatch(/tool_timeout_sec|approval_policy|config\.toml|mcp__linear__/);
     }
     const review = readFileSync(path.join(host, 'skills/review/SKILL.md'), 'utf8');
-    for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable']) expect(review, word).toContain(word);
+    for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable', 'previous.unavailable']) expect(review, word).toContain(word);
     expect(review).not.toContain('completion summaries');
     const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
     // The raise offer, cut out and read alone. See specs/host-integration "Run skill offers a raised limit".

@@ -40,7 +40,8 @@ decides how you read, not the tool's argument list.
 - When the answer has `previous`, start from it: read `git diff <previous.sha>..<integrationSha>`
   and the tasks in `previous.tasksSince`. Use the sha, not the tag name. When
   `previous.tasksSince` is absent (`previous.tasksSinceUnavailable` is true), read every closure
-  task. `accept` still covers the whole pinned commit, so reading only `previous` is not
+  task. When `previous.unavailable` is set, no prior version can be compared: review the whole
+  closure as for a first version. `accept` still covers the whole pinned commit, so reading only `previous` is not
   enough.
 
 ## 2. Judge
@@ -48,7 +49,9 @@ decides how you read, not the tool's argument list.
 - Read the diff for the tag in the repository (`git diff <baseline>..<sha>`, or per task
   with the published shas) where the stat suggests it matters.
 - For each task, compare the report and its evidence in the one-task answer against the
-  `acceptanceCriteria` in that answer (or, for a whole bundle, the entry's own). Evidence that
+  `acceptanceCriteria` in that answer. A whole-bundle entry (no `view`, or `view` `full`) holds
+  no task criteria: its `acceptanceCriteria` is the milestone's. Read each task's criteria from
+  its tracker issue, or from its one-task answer when the daemon gives one. Evidence that
   merely restates the criterion is not evidence.
 - For the milestone, check its own criteria, such as a demo scenario, against the integrated
   result. Run it if the repository offers a way to.

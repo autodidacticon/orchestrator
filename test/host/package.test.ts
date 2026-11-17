@@ -268,7 +268,7 @@ describe('package entrypoints', () => {
 
   it("the review skill reads the index first, keyed on the answer's view field", () => {
     const review = readFileSync(path.join(root, 'hosts/claude-code/skills/review/SKILL.md'), 'utf8');
-    for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable']) expect(review, word).toContain(word);
+    for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable', 'previous.unavailable']) expect(review, word).toContain(word);
     expect(review).not.toContain('completion summaries');
     expect(review).toContain('Each reviewer fetches its own task');
     for (const h of ['codex', 'opencode']) expect(readFileSync(path.join(root, 'hosts', h, 'skills/review/SKILL.md'), 'utf8'), h).not.toContain('fan');

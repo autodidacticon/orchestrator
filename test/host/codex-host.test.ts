@@ -441,7 +441,7 @@ describe('codex host', () => {
     for (const word of ['mcp__linear__', 'mcp__atlassian__', 'gh auth status', 'needsConfig', 'configure', 'AGENTS.md', 'runner:<kind>', 'model:<name>', 'effort:<level>', 'ignoredLabels', 'mode: "spawn"', codexLine]) expect(imp, word).toContain(word);
     const review = readFileSync(path.join(host, 'skills/review/SKILL.md'), 'utf8');
     for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion']) expect(review, word).toContain(word);
-    for (const word of ['view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable']) expect(review, word).toContain(word);
+    for (const word of ['view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable', 'previous.unavailable']) expect(review, word).toContain(word);
     expect(review).not.toContain('completion summaries');
     const readme = readFileSync(path.join(host, 'README.md'), 'utf8');
     for (const word of ['[mcp_servers.orchestrator_operator]', 'tool_timeout_sec', 'codex mcp add orchestrator_operator --env ORCH_WAIT_CAP_MS=', 'codex mcp get orchestrator_operator', '~/.codex/skills', 'approval_policy = "never"']) expect(readme, word).toContain(word);

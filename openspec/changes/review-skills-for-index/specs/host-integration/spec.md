@@ -23,6 +23,14 @@ The `review` skill of each host SHALL key its reading on the `view` field of the
 - **WHEN** the answer has `previous`
 - **THEN** the skill reads `git diff <previous.sha>..<integrationSha>` and the tasks in `previous.tasksSince` (every closure task when `previous.tasksSinceUnavailable` is true), and says `accept` covers the whole pinned commit
 
+#### Scenario: Previous version unavailable
+- **WHEN** `previous.unavailable` is set
+- **THEN** the skill reviews the whole closure as for a first version
+
+#### Scenario: Whole-bundle entry
+- **WHEN** the answer is a whole bundle (no `view`, or `view` `full`)
+- **THEN** the skill reads each task's criteria from its tracker issue or its one-task answer, since the bundle's `acceptanceCriteria` is the milestone's
+
 #### Scenario: Resubmitted milestone
 - **WHEN** a one-task answer carries another `integrationSha` or `reviewVersion` than the index
 - **THEN** the skill starts the review again
