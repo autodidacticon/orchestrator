@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parse, parseAllDocuments } from 'yaml';
+import { leaseCoversFlushDeadline } from '../../src/config.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const hasKubectl = spawnSync('kubectl', ['version', '--client'], { stdio: 'ignore' }).status === 0;
@@ -51,9 +52,9 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     expect(cfg.apiBaseUrl).toBe('http://orchestrator.orch.svc:8080');
     expect(cfg.graphPath).toBeUndefined();
     expect(Object.keys(cm.data ?? {})).toEqual(['orchestrator.yaml']);
-    // The URL comes from the mounted Secret file (store.urlFile), never from the ConfigMap itself; the default lease outlasts the deadline.
+    // The URL comes from the mounted Secret file (store.urlFile), never from the ConfigMap itself; the default lease leaves the startup margin above the deadline (a deadline of 300000 with the default lease would fail).
     expect(cfg.store).toEqual({ kind: 'postgres', urlFile: '/var/run/secrets/orchestrator/postgres/uri', flushDeadlineMs: 120000 });
-    expect(cfg.leaseTtlMs ?? 600_000).toBeGreaterThanOrEqual(cfg.store.flushDeadlineMs);
+    expect(leaseCoversFlushDeadline(cfg.leaseTtlMs ?? 600_000, cfg.store.flushDeadlineMs)).toBe(true);
     expect(cfg.git.pushIntegration).toBe(true);
   });
 

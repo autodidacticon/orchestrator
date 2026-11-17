@@ -149,7 +149,7 @@ export const configSchema = z.object({
   /** The integration branch's remote. See specs/integration-pipeline "Origin as source of truth". */
   git: z
     .object({
-      /** The URL of the clone's `origin` remote; set, the remote is added or re-pointed to it. Unset, the clone's existing `origin` is used. Read only while pushIntegration is on. */
+      /** The URL of the clone's `origin` remote; set, the remote is added or re-pointed to it. Unset, the clone's existing `origin` is used. The remote is set only while pushIntegration is on, but under store.kind postgres the URL is also hashed for the run id whatever pushIntegration says (see src/runs/runDir.ts chooseRunId). */
       originUrl: z.string().min(1).optional(),
       /** Origin is the source of truth: the verifier fetches before each job and pushes each publication with a lease, base selection reads origin's head, and milestone tags are pushed. Off, no git command contacts a remote. */
       pushIntegration: z.boolean().default(false),
@@ -192,7 +192,7 @@ export const configSchema = z.object({
        * starts an empty run in the new schema. Ignored under sqlite. See specs/state-backend "Store schema key".
        */
       schema: z.string().optional(),
-      /** The oldest unflushed batch may be this old before the daemon exits. A worker lease must be at least as long. */
+      /** The oldest unflushed batch may be this old before the daemon exits. A worker lease must outlast it by the margin of leaseCoversFlushDeadline. */
       flushDeadlineMs: z.number().int().positive().default(120_000),
     })
     .default({}),

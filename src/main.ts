@@ -170,7 +170,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     stderrLogger.error('store configuration refused', { error: msg });
     throw new Error(msg);
   }
-  // Startup refuses a store block that cannot work: no URL, or a lease shorter than the flush deadline. See specs/state-backend "Lease versus flush deadline".
+  // Startup refuses a store block that cannot work: no URL, or a lease without the margin above the flush deadline. See specs/state-backend "Lease margin above the flush deadline".
   const storeError = storeConfigError(early);
   if (storeError) {
     stderrLogger.error('store configuration refused', { error: storeError, leaseTtlMs: early.leaseTtlMs, flushDeadlineMs: early.store.flushDeadlineMs });
