@@ -33,6 +33,12 @@ session and hand over normalized records.
   `checkCommand`, follow the run skill's section 1b (read `CLAUDE.md`, the README, and the
   root manifests; set it with `configure` when it is stated unambiguously, otherwise ask) before
   continuing, so that the first submission is not held.
+- **Worker profile.** When the `start` result has `confirmProfile` true and
+  `config.model.source` or `config.effort.source` is `default`, the imported tasks will be
+  held: the daemon does not launch them until their model and effort are set. Ask the user for
+  the model and effort before the import, naming the value shown as one option (in `spawn`
+  mode skip a key whose `applied` is false), and apply the answer with `configure`, as the
+  Worker profile paragraph of the `run` skill says.
 
 ## 2. Fetch the root and everything it references
 
@@ -149,5 +155,12 @@ task will use the run default); the tasks missing
 acceptance criteria, which will block at ready until someone adds them; any unknown external
 blockers; and whether the graph was accepted by the daemon. If the import was rejected as an
 incompatible reload, show the reasons and suggest cancelling the affected tasks first.
+
+**Held tasks.** Call `status` after the import. When `status.profiles` has an entry with
+`held: true`, tell the user how many tasks it holds (its `tasks`) and that the daemon will not
+launch them, ask for the keys in `missing`, naming the entry's value as one option, and apply
+the answer with `configure` (`model` and `effort` for the kind in force, or the `claude`,
+`codex`, or `opencode` object for another kind). Never choose the values from the model of
+this session, and never without the user's answer.
 
 Then offer to run it with the `run` skill.

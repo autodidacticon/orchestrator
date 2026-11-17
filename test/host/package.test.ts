@@ -249,6 +249,15 @@ describe('package entrypoints', () => {
     expect(importSkill.replace(/\s+/g, ' ')).toContain("the root record's `url` is the project's URL");
   });
 
+  // See specs/host-integration "Run skill asks for a held profile" and "Import skill reports held tasks".
+  it('the run, import and work skills ask the user for a held worker profile', () => {
+    const run = readFileSync(path.join(plugin, 'skills/run/SKILL.md'), 'utf8');
+    const imp = readFileSync(path.join(plugin, 'skills/import/SKILL.md'), 'utf8');
+    expectProfileBlocks(run, imp);
+    const work = cutBlock(readFileSync(path.join(plugin, 'skills/work/SKILL.md'), 'utf8'), '- **Worker profile.**');
+    for (const word of ['status.profiles', 'held: true']) expect(work, word).toContain(word);
+  });
+
   it("the review skill reads the index first, keyed on the answer's view field", () => {
     const review = readFileSync(path.join(root, 'hosts/claude-code/skills/review/SKILL.md'), 'utf8');
     for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable']) expect(review, word).toContain(word);
@@ -341,3 +350,27 @@ describe('package entrypoints', () => {
     }
   });
 });
+
+/** A block cut out of a skill: from its opening words to the next blank line, or to the next list item for a bullet. Exactly one block opens with the words. */
+function cutBlock(text: string, opening: string): string {
+  const lines = text.split('\n');
+  const starts = lines.flatMap((l, i) => (l.startsWith(opening) ? [i] : []));
+  expect(starts, opening).toHaveLength(1);
+  const out = [lines[starts[0]!]!];
+  for (const line of lines.slice(starts[0]! + 1)) {
+    if (line === '' || line.startsWith('- ') || line.startsWith('#')) break;
+    out.push(line);
+  }
+  return out.join(' ').replace(/\s+/g, ' ');
+}
+
+/** The profile-hold blocks of a run skill and an import skill, each read alone. */
+function expectProfileBlocks(run: string, imp: string): void {
+  const paragraph = cutBlock(run, '**Worker profile.**');
+  for (const word of ['confirmProfile', 'status.profiles', 'held', 'missing', 'modelSource', 'configure', 'runner.confirmProfile', 'orchestrator.yaml', 'model of this session']) expect(paragraph, word).toContain(word);
+  expect(cutBlock(run, '- **profileHeld**')).toContain('Worker profile');
+  const bullet = cutBlock(imp, '- **Worker profile.**');
+  for (const word of ['confirmProfile', 'default', 'configure']) expect(bullet, word).toContain(word);
+  const held = cutBlock(imp, '**Held tasks.**');
+  for (const word of ['status.profiles', 'held', 'missing', 'configure', 'model of this session']) expect(held, word).toContain(word);
+}

@@ -82,7 +82,7 @@ describe('operator MCP server', () => {
     // The wait description quotes the cap in force, which a Codex registration sizes tool_timeout_sec against. See specs/operator-mcp "Wait tool".
     expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain(`cap ${WAIT_CAP_MS}`);
     const configure = tools.tools.find((t) => t.name === 'configure');
-    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'budgets', 'capacity', 'checkCommand', 'codex', 'commit', 'dataDir', 'effort', 'endLive', 'health', 'model', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
+    expect(Object.keys((configure?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['allowedTools', 'budgets', 'capacity', 'checkCommand', 'claude', 'codex', 'commit', 'dataDir', 'effort', 'endLive', 'health', 'model', 'opencode', 'permission', 'repo', 'runnerCommand', 'runnerKind', 'sandbox']);
     // The limit keys. See specs/operator-mcp "Configure and start tools: limit keys".
     for (const word of ['budgets { maxLaunchMs }', 'health { stuckAfterMs, stuckFailAfterMs }', '0 disables a limit', 'applies on the next tick']) expect(configure?.description, word).toContain(word);
     // See specs/operator-mcp "Configure tool: endLive".
@@ -105,6 +105,10 @@ describe('operator MCP server', () => {
     for (const word of ['runnerKind', 'runner', 'codex.sandbox', 'claimableByKind']) expect(statusTool?.description, word).toContain(word);
     const startTool = tools.tools.find((t) => t.name === 'start');
     for (const word of ['claude-opus-5-5', 'gpt-6-astra', 'anthropic/claude-opus-5-5', 'ultra', 'spawn when the runner kind is codex or opencode', 'orchestrator-work --runner', 'permission', 'dataDir']) expect(JSON.stringify(startTool), word).toContain(word);
+    // The profile hold. See specs/operator-mcp "Start tool turns the profile hold on".
+    for (const word of ['runner.confirmProfile', 'confirmProfile']) expect(startTool?.description, word).toContain(word);
+    for (const word of ['profiles', 'runner.confirmProfile']) expect(statusTool?.description, word).toContain(word);
+    expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain('profileHeld');
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);
@@ -260,7 +264,7 @@ describe('operator MCP server', () => {
     const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
     dirs.push(home, base);
     const repo = realpathSync(makeRepo(base));
-    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 2'].join('\n'));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 2', 'runner: { confirmProfile: false }'].join('\n'));
     env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
     client = new Client({ name: 'test', version: '0' });
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
@@ -322,6 +326,66 @@ describe('operator MCP server', () => {
     client = new Client({ name: 'test', version: '0' });
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
     expect(await tool('start')).toMatchObject({ started: true, mode: 'spawn' });
+  }, 120_000);
+
+  // See specs/operator-mcp "Start tool turns the profile hold on".
+  it('a run started through the start tool holds a task on default worker values until configure sets them', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 2'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    const started = await tool('start');
+    expect(started).toMatchObject({ status: 200, started: true, mode: 'pull', confirmProfile: true });
+    const before = await tool('status');
+    expect(before['runner']).toMatchObject({ confirmProfile: true });
+    expect(before['profiles']).toEqual([]);
+    expect(await importAdopted('import_graph', { content: 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n' })).toMatchObject({ accepted: true });
+    const held = await tool('status');
+    expect(held['profiles']).toMatchObject([{ runner: 'claude-code', held: true, missing: ['model', 'effort'], tasks: 1, sample: ['T1'] }]);
+    // A few ticks pass and the task is still not parked for a worker.
+    await new Promise((r) => setTimeout(r, 600));
+    expect((await tool('status'))['claimable']).toEqual([]);
+    const digest = (await tool('wait', { timeoutMs: 300 }))['digest'] as Record<string, unknown>;
+    expect(digest['profileHeld']).toEqual([{ runner: 'claude-code', missing: ['model', 'effort'], tasks: 1 }]);
+    expect(await tool('configure', { model: 'claude-opus-5-5', effort: 'medium' })).toMatchObject({ status: 200, ok: true });
+    for (let i = 0; i < 50 && ((await tool('status'))['claimable'] as string[]).length === 0; i++) await new Promise((r) => setTimeout(r, 100));
+    expect((await tool('status'))['claimable']).toEqual(['T1']);
+    const released = (await tool('wait', { timeoutMs: 300 }))['digest'] as Record<string, unknown>;
+    expect(released['profileHeld']).toEqual([]);
+  }, 120_000);
+
+  // See specs/operator-mcp "Configure and start tools: claude object".
+  it('the claude object sets the claude-code leaves on a run of another kind and releases a held claude-code task', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 2'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    const tools = await client.listTools();
+    for (const name of ['configure', 'start']) {
+      const props = (tools.tools.find((t) => t.name === name)?.inputSchema as { properties: Record<string, unknown> }).properties;
+      expect(Object.keys(props), name).toContain('claude');
+    }
+    const started = await tool('start', { mode: 'pull', runnerKind: 'codex', codex: { model: 'gpt-6-astra', effort: 'medium' }, claude: { effort: 'high' } });
+    expect(started).toMatchObject({ status: 200, started: true, mode: 'pull', confirmProfile: true });
+    expect(started['applied']).toContain('claude');
+    expect(await importAdopted('import_graph', {
+      content: 'nodes:\n  - { id: C1, deps: [], runner: claude-code, description: d, acceptanceCriteria: [a] }\n  - { id: C2, deps: [C1], runner: claude-code, description: d, acceptanceCriteria: [a] }\n',
+    })).toMatchObject({ accepted: true });
+    expect((await tool('status'))['profiles']).toMatchObject([{ runner: 'claude-code', held: true, missing: ['model'], effortSource: 'argument', tasks: 2 }]);
+    expect(await tool('configure', { claude: { model: 'claude-opus-5-5' } })).toMatchObject({ status: 200, ok: true });
+    for (let i = 0; i < 50 && ((await tool('status'))['claimable'] as string[]).length === 0; i++) await new Promise((r) => setTimeout(r, 100));
+    const after = await tool('status');
+    expect(after['claimable']).toEqual(['C1']);
+    const c2 = (after['profiles'] as Array<{ sample: string[] }>).find((p) => p.sample.includes('C2'));
+    expect(c2).toMatchObject({ runner: 'claude-code', held: false, modelSource: 'argument' });
   }, 120_000);
 
   // See specs/operator-mcp "Start tool" (mode default for codex) and "Configure tool". No graph is loaded: a codex daemon in spawn would exec codex.
@@ -536,6 +600,37 @@ describe('operator MCP server', () => {
     expect(refused.isError).toBe(true);
     expect(parse(refused)['error']).toMatch(/stopped at .*start/);
     expect((await tool('runs'))['runs']).toMatchObject([{ repo, alive: false, exit: { reason: 'stop' } }]);
+  }, 60_000);
+
+  // See specs/operator-mcp "Start tool turns the profile hold on": the local revival is a spawn by the plugin too.
+  it('a revival through a tool turns the profile hold on for a run that has no stored choice', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 100', 'daemon: { idleExitMs: 800, exitWhileAttached: true }', 'runner: { mode: pull }'].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    // A run from before the update: started without the default, so it stores no choice.
+    const run = await startDaemon({ repo, env });
+    expect(run.confirmProfile).toBe(false);
+    const put = await fetch(`${run.url}/v1/graph`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ content: 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n  - { id: T2, deps: [T1], description: d, acceptanceCriteria: [a] }\n' }),
+    });
+    expect(put.status).toBe(200);
+    const deadline = Date.now() + 15_000;
+    while (pidAlive(run.pid)) {
+      if (Date.now() > deadline) throw new Error('daemon did not exit idle');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    expect((await tool('runs'))['runs']).toMatchObject([{ repo, alive: false, exit: { reason: 'idle' } }]);
+    const revived = await tool('status');
+    expect(revived).toMatchObject({ status: 200, runner: { confirmProfile: true } });
+    const t2 = (revived['profiles'] as Array<{ held: boolean; sample: string[] }>).find((p) => p.sample.includes('T2'));
+    expect(t2).toMatchObject({ held: true });
   }, 60_000);
 
   it('records the tracker at import and drives the outbox: list, ack with a result, ack with an error, local argument error', async () => {

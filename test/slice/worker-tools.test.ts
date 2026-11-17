@@ -47,7 +47,7 @@ describe('worker tools on the operator MCP server', () => {
     const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
     dirs.push(home, base);
     const repo = realpathSync(makeRepo(base));
-    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 2'].join('\n'));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 2', 'runner: { confirmProfile: false }'].join('\n'));
     env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo, ORCH_WAIT_CAP_MS: '2000' };
     client = new Client({ name: 'test', version: '0' });
     await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));

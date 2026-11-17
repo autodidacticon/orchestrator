@@ -27,7 +27,7 @@ const graph = ['nodes:',
   '  - { id: T2, deps: [T1], behavior: commitAndSubmit, description: d, acceptanceCriteria: [b] }', ''].join('\n');
 
 const prompt = `You are the operator of an orchestrator run. Use only the tools of the ${ID} MCP server; run no shell commands.
-1. Call start with mode "spawn".
+1. Call start with mode "spawn", model "claude-opus-5-5" and effort "medium".
 2. Call import_graph with content set to exactly this YAML:
 ${graph}
 3. Loop: call wait with until "any" and timeoutMs 60000, passing afterSeq set to the seq the previous wait returned (omit it the first time).

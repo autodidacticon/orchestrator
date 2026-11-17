@@ -97,6 +97,8 @@ export interface StartOptions {
   mode?: 'spawn' | 'pull' | 'mixed';
   /** The mode a spawned daemon adopts when neither the store nor orchestrator.yaml chose one; ignored for a running daemon. */
   defaultMode?: 'spawn' | 'pull' | 'mixed';
+  /** The profile hold a spawned daemon adopts when neither the store nor orchestrator.yaml chose one (`--default-confirm-profile`); ignored for a running daemon. See specs/operator-control "Profile hold default for a spawned daemon". */
+  defaultConfirmProfile?: boolean;
   /** Configuration arguments: passed as `--set` flags to a daemon this call spawns, applied through `PUT /v1/config` to one already running. See specs/operator-control "Start arguments". */
   overrides?: Overrides;
 }
@@ -107,6 +109,8 @@ export interface StartResult extends DaemonInfo {
   started: boolean;
   /** The runner mode in force after the start. */
   mode?: 'spawn' | 'pull' | 'mixed';
+  /** The profile hold in force (`runner.confirmProfile` from the status probe); absent when the probe failed. */
+  confirmProfile?: boolean;
   /** The resolved configuration with value and source per key, read from the daemon once healthy. */
   config?: ConfigReport['config'];
   toolchain?: ToolchainRecord;
@@ -155,6 +159,11 @@ function modeOf(status: Record<string, unknown> | undefined): 'spawn' | 'pull' |
   return m === 'spawn' || m === 'pull' || m === 'mixed' ? m : undefined;
 }
 
+function confirmProfileOf(status: Record<string, unknown> | undefined): Pick<StartResult, 'confirmProfile'> {
+  const c = (status?.['runner'] as { confirmProfile?: unknown } | undefined)?.confirmProfile;
+  return typeof c === 'boolean' ? { confirmProfile: c } : {};
+}
+
 /** Idempotent start: reuse a healthy daemon, otherwise spawn one detached and wait for health. */
 export async function startDaemon(opts: StartOptions = {}): Promise<StartResult> {
   const env = opts.env ?? process.env;
@@ -173,14 +182,18 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
       await fetch(`${state.url}/v1/runner`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode: opts.mode }), signal: AbortSignal.timeout(3000) });
     }
     const outcome = await applyOverrides(state.url, overrides);
-    const mode = opts.mode ?? modeOf(await health(state.url));
-    return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false, ...(mode ? { mode } : {}), ...configFields(await readConfig(state.url)), applied: outcome.applied, rejected: outcome.rejected };
+    // The probe is made in every case: confirmProfile is reported also when a mode was passed.
+    const status = await health(state.url);
+    const mode = opts.mode ?? modeOf(status);
+    return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: false, ...(mode ? { mode } : {}), ...confirmProfileOf(status), ...configFields(await readConfig(state.url)), applied: outcome.applied, rejected: outcome.rejected };
   }
   const remote = remoteDaemonUrl(env);
   if (remote) await refuseRemote(remote);
   const { command, args } = daemonCommand();
   const fd = openSync(paths.daemonLog, 'a');
   const modeArgs = opts.mode ? ['--mode', opts.mode] : opts.defaultMode ? ['--default-mode', opts.defaultMode] : [];
+  // Independent of the mode: adopted by the daemon only when neither the store nor the file chose.
+  const confirmArgs = opts.defaultConfirmProfile !== undefined ? ['--default-confirm-profile', opts.defaultConfirmProfile ? 'on' : 'off'] : [];
   // Values become `--set` flags the daemon stores before resolving; a null (clear) goes through the route once it is up.
   const setArgs: string[] = [];
   const clears: Record<string, null> = {};
@@ -189,7 +202,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
     if (v === null) clears[k] = null;
     else setArgs.push('--set', `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`);
   }
-  const child = spawn(command, [...args, '--repo', repo, ...modeArgs, ...setArgs], {
+  const child = spawn(command, [...args, '--repo', repo, ...modeArgs, ...confirmArgs, ...setArgs], {
     cwd: repo,
     env: { ...env, ...opts.extraEnv },
     detached: true,
@@ -206,7 +219,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<StartResult>
       const mode = modeOf(status) ?? opts.mode;
       const applied = Object.entries(overrides).filter(([, v]) => v !== undefined && v !== null).map(([k]) => k as OverridableKey);
       const cleared = Object.keys(clears).length ? await applyOverrides(info.url, clears as Overrides) : { applied: [] as OverridableKey[], rejected: [] as Array<{ key: OverridableKey; reason: string }> };
-      return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: true, ...(mode ? { mode } : {}), ...configFields(await readConfig(info.url)), applied: [...applied, ...cleared.applied], rejected: cleared.rejected };
+      return { ...info, runDir: paths.runDir, graphPath: paths.graphPath, started: true, ...(mode ? { mode } : {}), ...confirmProfileOf(status), ...configFields(await readConfig(info.url)), applied: [...applied, ...cleared.applied], rejected: cleared.rejected };
     }
     if (!pidAlive(child.pid)) break;
     await new Promise((r) => setTimeout(r, 150));

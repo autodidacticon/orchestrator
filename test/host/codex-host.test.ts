@@ -446,4 +446,35 @@ describe('codex host', () => {
     const readme = readFileSync(path.join(host, 'README.md'), 'utf8');
     for (const word of ['[mcp_servers.orchestrator_operator]', 'tool_timeout_sec', 'codex mcp add orchestrator_operator --env ORCH_WAIT_CAP_MS=', 'codex mcp get orchestrator_operator', '~/.codex/skills', 'approval_policy = "never"']) expect(readme, word).toContain(word);
   });
+
+  // See specs/host-integration "Run skill asks for a held profile" and "Import skill reports held tasks".
+  it('the run and import skills ask the user for a held worker profile', () => {
+    const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
+    const imp = readFileSync(path.join(host, 'skills/import/SKILL.md'), 'utf8');
+    expectProfileBlocks(run, imp);
+  });
 });
+
+/** A block cut out of a skill: from its opening words to the next blank line, or to the next list item for a bullet. Exactly one block opens with the words. */
+function cutBlock(text: string, opening: string): string {
+  const lines = text.split('\n');
+  const starts = lines.flatMap((l, i) => (l.startsWith(opening) ? [i] : []));
+  expect(starts, opening).toHaveLength(1);
+  const out = [lines[starts[0]!]!];
+  for (const line of lines.slice(starts[0]! + 1)) {
+    if (line === '' || line.startsWith('- ') || line.startsWith('#')) break;
+    out.push(line);
+  }
+  return out.join(' ').replace(/\s+/g, ' ');
+}
+
+/** The profile-hold blocks of a run skill and an import skill, each read alone. */
+function expectProfileBlocks(run: string, imp: string): void {
+  const paragraph = cutBlock(run, '**Worker profile.**');
+  for (const word of ['confirmProfile', 'status.profiles', 'held', 'missing', 'modelSource', 'configure', 'runner.confirmProfile', 'orchestrator.yaml', 'model of this session']) expect(paragraph, word).toContain(word);
+  expect(cutBlock(run, '- **profileHeld**')).toContain('Worker profile');
+  const bullet = cutBlock(imp, '- **Worker profile.**');
+  for (const word of ['confirmProfile', 'default', 'configure']) expect(bullet, word).toContain(word);
+  const held = cutBlock(imp, '**Held tasks.**');
+  for (const word of ['status.profiles', 'held', 'missing', 'configure', 'model of this session']) expect(held, word).toContain(word);
+}

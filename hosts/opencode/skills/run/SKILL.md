@@ -93,6 +93,24 @@ choose its own model or effort: `model` and `effort` in its payload, or `model:<
 1b). Then call `status`. If no graph is loaded, say so and suggest the `orchestrator-import`
 skill.
 
+**Worker profile.** The `start` result's `confirmProfile` says whether the profile hold is
+on. While it is on, the daemon launches no task whose model or effort would come from a
+built-in default. Before a graph is loaded: when `confirmProfile` is true and
+`config.model.source` or `config.effort.source` is `default`, ask the user now which model
+and effort the workers run with, naming the value shown as one option; in `spawn` mode skip a
+key whose `applied` is false. With a graph, read `status.profiles`, and read it again after
+every import. Each entry says what a group of tasks that have not started will run with
+(`runner`, `model`, `effort`), where each value comes from (`modelSource`, `effortSource`:
+`task`, `argument`, `file`, or `default`), and how many tasks it covers (`tasks`); tell the
+user every entry in one line. An entry with `held: true` is not launched: ask the user for
+the keys in `missing`, naming the entry's value as one option. Apply the answer with
+`configure`: `model` and `effort` for the kind in force, or the `claude`, `codex`, or
+`opencode` object for another kind. Do this also when the user accepts the value shown, so
+that its source becomes `argument`. Never choose the profile from the model of this session,
+and never without the user's answer. A lasting choice is `model` and `effort` under
+`runner.claude`, `runner.codex`, or `runner.opencode` in `orchestrator.yaml`;
+`runner.confirmProfile: false` there turns the profile hold off.
+
 The configuration keys for the runner kinds, in `orchestrator.yaml`: `runner.kind`
 (`claude-code`, `codex`, or `opencode`); `runner.claude.*` (`model`, `effort`, `commit`, `allowedTools`,
 `deriveTools`); `runner.codex.*` (`model`, `effort` up to `ultra`, `sandbox`: `read-only`,
@@ -153,6 +171,8 @@ digest:
   agent now, or answering with an alternative. Do what the user picks.
 - **needsConfig** names `checkCommand`: submitted tasks are held under `verifying` until a
   check command is set. Follow section 1b now; do not call the run slow or stalled.
+- **profileHeld** non-empty: tasks are held until their model or effort is set. Follow the
+  Worker profile paragraph of section 1 now; do not call the run slow or stalled.
 - **awaitingReview** non-empty: use the `orchestrator-review` skill for each milestone.
 - **finished** true: report the final state (done tasks, milestones) and stop.
 - **stalled** true: report `stallRoots` with their reasons. Offer the options that apply:

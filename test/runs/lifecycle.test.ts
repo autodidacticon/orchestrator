@@ -343,6 +343,72 @@ describe('run directory and daemon lifecycle', () => {
     expect((await startDaemon({ repo: configured, env, defaultMode: 'pull' })).mode).toBe('spawn'); // the file wins
     await stopDaemon({ repo: configured, env });
   }, 90_000);
+
+  // See specs/operator-control "Profile hold default for a spawned daemon".
+  it('adopts --default-confirm-profile once, keeps it for the run whoever starts it, and reports it in every start path', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home };
+    const repo = realpathSync(makeRepo(fresh()));
+    configFor(repo);
+    const first = await startDaemon({ repo, env, defaultConfirmProfile: true });
+    expect(first.started).toBe(true);
+    expect(first.confirmProfile).toBe(true);
+    // A running daemon: the probe is made also when a mode is passed.
+    const withMode = await startDaemon({ repo, env, mode: 'pull' });
+    expect(withMode).toMatchObject({ started: false, mode: 'pull', confirmProfile: true });
+    const bare = await startDaemon({ repo, env });
+    expect(bare).toMatchObject({ started: false, mode: 'pull', confirmProfile: true });
+    await stopDaemon({ repo, env });
+    const again = await startDaemon({ repo, env });
+    expect(again.started).toBe(true);
+    expect(again.confirmProfile).toBe(true); // durable: the run's choice, not the starter's
+    await stopDaemon({ repo, env });
+
+    const off = realpathSync(makeRepo(fresh()));
+    configFor(off);
+    expect((await startDaemon({ repo: off, env, defaultConfirmProfile: false })).confirmProfile).toBe(false);
+    await stopDaemon({ repo: off, env });
+    expect((await startDaemon({ repo: off, env, defaultConfirmProfile: true })).confirmProfile).toBe(false); // the stored choice is kept
+    await stopDaemon({ repo: off, env });
+
+    const none = realpathSync(makeRepo(fresh()));
+    configFor(none);
+    expect((await startDaemon({ repo: none, env })).confirmProfile).toBe(false);
+    await stopDaemon({ repo: none, env });
+  }, 120_000);
+
+  it('writes the stored profile hold from orchestrator.yaml at every start, and keeps the last one when the line is removed', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home };
+    const repo = realpathSync(makeRepo(fresh()));
+    configFor(repo);
+    const file = path.join(repo, 'orchestrator.yaml');
+    const plain = readFileSync(file, 'utf8');
+    expect((await startDaemon({ repo, env, defaultConfirmProfile: true })).confirmProfile).toBe(true);
+    await stopDaemon({ repo, env });
+    writeFileSync(file, `${plain}runner: { confirmProfile: false }\n`);
+    expect((await startDaemon({ repo, env, defaultConfirmProfile: true })).confirmProfile).toBe(false); // the file overwrites the stored choice
+    await stopDaemon({ repo, env });
+    expect((await startDaemon({ repo, env })).confirmProfile).toBe(false);
+    await stopDaemon({ repo, env });
+    writeFileSync(file, plain);
+    expect((await startDaemon({ repo, env, defaultConfirmProfile: true })).confirmProfile).toBe(false); // the last stored choice stays
+    await stopDaemon({ repo, env });
+
+    const filed = realpathSync(makeRepo(fresh()));
+    configFor(filed);
+    writeFileSync(path.join(filed, 'orchestrator.yaml'), `${readFileSync(path.join(filed, 'orchestrator.yaml'), 'utf8')}runner: { confirmProfile: true }\n`);
+    expect((await startDaemon({ repo: filed, env })).confirmProfile).toBe(true);
+    await stopDaemon({ repo: filed, env });
+  }, 120_000);
+
+  it('refuses a --default-confirm-profile value other than on or off, and names the flag in the usage', async () => {
+    home = fresh();
+    env = { ...process.env, ORCH_HOME: home };
+    const { main, USAGE } = await import('../../src/main.js');
+    await expect(main(['--default-confirm-profile', 'maybe'])).rejects.toThrow('--default-confirm-profile must be on or off, not maybe');
+    expect(USAGE).toContain('--default-confirm-profile');
+  });
 });
 
 // See specs/operator-control "Exit record": a clean record only after the store closed with nothing unflushed.

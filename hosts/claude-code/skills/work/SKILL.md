@@ -28,6 +28,8 @@ the workflow hands back: questions, reviews, and the end.
   names `checkCommand`, follow the run skill's section 1b (find the test command in
   `CLAUDE.md`, the README, or the root manifests and set it with `configure`, or ask the user)
   before running workers, since submitted work is held until it is set.
+- **Worker profile.** When `status.profiles` has an entry with `held: true`, follow the run
+  skill's Worker profile paragraph before running workers, since held tasks are never claimable.
 - `start` reports the mode in force. A plugin-started run is already `pull`. To work a run in
   `spawn` mode, call `start` with `mode: "pull"` (workers only) or `mode: "mixed"` (the
   daemon spawns whatever nobody claims within its claim window); this switches a daemon

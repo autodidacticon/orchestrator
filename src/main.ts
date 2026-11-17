@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Daemon entrypoint.
- *   orchestrator [--repo <path>] [--config orchestrator.yaml] [--reap-on-exit] [--mode m] [--default-mode m] [--set key=value]...
+ *   orchestrator [--repo <path>] [--config orchestrator.yaml] [--reap-on-exit] [--mode m] [--default-mode m] [--default-confirm-profile on|off] [--set key=value]...
  * SIGTERM/SIGINT: graceful stop (agents keep running for adoption) unless --reap-on-exit.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -62,7 +62,7 @@ const SHUTDOWN_GRACE_MS = 8_000;
 
 export const USAGE = `orchestrator: the daemon.
 
-  orchestrator [--repo <path>] [--config orchestrator.yaml] [--reap-on-exit] [--mode spawn|pull|mixed] [--default-mode spawn|pull|mixed] [--set key=value]...
+  orchestrator [--repo <path>] [--config orchestrator.yaml] [--reap-on-exit] [--mode spawn|pull|mixed] [--default-mode spawn|pull|mixed] [--default-confirm-profile on|off] [--set key=value]...
 
 With --repo (or inside a repository), run data lives under ORCH_HOME
 (~/.orchestrator) keyed by the repository path, and <repo>/orchestrator.yaml is
@@ -88,7 +88,10 @@ agents up to capacity, verifies and publishes their work, and serves the agent
 and operator APIs on loopback. SIGTERM stops it gracefully; agents keep running
 and are adopted on the next start unless --reap-on-exit is set. --mode sets the
 run's runner mode; --default-mode applies only when neither the store nor
-orchestrator.yaml chose one. The daemon exits on its own after daemon.idleExitMs
+orchestrator.yaml chose one. --default-confirm-profile on|off sets the run's
+profile hold (runner.confirmProfile) only when the store holds no choice and
+orchestrator.yaml states none; a value in the file overwrites the stored choice
+at every start. The daemon exits on its own after daemon.idleExitMs
 of quiet and records why in daemon.json; start revives it.
 `;
 
@@ -101,6 +104,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       'reap-on-exit': { type: 'boolean', default: false },
       mode: { type: 'string' },
       'default-mode': { type: 'string' },
+      'default-confirm-profile': { type: 'string' },
       set: { type: 'string', multiple: true },
       help: { type: 'boolean', short: 'h', default: false },
     },
@@ -108,6 +112,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   if (values.help) {
     process.stdout.write(USAGE);
     return;
+  }
+  const holdDefault = values['default-confirm-profile'];
+  if (holdDefault !== undefined && holdDefault !== 'on' && holdDefault !== 'off') {
+    throw new Error(`--default-confirm-profile must be on or off, not ${holdDefault}`);
   }
   let flags: Overrides;
   try {
@@ -228,6 +236,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     const mode = values['default-mode'];
     if (!['spawn', 'pull', 'mixed'].includes(mode)) throw new Error(`--default-mode must be spawn, pull, or mixed, not ${mode}`);
     if (!store.getKv('runner.mode') && !fileSetsMode) store.setKv('runner.mode', mode);
+  }
+  // The profile hold belongs to the run: a value in the file overwrites the stored choice at every start; the default is adopted only when nothing chose. See specs/operator-control "Profile hold default for a spawned daemon".
+  const fileConfirmProfile = (fileRaw?.['runner'] as { confirmProfile?: unknown } | undefined)?.confirmProfile;
+  if (typeof fileConfirmProfile === 'boolean') {
+    store.setKv('runner.confirmProfile', fileConfirmProfile ? 'on' : 'off');
+  } else if (holdDefault !== undefined && !store.getKv('runner.confirmProfile')) {
+    store.setKv('runner.confirmProfile', holdDefault);
   }
 
   // Arguments are durable overrides: merged over the store's document for resolution and persisted once the start is accepted, so a restart without flags keeps them and a refused start leaves nothing behind. See specs/toolchain-discovery "Resolution order and provenance".
