@@ -287,7 +287,9 @@ describe('opencode host', () => {
     const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
     const opencodeLine = 'detected: npm test on main; workers opencode anthropic/claude-opus-5-5 at medium (default); permission derived, agent commits';
     for (const word of ['mode: "spawn"', 'modeNote', 'needsConfig', 'AGENTS.md', 'needsAccess', 'permission: "allow"', opencodeLine, 'runner.opencode.*', '"orchestrator_operator_*"', 'opencode.json']) expect(run, word).toContain(word);
+    for (const word of ['/project/', "never change the project's state", 'applied: false', 'reason', 'status update', 'statusUpdateId', 'Milestone accepted:', 'Milestone rejected:']) expect(run.replace(/\s+/g, ' '), word).toContain(word);
     const imp = readFileSync(path.join(host, 'skills/import/SKILL.md'), 'utf8');
+    expect(imp.replace(/\s+/g, ' ')).toContain("the root record's `url` is the project's URL");
     for (const word of ['linear_<tool>', 'atlassian_<tool>', 'gh auth status', 'AGENTS.md', 'runner:<kind>', 'mode: "spawn"']) expect(imp, word).toContain(word);
     expect(imp.replace(/\s+/g, ' ')).toContain(opencodeLine);
   });

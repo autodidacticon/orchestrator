@@ -41,7 +41,10 @@ Identify the root from the user's input: an issue key such as `ENG-123`, a URL, 
 For **Linear**: fetch the root issue; fetch its child issues (sub-issues); for every child,
 read its relations and collect the issues that block it (`blockedBy`). For every blocker that
 is not itself a child, fetch that issue too so you know its state. If the root is a project
-milestone rather than an issue, treat the issues assigned to the milestone as the children.
+milestone rather than an issue, treat the issues assigned to the milestone as the children. For a Linear project-milestone root, the root record's `url` is the project's URL, its `id`
+is a short key the user confirms that is safe in a URL path and a git branch name (letters,
+digits, `-`), and its `state` is `open`; the daemon only stores the root's state and never
+acts on it.
 
 For **Jira**: fetch the root (an epic or any parent); fetch the issues whose parent is the root
 (or whose epic link is the root); for every child, read the issue links of type "is blocked

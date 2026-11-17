@@ -232,6 +232,10 @@ describe('package entrypoints', () => {
     for (const word of ['gh auth status', 'inProgressLabel', 'GH-<number>', 'GH-M<number>', 'stateReason', 'subIssues', 'blockedBy', 'No tracker connector is available']) expect(importSkill, word).toContain(word);
     const runSkill = readFileSync(path.join(plugin, 'skills/run/SKILL.md'), 'utf8');
     for (const word of ['gh issue close', '--reason completed', '"not planned"', 'gh issue reopen', '--add-label', '--remove-label', 'inProgressLabel', 'skipped: true', 'gh issue comment', '--parent', 'addBlockedBy']) expect(runSkill, word).toContain(word);
+    // Linear project-milestone root. See specs/host-integration "Run skill handles a Linear project-milestone root".
+    const flatRun = runSkill.replace(/\s+/g, ' ');
+    for (const word of ['/project/', "never change the project's state", 'applied: false', 'reason', 'status update', 'statusUpdateId', 'Milestone accepted:', 'Milestone rejected:']) expect(flatRun, word).toContain(word);
+    expect(importSkill.replace(/\s+/g, ' ')).toContain("the root record's `url` is the project's URL");
   });
 
   it('declares the session hooks', () => {

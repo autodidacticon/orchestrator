@@ -181,6 +181,29 @@ effect names its `issue` (the tracker key), an optional `url`, and is either
 `setState { state }` or `comment { body, marker }`. Apply them in `id` order with the
 tracker tools in this session, acknowledging each one before the next:
 
+- A Linear project-milestone root (the effect's `url` is a project URL, with `/project/` in
+  its path and not `/issue/`): never change the project's state, and never post a comment on
+  it, because a project has no workflow state of its own and no comment thread. Answer every
+  `setState` effect (`inProgress`, `done`, `cancelled`) with
+  `ack { id, result: { applied: false, reason: "<why>" } }` and change nothing in Linear.
+  Post only a `comment` whose `body` opens with "Milestone accepted:" or "Milestone rejected:",
+  and post it as a project status update on the project the `url` names, with no health value
+  (when the tool requires one, keep the project's current health). List the project's recent
+  status updates first; if one already contains the effect's `marker`, call
+  `ack { id, result: { statusUpdateId } }` with that update's id and do not post again.
+  Otherwise post `body`, a blank line, and the `marker` as the last line, then call
+  `ack { id, result: { statusUpdateId } }`. Every other `comment` for such a root (the
+  ready-for-review comment, a blocked comment, a question) is not an accept or reject decision:
+  answer it with `ack { id, result: { applied: false, reason: "<why>" } }` and post nothing.
+  When this session has no Linear tool that posts a project status update, answer the accept
+  and reject comments with `applied: false` and a reason that says so, and tell the user once.
+  Always answer these effects with `ack` and a `result`, never with `error`, which is retried
+  and ends in `trackerErrors`; a tracker error while posting a status update is still an
+  `error`, as for any effect. The effect's stored status becomes `applied` either way: that is
+  the daemon's word for acknowledged, and `result.applied: false` states that nothing was
+  changed in the tracker. An effect acknowledged with `applied: false` is counted in neither
+  number of the line below. A Linear effect whose `url` is an issue URL follows the rules
+  below.
 - `setState`: map `state` by state TYPE, never by name. Linear: the team's workflow state of
   type `started` for `inProgress`, `completed` for `done`, `canceled` for `cancelled`. Jira:
   transition to a status in category In Progress or Done; for `cancelled`, a canceled-type

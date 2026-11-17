@@ -424,7 +424,9 @@ describe('codex host', () => {
     const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
     const codexLine = 'workers codex gpt-6-astra at medium (file); sandbox workspace-write, daemon commits';
     for (const word of ['mode: "spawn"', 'modeNote', 'needsConfig', 'configure', 'AGENTS.md', 'needsAccess', 'detected: npm test on main', 'start-only', codexLine, 'omit the allow-list part', 'runner.kind', 'runner.codex.*', 'budgets.prices', 'config.runnerKind', 'claimableByKind', 'tool_timeout_sec', 'codex exec', 'default_tools_approval_mode', 'interactive']) expect(run, word).toContain(word);
+    for (const word of ['/project/', "never change the project's state", 'applied: false', 'reason', 'status update', 'statusUpdateId', 'Milestone accepted:', 'Milestone rejected:']) expect(run.replace(/\s+/g, ' '), word).toContain(word);
     const imp = readFileSync(path.join(host, 'skills/import/SKILL.md'), 'utf8');
+    expect(imp.replace(/\s+/g, ' ')).toContain("the root record's `url` is the project's URL");
     for (const word of ['mcp__linear__', 'mcp__atlassian__', 'gh auth status', 'needsConfig', 'configure', 'AGENTS.md', 'runner:<kind>', 'model:<name>', 'effort:<level>', 'ignoredLabels', 'mode: "spawn"', codexLine]) expect(imp, word).toContain(word);
     const review = readFileSync(path.join(host, 'skills/review/SKILL.md'), 'utf8');
     for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion']) expect(review, word).toContain(word);
