@@ -3,7 +3,7 @@
  * batches, launch insertion order, and number types after a load. Skipped without Postgres (pg-db.ts).
  */
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,8 +11,8 @@ import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type FatalInfo, FencedError, isFenced, isRejected, JournaledStore, type RejectedBatchError, type RowOp, TABLES } from '../../src/state/journal.js';
 import { redactUrl, storeConfigError } from '../../src/config.js';
-import { openStore, StoreOpenError } from '../../src/state/open.js';
-import { batchStatements, COLUMNS, MIGRATIONS, migrate, NewerSchemaError, PgSink, readRun, RunLockedError, StoreSchemaError } from '../../src/state/pg/index.js';
+import { openStore, otherSchemasWarning, StoreOpenError } from '../../src/state/open.js';
+import { batchStatements, COLUMNS, MIGRATIONS, migrate, NewerSchemaError, PgSink, readRun, RunLockedError, schemasHoldingStoreTables, StoreSchemaError } from '../../src/state/pg/index.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
 import type { Launch } from '../../src/state/store.js';
@@ -846,6 +846,103 @@ describe.skipIf(!pgAvailable)('store schema placement', () => {
     await dropRun(r);
     for (const { name } of TABLES) expect(await countIn(TEST_SCHEMA, name, r), name).toBe(0);
   });
+});
+
+describe('tables in another schema, without a server', () => {
+  it('a failed catalogue query does not stop the open', async () => {
+    let asked = 0;
+    const throwing = {
+      query: async () => {
+        asked++;
+        throw Object.assign(new Error('permission denied for table pg_class'), { code: '42501' });
+      },
+    } as unknown as pg.ClientBase;
+    await expect(schemasHoldingStoreTables(throwing, 'orchestrator')).resolves.toEqual([]);
+    expect(asked).toBe(1);
+    // The sink's method, which openStore awaits for the check, goes through the same function on its own session.
+    const sinkLike = { client: throwing, schema: 'orchestrator', serial: <T>(fn: () => Promise<T>) => fn() };
+    await expect((PgSink.prototype.schemasElsewhere as (this: unknown) => Promise<string[]>).call(sinkLike)).resolves.toEqual([]);
+    expect(asked).toBe(2);
+  });
+
+  it('sqlite reports no other schemas', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-other-'));
+    try {
+      const opened = await openStore({ store: { kind: 'sqlite', flushDeadlineMs: 60_000 }, dataDir: dir, runId: freshRunId('lite'), onFatal: () => undefined });
+      expect(opened.kind).toBe('sqlite');
+      expect(opened.otherSchemas).toBeUndefined();
+      expect('otherSchemas' in opened).toBe(false);
+      await opened.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the warning names both schemas, the run id and the key', () => {
+    const message = otherSchemasWarning('sch_new', ['public', 'sch_old'], 'run-1234abcd');
+    for (const part of ['public', 'sch_old', 'sch_new', 'run-1234abcd', 'store.schema']) expect(message).toContain(part);
+    const one = otherSchemasWarning('orchestrator', ['public'], 'r1');
+    for (const part of ['public', 'orchestrator', 'r1', 'store.schema']) expect(one).toContain(part);
+  });
+});
+
+describe.skipIf(!pgAvailable)('tables in another schema', () => {
+  let admin: pg.Client;
+  const schemas: string[] = [];
+  const scratch = (label: string) => {
+    const s = freshSchema(label);
+    schemas.push(s);
+    return s;
+  };
+  const open = async (schema: string, runId: string) =>
+    openStore({ store: { kind: 'postgres', url: await pgUrl('pw-other'), schema, flushDeadlineMs: 60_000 }, dataDir: tmpdir(), runId, onFatal: () => undefined });
+
+  beforeAll(async () => {
+    admin = await adminClient();
+  }, 120_000);
+  afterEach(async () => {
+    for (const s of schemas.splice(0)) await admin.query(`DROP SCHEMA IF EXISTS "${s}" CASCADE`);
+  });
+  afterAll(async () => {
+    await admin?.end();
+    await stopTestPostgres();
+  });
+
+  it('an empty run reports the other schemas that hold orchestrator tables', async () => {
+    const [first, second] = [scratch('oth_a'), scratch('oth_b')];
+    const runId = freshRunId('other');
+    const a = await open(first, runId);
+    a.store.setKv('k', 'v');
+    expect((await a.close()).unflushedBatches).toBe(0);
+
+    const b = await open(second, runId);
+    expect(b.otherSchemas).toEqual(expect.arrayContaining([first]));
+    expect(b.otherSchemas).not.toContain(second);
+    expect([...b.otherSchemas!]).toEqual([...b.otherSchemas!].sort());
+    b.store.setKv('k', 'v');
+    expect((await b.close()).unflushedBatches).toBe(0);
+
+    // The run has rows in the second schema now: no check, nothing reported.
+    const again = await open(second, runId);
+    expect(again.otherSchemas).toBeUndefined();
+    await again.close();
+  }, 60_000);
+
+  it('a table named orchestrator_migrations is the marker', async () => {
+    const [marker, lookalike, own] = [scratch('oth_mark'), scratch('oth_look'), scratch('oth_own')];
+    await admin.query(`CREATE SCHEMA "${marker}"`);
+    await admin.query(`CREATE TABLE "${marker}".orchestrator_migrations (version integer)`);
+    await admin.query(`CREATE SCHEMA "${lookalike}"`);
+    await admin.query(`CREATE TABLE "${lookalike}".launches (run_id text)`);
+    const opened = await open(own, freshRunId('marker'));
+    try {
+      expect(opened.otherSchemas).toEqual(expect.arrayContaining([marker]));
+      expect(opened.otherSchemas).not.toContain(lookalike);
+      expect(opened.otherSchemas).not.toContain(own);
+    } finally {
+      await opened.close();
+    }
+  }, 60_000);
 });
 
 describe('Postgres driver', () => {

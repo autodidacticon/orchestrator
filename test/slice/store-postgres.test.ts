@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { daemonCommand, health, startDaemon, stopDaemon } from '../../src/runs/lifecycle.js';
 import { cleanExit, readDaemonJson, runPaths } from '../../src/runs/runDir.js';
+import { DEFAULT_STORE_SCHEMA } from '../../src/state/pg/schema.js';
 import { adminClient, dropRun, freshSchema, pgAvailable, pgSource, stopTestPostgres, testDatabase } from '../state/pg-db.js';
 import { gitIn, makeRepo, tsxLoader } from './harness.js';
 
@@ -471,6 +472,65 @@ describe.skipIf(!pgAvailable)('daemon on store.kind postgres', () => {
       expect(await rowsIn(second, 'launches')).toBe(0);
     } finally {
       for (const s of [first, second]) await admin.query(`DROP SCHEMA IF EXISTS "${s}" CASCADE`);
+      await admin.end();
+    }
+  }, 120_000);
+
+  it('a daemon on an empty run in a new schema warns once', async () => {
+    const scratch = freshSchema('slice_new');
+    const admin = await adminClient();
+    const isWarning = (l: Record<string, unknown>) => l['level'] === 'warn' && String(l['msg']).includes('store.schema') && Array.isArray(l['otherSchemas']);
+    const warningsIn = (text: string) =>
+      text
+        .split('\n')
+        .filter((l) => l.startsWith('{'))
+        .map((l) => JSON.parse(l) as Record<string, unknown>)
+        .filter(isWarning);
+    const tablesInOtherSchema = async (url: string) =>
+      ((await api(url, 'GET', '/v1/events?after=0&limit=500&kinds=config.warning')).body['events'] as Array<{ payload: Record<string, unknown> }>).filter(
+        (e) => e.payload['code'] === 'tablesInOtherSchema',
+      );
+    try {
+      // A daemon on the default schema: that schema holds the tables.
+      const plain = await makeRun([...STORE(), 'leaseTtlMs: 600000']);
+      runIds.push(runIdOfRepo(plain));
+      const first = await startDaemon({ repo: plain.repo, env: plain.env() });
+      await stopDaemon({ repo: plain.repo, env: plain.env() });
+      await waitFor(async () => (await health(first.url)) === undefined, 15_000);
+
+      // Another run on a new schema: empty, so it warns.
+      const run = await makeRun([...STORE(), `  schema: ${scratch}`, 'leaseTtlMs: 600000']);
+      const runId = runIdOfRepo(run);
+      const started = await startDaemon({ repo: run.repo, env: run.env() });
+      const log = path.join(started.runDir, 'daemon.log');
+      await waitFor(async () => (await tablesInOtherSchema(started.url)).length > 0, 15_000);
+      const events = await tablesInOtherSchema(started.url);
+      expect(events).toHaveLength(1);
+      expect(events[0]!.payload['schemas']).toEqual(expect.arrayContaining([DEFAULT_STORE_SCHEMA]));
+      expect(events[0]!.payload['schemas']).not.toContain(scratch);
+      expect(String(events[0]!.payload['message'])).toContain('store.schema');
+      await stopDaemon({ repo: run.repo, env: run.env() });
+      await waitFor(async () => (await health(started.url)) === undefined, 15_000);
+      const firstLog = readFileSync(log, 'utf8');
+      const warned = warningsIn(firstLog);
+      expect(warned).toHaveLength(1);
+      for (const part of [DEFAULT_STORE_SCHEMA, scratch, 'store.schema', runId]) expect(String(warned[0]!['msg'])).toContain(part);
+      expect(warned[0]).toMatchObject({ schema: scratch, runId });
+      expect(warned[0]!['otherSchemas']).toEqual(expect.arrayContaining([DEFAULT_STORE_SCHEMA]));
+
+      // Restarted with the same configuration: the run has rows, so no second warning.
+      const again = await startDaemon({ repo: run.repo, env: run.env() });
+      // The restart's own config.resolved is durable, so a warning it appended before it would be listed too.
+      const resolved = async () => ((await api(again.url, 'GET', '/v1/events?after=0&limit=500&kinds=config.resolved')).body['events'] as unknown[]).length;
+      await waitFor(async () => (await resolved()) >= 2, 15_000);
+      expect(await tablesInOtherSchema(again.url)).toHaveLength(1);
+      await stopDaemon({ repo: run.repo, env: run.env() });
+      await waitFor(async () => (await health(again.url)) === undefined, 15_000);
+      const restartLog = readFileSync(log, 'utf8').slice(firstLog.length);
+      expect(restartLog).toContain('store opened');
+      expect(warningsIn(restartLog)).toEqual([]);
+    } finally {
+      await admin.query(`DROP SCHEMA IF EXISTS "${scratch}" CASCADE`);
       await admin.end();
     }
   }, 120_000);

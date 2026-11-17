@@ -20,6 +20,12 @@ export interface OpenedStore {
   /** The Postgres sink, under `postgres`. */
   sink?: PgSink;
   /**
+   * Under `postgres`, when the load found no row for the run: the other schemas of the database that hold orchestrator
+   * tables, sorted. Absent when there are none, when the run has rows, under `sqlite`, or when the catalogue query failed.
+   * See specs/state-backend "Empty run beside tables in another schema".
+   */
+  otherSchemas?: string[];
+  /**
    * Wait (up to `timeoutMs`) for committed batches to reach the sink, then close the image and the sink. Resolves
    * with the committed batches that never reached the sink (always 0 under `sqlite`).
    */
@@ -102,6 +108,15 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
     await sink.close();
     throw new StoreOpenError(`could not load run ${opts.runId} from ${redactUrl(url)} (schema "${schema}"):${err instanceof Error ? err.message : String(err)}`, 'connect');
   }
+  // An empty run: say where other orchestrator tables are. Catalogues only, on the sink's session; never blocks the open.
+  let otherSchemas: string[] = [];
+  if (sink.loadedRows === 0) {
+    try {
+      otherSchemas = await sink.schemasElsewhere();
+    } catch {
+      otherSchemas = [];
+    }
+  }
   journal = new JournaledStore(image, sink, {
     flushDeadlineMs: opts.store.flushDeadlineMs,
     onFatal: opts.onFatal,
@@ -115,6 +130,7 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
     store: j,
     kind: 'postgres',
     sink,
+    ...(otherSchemas.length > 0 ? { otherSchemas } : {}),
     close: (timeoutMs = 5_000) => closeJournaled(j, () => sink.close(), timeoutMs),
   };
 }
@@ -142,6 +158,19 @@ export async function closeJournaled(j: JournaledStore, closeSink: () => Promise
   }
   const rejected = j.rejectionAtShutdown();
   return { unflushedBatches, ...(rejected ? { rejected } : {}) };
+}
+
+/**
+ * The startup warning of an empty Postgres run while other schemas of the database hold orchestrator tables: names
+ * each of them, the configured schema, the run id and the key store.schema.
+ */
+export function otherSchemasWarning(schema: string, otherSchemas: readonly string[], runId: string): string {
+  const list = otherSchemas.map((s) => `"${s}"`).join(", ");
+  const one = otherSchemas.length === 1;
+  return (
+    `run ${runId} has no rows in schema "${schema}", so it starts empty, but ${one ? "schema" : "schemas"} ${list} of the same database ${one ? "holds" : "hold"} orchestrator tables: ` +
+    `if the run's state is there, set store.schema to that schema; a database made before 0.6.0 keeps its tables in the session's default schema, normally "public"`
+  );
 }
 
 /** Whether the run directory holds a SQLite store; a Postgres run has none. */

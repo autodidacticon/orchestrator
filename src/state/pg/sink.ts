@@ -210,8 +210,8 @@ export async function readRun(client: pg.ClientBase, schema: string, runId: stri
   return out;
 }
 
-/** Copy one run's rows into an empty image, launches in insertion order. */
-export async function loadRunInto(client: pg.ClientBase, schema: string, runId: string, image: SqliteStore): Promise<void> {
+/** Copy one run's rows into an empty image, launches in insertion order. Resolves with the number of rows copied: 0 is an empty run. */
+export async function loadRunInto(client: pg.ClientBase, schema: string, runId: string, image: SqliteStore): Promise<number> {
   const tables = await readRun(client, schema, runId);
   const ops: RowOp[] = [];
   for (const { name } of TABLES) for (const row of tables[name]!) ops.push({ op: 'upsert', table: name, row });
@@ -224,6 +224,26 @@ export async function loadRunInto(client: pg.ClientBase, schema: string, runId: 
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
+  }
+  return ops.length;
+}
+
+/** The catalogue query of schemasHoldingStoreTables: every schema but $1 holding an ordinary table named orchestrator_migrations. */
+const OTHER_SCHEMAS_SQL =
+  "SELECT n.nspname AS name FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace WHERE c.relkind = 'r' AND c.relname = 'orchestrator_migrations' AND n.nspname <> $1 ORDER BY n.nspname";
+
+/**
+ * The schemas other than `schema` that hold orchestrator tables (an ordinary table named `orchestrator_migrations`),
+ * sorted by name. Reads the catalogues only, so it needs no right on those schemas (not information_schema, which
+ * shows only what the role may access). Never throws: a failed query resolves with no schemas.
+ * See specs/state-backend "Empty run beside tables in another schema".
+ */
+export async function schemasHoldingStoreTables(client: Pick<pg.ClientBase, 'query'>, schema: string): Promise<string[]> {
+  try {
+    const res = await client.query(OTHER_SCHEMAS_SQL, [schema]);
+    return (res.rows as Array<{ name: string }>).map((r) => r.name);
+  } catch {
+    return [];
   }
 }
 
@@ -314,6 +334,8 @@ export class PgSink implements JournalSink {
   private lost: unknown;
   private fencedAt: FencedError | undefined;
   private queue: Promise<unknown> = Promise.resolve();
+  /** The rows the last load copied into an image (undefined before any load): 0 is an empty run. */
+  loadedRows: number | undefined;
   private closed = false;
   private readonly lostListeners: Array<(err: unknown) => void> = [];
 
@@ -429,9 +451,16 @@ export class PgSink implements JournalSink {
     return this.serial(() => readRun(this.client, this.schema, this.runId, opts));
   }
 
-  /** Load this run into an empty image. */
+  /** Load this run into an empty image. The number of rows copied is kept in `loadedRows`. */
   loadInto(image: SqliteStore): Promise<void> {
-    return this.serial(() => loadRunInto(this.client, this.schema, this.runId, image));
+    return this.serial(async () => {
+      this.loadedRows = await loadRunInto(this.client, this.schema, this.runId, image);
+    });
+  }
+
+  /** The other schemas of the database that hold orchestrator tables, sorted; on the sink's session. Never throws. */
+  schemasElsewhere(): Promise<string[]> {
+    return this.serial(() => schemasHoldingStoreTables(this.client, this.schema));
   }
 
   /** A fresh in-memory image holding this run. */

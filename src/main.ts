@@ -22,7 +22,7 @@ import { DEFAULT_CODEX_COMMAND, DEFAULT_OPENCODE_COMMAND } from './runner/comman
 import { MultiRunner } from './runner/multi.js';
 import { OpenCodeRunner } from './runner/opencode.js';
 import { composeAllowedTools } from './toolchain/tools.js';
-import { openStore, type OpenedStore } from './state/open.js';
+import { openStore, type OpenedStore, otherSchemasWarning } from './state/open.js';
 import { GitVerifierBackend } from './verify/verifier.js';
 import { chooseRunId, CONFIG_FILE, DAEMON_PID, ensureRunDir, repoRunId, type RunIdChoice, runIdInputOf, runIdWarning, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, trackedInRepo, writeConfigJson, writeDaemonJson, writeExitRecord, type ExitRecord, exitStoreFields } from './runs/runDir.js';
 import { databaseVariablesIn, postgresInputsWithoutKind, setStoreWithholding, storeWithholding, storeWithholdingFor, withholdStoreUrl } from './runs/childEnv.js';
@@ -198,6 +198,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     kind: opened.kind,
     ...(opened.kind === 'postgres' ? { url: redactedStore(early.store).url, schema: storeSchemaOf(early.store), runId, backendPid: opened.sink?.backendPid } : {}),
   });
+  if (opened.otherSchemas) {
+    // An empty run while other schemas hold orchestrator tables: the first start of a run only, since this start writes rows. See specs/state-backend "Empty run beside tables in another schema".
+    const schema = storeSchemaOf(early.store);
+    const message = otherSchemasWarning(schema, opened.otherSchemas, runId ?? '');
+    stderrLogger.warn(message, { schema, otherSchemas: opened.otherSchemas, runId });
+    store.appendEvent({ kind: 'config.warning', payload: { code: 'tablesInOtherSchema', message, schemas: opened.otherSchemas } }, Date.now());
+  }
   // Children get the database variables back only on a SQLite store; a Postgres input without store.kind keeps them withheld. See specs/state-backend "Withholding follows the store".
   const postgresInputs = postgresInputsWithoutKind(fileRaw, process.env);
   setStoreWithholding(storeWithholdingFor(opened.kind, postgresInputs));
