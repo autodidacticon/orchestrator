@@ -284,6 +284,9 @@ describe('opencode host', () => {
       expect(text, name).not.toMatch(/(?<!anthropic\/)claude-(opus|sonnet|haiku)-/);
       expect(text, name).not.toMatch(/tool_timeout_sec|approval_policy|config\.toml|mcp__linear__/);
     }
+    const review = readFileSync(path.join(host, 'skills/review/SKILL.md'), 'utf8');
+    for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable']) expect(review, word).toContain(word);
+    expect(review).not.toContain('completion summaries');
     const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
     const opencodeLine = 'detected: npm test on main; workers opencode anthropic/claude-opus-5-5 at medium (default); permission derived, agent commits';
     for (const word of ['mode: "spawn"', 'modeNote', 'needsConfig', 'AGENTS.md', 'needsAccess', 'permission: "allow"', opencodeLine, 'runner.opencode.*', '"orchestrator_operator_*"', 'opencode.json']) expect(run, word).toContain(word);

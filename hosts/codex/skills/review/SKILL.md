@@ -16,26 +16,57 @@ directory, so the server cannot tell which project this session is in: without `
 before any call has passed it) a call is refused with an error naming the argument. Passing it
 on every call keeps the right project even after the server restarts.
 
-## 1. Get the bundle
+## 1. Get the index
 
-Call `review` with the milestone id. It returns the pinned integration sha, the review
-version, the tag `milestone/<id>/v<n>`, a diff stat against the run's baseline, the closure
-tasks with their published shas and completion summaries, and the milestone's acceptance
-criteria if any.
+Call `review` with the milestone id and read the `view` field of the answer. The answer
+decides how you read, not the tool's argument list.
+
+- `view` is `index`: the answer carries the pinned `integrationSha`, the `reviewVersion`, the
+  tag `milestone/<id>/v<n>`, the `baseline`, the milestone's own `acceptanceCriteria`, a cut
+  `diffStat` and one `closure` entry per task (`taskId`, `title`, `status`, `publishedSha`, a
+  cut `summary`, `summaryLength`, `acceptanceCount`, `changedFileCount`). The `diffStat` is
+  the first file lines and the totals line against the run's baseline, which can include work
+  of earlier milestones. Read `omitted` first: each entry names a `field`, a `count` and how to
+  `fetch` what the index left out. The index holds no acceptance evidence and no task
+  criteria.
+- Then call `review` with `task` set to each closure task id. The answer has `view` `task`
+  and one closure entry with the whole completion report (`summary`, `acceptance`,
+  `interfaces`, `decisions`, `deviations`, `followUps`, `tests`, `noChanges`), the task's own
+  `acceptanceCriteria` and its `changedFiles`. A task with no report fields (cancelled with
+  the release) has nothing to judge but its cancellation.
+- `full` returns everything in one answer (`view` `full`). It can be too large for the client,
+  so the per-task reading is the normal path.
+- No `view` field: the daemon is older and the answer is the whole bundle. Every entry
+  already carries its evidence. Never call per task in that case.
+- `view` is `index` and the `review` tool has no `task` argument: the operator server is older
+  than the daemon. Fetch each task with `GET <daemonUrl>/v1/milestones/<id>/review?task=<taskId>`,
+  where `daemonUrl` comes from `status`, or update the plugin.
+- When the client refuses an answer for its size, in any case, save it to a file with
+  `curl -s <daemonUrl>/v1/milestones/<id>/review` (add `?full=true` for the whole bundle) and
+  read the file in parts. If the session refuses the command, ask the user to run it.
+- When the answer has `previous`, start from it: read `git diff <previous.sha>..<integrationSha>`
+  and the tasks in `previous.tasksSince`. Use the sha, not the tag name. When
+  `previous.tasksSince` is absent (`previous.tasksSinceUnavailable` is true), read every closure
+  task. `accept` still covers the whole pinned commit, so reading only `previous` is not
+  enough.
 
 ## 2. Judge
 
 - Read the diff for the tag in the repository (`git diff <baseline>..<sha>`, or per task
   with the published shas) where the stat suggests it matters.
-- For each task, compare its completion report and acceptance evidence against the task's
-  acceptance criteria. Evidence that merely restates the criterion is not evidence.
+- For each task, compare the report and its evidence in the one-task answer against the
+  `acceptanceCriteria` in that answer (or, for a whole bundle, the entry's own). Evidence that
+  merely restates the criterion is not evidence.
 - For the milestone, check its own criteria, such as a demo scenario, against the integrated
   result. Run it if the repository offers a way to; under a `read-only` sandbox, ask the user
   to run it or to allow the command.
 
 ## 3. Decide
 
-- Accept: call `accept` with the exact `integrationSha` and `reviewVersion` from the bundle.
+- Before deciding, check that every one-task answer carried the same `integrationSha` and
+  `reviewVersion` as the index. If not, the milestone was resubmitted: start the review again.
+- Accept: call `accept` with the exact `integrationSha` and `reviewVersion` of the answer you
+  reviewed.
   A stale sha or version is refused; call `review` again.
 - Reject: call `reject` with a note that says what is missing, task by task. The milestone
   becomes blocked. The repair is new or amended tasks upstream in the tracker and a re-import,

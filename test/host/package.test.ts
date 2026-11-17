@@ -238,6 +238,14 @@ describe('package entrypoints', () => {
     expect(importSkill.replace(/\s+/g, ' ')).toContain("the root record's `url` is the project's URL");
   });
 
+  it("the review skill reads the index first, keyed on the answer's view field", () => {
+    const review = readFileSync(path.join(root, 'hosts/claude-code/skills/review/SKILL.md'), 'utf8');
+    for (const word of ['accept', 'reject', 'integrationSha', 'reviewVersion', 'view', 'index', 'omitted', 'task', 'full', 'acceptanceCriteria', 'daemonUrl', 'curl', 'previous.sha', 'previous.tasksSince', 'tasksSinceUnavailable']) expect(review, word).toContain(word);
+    expect(review).not.toContain('completion summaries');
+    expect(review).toContain('Each reviewer fetches its own task');
+    for (const h of ['codex', 'opencode']) expect(readFileSync(path.join(root, 'hosts', h, 'skills/review/SKILL.md'), 'utf8'), h).not.toContain('fan');
+  });
+
   it('declares the session hooks', () => {
     const hooks = JSON.parse(readFileSync(path.join(plugin, 'hooks/hooks.json'), 'utf8')) as { hooks: { SessionStart: Array<{ matcher: string; hooks: Array<{ command: string; timeout?: number }> }>; SessionEnd: Array<{ hooks: Array<{ command: string }> }> } };
     expect(hooks.hooks.SessionStart[0]).toMatchObject({ matcher: 'startup|resume|clear' });
