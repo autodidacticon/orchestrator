@@ -2,7 +2,7 @@
  * Brief composition. Produces brief.json (machine) and brief.md (human/agent).
  * The brief is standalone: a person could perform the task from it alone.
  */
-import type { BriefInput, BriefRunner } from '../workspace/workspace.js';
+import type { BriefInput, BriefLimits, BriefRunner } from '../workspace/workspace.js';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { checkCommandPatterns } from '../runner/opencode.js';
@@ -34,6 +34,8 @@ export interface BriefJson {
   retryWindowMs: number;
   /** The lease TTL in force when the brief was composed; a claim response states the same value. */
   leaseTtlMs?: number;
+  /** The stuck limits and the launch time budget in force when the brief was composed; absent when the brief input had none. See specs/agent-protocol "Brief states the limits in force". */
+  limits?: BriefLimits;
   fallbackPath: string;
   attempt: number;
   launchNo: number;
@@ -53,6 +55,38 @@ export function leaseRule(leaseTtlMs: number): string {
   const every = renewEveryMsOf(leaseTtlMs);
   return `- Lease: your lease lasts ${seconds(leaseTtlMs)} (\`leaseTtlMs\` ${leaseTtlMs}; a claim response states it as \`lease.ttlMs\` with the expiry). Every call renews it. Call an operation (\`heartbeat\` with a short progress text will do) at least every ${seconds(every)} (\`lease.renewEveryMs\` ${every}, a third of the lease). Run any command expected to take longer than that in the background and call \`heartbeat\` while it runs: you cannot call while a foreground command runs, and a lease that expires ends your launch. An expiry keeps your commits, changes to tracked files and files you staged (\`git add\`) on your branch; a new file you have not staged is not kept.`;
 }
+
+/**
+ * The brief's limits line: the stuck limits and the launch time budget in force when the brief is composed.
+ * A limit of 0 is disabled and drops its part; with all three 0 there is no line. Each limit is a length of time only:
+ * the line does not say how idle or elapsed time is measured. See specs/agent-protocol "Brief states the limits in force".
+ */
+export function limitsRule(limits: BriefLimits): string | undefined {
+  const { stuckAfterMs, stuckFailAfterMs, maxLaunchMs } = limits;
+  if (!stuckAfterMs && !stuckFailAfterMs && !maxLaunchMs) return undefined;
+  const parts: string[] = [];
+  const silence: string[] = [];
+  if (stuckAfterMs > 0) silence.push(`after ${seconds(stuckAfterMs)} (\`health.stuckAfterMs\` ${stuckAfterMs}) with no progress signal your launch is flagged stuck and a \`stuck\` notice arrives in your inbox`);
+  if (stuckFailAfterMs > 0) silence.push(`after ${seconds(stuckFailAfterMs)} (\`health.stuckFailAfterMs\` ${stuckFailAfterMs}) with no progress signal your launch is ended and the attempt is spent`);
+  if (silence.length) {
+    const s = silence.join('; ');
+    parts.push(`${s[0]!.toUpperCase()}${s.slice(1)}.`);
+  }
+  parts.push('A progress signal is a call to an operation, a new commit, or a change in the worktree.');
+  if (maxLaunchMs > 0) parts.push(`Your launch is ${silence.length ? 'also ' : ''}ended, and the attempt spent, when its time budget of ${seconds(maxLaunchMs)} (\`budgets.maxLaunchMs\` ${maxLaunchMs}) is used up, even while it makes progress.`);
+  parts.push(
+    maxLaunchMs > 0
+      ? 'Call `heartbeat` between long steps, run a longer command in the background and call `heartbeat` while it runs, and before the budget ends report what you have, or ask a question, rather than start a step that cannot finish in the time left.'
+      : 'Call `heartbeat` between long steps, and run a longer command in the background and call `heartbeat` while it runs.',
+  );
+  parts.push('These numbers are the ones in force when this brief was written; the operator can change them during the run, and a change arrives as a `nudge` notice in your inbox.');
+  return `- Limits: ${parts.join(' ')}`;
+}
+
+const limitsLines = (limits: BriefLimits | undefined): string[] => {
+  const line = limits ? limitsRule(limits) : undefined;
+  return line ? [line] : [];
+};
 
 export function acceptanceCriteriaOf(payload: Record<string, unknown>): string[] {
   const raw = payload['acceptanceCriteria'];
@@ -79,6 +113,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     ...(input.runner ? { runner: input.runner } : {}),
     retryWindowMs: input.retryWindowMs,
     ...(input.leaseTtlMs ? { leaseTtlMs: input.leaseTtlMs } : {}),
+    ...(input.limits ? { limits: { ...input.limits } } : {}),
     fallbackPath: opts.fallbackPath,
     attempt: launch.attempt,
     launchNo: launch.launchNo,
@@ -263,6 +298,8 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     '- Operations: heartbeat, report (kind submit|fail, with seq), block (a question; waits for the answer), inbox, log.',
     // The interval rule. See specs/agent-protocol "Heartbeat interval".
     ...(input.leaseTtlMs ? [leaseRule(input.leaseTtlMs)] : []),
+    // The stuck limits and the time budget. See specs/agent-protocol "Brief states the limits in force".
+    ...limitsLines(input.limits),
     `- If the API fails for more than ${Math.round(input.retryWindowMs / 1000)}s, write your report to \`${opts.fallbackPath}\` and exit.`,
     '- If any call returns 401, stop immediately: your launch has been revoked.',
     '',

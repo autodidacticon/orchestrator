@@ -40,6 +40,8 @@ export interface BriefInput {
   retryWindowMs: number;
   /** The lease TTL; the brief names the heartbeat interval from it (a third). Absent: no interval line. See specs/agent-protocol "Heartbeat interval". */
   leaseTtlMs?: number;
+  /** The stuck limits and the launch time budget in force when the brief is composed (0 disables each). Absent: no limits line. See specs/agent-protocol "Brief states the limits in force". */
+  limits?: BriefLimits;
   /** Absent while no check command is configured. */
   checkCommand?: string;
   integrationBranch: string;
@@ -47,6 +49,13 @@ export interface BriefInput {
   allowedTools?: string[];
   /** The kind the launch was prepared for; the brief writes kind-specific text from it. Absent: the Claude Code text under the `agent` policy. See specs/worker-runners "Sandbox and commit policy". */
   runner?: BriefRunner;
+}
+
+/** `health.stuckAfterMs`, `health.stuckFailAfterMs` and `budgets.maxLaunchMs` as the brief states them. */
+export interface BriefLimits {
+  stuckAfterMs: number;
+  stuckFailAfterMs: number;
+  maxLaunchMs: number;
 }
 
 /** The launch's runner kind and commit policy; `sandbox` only for codex, `permission` (with the derived bash patterns) only for opencode. */

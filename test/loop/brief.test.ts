@@ -145,6 +145,27 @@ describe('check command and tool rules', () => {
     expect(h.workspace.briefs.get(first)!.checkCommand).toBe('true');
   });
 
+  // See specs/agent-protocol "Brief states the limits in force".
+  for (const mode of ['spawn', 'pull'] as const) {
+    it(`briefInput carries the stuck limits and the time budget in force (${mode} mode)`, async () => {
+      const limits = { stuckAfterMs: 111_000, stuckFailAfterMs: 222_000, maxLaunchMs: 333_000 };
+      h = makeHarness({
+        graph: 'nodes:\n  - { id: A, deps: [], description: d, acceptanceCriteria: [a] }',
+        config: { capacity: 1, runner: { mode, claimWindowMs: 60_000 }, health: { stuckAfterMs: limits.stuckAfterMs, stuckFailAfterMs: limits.stuckFailAfterMs }, budgets: { maxLaunchMs: limits.maxLaunchMs, maxRunCostUsd: 0 } },
+      });
+      await h.orch.tick();
+      if (mode === 'pull') expect((await h.orch.claim({ workerId: 'w1', taskId: 'A' })).status).toBe(200);
+      const launch = h.launchOf('A');
+      const input = h.orch.briefInput(launch);
+      expect(input.limits).toEqual(limits);
+      expect(mode === 'pull' ? input.leaseTtlMs : undefined).toBe(mode === 'pull' ? h.orch.config.leaseTtlMs : undefined);
+      expect(h.workspace.briefs.get(launch.launchId)!.limits).toEqual(limits);
+      const { markdown, json } = composeBrief(input, { fallbackPath: '/x' });
+      expect(json.limits).toEqual(limits);
+      expect(markdown.split('\n').filter((l) => l.startsWith('- Limits:'))).toHaveLength(1);
+    });
+  }
+
   // See specs/worker-runners "Runner dispatch by launch kind" (a task-level selector).
   it('in a mixed run a codex task gets no Bash rules while a default task keeps the base rules', async () => {
     h = makeHarness({ graph: 'nodes:\n  - { id: C, deps: [], description: d, acceptanceCriteria: [a], runner: codex }\n  - { id: P, deps: [], description: d, acceptanceCriteria: [a] }', config: { capacity: 2 } });

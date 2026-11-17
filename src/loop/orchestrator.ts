@@ -651,6 +651,8 @@ export class Orchestrator implements OrchestratorCore {
       carry: scrubCarry(entry.carry, (ref) => this.lostRefs.has(ref)).carry as Record<string, unknown> | undefined,
       apiBaseUrl: this.apiBaseUrl,
       retryWindowMs: this.config.retryWindowMs,
+      // Every brief states the limits in force when it is composed. See specs/agent-protocol "Brief states the limits in force".
+      limits: { stuckAfterMs: eff.config.health.stuckAfterMs, stuckFailAfterMs: eff.config.health.stuckFailAfterMs, maxLaunchMs: eff.config.budgets.maxLaunchMs },
       // The lease line is for a launch a worker claims. A spawned launch's lease is renewed by the tick while its process
       // lives, so its brief carries no lease line: one composed in `spawn` mode, or recomposed when a parked launch is
       // spawned (status `launching`). See specs/agent-protocol "No lease line for a spawned launch".
