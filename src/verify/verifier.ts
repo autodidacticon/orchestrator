@@ -36,6 +36,10 @@ export interface GitVerifierOptions {
   /** The check command, or a getter read once when a job starts checking and held for the job. See specs/integration-pipeline "Check and verified tree". */
   checkCommand: string | undefined | (() => string | undefined);
   checkTimeoutMs: number;
+  /** Run in the temporary worktree immediately before the check command, read once when the backend is built. See specs/integration-pipeline "Prepare command before the check". */
+  prepareCommand?: string;
+  /** Bound on the prepare command; 600000 when unset. */
+  prepareTimeoutMs?: number;
   /** Head when the orchestrator first ran; commits before it are never foreign. */
   baselineSha?: string;
   /** Keep at most this many bytes of check output. */
@@ -108,6 +112,20 @@ export class GitVerifierBackend implements VerifierBackend {
       // 2. Check command on the rebased tree.
       if (checkCommand === undefined) {
         return { kind: 'failed', reason: { kind: 'checkFailed', message: 'no check command is configured for this repository', output: '' } };
+      }
+      // The prepare command installs what the check needs. The published tree was read above, so nothing it writes is published.
+      // The failed job keeps the output, not the message, so the output leads with the message.
+      if (this.opts.prepareCommand !== undefined) {
+        const prepareTimeoutMs = this.opts.prepareTimeoutMs ?? 600000;
+        const prep = await runCheck(this.opts.prepareCommand, temp, prepareTimeoutMs, this.maxOut, this.opts.dataDir ?? path.dirname(this.opts.tempRoot), { closeWaitMs: 2000 });
+        if (prep.timedOut) {
+          const message = `prepare command exceeded ${prepareTimeoutMs}ms`;
+          return { kind: 'failed', reason: { kind: 'checkTimeout', message, output: `${message}\n${prep.output}` } };
+        }
+        if (prep.code !== 0) {
+          const message = `prepare command exited ${prep.code}`;
+          return { kind: 'failed', reason: { kind: 'checkFailed', message, output: `${message}\n${prep.output}` } };
+        }
       }
       const check = await runCheck(checkCommand, temp, this.opts.checkTimeoutMs, this.maxOut, this.opts.dataDir ?? path.dirname(this.opts.tempRoot));
       crashPoint('verify.afterCheck');

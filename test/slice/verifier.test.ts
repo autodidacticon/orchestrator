@@ -1,9 +1,10 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { commitTrailers } from '../../src/workspace/git.js';
 import { GitVerifierBackend, TRAILER_TASK } from '../../src/verify/verifier.js';
-import { gitIn, makeSlice, single, type SliceHarness } from './harness.js';
+import { gitIn, makeRepo, makeSlice, single, type SliceHarness } from './harness.js';
 
 let h: SliceHarness | undefined;
 afterEach(async () => {
@@ -179,5 +180,132 @@ describe('slice: verifier and publication', () => {
     expect(gitIn(h.repo, 'rev-parse', 'milestone/MVP/v1^{commit}')).toBe(mvp.integrationSha);
     expect(h.orch.acceptMilestone('MVP', mvp.integrationSha!, 1)).toEqual({ ok: true });
     expect(h.orch.status().finished).toBe(true);
+  });
+});
+
+// See specs/integration-pipeline "Prepare command before the check". Every case builds its own backend and leaves the
+// config key unset, so the launch-side prepare command never runs.
+describe('slice: prepare command in the verifier', () => {
+  function fixture(): { dir: string; repo: string } {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-slice-'));
+    return { dir, repo: makeRepo(dir) };
+  }
+  function backend(dir: string, repo: string, opts: { checkCommand: string; prepareCommand: string; prepareTimeoutMs?: number }): GitVerifierBackend {
+    return new GitVerifierBackend({
+      repo,
+      integrationBranch: 'main',
+      tempRoot: path.join(dir, 'run', 'verify'),
+      checkCommand: opts.checkCommand,
+      checkTimeoutMs: 10_000,
+      prepareCommand: opts.prepareCommand,
+      ...(opts.prepareTimeoutMs !== undefined ? { prepareTimeoutMs: opts.prepareTimeoutMs } : {}),
+      baselineSha: gitIn(repo, 'rev-parse', 'main'),
+    });
+  }
+  function noLaunchPrepare(): void {
+    expect(h!.store.listEvents().filter((e) => e.kind.startsWith('launch.prepare'))).toEqual([]);
+  }
+
+  it('runs before the check in the temporary worktree, and nothing it installs is published', async () => {
+    const { dir, repo } = fixture();
+    const verifier = backend(dir, repo, { prepareCommand: 'mkdir -p node_modules && touch node_modules/marker', checkCommand: 'test -f node_modules/marker' });
+    h = await makeSlice({ graph: single('commitAndSubmit'), verifier, dir, repo });
+    expect(h.config.prepareCommand).toBeUndefined();
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done' || h!.store.listJobs({ taskId: 'T1' })[0]?.status === 'failed');
+    expect(h.orch.entry('T1').status.kind).toBe('done');
+    const job = h.store.listJobs({ taskId: 'T1' })[0]!;
+    expect(job.status).toBe('published');
+    expect(gitIn(repo, 'rev-parse', 'main')).toBe(job.publishedSha);
+    // The repository has no ignore line for node_modules/.
+    expect(existsSync(path.join(repo, '.gitignore'))).toBe(false);
+    const files = gitIn(repo, 'ls-tree', '-r', '--name-only', 'main').split('\n');
+    expect(files).toContain('T1.txt');
+    expect(files).not.toContain('node_modules/marker');
+    noLaunchPrepare();
+  });
+
+  it('a non-zero exit fails the job as checkFailed, spends an attempt, skips the check and reaches the next brief', async () => {
+    const { dir, repo } = fixture();
+    const outside = path.join(dir, 'check-ran');
+    const verifier = backend(dir, repo, { prepareCommand: 'echo NOPE; exit 3', checkCommand: `touch ${outside}` });
+    h = await makeSlice({ graph: single('commitAndSubmit'), verifier, dir, repo });
+    await h.waitFor(() => h!.orch.entry('T1').attempts >= 1);
+    expect(h.orch.entry('T1').attempts).toBe(1);
+    const job = h.store.listJobs({ taskId: 'T1' })[0]!;
+    expect(job).toMatchObject({ status: 'failed', failureKind: 'checkFailed' });
+    const lines = job.output!.split('\n');
+    expect(lines[0]).toBe('prepare command exited 3');
+    expect(lines.slice(1).some((l) => l.includes('NOPE'))).toBe(true);
+    expect(existsSync(outside)).toBe(false);
+    await h.waitFor(() => h!.store.listLaunches({ taskId: 'T1' }).length === 2);
+    const l2 = h.store.listLaunches({ taskId: 'T1' })[1]!;
+    const briefJson = JSON.parse(readFileSync(path.join(l2.worktree, '.orchestrator', 'brief.json'), 'utf8')) as { context?: { verifierOutput?: string } };
+    expect(briefJson.context?.verifierOutput).toContain('prepare command exited 3');
+    noLaunchPrepare();
+  });
+
+  it('a timeout fails the job as checkTimeout and spends the attempt', async () => {
+    const { dir, repo } = fixture();
+    const verifier = backend(dir, repo, { prepareCommand: 'sleep 30', prepareTimeoutMs: 300, checkCommand: 'true' });
+    h = await makeSlice({ graph: single('commitAndSubmit'), verifier, dir, repo, config: { maxAttempts: 1 } });
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'blocked');
+    const job = h.store.listJobs({ taskId: 'T1' })[0]!;
+    expect(job).toMatchObject({ status: 'failed', failureKind: 'checkTimeout' });
+    expect(job.output!.split('\n')[0]).toBe('prepare command exceeded 300ms');
+    noLaunchPrepare();
+  });
+
+  it('a command that exits and leaves its output pipe held is a timeout after the bounded wait', async () => {
+    const { dir, repo } = fixture();
+    const pidFile = path.join(dir, 'holder.pid');
+    // The helper starts a sleep in its own session holding stdout, writes its pid and exits 0.
+    const script = `const c = require("node:child_process").spawn("sleep", ["30"], { detached: true, stdio: "inherit" }); c.unref(); require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));`;
+    const verifier = backend(dir, repo, { prepareCommand: `${process.execPath} -e '${script}'`, prepareTimeoutMs: 1000, checkCommand: 'true' });
+    let pid: number | undefined;
+    try {
+      h = await makeSlice({ graph: single('commitAndSubmit'), verifier, dir, repo, config: { maxAttempts: 1 } });
+      await h.waitFor(() => h!.orch.entry('T1').status.kind === 'blocked');
+      pid = Number(readFileSync(pidFile, 'utf8'));
+      expect(() => process.kill(pid!, 0)).not.toThrow();
+      const job = h.store.listJobs({ taskId: 'T1' })[0]!;
+      expect(job).toMatchObject({ status: 'failed', failureKind: 'checkTimeout' });
+      expect(job.output!.split('\n')[0]).toBe('prepare command exceeded 1000ms');
+      noLaunchPrepare();
+    } finally {
+      if (pid === undefined && existsSync(pidFile)) pid = Number(readFileSync(pidFile, 'utf8'));
+      if (pid) {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch {
+          // already gone
+        }
+      }
+    }
+  });
+
+  it('runs with the check environment', async () => {
+    const { dir, repo } = fixture();
+    const verifier = backend(dir, repo, { prepareCommand: 'test -z "$ORCH_URL" && test -n "$ORCH_HOME"', checkCommand: 'true' });
+    h = await makeSlice({ graph: single('commitAndSubmit'), verifier, dir, repo });
+    process.env['ORCH_URL'] = 'http://127.0.0.1:1';
+    try {
+      await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done' || h!.store.listJobs({ taskId: 'T1' })[0]?.status === 'failed');
+      expect(h.store.listJobs({ taskId: 'T1' })[0]).toMatchObject({ status: 'published' });
+      expect(h.orch.entry('T1').status.kind).toBe('done');
+      noLaunchPrepare();
+    } finally {
+      delete process.env['ORCH_URL'];
+    }
+  });
+
+  it('a declared no-op runs no prepare command', async () => {
+    const { dir, repo } = fixture();
+    const outside = path.join(dir, 'prepare-ran');
+    const verifier = backend(dir, repo, { prepareCommand: `touch ${outside}`, checkCommand: 'true' });
+    h = await makeSlice({ graph: single('noopDeclared'), verifier, dir, repo });
+    await h.waitFor(() => h!.orch.entry('T1').status.kind === 'done');
+    expect(h.store.listJobs({ taskId: 'T1' })[0]).toMatchObject({ status: 'published' });
+    expect(existsSync(outside)).toBe(false);
+    noLaunchPrepare();
   });
 });

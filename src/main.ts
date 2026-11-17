@@ -296,6 +296,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     tempRoot: path.join(config.dataDir, 'verify'),
     checkCommand: () => orch.effective().config.checkCommand,
     checkTimeoutMs: config.checkTimeoutMs,
+    prepareCommand: config.prepareCommand,
+    prepareTimeoutMs: config.prepareTimeoutMs,
     baselineSha: store.getKv('baselineHead'),
   });
   orch = new Orchestrator({
