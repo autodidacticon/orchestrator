@@ -49,7 +49,7 @@ export interface TaskExtras {
 }
 
 export interface OmittedField {
-  field: 'closure.acceptance' | 'closure.summary' | 'diffStat';
+  field: 'closure.acceptance' | 'closure.summary' | 'diffStat' | 'previous.diffStat';
   count: number;
   fetch: string;
 }
@@ -96,8 +96,79 @@ export function cutSummary(summary: string, chars: number): string {
 
 const reviewPath = (milestone: Id) => `/v1/milestones/${encodeURIComponent(milestone)}/review`;
 
-/** The index built from the full bundle. Pure. */
-export function indexOf(bundle: ReviewBundle, extras: ReadonlyMap<Id, TaskExtras>, cuts: ReviewCuts): Record<string, unknown> {
+/** One closure task as a submitted transition event records it. */
+export interface ClosureSha {
+  taskId: Id;
+  publishedSha?: string;
+}
+
+/**
+ * What the answer needs to name the previous review version. Gathered by `gatherPrevious`; see specs/operator-control
+ * "Review answer names the previous version".
+ */
+export interface PreviousFacts {
+  /** The milestone's review version now (n). */
+  version: number;
+  milestone: Id;
+  /** The sha version n-1 was pinned at (kv `tagged:<id>:<n-1>`); undefined when none is on record. */
+  sha?: string;
+  integrationSha: string;
+  closure: ClosureSha[];
+  /** The closure of version n-1; undefined when it cannot be read. */
+  previousClosure?: ClosureSha[];
+  /** `git diff --stat <sha>..<integrationSha>`; undefined when the shas are equal or no sha is on record. */
+  stat?: string;
+}
+
+export interface PreviousTask {
+  taskId: Id;
+  change: 'added' | 'republished';
+}
+
+/**
+ * The `previous` block, or undefined at version 1. With `statLines` the stat is cut as the index cuts `diffStat`, and a
+ * cut gives an `omitted` element; without it the stat is whole. Pure: makes no git call.
+ */
+export function previousOf(f: PreviousFacts, statLines?: number): { previous: Record<string, unknown>; omitted: OmittedField[] } | undefined {
+  if (f.version <= 1) return undefined;
+  const version = f.version - 1;
+  if (!f.sha) {
+    return {
+      previous: { version, unavailable: `No sha is on record for version ${version} of ${f.milestone} (kv tagged:${f.milestone}:${version} is absent), so nothing can be compared with it.` },
+      omitted: [],
+    };
+  }
+  const previous: Record<string, unknown> = { version, sha: f.sha, tag: `milestone/${f.milestone}/v${version}` };
+  const sameCommit = f.sha === f.integrationSha;
+  if (sameCommit) previous['sameCommit'] = true;
+  if (f.previousClosure) {
+    const before = new Map(f.previousClosure.map((c) => [c.taskId, c.publishedSha]));
+    const since: PreviousTask[] = [];
+    for (const c of f.closure) {
+      if (!before.has(c.taskId)) since.push({ taskId: c.taskId, change: 'added' });
+      else if (before.get(c.taskId) !== c.publishedSha) since.push({ taskId: c.taskId, change: 'republished' });
+    }
+    previous['tasksSince'] = since;
+  } else {
+    previous['tasksSinceUnavailable'] = true;
+  }
+  const omitted: OmittedField[] = [];
+  const whole = sameCommit ? '' : (f.stat ?? '');
+  if (statLines === undefined) {
+    previous['diffStat'] = whole;
+  } else {
+    const cut = cutStat(whole, statLines);
+    previous['diffStat'] = cut.text;
+    if (cut.omitted > 0) omitted.push({ field: 'previous.diffStat', count: cut.omitted, fetch: `git diff --stat ${f.sha}..${f.integrationSha}` });
+  }
+  if (!sameCommit && whole.trim() === '') {
+    previous['diffStatNote'] = `git printed nothing: either no file differs between ${f.sha} and ${f.integrationSha}, or commit ${f.sha} is not in the daemon's clone.`;
+  }
+  return { previous, omitted };
+}
+
+/** The index built from the full bundle, with `previous` when facts for it are given. Pure. */
+export function indexOf(bundle: ReviewBundle, extras: ReadonlyMap<Id, TaskExtras>, cuts: ReviewCuts, facts?: PreviousFacts): Record<string, unknown> {
   let withEvidence = 0;
   let summariesCut = 0;
   const closure: IndexEntry[] = bundle.closure.map((c) => {
@@ -124,6 +195,8 @@ export function indexOf(bundle: ReviewBundle, extras: ReadonlyMap<Id, TaskExtras
   if (withEvidence > 0) omitted.push({ field: 'closure.acceptance', count: withEvidence, fetch: perTask });
   if (summariesCut > 0) omitted.push({ field: 'closure.summary', count: summariesCut, fetch: perTask });
   if (stat.omitted > 0) omitted.push({ field: 'diffStat', count: stat.omitted, fetch: `git diff --stat ${bundle.baseline}..${bundle.integrationSha}` });
+  const prev = facts ? previousOf(facts, cuts.statLines) : undefined;
+  if (prev) omitted.push(...prev.omitted);
   return {
     view: 'index',
     milestone: bundle.milestone,
@@ -132,15 +205,17 @@ export function indexOf(bundle: ReviewBundle, extras: ReadonlyMap<Id, TaskExtras
     tag: bundle.tag,
     baseline: bundle.baseline,
     omitted,
+    ...(prev ? { previous: prev.previous } : {}),
     diffStat: stat.text,
     closure,
     acceptanceCriteria: bundle.acceptanceCriteria,
   };
 }
 
-/** The full answer: the bundle unchanged, with `view` and `omitted` first. Pure. */
-export function fullOf(bundle: ReviewBundle): Record<string, unknown> {
-  return { view: 'full', omitted: [], ...bundle };
+/** The full answer: the bundle unchanged, with `view` and `omitted` first, then `previous` when facts for it are given. Pure. */
+export function fullOf(bundle: ReviewBundle, facts?: PreviousFacts): Record<string, unknown> {
+  const prev = facts ? previousOf(facts) : undefined;
+  return { view: 'full', omitted: [], ...(prev ? { previous: prev.previous } : {}), ...bundle };
 }
 
 const bad = (parameter: string, reason: string) => ({ ok: false as const, parameter, reason });
@@ -165,7 +240,51 @@ export function parseReviewQuery(query: Record<string, unknown>): { ok: true; pa
   return { ok: true, params };
 }
 
-type ReviewSource = Pick<Orchestrator, 'store' | 'config' | 'graph' | 'entry' | 'payloadOf' | 'acceptanceCriteria' | 'reviewBundle'>;
+type ReviewSource = Pick<Orchestrator, 'store' | 'config' | 'graph' | 'entry' | 'payloadOf' | 'acceptanceCriteria' | 'reviewBundle' | 'workspace'>;
+
+function closureShas(v: unknown): ClosureSha[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  const out: ClosureSha[] = [];
+  for (const c of v) {
+    const entry = c as Record<string, unknown> | null;
+    if (!entry || typeof entry !== 'object' || typeof entry['taskId'] !== 'string') return undefined;
+    const sha = entry['publishedSha'];
+    out.push({ taskId: entry['taskId'], ...(typeof sha === 'string' ? { publishedSha: sha } : {}) });
+  }
+  return out;
+}
+
+/**
+ * The facts for `previous`, or undefined at version 1. The sha comes from kv `tagged:<id>:<n-1>`. The closure of version
+ * n-1 comes from the milestone's second to last submitted transition (the last is the current version's), and is used
+ * only when that event's `integrationSha` equals the kv sha. One git call, only when the two shas differ; a throw is an
+ * empty stat.
+ */
+export async function gatherPrevious(orch: Pick<ReviewSource, 'store' | 'workspace'>, bundle: ReviewBundle): Promise<PreviousFacts | undefined> {
+  const n = bundle.reviewVersion;
+  if (!(n > 1)) return undefined;
+  const id = bundle.milestone;
+  const closure: ClosureSha[] = bundle.closure.map((c) => ({ taskId: c.taskId, ...(c.publishedSha ? { publishedSha: c.publishedSha } : {}) }));
+  const facts: PreviousFacts = { version: n, milestone: id, integrationSha: bundle.integrationSha, closure };
+  const sha = orch.store.getKv(`tagged:${id}:${n - 1}`);
+  if (!sha) return facts;
+  facts.sha = sha;
+  // No limit: every transition of the milestone, in seq order.
+  const submitted = orch.store.listEvents({ kind: 'transition', taskId: id }).filter((e) => e.payload?.['to'] === 'submitted');
+  const before = submitted.at(-2)?.payload;
+  if (before && before['integrationSha'] === sha) {
+    const prev = closureShas(before['closure']);
+    if (prev) facts.previousClosure = prev;
+  }
+  if (sha !== bundle.integrationSha) {
+    try {
+      facts.stat = await orch.workspace.diffStat(sha, bundle.integrationSha);
+    } catch {
+      facts.stat = '';
+    }
+  }
+  return facts;
+}
 
 function titleOf(orch: ReviewSource, id: Id): string {
   const node = orch.graph().nodes.get(id);
@@ -184,7 +303,8 @@ export async function reviewAnswer(orch: ReviewSource, milestoneId: Id, params: 
   const r = await orch.reviewBundle(milestoneId);
   if (!r.ok) return { status: 409, body: { ok: false, reason: r.reason } };
   const bundle = r.bundle as unknown as ReviewBundle;
-  if (params.full) return { status: 200, body: fullOf(bundle) };
+  const facts = await gatherPrevious(orch, bundle);
+  if (params.full) return { status: 200, body: fullOf(bundle, facts) };
   const extras = new Map<Id, TaskExtras>();
   for (const c of bundle.closure) {
     const changed = orch.store.listJobs({ taskId: c.taskId, status: 'published' }).at(-1)?.changedFiles;
@@ -194,7 +314,7 @@ export async function reviewAnswer(orch: ReviewSource, milestoneId: Id, params: 
     statLines: params.statLines ?? orch.config.review.statLines,
     summaryChars: params.summaryChars ?? orch.config.review.summaryChars,
   };
-  return { status: 200, body: indexOf(bundle, extras, cuts) };
+  return { status: 200, body: indexOf(bundle, extras, cuts, facts) };
 }
 
 function taskAnswer(orch: ReviewSource, milestoneId: Id, taskId: Id): ReviewAnswer {

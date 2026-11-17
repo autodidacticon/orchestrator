@@ -107,6 +107,20 @@ describe('event stream, review bundle, status facts', () => {
     expect(stored().find(isSubmitted)!.payload).toEqual(wp);
   });
 
+  it('the review answer at version 2 names version 1 in previous', async () => {
+    h = await makeSlice({ graph: `nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit, acceptanceCriteria: [works] }\n  - { id: MVP, kind: milestone, gated: true, deps: [T1], acceptanceCriteria: [demo runs] }` });
+    await h.waitFor(() => h!.orch.entry('MVP').status.kind === 'submitted', 20_000);
+    const v1 = h.orch.entry('MVP');
+    expect((await get(h, '/v1/milestones/MVP/review')).body).not.toHaveProperty('previous');
+    expect(h.orch.acceptMilestone('MVP', v1.integrationSha!, 1)).toEqual({ ok: true });
+    h.orch.reopen('MVP');
+    await h.waitFor(() => h!.orch.entry('MVP').status.kind === 'submitted' && h!.orch.entry('MVP').reviewVersion === 2, 20_000);
+    const r = await get(h, '/v1/milestones/MVP/review');
+    expect(r.status).toBe(200);
+    expect(r.body['reviewVersion']).toBe(2);
+    expect(r.body['previous']).toMatchObject({ version: 1, sha: v1.integrationSha, tag: 'milestone/MVP/v1' });
+  });
+
   it('review bundle for a submitted milestone, error otherwise; status carries run facts', async () => {
     h = await makeSlice({ graph: `nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit, acceptanceCriteria: [works] }\n  - { id: MVP, kind: milestone, gated: true, deps: [T1], acceptanceCriteria: [demo runs] }`, realVerifier: true });
     expect((await get(h, '/v1/milestones/MVP/review')).status).toBe(409);
