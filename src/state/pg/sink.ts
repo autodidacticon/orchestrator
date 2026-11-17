@@ -32,6 +32,24 @@ export class RunLockedError extends Error {
   }
 }
 
+/**
+ * Thrown by `migrate` (so by `PgSink.open`, before the run lock) when the migrations table records a version this
+ * daemon does not know: a newer release has migrated the database. `recorded` is the highest such version, `known`
+ * the highest version this daemon knows.
+ */
+export class NewerSchemaError extends Error {
+  readonly code = 'schemaNewer';
+  constructor(
+    readonly recorded: number,
+    readonly known: number,
+  ) {
+    super(
+      `the database records migration version ${recorded}, but this daemon knows versions up to ${known}: a newer release has migrated the database, so upgrade this daemon`,
+    );
+    this.name = 'NewerSchemaError';
+  }
+}
+
 /** The advisory lock key for a run: the first 8 bytes of a SHA-256, as a signed bigint. */
 export function runLockKey(runId: string): string {
   return createHash('sha256').update(`orchestrator-run:${runId}`).digest().readBigInt64BE(0).toString();
@@ -186,6 +204,10 @@ export async function migrate(client: pg.ClientBase): Promise<number[]> {
     await client.query('SELECT pg_advisory_xact_lock($1::bigint)', [MIGRATION_LOCK_KEY]);
     await client.query('CREATE TABLE IF NOT EXISTS orchestrator_migrations (version integer PRIMARY KEY, name text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())');
     const done = new Set((await client.query('SELECT version FROM orchestrator_migrations')).rows.map((r: { version: number }) => r.version));
+    // A version this daemon does not know means a newer release migrated the database: refuse before applying anything.
+    const ours = new Set(MIGRATIONS.map((m) => m.version));
+    const unknown = [...done].filter((v) => !ours.has(v));
+    if (unknown.length) throw new NewerSchemaError(Math.max(...unknown), Math.max(...ours));
     for (const m of MIGRATIONS) {
       if (done.has(m.version)) continue;
       await client.query(m.sql);

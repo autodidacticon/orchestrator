@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { type Config, redactUrl } from '../config.js';
 import { type FatalInfo, JournaledStore, type JournalOptions, type ShutdownRejection } from './journal.js';
-import { PgSink, RunLockedError } from './pg/sink.js';
+import { NewerSchemaError, PgSink, RunLockedError } from './pg/sink.js';
 import { SqliteStore } from './sqlite.js';
 import type { Store } from './store.js';
 
@@ -51,7 +51,7 @@ export interface OpenStoreOptions {
 
 /** A clear error for a refused Postgres open, never carrying the password. */
 export class StoreOpenError extends Error {
-  constructor(message: string, readonly code: 'runLocked' | 'noUrl' | 'connect') {
+  constructor(message: string, readonly code: 'runLocked' | 'noUrl' | 'connect' | 'schemaNewer') {
     super(message);
     this.name = 'StoreOpenError';
   }
@@ -76,6 +76,7 @@ export async function openStore(opts: OpenStoreOptions): Promise<OpenedStore> {
     sink = await PgSink.open({ connection: url, runId: opts.runId });
   } catch (err) {
     if (err instanceof RunLockedError) throw new StoreOpenError(`${err.message} (database ${redactUrl(url)})`, 'runLocked');
+    if (err instanceof NewerSchemaError) throw new StoreOpenError(`refusing the Postgres store at ${redactUrl(url)}: ${err.message}`, 'schemaNewer');
     throw new StoreOpenError(`could not open the Postgres store at ${redactUrl(url)}: ${err instanceof Error ? err.message : String(err)}`, 'connect');
   }
   let journal: JournaledStore | undefined;

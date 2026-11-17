@@ -3,19 +3,33 @@
  * batches, launch insertion order, and number types after a load. Skipped without Postgres (pg-db.ts).
  */
 import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type FatalInfo, FencedError, isFenced, isRejected, JournaledStore, type RejectedBatchError, type RowOp } from '../../src/state/journal.js';
-import { MIGRATIONS, migrate, PgSink, RunLockedError } from '../../src/state/pg/index.js';
+import { redactUrl } from '../../src/config.js';
+import { openStore, StoreOpenError } from '../../src/state/open.js';
+import { MIGRATIONS, migrate, NewerSchemaError, PgSink, RunLockedError } from '../../src/state/pg/index.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import { defaultEntry } from '../../src/state/status.js';
 import type { Launch } from '../../src/state/store.js';
 import { expectReloadEquals } from './backends.js';
-import { adminClient, dropRun, freshRunId, pgAvailable, stopTestPostgres, testDatabase } from './pg-db.js';
+import { adminClient, dropRun, freshRunId, pgAvailable, pgSource, stopTestPostgres, testDatabase } from './pg-db.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+/** The test database as a URL carrying a password (trust authentication ignores it). */
+async function pgUrl(password: string): Promise<string> {
+  const conn = await testDatabase();
+  if (typeof conn === 'string') {
+    const u = new URL(conn);
+    if (!u.password) u.password = password;
+    return u.toString();
+  }
+  return `postgresql://${conn.user}:${password}@${encodeURIComponent(String(conn.host))}:${conn.port}/${conn.database}`;
+}
 
 const launch = (id: string, createdAt: number, token = `tok-${id}`): Launch => ({
   launchId: id,
@@ -284,6 +298,84 @@ describe.skipIf(!pgAvailable)('PgSink', () => {
     await again.durable();
     await expectReloadEquals(sink, again.image);
     again.close();
+  });
+
+  // Records an unknown version in the database: only on this file's own database on the run's cluster, never a shared TEST_DATABASE_URL, where the row would refuse every other file's open.
+  it.skipIf(pgSource !== 'cluster')('a database migrated by a newer daemon is refused before the run lock', async () => {
+    const known = Math.max(...MIGRATIONS.map((m) => m.version));
+    const newer = known + 1;
+    const versions = async () => (await admin.query('SELECT version FROM orchestrator_migrations ORDER BY version')).rows.map((x: { version: number }) => x.version);
+    const r = run('newer');
+    await open(r);
+    const before = await versions();
+    await admin.query('INSERT INTO orchestrator_migrations (version, name) VALUES ($1, $2)', [newer, 'from-a-newer-release']);
+    try {
+      const after = [...before, newer];
+      // The first sink holds r's lock: a refusal for the version, not the lock, shows the check comes first.
+      const same = await PgSink.open({ connection: await testDatabase(), runId: r }).catch((e: unknown) => e);
+      expect(same).toBeInstanceOf(NewerSchemaError);
+      expect(same).not.toBeInstanceOf(RunLockedError);
+      expect(same).toMatchObject({ code: 'schemaNewer', recorded: newer, known });
+      const other = run('newer-other');
+      await expect(PgSink.open({ connection: await testDatabase(), runId: other })).rejects.toBeInstanceOf(NewerSchemaError);
+      await expect(migrate(admin)).rejects.toBeInstanceOf(NewerSchemaError);
+      expect(await versions()).toEqual(after);
+
+      const password = 'pw-s3cret-108';
+      const url = await pgUrl(password);
+      const err = await openStore({ store: { kind: 'postgres', url, flushDeadlineMs: 60_000 }, dataDir: tmpdir(), runId: other, onFatal: () => undefined }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(StoreOpenError);
+      expect((err as StoreOpenError).code).toBe('schemaNewer');
+      const message = (err as Error).message;
+      expect(message).not.toContain(password);
+      // The URL's host, port and database name hold digits too: look for the versions in the rest of the message.
+      const shown = redactUrl(url)!;
+      expect(message).toContain(shown);
+      const rest = message.replace(shown, '');
+      expect(rest).toMatch(new RegExp(`\\b${newer}\\b`));
+      expect(rest).toMatch(new RegExp(`\\b${known}\\b`));
+      expect(await versions()).toEqual(after);
+    } finally {
+      await admin.query('DELETE FROM orchestrator_migrations WHERE version = $1', [newer]);
+    }
+    expect(await versions()).toEqual(before);
+    await open(run('newer-after'));
+  });
+});
+
+/** A client that answers `migrate()`'s statements by what they ask for: the read of recorded versions returns them, everything else no rows. */
+function recordingClient(recorded: number[]): { client: pg.ClientBase; sent: string[] } {
+  const sent: string[] = [];
+  const query = async (q: string | { text: string }) => {
+    const text = typeof q === 'string' ? q : q.text;
+    sent.push(text);
+    if (/^\s*SELECT\s+version\s+FROM\s+(\S+\.)?orchestrator_migrations\b/i.test(text)) return { rows: recorded.map((version) => ({ version })) };
+    return { rows: [] };
+  };
+  return { client: { query } as unknown as pg.ClientBase, sent };
+}
+
+describe('migrate', () => {
+  it('migrate refuses a recorded version it does not know', async () => {
+    const known = Math.max(...MIGRATIONS.map((m) => m.version));
+    const migrationSql = new Set(MIGRATIONS.map((m) => m.sql));
+    for (const recorded of [[1, 2], [2]]) {
+      const { client, sent } = recordingClient(recorded);
+      const err = await migrate(client).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(NewerSchemaError);
+      expect(err).toMatchObject({ code: 'schemaNewer', recorded: 2, known });
+      expect((err as Error).message).toContain('2');
+      expect((err as Error).message).toContain(String(known));
+      expect((err as Error).message).toMatch(/upgrade/);
+      expect(sent).toContain('ROLLBACK');
+      expect(sent).not.toContain('COMMIT');
+      expect(sent.filter((t) => migrationSql.has(t))).toEqual([]);
+      expect(sent.filter((t) => /INSERT\s+INTO\s+(\S+\.)?orchestrator_migrations/i.test(t))).toEqual([]);
+    }
+    const { client, sent } = recordingClient([1]);
+    await expect(migrate(client)).resolves.toEqual([]);
+    expect(sent).toContain('COMMIT');
+    expect(sent).not.toContain('ROLLBACK');
   });
 });
 
