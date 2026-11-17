@@ -204,6 +204,15 @@ export const configSchema = z.object({
       prices: z.record(anyModelSchema, priceSchema).default({}),
     })
     .default({}),
+  /** Cuts of the review index, read at daemon start; a request parameter overrides each for one call. See specs/operator-control "Review bundle". */
+  review: z
+    .object({
+      /** File lines of the diff stat the index keeps; the totals line is always kept. */
+      statLines: z.number().int().nonnegative().default(40),
+      /** UTF-16 units of each task summary the index keeps. */
+      summaryChars: z.number().int().nonnegative().default(400),
+    })
+    .default({}),
   /** Tracker mirroring policy. See specs/tracker-sync. */
   tracker: z
     .object({

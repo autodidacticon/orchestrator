@@ -411,8 +411,32 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
     },
     async (a, c) => guarded(() => c.wait(a)),
   );
-  tool('review', { description: 'Review bundle for a submitted gated milestone: pinned sha, version, tag, diff stat, closure task summaries, acceptance criteria.', inputSchema: milestone }, async (a, c) =>
-    guarded(() => c.call('GET', `/v1/milestones/${encodeURIComponent(a.milestone)}/review`)),
+  tool(
+    'review',
+    {
+      description:
+        'Review a submitted gated milestone. By default an index (view "index"): pinned integrationSha, reviewVersion, tag, a cut diff stat, ' +
+        'per task its title, status, publishedSha, a cut summary with summaryLength, acceptanceCount and changedFileCount, and the milestone\'s ' +
+        'acceptance criteria; `omitted` lists what the cuts left out and how to fetch it. task: one closure task\'s whole report and its own ' +
+        'acceptance criteria (view "task"). full: true for the whole bundle (view "full"), which can be too large for a client at a big ' +
+        'milestone. statLines and summaryChars override the index cuts for this call. Every answer repeats integrationSha and reviewVersion for accept.',
+      inputSchema: {
+        ...milestone,
+        task: z.string().optional().describe('A task in the milestone\'s closure: return its whole report'),
+        full: z.boolean().optional().describe('true: the whole bundle, which can be too large for a client'),
+        statLines: z.number().int().nonnegative().optional().describe('Diff stat file lines the index keeps (default: review.statLines)'),
+        summaryChars: z.number().int().nonnegative().optional().describe('Summary characters the index keeps per task (default: review.summaryChars)'),
+      },
+    },
+    async (a, c) => {
+      const qs = new URLSearchParams();
+      if (a.task !== undefined) qs.set('task', a.task);
+      if (a.full === true) qs.set('full', 'true');
+      if (a.statLines !== undefined) qs.set('statLines', String(a.statLines));
+      if (a.summaryChars !== undefined) qs.set('summaryChars', String(a.summaryChars));
+      const query = qs.toString();
+      return guarded(() => c.call('GET', `/v1/milestones/${encodeURIComponent(a.milestone)}/review${query ? `?${query}` : ''}`));
+    },
   );
   tool('answer', { description: 'Answer a waiting or blocked task\'s question.', inputSchema: { ...task, text: z.string() } }, async (a, c) =>
     guarded(() => c.call('POST', `/v1/tasks/${encodeURIComponent(a.task)}/answer`, { text: a.text })),

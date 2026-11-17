@@ -17,6 +17,7 @@ import { setTracker, trackerOf } from '../state/store.js';
 import { storeLag } from '../state/gate.js';
 import { assertStorableId } from '../state/storable.js';
 import { policyReport } from '../tracker/policy.js';
+import { parseReviewQuery, reviewAnswer } from './review.js';
 import { git } from '../workspace/git.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
@@ -371,10 +372,12 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     const seq = Math.max(after, upTo);
     return { status: 200, body: { events: read.events, seq, digest: digestOf(orch) } };
   });
-  server.addRoute('GET', /^\/v1\/milestones\/([^/]+)\/review$/, async (_req, _query, [id]) => {
+  // An index by default; `task` for one task's report, `full=true` for the whole bundle. See specs/operator-control "Review bundle".
+  server.addRoute('GET', /^\/v1\/milestones\/([^/]+)\/review$/, async (_req, query, [id]) => {
     if (!orch.hasGraph()) return { status: 409, body: { ok: false, reason: 'graph not loaded' } };
-    const r = await orch.reviewBundle(id as string);
-    return r.ok ? { status: 200, body: r.bundle } : { status: 409, body: { ok: false, reason: r.reason } };
+    const parsed = parseReviewQuery(query);
+    if (!parsed.ok) return { status: 400, body: parsed };
+    return reviewAnswer(orch, id as string, parsed.params);
   });
   server.addRoute('PUT', /^\/v1\/graph$/, async (_req, body) => {
     let content: string;

@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { runCli } from '../../src/operator/cli.js';
@@ -56,6 +58,42 @@ describe('operator CLI and routes', () => {
     const kinds = h.store.listEvents().map((e) => e.kind);
     for (const k of ['operator.pause', 'operator.resume', 'operator.nudge', 'operator.answer', 'operator.reject', 'operator.unblock', 'operator.cancel']) expect(kinds).toContain(k);
     await expect(runCli(['bogus', '--url', url])).rejects.toThrow(/unknown command/);
+  });
+
+  it('review prints the index, one task, or the whole bundle, and accept takes the printed sha and version', async () => {
+    h = await makeSlice({
+      graph: `nodes:\n  - { id: T1, deps: [], behavior: commitAndSubmit }\n  - { id: T2, deps: [T1], behavior: commitAndSubmit, acceptanceCriteria: [b] }\n  - { id: "A+B", deps: [], behavior: commitAndSubmit }\n  - { id: MVP, kind: milestone, gated: true, deps: [T2, "A+B"] }`,
+      config: { leaseTtlMs: 60_000 },
+    });
+    const url = h.orch.apiBaseUrl;
+    const cli = (...args: string[]) => runCli([...args, '--url', url]);
+    expect((await cli('review', 'MVP')).status).toBe(409);
+    await h.waitFor(() => h!.orch.entry('MVP').status.kind === 'submitted', 30_000);
+    const mvp = h.orch.entry('MVP');
+    const index = await cli('review', 'MVP');
+    expect(index.status).toBe(200);
+    const body = index.body as Record<string, unknown>;
+    expect(body).toMatchObject({ view: 'index', integrationSha: mvp.integrationSha, reviewVersion: mvp.reviewVersion });
+    const one = await cli('review', 'MVP', '--task', 'T2');
+    expect(one.body).toMatchObject({ view: 'task', closure: [{ taskId: 'T2', acceptanceCriteria: ['b'] }] });
+    // An id that needs URL encoding reaches the daemon whole.
+    expect((await cli('review', 'MVP', '--task', 'A+B')).body).toMatchObject({ view: 'task', closure: [{ taskId: 'A+B' }] });
+    expect((await cli('review', 'MVP', '--full')).body).toMatchObject({ view: 'full', omitted: [] });
+    const empty = await cli('review', 'MVP', '--summary-chars', '0');
+    expect(((empty.body as { closure: Array<{ summary: string }> }).closure).map((c) => c.summary)).toEqual(['', '', '']);
+    const refused = await cli('review', 'MVP', '--stat-lines', '-1');
+    expect(refused.status).toBe(400);
+    expect(refused.body).toMatchObject({ ok: false, parameter: 'statLines' });
+    await expect(runCli(['review', '--url', url])).rejects.toThrow(/milestone/);
+    expect((await cli('accept', 'MVP', '--sha', String(body['integrationSha']), '--version', String(body['reviewVersion']))).body).toMatchObject({ ok: true });
+  });
+
+  it('USAGE and the header comment list the review command', async () => {
+    const usage = String(((await runCli(['--help'])).body as { usage: string }).usage);
+    expect(usage.split('\n').some((l) => l.trimStart().startsWith('orchestrator-ctl review <milestone>'))).toBe(true);
+    const source = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/operator/cli.ts'), 'utf8');
+    const header = source.slice(0, source.indexOf('*/'));
+    expect(header.split('\n').some((l) => l.replace(/^\s*\*\s*/, '').startsWith('orchestrator-ctl review <milestone>'))).toBe(true);
   });
 
   it('outbox and ack commands reach the outbox routes', async () => {

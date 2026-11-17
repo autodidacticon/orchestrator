@@ -86,6 +86,9 @@ describe('operator MCP server', () => {
     const codexArg = (configure?.inputSchema as { properties: Record<string, { anyOf?: Array<{ properties?: Record<string, unknown> }>; properties?: Record<string, unknown> }> }).properties['codex'];
     expect(JSON.stringify(codexArg)).toContain('"model"');
     expect(JSON.stringify(codexArg)).toContain('"ultra"');
+    const reviewTool = tools.tools.find((t) => t.name === 'review');
+    expect(Object.keys((reviewTool?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['full', 'milestone', 'repo', 'statLines', 'summaryChars', 'task']);
+    for (const word of ['task', 'full', 'omitted', 'too large for a client']) expect(reviewTool?.description, word).toContain(word);
     const statusTool = tools.tools.find((t) => t.name === 'status');
     for (const word of ['runnerKind', 'runner', 'codex.sandbox', 'claimableByKind']) expect(statusTool?.description, word).toContain(word);
     const startTool = tools.tools.find((t) => t.name === 'start');
@@ -135,6 +138,15 @@ describe('operator MCP server', () => {
     const bundle = await tool('review', { milestone: 'MVP' });
     expect(bundle).toMatchObject({ status: 200, milestone: 'MVP', reviewVersion: 1, tag: 'milestone/MVP/v1' });
     expect((bundle['closure'] as Array<{ taskId: string }>).map((c) => c.taskId).sort()).toEqual(['T1', 'T2']);
+    // The index by default; task, summaryChars and full forwarded only when set. See specs/operator-mcp "Review tool".
+    expect(bundle['view']).toBe('index');
+    const oneTask = await tool('review', { milestone: 'MVP', task: 'T2' });
+    expect(oneTask).toMatchObject({ status: 200, view: 'task', integrationSha: bundle['integrationSha'], reviewVersion: 1 });
+    expect((oneTask['closure'] as Array<{ taskId: string }>).map((c) => c.taskId)).toEqual(['T2']);
+    const noSummaries = await tool('review', { milestone: 'MVP', summaryChars: 0 });
+    expect((noSummaries['closure'] as Array<{ summary: string }>).map((c) => c.summary)).toEqual(['', '']);
+    expect(await tool('review', { milestone: 'MVP', full: true })).toMatchObject({ status: 200, view: 'full', omitted: [] });
+    expect(await tool('review', { milestone: 'MVP', full: false })).toMatchObject({ status: 200, view: 'index' });
     expect(await tool('accept', { milestone: 'MVP', sha: bundle['integrationSha'], version: 1 })).toMatchObject({ ok: true });
     const fin = await tool('wait', { afterSeq: rv['seq'] as number, until: 'finished', timeoutMs: 20_000 });
     expect(fin).toMatchObject({ matched: true });
@@ -157,6 +169,29 @@ describe('operator MCP server', () => {
     expect(after.isError).toBe(true);
     expect(parse(after)['error']).toMatch(/stopped at .*start/);
     expect((await listRuns(env)).find((r) => r.repo === repo)).toMatchObject({ alive: false, exit: { reason: 'stop' } });
+  }, 120_000);
+
+  it('review fetches a task whose id needs URL encoding', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    dirs.push(home, base);
+    const repo = realpathSync(makeRepo(base));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), [
+      `runnerCommand: "node --import ${tsxLoader} ${scriptedAgent} {briefJson}"`,
+      'runner: { mode: spawn }',
+      'checkCommand: "true"', 'tickIntervalMs: 150', 'leaseTtlMs: 60000', 'capacity: 2',
+    ].join('\n'));
+    env = { ...(process.env as Record<string, string>), ORCH_HOME: home, ORCH_REPO: repo };
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, stderr: 'pipe' }));
+    expect(await tool('start')).toMatchObject({ status: 200, started: true });
+    const imported = await importAdopted('import_graph', {
+      content: ['nodes:', '  - { id: "A+1", deps: [], behavior: commitAndSubmit, description: d, acceptanceCriteria: [a] }', '  - { id: MVP, kind: milestone, gated: true, deps: ["A+1"] }', ''].join('\n'),
+    });
+    expect(imported).toMatchObject({ status: 200, accepted: true });
+    expect(await tool('wait', { afterSeq: 0, until: 'review', timeoutMs: 60_000 })).toMatchObject({ matched: true });
+    const one = await tool('review', { milestone: 'MVP', task: 'A+1' });
+    expect(one).toMatchObject({ status: 200, view: 'task', closure: [{ taskId: 'A+1', acceptanceCriteria: ['a'] }] });
   }, 120_000);
 
   it('defaults a plugin-started run to pull, yields to a configured mode, and leaves a running daemon alone', async () => {

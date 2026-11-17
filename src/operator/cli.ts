@@ -12,6 +12,7 @@
  *   orchestrator-ctl unblock <task> [--answer <text>] [--accept-candidate]
  *   orchestrator-ctl accept <milestone> --sha <sha> --version <n>
  *   orchestrator-ctl reject <milestone> --note <text>
+ *   orchestrator-ctl review <milestone> [--task <id>] [--full] [--stat-lines <n>] [--summary-chars <n>]
  *   orchestrator-ctl pause | resume [--override-budget]
  *   orchestrator-ctl mode <spawn|pull|mixed>
  *   orchestrator-ctl claim <workerId> [--task <id>]
@@ -116,6 +117,9 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl unblock <task> [--answer <text>] [--accept-candidate]
   orchestrator-ctl accept <milestone> --sha <sha> --version <n>
   orchestrator-ctl reject <milestone> --note <text>
+  orchestrator-ctl review <milestone> [--task <id>] [--full] [--stat-lines <n>] [--summary-chars <n>]
+                                               an index by default; --task: one task's whole report; --full: the
+                                               whole bundle; the other two override the index cuts for this call
   orchestrator-ctl pause | resume [--override-budget]   resume is refused over the cost ceiling without the flag
   orchestrator-ctl mode <spawn|pull|mixed>         who executes launches: the daemon, workers, or both
   orchestrator-ctl claim <workerId> [--task <id>]  hand a parked launch to a worker (prints its brief, token, worktree)
@@ -129,12 +133,28 @@ The daemon is found by --url, ORCH_URL, the run directory of --repo or the
 current repository (ORCH_HOME, default ~/.orchestrator), or --data-dir.
 `;
 
+/** Options whose value may start with a dash (`--stat-lines -1`): parseArgs refuses that form, so it is joined as `--opt=value` and the daemon judges the value. */
+const DASH_VALUE_OPTIONS = new Set(['--stat-lines', '--summary-chars']);
+
+function joinNumericValues(argv: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i] as string;
+    const next = argv[i + 1];
+    if (DASH_VALUE_OPTIONS.has(arg) && next !== undefined && next.startsWith('-') && !next.startsWith('--')) {
+      out.push(`${arg}=${next}`);
+      i++;
+    } else out.push(arg);
+  }
+  return out;
+}
+
 export async function runCli(argv: string[]): Promise<CliResult> {
   if (argv.includes('--help') || argv.includes('-h') || argv.length === 0) {
     return { status: 0, body: { usage: USAGE } };
   }
   const { values, positionals } = parseArgs({
-    args: argv,
+    args: joinNumericValues(argv),
     allowPositionals: true,
     options: {
       url: { type: 'string' },
@@ -160,6 +180,9 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       'node-id': { type: 'string' },
       payload: { type: 'string' },
       task: { type: 'string' },
+      full: { type: 'boolean', default: false },
+      'stat-lines': { type: 'string' },
+      'summary-chars': { type: 'string' },
       access: { type: 'string' },
       set: { type: 'string', multiple: true },
       'check-command': { type: 'string' },
@@ -196,6 +219,8 @@ export async function runCli(argv: string[]): Promise<CliResult> {
         'it names the store location only when no url is given',
     );
   }
+  // Refused before the daemon is looked up, so a missing argument never revives one.
+  if (cmd === 'review' && !a) throw new Error('review needs a milestone id');
   const base = await resolveUrl({ url: values.url, dataDir: dataDirLeaf === undefined ? values['data-dir'] : undefined, repo: values.repo });
   switch (cmd) {
     case 'status':
@@ -254,6 +279,16 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       return call(base, 'POST', `/v1/milestones/${a}/accept`, { sha: values.sha, version: Number(values.version) });
     case 'reject':
       return call(base, 'POST', `/v1/milestones/${a}/reject`, { note: values.note ?? rest.join(' ') });
+    case 'review': {
+      // The daemon checks every value; see specs/operator-control "Review bundle".
+      const q = new URLSearchParams();
+      if (values.task !== undefined) q.set('task', values.task);
+      if (values.full) q.set('full', 'true');
+      if (values['stat-lines'] !== undefined) q.set('statLines', values['stat-lines']);
+      if (values['summary-chars'] !== undefined) q.set('summaryChars', values['summary-chars']);
+      const qs = q.toString();
+      return call(base, 'GET', `/v1/milestones/${encodeURIComponent(a as string)}/review${qs ? `?${qs}` : ''}`);
+    }
     case 'pause':
       return call(base, 'POST', '/v1/pause');
     case 'resume':
