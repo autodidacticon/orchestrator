@@ -23,6 +23,8 @@ export class ApiServer {
   private readonly server: http.Server;
   private readonly routes: Route[] = [];
   port = 0;
+  /** Accepted `Host` values on a loopback bind; undefined when the bind is not loopback (no `Host` check). */
+  private acceptedHosts: HostEntry[] | undefined;
 
   constructor(private readonly orch: Orchestrator) {
     this.server = http.createServer((req, res) => void this.dispatch(req, res));
@@ -53,6 +55,8 @@ export class ApiServer {
       });
     });
     this.port = (this.server.address() as AddressInfo).port;
+    // Rebuilt on every listen: a fallback port calls listen again on this object. See specs/operator-control "Requests from another origin are refused".
+    this.acceptedHosts = acceptedHosts(bind, this.port, opts.baseUrl);
     const url = opts.baseUrl ? opts.baseUrl.replace(/\/+$/, '') : `http://${bind.includes(':') ? `[${bind}]` : bind}:${this.port}`;
     this.orch.apiBaseUrl = url;
     return url;
@@ -66,6 +70,12 @@ export class ApiServer {
   }
 
   private async dispatch(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    // Refused before routing, before activity is counted and before the body is read. See specs/operator-control "Requests from another origin are refused".
+    const refused = refusal(req, this.acceptedHosts);
+    if (refused) {
+      send(res, 403, refused, { connection: 'close' });
+      return;
+    }
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
     for (const r of this.routes) {
       if (r.method !== req.method) continue;
@@ -105,6 +115,62 @@ export class ApiServer {
     }
     send(res, 404, { error: 'not found' });
   }
+}
+
+interface HostEntry {
+  host: string;
+  port: number;
+  /** The default port of the entry's scheme, which a `Host` without a port stands for. */
+  defaultPort: number;
+}
+
+/** A bind is loopback when it is `localhost`, `::1`, or an IPv4 address in 127.0.0.0/8. */
+export function isLoopbackBind(bind: string): boolean {
+  const b = bind.toLowerCase();
+  if (b === 'localhost' || b === '::1' || b === '[::1]') return true;
+  const m = /^127\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(b);
+  return !!m && m.slice(1).every((o) => Number(o) <= 255);
+}
+
+function normalHost(name: string): string {
+  const n = name.toLowerCase();
+  if (n.startsWith('[')) return n;
+  if (n.includes(':')) return `[${n}]`;
+  return n.endsWith('.') ? n.slice(0, -1) : n;
+}
+
+function acceptedHosts(bind: string, port: number, baseUrl: string | undefined): HostEntry[] | undefined {
+  if (!isLoopbackBind(bind)) return undefined;
+  const entry = (host: string, p: number, defaultPort = 80): HostEntry => ({ host: normalHost(host), port: p, defaultPort });
+  const out: HostEntry[] = [entry(bind, port), entry('localhost', port)];
+  if (bind.toLowerCase() === 'localhost') out.push(entry('127.0.0.1', port), entry('[::1]', port));
+  if (baseUrl) {
+    const u = new URL(baseUrl);
+    const defaultPort = u.protocol === 'https:' ? 443 : 80;
+    out.push(entry(u.hostname, u.port ? Number(u.port) : defaultPort, defaultPort));
+  }
+  return out;
+}
+
+const HOST_PATTERN = /^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9._-]+)(?::(\d{1,5}))?$/;
+
+/** Why a request is refused before routing, or undefined. The `Origin` rule comes before the `Host` rule. */
+function refusal(req: http.IncomingMessage, accepted: HostEntry[] | undefined): { error: string; code: string } | undefined {
+  if (req.headers.origin !== undefined) {
+    return { error: 'request refused: the API does not accept requests that carry an Origin header', code: 'originHeader' };
+  }
+  if (!accepted) return undefined;
+  const raw = req.headers.host;
+  const m = raw === undefined ? null : HOST_PATTERN.exec(raw);
+  if (m) {
+    const host = normalHost(m[1] as string);
+    const port = m[2] === undefined ? undefined : Number(m[2]);
+    if (accepted.some((e) => e.host === host && e.port === (port ?? e.defaultPort))) return undefined;
+  }
+  return {
+    error: `request refused: Host header ${raw === undefined ? '(missing)' : JSON.stringify(raw)} is not an address this server listens on; set apiBaseUrl to add a host`,
+    code: 'hostHeader',
+  };
 }
 
 function bearer(req: http.IncomingMessage): string {
