@@ -89,6 +89,8 @@ describe('operator MCP server', () => {
     const reviewTool = tools.tools.find((t) => t.name === 'review');
     expect(Object.keys((reviewTool?.inputSchema as { properties: Record<string, unknown> }).properties).sort()).toEqual(['full', 'milestone', 'repo', 'statLines', 'summaryChars', 'task']);
     for (const word of ['task', 'full', 'omitted', 'too large for a client']) expect(reviewTool?.description, word).toContain(word);
+    // The ack answer carries the effect's id and state, not its payload. See specs/operator-control "Tracker outbox".
+    expect(tools.tools.find((t) => t.name === 'ack')?.description).toContain('payload');
     const statusTool = tools.tools.find((t) => t.name === 'status');
     for (const word of ['runnerKind', 'runner', 'codex.sandbox', 'claimableByKind']) expect(statusTool?.description, word).toContain(word);
     const startTool = tools.tools.find((t) => t.name === 'start');
@@ -513,8 +515,12 @@ describe('operator MCP server', () => {
       ['E-1', 'setState', 'inProgress'],
     ]);
     const [first, second] = effects;
-    expect(await tool('ack', { id: first!.id, result: { stateId: 'st-1' } })).toMatchObject({ status: 200, ok: true, effect: { status: 'applied', result: { stateId: 'st-1' } } });
-    expect(await tool('ack', { id: second!.id, error: 'rate limited' })).toMatchObject({ status: 200, effect: { status: 'pending', attempts: 1, error: 'rate limited' } });
+    const ackResult = await tool('ack', { id: first!.id, result: { stateId: 'st-1' } });
+    expect(ackResult).toMatchObject({ status: 200, ok: true, effect: { status: 'applied', result: { stateId: 'st-1' } } });
+    expect(ackResult['effect']).not.toHaveProperty('payload');
+    const ackError = await tool('ack', { id: second!.id, error: 'rate limited' });
+    expect(ackError).toMatchObject({ status: 200, effect: { status: 'pending', attempts: 1, error: 'rate limited' } });
+    expect(ackError['effect']).not.toHaveProperty('payload');
     const neither = await client.callTool({ name: 'ack', arguments: { id: second!.id } });
     expect(neither.isError).toBe(true);
     expect(parse(neither)['error']).toMatch(/exactly one of result or error/);

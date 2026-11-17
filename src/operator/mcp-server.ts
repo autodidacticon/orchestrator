@@ -498,7 +498,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   tool(
     'ack',
     {
-      description: 'Acknowledge an outbox effect with the vendor result (e.g. { commentId }), or reject it with error text; exactly one of result or error.',
+      description: 'Acknowledge an outbox effect with the vendor result (e.g. { commentId }), or reject it with error text; exactly one of result or error. The answer carries the effect\'s id and state (id, taskId, kind, status, attempts, result, error), not its payload.',
       inputSchema: { id: z.number().int(), result: z.record(z.unknown()).optional(), error: z.string().optional() },
     },
     async (a, c) =>

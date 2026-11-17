@@ -17,8 +17,11 @@ const tracker: Config['tracker'] = { enabled: 'always', maxAttempts: 3, parentIn
 
 async function http(h: SliceHarness, method: 'GET' | 'POST' | 'PUT', route: string, body?: Record<string, unknown>) {
   const res = await fetch(`${h.orch.apiBaseUrl}${route}`, { method, headers: { 'content-type': 'application/json' }, body: method === 'GET' ? undefined : JSON.stringify(body ?? {}) });
-  return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  lastBody = (await res.json()) as Record<string, unknown>;
+  return { status: res.status, body: lastBody };
 }
+/** The body of the last answer, so a check can follow an assertion that makes its request inline. */
+let lastBody: Record<string, unknown> = {};
 
 describe('outbox routes', () => {
   it('lists, acknowledges, rejects with retry and cap, reports in status and digest, and records the tracker on import', async () => {
@@ -44,11 +47,29 @@ describe('outbox routes', () => {
     expect(h.orch.status()).toMatchObject({ outboxPending: 1, trackerErrors: [] });
     const dup = await http(h, 'POST', `/v1/outbox/${first!.id}/ack`, { result: { stateId: 'other' } });
     expect(dup.body).toMatchObject({ ok: true, duplicate: true, effect: { result: { stateId: 's-started' } } });
+    // The answers carry the effect's id and state, not its payload; the listing keeps the payload. See specs/operator-control "Tracker outbox".
+    const allowed = ['id', 'taskId', 'kind', 'status', 'attempts', 'result', 'error'];
+    const shortForm = (body: Record<string, unknown>) => {
+      const effect = body['effect'] as Record<string, unknown>;
+      expect(effect).toBeTypeOf('object');
+      expect(effect).not.toHaveProperty('payload');
+      for (const key of Object.keys(effect)) expect(allowed, key).toContain(key);
+    };
+    shortForm(acked.body);
+    expect(acked.body['effect']).toEqual({ id: first!.id, taskId: 'T1', kind: 'setState', status: 'applied', attempts: 0, result: { stateId: 's-started' } });
+    shortForm(dup.body);
+    const stillPending = (await http(h, 'GET', '/v1/outbox')).body['effects'] as Array<Record<string, unknown>>;
+    expect(stillPending.map((e) => e['id'])).toEqual([second!.id]);
+    expect(stillPending[0]).toHaveProperty('payload');
+    expect((stillPending[0]!['payload'] as Record<string, unknown>)['state']).toBe('inProgress');
 
     expect((await http(h, 'POST', `/v1/outbox/${second!.id}/nack`, { error: 'rate limited' })).body).toMatchObject({ effect: { status: 'pending', attempts: 1, error: 'rate limited' } });
+    shortForm(lastBody);
     expect((await http(h, 'POST', `/v1/outbox/${second!.id}/nack`, { error: 'rate limited' })).body).toMatchObject({ effect: { status: 'pending', attempts: 2 } });
+    shortForm(lastBody);
     expect(((await http(h, 'GET', '/v1/outbox')).body['effects'] as unknown[]).length).toBe(1);
     expect((await http(h, 'POST', `/v1/outbox/${second!.id}/nack`, { error: 'workflow has no started state' })).body).toMatchObject({ effect: { status: 'failed', attempts: 3 } });
+    shortForm(lastBody);
     expect((await http(h, 'GET', '/v1/outbox')).body['effects']).toEqual([]);
     const status = await http(h, 'GET', '/v1/status');
     expect(status.body).toMatchObject({ outboxPending: 0, trackerErrors: [{ id: second!.id, taskId: 'T2', kind: 'setState', attempts: 3, error: 'workflow has no started state' }] });
@@ -57,7 +78,10 @@ describe('outbox routes', () => {
 
     expect((await http(h, 'POST', '/v1/outbox/999/ack', { result: {} })).status).toBe(404);
     expect((await http(h, 'POST', '/v1/outbox/999/nack', { error: 'x' })).status).toBe(404);
-    expect((await http(h, 'POST', `/v1/outbox/${first!.id}/nack`, { error: 'late' })).status).toBe(409);
+    const late = await http(h, 'POST', `/v1/outbox/${first!.id}/nack`, { error: 'late' });
+    expect(late.status).toBe(409);
+    expect(late.body).toMatchObject({ ok: false, reason: `effect ${first!.id} is already applied`, effect: { id: first!.id, status: 'applied' } });
+    shortForm(late.body);
 
     const kinds = h.store.listEvents().map((e) => e.kind);
     expect(kinds.filter((k) => k === 'operator.ack')).toHaveLength(1);

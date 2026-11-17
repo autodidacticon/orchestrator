@@ -13,7 +13,7 @@ import { trackerSchema } from '../import/mapping.js';
 import { zeroByKind } from '../runner/selection.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import { logPath } from '../runner/subprocess.js';
-import { setTracker, trackerOf } from '../state/store.js';
+import { type OutboxEffect, setTracker, trackerOf } from '../state/store.js';
 import { storeLag } from '../state/gate.js';
 import { assertStorableId } from '../state/storable.js';
 import { policyReport } from '../tracker/policy.js';
@@ -422,6 +422,14 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     return { status: 200, body: { ok: true, id: p.id, rejected: true } };
   });
   // Tracker outbox: what a drainer reads and acknowledges. See specs/tracker-sync "Drainer contract".
+  // An ack or nack answers the effect's id and state, never its payload: the drainer has it from the listing. See specs/operator-control "Tracker outbox".
+  const effectState = (e: OutboxEffect | undefined) => {
+    if (!e) return undefined;
+    const out: Pick<OutboxEffect, 'id' | 'taskId' | 'kind' | 'status' | 'attempts' | 'result' | 'error'> = { id: e.id, taskId: e.taskId, kind: e.kind, status: e.status, attempts: e.attempts };
+    if (e.result !== undefined) out.result = e.result;
+    if (e.error !== undefined) out.error = e.error;
+    return out;
+  };
   server.addRoute('GET', /^\/v1\/outbox$/, async (_req, query) => {
     const after = Number(query['after'] ?? 0);
     const limit = Math.max(1, Math.min(500, Number(query['limit'] ?? 50)));
@@ -434,24 +442,24 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     const id = Number(idStr);
     const cur = orch.store.getOutbox(id);
     if (!cur) return { status: 404, body: { error: `no effect ${idStr}` } };
-    if (cur.status === 'applied') return { status: 200, body: { ok: true, effect: cur, duplicate: true } };
+    if (cur.status === 'applied') return { status: 200, body: { ok: true, effect: effectState(cur), duplicate: true } };
     const effect = orch.store.transaction(() => {
       orch.store.appendEvent({ kind: 'operator.ack', taskId: cur.taskId, payload: { effectId: id, result: body['result'] ?? null } }, orch.now());
       return orch.store.ackOutbox(id, body['result'] ?? null, orch.now());
     });
-    return { status: 200, body: { ok: true, effect } };
+    return { status: 200, body: { ok: true, effect: effectState(effect) } };
   });
   server.addRoute('POST', /^\/v1\/outbox\/([^/]+)\/nack$/, async (_req, body, [idStr]) => {
     const id = Number(idStr);
     const cur = orch.store.getOutbox(id);
     if (!cur) return { status: 404, body: { error: `no effect ${idStr}` } };
-    if (cur.status === 'applied') return { status: 409, body: { ok: false, reason: `effect ${id} is already applied`, effect: cur } };
+    if (cur.status === 'applied') return { status: 409, body: { ok: false, reason: `effect ${id} is already applied`, effect: effectState(cur) } };
     const error = String(body['error'] ?? 'unknown error');
     const effect = orch.store.transaction(() => {
       orch.store.appendEvent({ kind: 'operator.nack', taskId: cur.taskId, payload: { effectId: id, error } }, orch.now());
       return orch.store.nackOutbox(id, error, orch.config.tracker.maxAttempts);
     });
-    return { status: 200, body: { ok: true, effect } };
+    return { status: 200, body: { ok: true, effect: effectState(effect) } };
   });
   server.addRoute('POST', /^\/v1\/shutdown$/, async (req, body) => {
     const reap = body['reap'] === true || body['reap'] === 'true';

@@ -112,8 +112,13 @@ describe('operator CLI and routes', () => {
     const effects = (listed.body as { effects: Array<{ id: number; taskId: string }> }).effects;
     expect(effects.map((e) => e.taskId)).toEqual(['T1', 'T2']);
     const [first, second] = effects;
-    expect((await cli('ack', String(first!.id), '--result', '{"stateId":"s1"}')).body).toMatchObject({ ok: true, effect: { status: 'applied', result: { stateId: 's1' } } });
-    expect((await cli('ack', String(second!.id), '--error', 'no such state')).body).toMatchObject({ ok: true, effect: { status: 'pending', attempts: 1, error: 'no such state' } });
+    const ackResult = (await cli('ack', String(first!.id), '--result', '{"stateId":"s1"}')).body as Record<string, unknown>;
+    expect(ackResult).toMatchObject({ ok: true, effect: { status: 'applied', result: { stateId: 's1' } } });
+    // The answer carries the effect's id and state, not its payload. See specs/operator-control "Tracker outbox".
+    expect(ackResult['effect']).not.toHaveProperty('payload');
+    const ackError = (await cli('ack', String(second!.id), '--error', 'no such state')).body as Record<string, unknown>;
+    expect(ackError).toMatchObject({ ok: true, effect: { status: 'pending', attempts: 1, error: 'no such state' } });
+    expect(ackError['effect']).not.toHaveProperty('payload');
     const paged = await cli('outbox', '--after', String(first!.id), '--limit', '1');
     expect((paged.body as { effects: Array<{ id: number }> }).effects.map((e) => e.id)).toEqual([second!.id]);
     await expect(cli('ack')).rejects.toThrow(/effect id/);
