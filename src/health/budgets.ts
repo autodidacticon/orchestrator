@@ -7,19 +7,25 @@ import type { Id } from '../graph/model.js';
 import type { TokenUsage } from '../runner/runner.js';
 import type { Launch, Store } from '../state/store.js';
 import type { Orchestrator } from '../loop/orchestrator.js';
+import type { AwakeClock } from './gaps.js';
 
-/** Wall time since spawn, excluding time the task spent waiting on questions. */
-export function elapsedMs(launch: Launch, now: number): number {
+/**
+ * Awake time since spawn, excluding time the task spent waiting on questions (`waitedMs`, itself awake time, and the
+ * awake time of a wait in progress). Gaps in the daemon's clock are left out. See specs/health-monitoring "Launch time budget".
+ */
+export function elapsedMs(launch: Launch, now: number, clock: AwakeClock): number {
   const start = launch.spawnedAt ?? launch.createdAt;
-  const waiting = launch.waitingSince !== undefined ? now - launch.waitingSince : 0;
-  return Math.max(0, now - start - (launch.waitedMs ?? 0) - waiting);
+  const waiting = launch.waitingSince !== undefined ? clock.awakeMs(launch.waitingSince, now) : 0;
+  return Math.max(0, clock.awakeMs(start, now) - (launch.waitedMs ?? 0) - waiting);
 }
 
 /** Returns true when the launch was ended for exceeding `budgets.maxLaunchMs`. */
 export async function checkTimeBudget(o: Orchestrator, launch: Launch): Promise<boolean> {
   const max = o.config.budgets.maxLaunchMs;
   if (!max) return false;
-  const elapsed = elapsedMs(launch, o.now());
+  // A sleep during the awaits before this check is a gap, left out of the elapsed time.
+  o.noteClock();
+  const elapsed = elapsedMs(launch, o.now(), o);
   if (elapsed < max) return false;
   await o.runner.reap(launch);
   await o.recordUsage(launch);

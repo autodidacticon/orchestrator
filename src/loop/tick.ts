@@ -22,6 +22,9 @@ import { observeFingerprint, recordSignal } from '../health/progress.js';
 import { checkStuck } from '../health/stuck.js';
 
 export async function runTick(o: Orchestrator): Promise<void> {
+  // A gap noted since the last tick is written first. See specs/health-monitoring "Gap in the daemon's clock".
+  o.noteClock();
+  o.recordGaps();
   await o.loadGraph();
   if (!o.hasGraph()) return;
 
@@ -90,6 +93,10 @@ export async function reconcile(o: Orchestrator): Promise<void> {
   await applyPendingCascade(o);
   // Sessions that died or ended hand their claimed launches back with keep. See specs/operator-control "Session attachments".
   await o.sweepAttachments();
+  // A sleep during the awaits above is written, and the leases renewed, before any lease is tested against this clock.
+  // See specs/pull-runner "Lease renewal after a gap".
+  o.noteClock();
+  o.recordGaps();
   const now = o.now();
   for (const launch of o.store.listLaunches({ status: 'live' })) {
     const entry = o.entry(launch.taskId);
@@ -412,6 +419,9 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
     o.setDeferred([]);
     return;
   }
+  // Nothing starts during the hold after a gap; each start below tests it again, so a sleep in the pass stops the rest.
+  // See specs/health-monitoring "Hold after a gap".
+  if (o.inHold()) return;
   await spawnDueLaunches(o);
   const g = o.graph();
   const overlay = o.overlay();
@@ -444,6 +454,7 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
   o.setDeferred(admission.deferred);
 
   for (const id of admission.resumes) {
+    if (o.inHold()) return;
     const e = o.entry(id);
     if (e.status.kind !== 'waiting' || e.status.answer === undefined || !e.lease) continue;
     const { seq, answer } = e.status;
@@ -452,7 +463,8 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
       o.transition(id, { kind: 'running' }, 'orchestrator', 'resumed', { lease: e.lease });
       const l = o.store.getLaunch(launchId);
       const now = o.now();
-      const waited = l?.waitingSince !== undefined ? now - l.waitingSince : 0;
+      // The wait is counted in awake time, as the elapsed time it is taken from. See specs/health-monitoring "Launch time budget".
+      const waited = l?.waitingSince !== undefined ? o.awakeMs(l.waitingSince, now) : 0;
       o.store.updateLaunch(launchId, { pendingAnswer: { seq, answer }, waitedMs: (l?.waitedMs ?? 0) + waited, waitingSince: undefined });
       if (l) recordSignal(o, { ...l, waitedMs: (l.waitedMs ?? 0) + waited }, 'resumed');
       // A claimed launch's lease starts fresh at admission; a spawned one is renewed by liveness anyway.
@@ -463,6 +475,7 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
   }
 
   for (const id of admission.launches) {
+    if (o.inHold()) return;
     const node = o.requireNode(id);
     const payload = o.payloadOf(node);
     const v = o.briefValidator.validate(node, payload);
@@ -513,6 +526,7 @@ export async function spawnDueLaunches(o: Orchestrator): Promise<void> {
   if (mode === 'pull') return;
   const window = mode === 'mixed' ? o.config.runner.claimWindowMs : 0;
   for (const listed of o.store.listLaunches({ status: 'claimable' })) {
+    if (o.inHold()) return;
     if (o.now() - (listed.claimableAt ?? listed.createdAt) < window) continue;
     // The list is a snapshot, and a claim can land while an earlier launch of it is awaited: read the row and the
     // task again and move the launch to `launching` in the same synchronous step, so a claimed launch keeps its worker,

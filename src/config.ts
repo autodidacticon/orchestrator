@@ -14,6 +14,12 @@ export type StageName = (typeof stageNames)[number];
 /** `health.contendedRetries` when unset. */
 export const DEFAULT_CONTENDED_RETRIES = 3;
 
+/** `health.gapAfterMs` when unset: two notes of the clock further apart than this are a gap. See specs/health-monitoring "Gap in the daemon's clock". */
+export const DEFAULT_GAP_AFTER_MS = 60_000;
+
+/** `health.gapHoldMs` when unset: how long nothing starts after a gap. See specs/health-monitoring "Hold after a gap". */
+export const DEFAULT_GAP_HOLD_MS = 60_000;
+
 /** One model's token rates in USD per million tokens; the optional rates fall back as `priceUsage` states. */
 const rate = z.number().nonnegative();
 export const priceSchema = z
@@ -191,6 +197,10 @@ export const configSchema = z.object({
       baseMovedNotice: z.boolean().default(true),
       /** Launches per task that died of `startupContended` and are relaunched without charging a retry; later ones count. Unset is DEFAULT_CONTENDED_RETRIES. See specs/task-lifecycle "Retry and exhaustion". */
       contendedRetries: z.number().int().nonnegative().optional(),
+      /** Two notes of the daemon's clock further apart than this are a gap, left out of the stuck limits, the launch time budget and leases; 0 turns the rule off. Read at start. Unset is DEFAULT_GAP_AFTER_MS. See specs/health-monitoring "Gap in the daemon's clock". */
+      gapAfterMs: z.number().int().nonnegative().optional(),
+      /** How long after a gap nothing is admitted, resumed, spawned or verified; 0 turns the hold off. Read at start. Unset is DEFAULT_GAP_HOLD_MS. See specs/health-monitoring "Hold after a gap". */
+      gapHoldMs: z.number().int().nonnegative().optional(),
     })
     .default({}),
   /** Wall time per launch and cost per run. */

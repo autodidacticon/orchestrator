@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { BriefValidator } from '../../src/brief/validate.js';
 import type { StuckDiagnoser } from '../../src/health/stuck.js';
-import { type ConfigInput, defaultConfig } from '../../src/config.js';
+import { type ConfigInput, DEFAULT_GAP_AFTER_MS, defaultConfig } from '../../src/config.js';
 import { StaticGraphSource } from '../../src/graph/source.js';
 import { Orchestrator, type ApiResponse } from '../../src/loop/orchestrator.js';
 import { InprocRunner } from '../../src/runner/inproc.js';
@@ -26,7 +26,13 @@ export interface Harness {
   source: StaticGraphSource;
   dir: string;
   now: { value: number };
+  /**
+   * Time during which the daemon ran: the clock moves in steps of at most half of `health.gapAfterMs`, noted by
+   * `orch` after each step, so it is never a gap. With `health.gapAfterMs: 0` it moves in one step.
+   */
   advance(ms: number): void;
+  /** Time during which the daemon did not run: the clock moves in one step and nothing is noted. */
+  sleep(ms: number): void;
   /** Live launch for a task (throws if none). */
   launchOf(taskId: string): Launch;
   submit(taskId: string, extra?: Record<string, unknown>, seq?: number): Promise<ApiResponse>;
@@ -80,6 +86,20 @@ export function makeHarness(opts: { graph?: string; config?: ConfigInput; dir?: 
     dir,
     now,
     advance: (ms) => {
+      const gapAfterMs = config.health.gapAfterMs ?? DEFAULT_GAP_AFTER_MS;
+      if (gapAfterMs <= 0 || ms <= 0) {
+        now.value += ms;
+        if (gapAfterMs > 0) h.orch.noteClock();
+        return;
+      }
+      const step = Math.max(1, Math.floor(gapAfterMs / 2));
+      for (let left = ms; left > 0; left -= step) {
+        now.value += Math.min(step, left);
+        // The orchestrator in place now: a test may replace it.
+        h.orch.noteClock();
+      }
+    },
+    sleep: (ms) => {
       now.value += ms;
     },
     launchOf: (taskId) => {

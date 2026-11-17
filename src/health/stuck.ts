@@ -8,6 +8,7 @@ import type { Id } from '../graph/model.js';
 import { logPath } from '../runner/subprocess.js';
 import type { Launch } from '../state/store.js';
 import type { Orchestrator } from '../loop/orchestrator.js';
+import type { AwakeClock } from './gaps.js';
 import { headOf } from './progress.js';
 
 export interface StuckContext {
@@ -30,8 +31,9 @@ export interface StuckDiagnoser {
 
 export const humanDiagnoser: StuckDiagnoser = { diagnose: async () => ({ action: 'wait' }) };
 
-export function idleMsOf(launch: Launch, now: number): number {
-  return Math.max(0, now - (launch.progressAt ?? launch.spawnedAt ?? launch.createdAt));
+/** Awake time since the last progress (or the spawn, or the creation): gaps in the daemon's clock are left out. See specs/health-monitoring "Gap in the daemon's clock". */
+export function idleMsOf(launch: Launch, now: number, clock: AwakeClock): number {
+  return clock.awakeMs(launch.progressAt ?? launch.spawnedAt ?? launch.createdAt, now);
 }
 
 /** Reap, record usage, fail with reason `stuck`, end the launch, remove the worktree. */
@@ -46,9 +48,11 @@ export async function failStuck(o: Orchestrator, launch: Launch, message: string
 /** Returns true when the launch was ended. Only for `running` tasks whose process is alive. */
 export async function checkStuck(o: Orchestrator, launch: Launch): Promise<boolean> {
   const { stuckAfterMs, stuckFailAfterMs } = o.config.health;
+  // A sleep during the awaits before this check is a gap, left out of the idle time.
+  o.noteClock();
   const now = o.now();
   const cur = o.store.getLaunch(launch.launchId) ?? launch;
-  const idleMs = idleMsOf(cur, now);
+  const idleMs = idleMsOf(cur, now, o);
   if (stuckFailAfterMs > 0 && idleMs > stuckFailAfterMs) {
     await failStuck(o, cur, `no progress for ${Math.round(idleMs / 1000)}s`);
     return true;

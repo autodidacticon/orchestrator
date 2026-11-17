@@ -9,7 +9,8 @@ import { renewEveryMsOf } from '../brief/compose.js';
 import { scrubCarry } from '../brief/lost.js';
 import { checkSubmission } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
-import { type Config, DEFAULT_CONTENDED_RETRIES, storeDurabilityWarning } from '../config.js';
+import { type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, storeDurabilityWarning } from '../config.js';
+import { type Gap, GapClock, noteIntervalMs } from '../health/gaps.js';
 import { classifyReload, type ReloadReason } from '../graph/diff.js';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
 import type { Graph, GraphNode, Id } from '../graph/model.js';
@@ -315,6 +316,9 @@ export class Orchestrator implements OrchestratorCore {
   private verifierInFlight: Promise<void> | undefined;
   private wakeResolve: (() => void) | undefined;
   private timer: NodeJS.Timeout | undefined;
+  /** Gaps in the daemon's clock and the hold after one. See specs/health-monitoring "Gap in the daemon's clock". */
+  private readonly gapClock: GapClock;
+  private noteTimer: NodeJS.Timeout | undefined;
   private stopping = false;
   private ticking: Promise<void> | undefined;
 
@@ -343,7 +347,63 @@ export class Orchestrator implements OrchestratorCore {
     this.boot = deps.resolved ?? resolveLayers({ base: this.config });
     this.startedAt = this.now();
     this.lastActivityAt = this.startedAt;
+    // The gap rule is read at start. Gaps an earlier process wrote count towards awake time from the first reading on;
+    // they set no hold. Time during which no daemon process ran is not a gap.
+    this.gapClock = new GapClock(this.config.health.gapAfterMs ?? DEFAULT_GAP_AFTER_MS, this.config.health.gapHoldMs ?? DEFAULT_GAP_HOLD_MS);
+    if (this.gapClock.enabled) this.gapClock.load(this.store.listEvents({ kind: 'daemon.gap' }).map((e) => ({ from: Number(e.payload?.['from']), to: Number(e.payload?.['to']) })));
     if (!runIdOf(this.store)) setRunId(this.store, randomUUID().slice(0, 16));
+  }
+
+  // ---- gaps in the daemon's clock (specs/health-monitoring "Gap in the daemon's clock", "Hold after a gap") ----
+
+  /** Take a note of the clock; memory only. Returns the gap it found, if any. */
+  noteClock(): Gap | undefined {
+    return this.gapClock.note(this.now());
+  }
+
+  /** The time between two instants less the parts inside gaps noted so far, written or not. */
+  awakeMs(from: number, to: number): number {
+    return this.gapClock.awakeMs(from, to);
+  }
+
+  /** Whether nothing may start: inside `health.gapHoldMs` after the end of the latest gap this process noted. Notes the clock first. */
+  inHold(): boolean {
+    const now = this.now();
+    this.gapClock.note(now);
+    return this.gapClock.inHold(now);
+  }
+
+  /**
+   * Write the gaps noted since the last write, in one transaction: one `daemon.gap` event per gap at its end, a fresh
+   * lease for every live launch holding a running or waiting task, and the latest gap's end as activity for idle exit.
+   * The renewal is not progress: `progressAt`, `lastSignal`, `progressText` and `stuckSince` stay, and no other event
+   * is appended. A no-op when nothing is pending. See specs/pull-runner "Lease renewal after a gap".
+   */
+  recordGaps(): void {
+    const pending = [...this.gapClock.pending()];
+    if (!pending.length) return;
+    this.store.transaction(() => {
+      for (const g of pending) this.store.appendEvent({ kind: 'daemon.gap', payload: { from: g.from, to: g.to, gapMs: g.gapMs, holdUntil: g.holdUntil } }, g.to);
+      for (const l of this.store.listLaunches({ status: 'live' })) this.renewLease(l);
+    });
+    this.gapClock.written(pending.length);
+    this.lastActivityAt = Math.max(this.lastActivityAt, pending.at(-1)!.to);
+    for (const g of pending) this.log.warn('the daemon did not run for a while; the gap is left out of limits and leases', { from: g.from, to: g.to, gapMs: g.gapMs, holdUntil: g.holdUntil });
+  }
+
+  /** Arm the note timer: every second, or a quarter of `health.gapAfterMs` when shorter. A note that finds a gap wakes the loop. */
+  armNoteTimer(): void {
+    this.clearNoteTimer();
+    if (!this.gapClock.enabled) return;
+    this.noteTimer = setInterval(() => {
+      if (this.noteClock()) this.wake();
+    }, noteIntervalMs(this.gapClock.gapAfterMs));
+    this.noteTimer.unref?.();
+  }
+
+  clearNoteTimer(): void {
+    if (this.noteTimer) clearInterval(this.noteTimer);
+    this.noteTimer = undefined;
   }
 
   // ---- idle exit (specs/operator-control "Idle exit") ----
@@ -376,7 +436,10 @@ export class Orchestrator implements OrchestratorCore {
   idleMs(): number {
     if (this.inFlightRequests > 0 || !this.quiescent()) return 0;
     if (this.attached() && !this.config.daemon.exitWhileAttached) return 0;
-    return Math.max(0, this.now() - this.lastActivityAt);
+    // A gap is activity, written or not, and nothing is idle while its hold is on. See specs/health-monitoring "Hold after a gap".
+    if (this.inHold()) return 0;
+    const since = Math.max(this.lastActivityAt, this.gapClock.lastGapEnd() ?? Number.NEGATIVE_INFINITY);
+    return Math.max(0, this.now() - since);
   }
 
   idleExitDue(): boolean {
@@ -881,6 +944,9 @@ export class Orchestrator implements OrchestratorCore {
   async expireClaim(launch: Launch): Promise<'kept' | 'failed' | 'skipped'> {
     const message = `no contact from worker for ${this.config.leaseTtlMs}ms`;
     const expired = (): boolean => {
+      // A sleep since the caller read the clock (inside the tick's loop, or while git ran) renews the lease first. See specs/pull-runner "Lease renewal after a gap".
+      this.noteClock();
+      this.recordGaps();
       const e = this.entry(launch.taskId);
       return e.status.kind === 'running' && e.lease?.launchId === launch.launchId && e.lease.expiresAt <= this.now() && this.store.getLaunch(launch.launchId)?.status === 'live';
     };
@@ -1825,15 +1891,17 @@ export class Orchestrator implements OrchestratorCore {
       byStatus[this.entry(node.id).status.kind].push(node.id);
     }
     const live = new Set<Id>([...byStatus.running, ...byStatus.waiting]);
+    // Elapsed and idle time are awake time: gaps in the daemon's clock are left out.
+    this.noteClock();
     const now = this.now();
     const liveLaunches = this.store.listLaunches({ status: 'live' }).map((l) => ({
       launchId: l.launchId,
       taskId: l.taskId,
       pid: l.pid,
-      elapsedMs: elapsedMs(l, now),
+      elapsedMs: elapsedMs(l, now, this),
       progressAt: l.progressAt,
       lastSignal: l.lastSignal,
-      idleMs: idleMsOf(l, now),
+      idleMs: idleMsOf(l, now, this),
       stuck: l.stuckSince !== undefined,
       costUsd: l.costUsd,
       tokens: l.tokens,
@@ -1936,6 +2004,8 @@ export class Orchestrator implements OrchestratorCore {
    */
   startVerifierIfIdle(): void {
     if (this.verifierInFlight) return;
+    // Nothing starts during the hold after a gap: no job and no deferred-job pass. See specs/health-monitoring "Hold after a gap".
+    if (this.inHold()) return;
     if (this.deferredJobs.size && this.now() - this.deferredTriedAt >= DEFERRED_RETRY_MS) {
       this.deferredTriedAt = this.now();
       this.verifierInFlight = this.resolveDeferredJobs()
@@ -2070,6 +2140,7 @@ export class Orchestrator implements OrchestratorCore {
     const { recover } = await import('../launch/recovery.js');
     await recover(this);
     this.stopping = false;
+    this.armNoteTimer();
     void this.loop();
   }
 
@@ -2089,6 +2160,7 @@ export class Orchestrator implements OrchestratorCore {
           return;
         }
         this.stopping = true;
+        this.clearNoteTimer();
         return;
       }
       await new Promise<void>((resolve) => {
@@ -2101,6 +2173,7 @@ export class Orchestrator implements OrchestratorCore {
 
   async stop(opts: { reap?: boolean } = {}): Promise<void> {
     this.stopping = true;
+    this.clearNoteTimer();
     this.wake();
     if (this.ticking) await this.ticking;
     if (this.verifierInFlight) await this.verifierInFlight;
