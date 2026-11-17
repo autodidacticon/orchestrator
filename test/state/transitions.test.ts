@@ -102,6 +102,19 @@ describe('transition table', () => {
     expect(findTransition('milestone', 'running', 'unstarted', 'orchestrator', 'released')).toBeUndefined();
   });
 
+  it('a failed prepare command returns the task to unstarted at no cost, by the orchestrator only (ORC-130)', () => {
+    const lease = { launchId: 'l', token: 't', claimedAt: 0, expiresAt: 9, baseSha: 's', graphRev: 'r' };
+    const carry = { verifierOutput: 'kept' };
+    const e = { ...defaultEntry(), attempts: 1, launches: 2, status: { kind: 'running' } as Status, lease, carry };
+    const out = applyTransition(e, { kind: 'unstarted' }, { nodeId: 'n', nodeKind: 'task', actor: 'orchestrator', trigger: 'prepareFailed', now: 1 });
+    expect(out).toMatchObject({ attempts: 1, launches: 2, status: { kind: 'unstarted' }, carry });
+    expect(out.lease).toBeUndefined();
+    expect(findTransition('task', 'running', 'unstarted', 'orchestrator', 'prepareFailed')).toMatchObject({ effects: [] });
+    expect(findTransition('task', 'running', 'unstarted', 'agent', 'prepareFailed')).toBeUndefined();
+    expect(findTransition('milestone', 'running', 'unstarted', 'orchestrator', 'prepareFailed')).toBeUndefined();
+    expect(TRANSITIONS.filter((r) => r.from === 'running' && r.to === 'blocked' && r.trigger === 'prepareFailed')).toEqual([]);
+  });
+
   it('leaving running clears the lease unless patched', () => {
     const lease = { launchId: 'l', token: 't', claimedAt: 0, expiresAt: 9, baseSha: 's', graphRev: 'r' };
     const e = { ...defaultEntry(), status: { kind: 'running' } as Status, lease };

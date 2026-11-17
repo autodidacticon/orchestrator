@@ -44,6 +44,7 @@ import type { Logger, OrchestratorCore } from './core.js';
 import { chainPolicy, type Deferral, type Policy } from './schedule.js';
 import { pidAlive } from '../runner/subprocess.js';
 import { runTick } from './tick.js';
+import { defaultPrepareRunner, type PrepareJob, type PrepareRunner, startPrepareCommand, stopPrepareJobs } from '../launch/prepare.js';
 import { deriveEffects } from '../tracker/effects.js';
 import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, priceFor, priceUsage, runCostUsd, tokensOf, unpricedLaunches } from '../health/budgets.js';
 import { recordSignal } from '../health/progress.js';
@@ -319,7 +320,14 @@ export class Orchestrator implements OrchestratorCore {
   /** Gaps in the daemon's clock and the hold after one. See specs/health-monitoring "Gap in the daemon's clock". */
   private readonly gapClock: GapClock;
   private noteTimer: NodeJS.Timeout | undefined;
-  private stopping = false;
+  /** Set by `stop()` and idle exit; read by the prepare command, which starts nothing once it is set. */
+  stopping = false;
+  /** Prepare commands running, by launch id; memory only. See specs/pull-runner "Prepare command". */
+  readonly prepareJobs = new Map<string, PrepareJob>();
+  /** Runs a prepare command; tests replace it. */
+  prepareRunner: PrepareRunner;
+  /** How long `stop()` waits for the prepare commands it aborted, in all. */
+  prepareStopWaitMs = 5000;
   private ticking: Promise<void> | undefined;
 
   constructor(deps: OrchestratorDeps) {
@@ -345,6 +353,7 @@ export class Orchestrator implements OrchestratorCore {
     this.log = deps.log ?? silentLog;
     this.apiBaseUrl = deps.apiBaseUrl ?? 'http://127.0.0.1:0';
     this.boot = deps.resolved ?? resolveLayers({ base: this.config });
+    this.prepareRunner = defaultPrepareRunner(this.config.dataDir);
     this.startedAt = this.now();
     this.lastActivityAt = this.startedAt;
     // The gap rule is read at start. Gaps an earlier process wrote count towards awake time from the first reading on;
@@ -2116,6 +2125,21 @@ export class Orchestrator implements OrchestratorCore {
     return published.slice(idx + 1).map((j) => j.taskId);
   }
 
+  /** Start the configured prepare command for a launch; false when none is set. See specs/pull-runner "Prepare command". */
+  startPrepareCommand(launch: Launch): boolean {
+    return startPrepareCommand(this, launch);
+  }
+
+  /** Every prepare job has called its runner (or ended without a call). Tests only. */
+  async prepareStarted(): Promise<void> {
+    await Promise.all([...this.prepareJobs.values()].map((j) => j.started));
+  }
+
+  /** Every prepare job has stored its outcome. Tests only. */
+  async prepareSettled(): Promise<void> {
+    await Promise.all([...this.prepareJobs.values()].map((j) => j.done));
+  }
+
   /** Wait for in-flight verification, then tick, until nothing is in flight. Tests only. */
   async settle(maxTicks = 20): Promise<void> {
     for (let i = 0; i < maxTicks; i++) {
@@ -2138,8 +2162,9 @@ export class Orchestrator implements OrchestratorCore {
     }
     await this.loadGraph();
     const { recover } = await import('../launch/recovery.js');
-    await recover(this);
+    // Cleared before recovery, which starts the prepare command again for a launch it relaunches.
     this.stopping = false;
+    await recover(this);
     this.armNoteTimer();
     void this.loop();
   }
@@ -2176,6 +2201,8 @@ export class Orchestrator implements OrchestratorCore {
     this.clearNoteTimer();
     this.wake();
     if (this.ticking) await this.ticking;
+    // Prepare commands are aborted and nothing is applied; their rows stay for the next start. See specs/pull-runner "Prepare command and a task that left".
+    await stopPrepareJobs(this, this.prepareStopWaitMs);
     if (this.verifierInFlight) await this.verifierInFlight;
     if (opts.reap) {
       for (const l of this.store.listLaunches({ status: 'live' })) {

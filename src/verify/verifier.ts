@@ -356,32 +356,75 @@ function tail(text: string, max: number): string {
   return text.length > max ? text.slice(text.length - max) : text;
 }
 
-export async function runCheck(command: string, cwd: string, timeoutMs: number, maxOut: number, dataDir: string): Promise<{ code: number | null; timedOut: boolean; output: string }> {
+/**
+ * Run a command in `cwd` with the check environment. With `label` it is started as
+ * `/bin/sh -c '/bin/sh -c "$1"; exit $?' <label> <command>`, so the label is on the outer shell's command line. An
+ * aborted `signal` before the spawn starts nothing; after it, the process group is killed as at the timeout. With
+ * `closeWaitMs`, after a kill it resolves that many milliseconds later when `close` has not come by then.
+ */
+export async function runCheck(
+  command: string,
+  cwd: string,
+  timeoutMs: number,
+  maxOut: number,
+  dataDir: string,
+  opts: { label?: string; signal?: AbortSignal; closeWaitMs?: number } = {},
+): Promise<{ code: number | null; timedOut: boolean; aborted?: boolean; spawnError?: boolean; output: string }> {
+  type RunCheckResult = { code: number | null; timedOut: boolean; aborted?: boolean; spawnError?: boolean; output: string };
+  const { label, signal, closeWaitMs } = opts;
+  if (signal?.aborted) return { code: null, timedOut: false, aborted: true, output: '' };
   return new Promise((resolve) => {
+    const args = label === undefined ? ['-c', command] : ['-c', '/bin/sh -c "$1"; exit $?', label, command];
     // Repository code runs here: same isolation as a spawned agent. See specs/integration-pipeline "Check environment".
-    const child = spawn('/bin/sh', ['-c', command], { cwd, env: childEnv(dataDir, identity), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+    const child = spawn('/bin/sh', args, { cwd, env: childEnv(dataDir, identity), stdio: ['ignore', 'pipe', 'pipe'], detached: true });
     let output = '';
     let timedOut = false;
+    let aborted = false;
+    let settled = false;
+    let closeWait: NodeJS.Timeout | undefined;
     const collect = (chunk: Buffer) => {
       output = tail(output + chunk.toString('utf8'), maxOut);
     };
     child.stdout?.on('data', collect);
     child.stderr?.on('data', collect);
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const finish = (result: RunCheckResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (closeWait) clearTimeout(closeWait);
+      signal?.removeEventListener('abort', onAbort);
+      resolve({ ...result, ...(aborted ? { aborted: true } : {}) });
+    };
+    const kill = () => {
       try {
         process.kill(-(child.pid as number), 'SIGKILL');
       } catch {
         child.kill('SIGKILL');
       }
+      // A process outside the group that holds the output pipe keeps `close` from coming: stop waiting after closeWaitMs.
+      if (closeWaitMs !== undefined && !closeWait) {
+        closeWait = setTimeout(() => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish({ code: null, timedOut, output });
+        }, closeWaitMs);
+      }
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill();
     }, timeoutMs);
+    const onAbort = () => {
+      if (settled) return;
+      aborted = true;
+      kill();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
     child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ code, timedOut, output });
+      finish({ code, timedOut, output });
     });
     child.on('error', (err) => {
-      clearTimeout(timer);
-      resolve({ code: null, timedOut, output: `${output}\n${String(err)}` });
+      finish({ code: null, timedOut, spawnError: true, output: `${output}\n${String(err)}` });
     });
   });
 }

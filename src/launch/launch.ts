@@ -8,7 +8,7 @@ import path from 'node:path';
 import { crashPoint } from '../crash.js';
 import type { Id } from '../graph/model.js';
 import type { Lease } from '../state/status.js';
-import type { Launch } from '../state/store.js';
+import type { Launch, RunnerMode } from '../state/store.js';
 import { applyTransition } from '../state/transitions.js';
 import type { OrchestratorCore } from '../loop/core.js';
 
@@ -124,8 +124,17 @@ export async function spawnLaunch(core: OrchestratorCore, launch: Launch): Promi
  */
 export async function startLaunch(core: OrchestratorCore, taskId: Id, opts: StartLaunchOptions = {}): Promise<Launch> {
   const launch = await prepareLaunch(core, taskId, opts);
+  // With a prepare command set, it runs off the tick; the tick parks or spawns the launch once it succeeded.
+  // See specs/pull-runner "Prepare command".
+  if (core.startPrepareCommand(launch)) return launch;
   const mode = core.effectiveMode();
   if (mode === 'spawn') return spawnLaunch(core, launch);
+  return parkLaunch(core, launch, mode);
+}
+
+/** Park a prepared launch as `claimable` for a worker. */
+export function parkLaunch(core: OrchestratorCore, launch: Launch, mode: RunnerMode = core.effectiveMode()): Launch {
+  const { taskId } = launch;
   const claimableAt = core.now();
   core.store.transaction(() => {
     core.store.updateLaunch(launch.launchId, { status: 'claimable', claimableAt });

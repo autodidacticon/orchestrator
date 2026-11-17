@@ -44,4 +44,9 @@ export interface OrchestratorCore {
   selectionFor(taskId: Id): Selection;
   /** The commit policy in force now for a kind: its `runner.<kind>.commit`. See specs/worker-runners "Sandbox and commit policy". */
   commitPolicyFor(kind: RunnerKind): CommitPolicy;
+  /**
+   * Start the configured prepare command for a launch whose worktree was just prepared, off the tick. False when no
+   * prepare command is set: the caller parks or spawns the launch itself. See specs/pull-runner "Prepare command".
+   */
+  startPrepareCommand(launch: Launch): boolean;
 }

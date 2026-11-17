@@ -132,6 +132,13 @@ export async function recover(o: Orchestrator): Promise<void> {
       await workspace.remove(launch);
       continue;
     }
+    // With a prepare command set, a parked launch it has not run for is ended and admission makes it again; one it ran
+    // for stays parked as it is. See specs/crash-recovery "Prepare command at recovery".
+    if (o.config.prepareCommand !== undefined) {
+      const why = await unpreparedCause(o, launch, o.config.prepareCommand);
+      if (why && endUnprepared(o, launch, why)) await workspace.remove(launch).catch(() => undefined);
+      continue;
+    }
     if (!(await workspace.exists(launch))) {
       await workspace.remove(launch);
       // A base the clone lacks (or any failure to prepare) fails the task at no cost instead of ending the daemon,
@@ -312,6 +319,42 @@ function failUnpreparable(o: Orchestrator, launch: Launch, baseLost: boolean, er
     o.fail(launch.taskId, { kind: 'worktreeLost', message, detail }, 'orchestrator', 'worktreeLost');
   });
   o.log.warn('recovery: parked launch could not be prepared again; task retried', { taskId: launch.taskId, ...detail });
+}
+
+type UnpreparedCause = 'worktreeLost' | 'neverPrepared' | 'otherCommand';
+
+const UNPREPARED_TEXT: Record<UnpreparedCause, string> = {
+  worktreeLost: 'worktree lost',
+  neverPrepared: 'parked before the command was set',
+  otherCommand: 'parked under another command',
+};
+
+/** Why the configured prepare command has not run for a parked launch, or undefined when it has. */
+async function unpreparedCause(o: Orchestrator, launch: Launch, command: string): Promise<UnpreparedCause | undefined> {
+  if (!(await o.workspace.exists(launch))) return 'worktreeLost';
+  const prepared = o.store.listEvents({ kind: 'launch.prepared', launchId: launch.launchId });
+  if (!prepared.length) return 'neverPrepared';
+  if (prepared.at(-1)!.payload?.['command'] !== command) return 'otherCommand';
+  return undefined;
+}
+
+/**
+ * End a parked launch the prepare command has not run for, with `notPrepared`, and fail its task at no cost, so
+ * admission makes the launch again and the command runs for it. A claim may have landed during the awaits before: the
+ * row and the task are read again, and nothing happens unless the row is still parked for a running task.
+ */
+function endUnprepared(o: Orchestrator, launch: Launch, cause: UnpreparedCause): boolean {
+  const current = o.store.getLaunch(launch.launchId);
+  const entry = o.entry(launch.taskId);
+  if (current?.status !== 'claimable' || entry.status.kind !== 'running' || entry.lease?.launchId !== launch.launchId) return false;
+  const message = `parked launch ${launch.launchId} is made again because the prepare command had not run for it (${UNPREPARED_TEXT[cause]}); nothing was wrong with the task and no attempt is spent`;
+  const detail = { launchId: launch.launchId, notPrepared: cause };
+  o.store.transaction(() => {
+    o.endLaunch(current, 'notPrepared', detail);
+    o.fail(launch.taskId, { kind: 'worktreeLost', message, detail }, 'orchestrator', 'worktreeLost');
+  });
+  o.log.warn('recovery: the prepare command had not run for a parked launch; it is made again', { taskId: launch.taskId, ...detail });
+  return true;
 }
 
 /**

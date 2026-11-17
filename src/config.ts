@@ -53,6 +53,12 @@ export const configSchema = z.object({
   /** Run on every rebased submission. Detected from the repository when the file does not set it; unresolved holds verification. See specs/toolchain-discovery. */
   checkCommand: z.string().min(1).optional(),
   checkTimeoutMs: z.number().int().positive().default(15 * 60_000),
+  /**
+   * Run by the daemon in each worktree it prepares, off the tick, before the launch is parked or spawned. Read at start;
+   * not an override, never detected. Unset: nothing runs. See specs/pull-runner "Prepare command".
+   */
+  prepareCommand: z.string().min(1).optional(),
+  prepareTimeoutMs: z.number().int().positive().default(10 * 60_000),
   /** Loopback API port; 0 picks a free port. */
   apiPort: z.number().int().nonnegative().default(0),
   /** Address the API binds to; `0.0.0.0` in a cluster. See specs/cluster-runtime. */

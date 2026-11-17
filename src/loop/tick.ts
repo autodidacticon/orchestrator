@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs';
 import { crashPoint } from '../crash.js';
 import * as q from '../graph/query.js';
 import { spawnLaunch, startLaunch } from '../launch/launch.js';
+import { settlePrepareJobs, spawnPreparedLaunches } from '../launch/prepare.js';
 import type { Id } from '../graph/model.js';
 import type { AttemptContext, Entry, FailedKind } from '../state/status.js';
 import type { Launch, VerifierJob } from '../state/store.js';
@@ -29,6 +30,8 @@ export async function runTick(o: Orchestrator): Promise<void> {
   if (!o.hasGraph()) return;
 
   await reconcile(o);
+  // Outcomes of prepare commands are applied here, never by their callbacks. See specs/pull-runner "Prepare command".
+  await settlePrepareJobs(o);
   crashPoint('tick.afterPhase1');
 
   await drainVerification(o);
@@ -266,7 +269,7 @@ async function applyJobs(o: Orchestrator): Promise<void> {
 }
 
 /** Remove a launch's worktree, awaited; one left behind joins the pending set and is retried on the next tick. */
-async function removeOrRetryLater(o: Orchestrator, launch: Launch, opts: { attempts?: number } = {}): Promise<void> {
+export async function removeOrRetryLater(o: Orchestrator, launch: Launch, opts: { attempts?: number } = {}): Promise<void> {
   let gone: boolean | void;
   try {
     gone = await o.workspace.remove(launch, opts);
@@ -522,6 +525,8 @@ async function launchOrAbandon(o: Orchestrator, id: Id): Promise<void> {
 
 /** Spawn parked launches whose claim window elapsed: zero in spawn, claimWindowMs in mixed, never in pull. */
 export async function spawnDueLaunches(o: Orchestrator): Promise<void> {
+  // Launches whose prepare command succeeded and whose next step is spawn, in every mode.
+  await spawnPreparedLaunches(o);
   const mode = o.effectiveMode();
   if (mode === 'pull') return;
   const window = mode === 'mixed' ? o.config.runner.claimWindowMs : 0;
@@ -548,6 +553,8 @@ export async function spawnDueLaunches(o: Orchestrator): Promise<void> {
       if ((await o.workspace.remove(launching)) === false) throw new Error(`the parked worktree ${launching.worktree} could not be removed`);
       stage = 'prepare';
       await o.workspace.prepare(launching, o.briefInput(launching));
+      // The prepare command runs again in the new worktree; the row stays `launching` until it succeeded.
+      if (o.startPrepareCommand(launching)) continue;
       stage = 'spawn';
       await spawnLaunch(o, launching);
     } catch (err) {
@@ -564,7 +571,7 @@ export async function spawnDueLaunches(o: Orchestrator): Promise<void> {
  * process and removing the worktree are best effort, and a worktree left behind is retried on later ticks.
  * See specs/pull-runner "Failed spawn of a parked launch".
  */
-async function abandonSpawn(o: Orchestrator, launch: Launch, stage: 'remove' | 'prepare' | 'spawn', err: unknown): Promise<void> {
+export async function abandonSpawn(o: Orchestrator, launch: Launch, stage: 'remove' | 'prepare' | 'spawn', err: unknown): Promise<void> {
   const error = err instanceof Error ? err.message : String(err);
   const message = `launch ${launch.launchId} could not be started: ${stage} failed: ${error}`;
   o.store.transaction(() => {
