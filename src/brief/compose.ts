@@ -88,6 +88,26 @@ const limitsLines = (limits: BriefLimits | undefined): string[] => {
   return line ? [line] : [];
 };
 
+/**
+ * The Definition of done bullet of a codex brief on the network limit: the full bullet when `networkAccess` is false,
+ * the short one when it is true under workspace-write, nothing otherwise (danger-full-access, or the field absent).
+ */
+export function codexNetworkRule(runner: BriefRunner | undefined, checkCommand: string | undefined): string[] {
+  const check = checkCommand ? 'the check' : "the project's test suite";
+  const daemonRuns = checkCommand ? ' The orchestrator runs the check command itself, outside the sandbox, on a clean checkout of your work after you submit.' : '';
+  const submit = 'do not ask with a `needsAccess` question and do not wait: submit, and name in the report summary each part that did not run and the error it gave.';
+  const login = 'A login, a credential or a token you lack is not covered: ask for it with a `needsAccess` question.';
+  if (runner?.networkAccess === false)
+    return [
+      `- Your commands have no network access in this sandbox: a package install that must download fails, and a test that opens a port or a local socket can fail. Retrying does not help. An install can also be refused because it writes to a package store outside this worktree.${daemonRuns} Run the parts of ${check} that do run. When the rest cannot run in the sandbox, for lack of network or for a refused write to a package store outside the worktree, ${submit} This is the exception to the \`needsAccess\` rule under Workspace. ${login}`,
+    ];
+  if (runner?.networkAccess === true && runner.sandbox === 'workspace-write')
+    return [
+      `- \`runner.codex.networkAccess\` is on for this launch, but a test that opens a port or a local socket may still be refused, and so may an install that writes to a package store outside this worktree.${daemonRuns} When a part of ${check} is refused in this way, ${submit} ${login}`,
+    ];
+  return [];
+}
+
 export function acceptanceCriteriaOf(payload: Record<string, unknown>): string[] {
   const raw = payload['acceptanceCriteria'];
   if (Array.isArray(raw)) return raw.map(String);
@@ -154,6 +174,8 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     input.checkCommand
       ? `- Run the check command before submitting: \`${input.checkCommand}\`.`
       : '- No check command is configured for this repository yet; the operator is being asked. Run the project\'s documented test suite before submitting.',
+    // A sandboxed Codex worker submits when the check cannot run for lack of network (ORC-84). See specs/agent-protocol "Codex brief states the network limit".
+    ...(kind === 'codex' ? codexNetworkRule(input.runner, input.checkCommand) : []),
     // Workers that edited openspec/specs directly lost the per-change record and collided on the main spec files (ORC-74).
     ...((opts.openspec ?? existsSync(path.join(launch.worktree, 'openspec'))) ? [OPENSPEC_CHANGE_RULE] : []),
     '- If the task needs no changes, say so explicitly with `noChanges: { justification }` in your report.',

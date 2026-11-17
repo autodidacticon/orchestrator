@@ -75,10 +75,21 @@ describe('model and effort per launch', () => {
     const brief = h.orch.briefInput(l1);
     // Codex's default sandbox cannot commit in a linked worktree, so its commit policy derives to daemon.
     expect(l1.commitPolicy).toBe('daemon');
-    expect(brief.runner).toEqual({ kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write' });
+    expect(brief.runner).toEqual({ kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write', networkAccess: false });
     expect(brief.allowedTools).toBeUndefined();
     // A task selector still wins under codex.
     expect(h.launchOf('T2')).toMatchObject({ runner: 'codex', model: 'claude-sonnet-5-5', effort: 'high' });
+  });
+
+  // See specs/agent-protocol "Codex brief states the network limit".
+  it('under runner.codex.networkAccess: true the brief input of a codex launch says the network is on', async () => {
+    const h = makeHarness({ graph, config: { capacity: 2, runner: { kind: 'codex', codex: { networkAccess: true } } } });
+    open.push(h);
+    await h.orch.tick();
+    const l1 = h.launchOf('T1');
+    expect(l1.runner).toBe('codex');
+    expect(h.orch.briefInput(l1).runner?.networkAccess).toBe(true);
+    expect(h.orch.briefInput(l1).runner).toEqual({ kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write', networkAccess: true });
   });
 
   it('effort ultra falls back to max under claude-code and records what was asked; codex keeps ultra', async () => {

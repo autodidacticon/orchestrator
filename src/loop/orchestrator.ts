@@ -48,7 +48,7 @@ import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, priceFor, priceUsag
 import { recordSignal } from '../health/progress.js';
 import { humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS } from '../runs/resolve.js';
-import { type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, type OpenCodePermission, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
+import { codexNetworkAccess, type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, type OpenCodePermission, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
 import { bashPatterns } from '../runner/opencode.js';
 import { composeAllowedTools } from '../toolchain/tools.js';
@@ -667,7 +667,9 @@ export class Orchestrator implements OrchestratorCore {
       runner: {
         kind: runnerOf(launch),
         commitPolicy: commitPolicyOf(launch),
-        ...(runnerOf(launch) === 'codex' ? { sandbox: eff.config.runner.codex.sandbox } : {}),
+        ...(runnerOf(launch) === 'codex'
+          ? { sandbox: eff.config.runner.codex.sandbox, networkAccess: codexNetworkAccess(eff.config.runner.codex.sandbox, eff.config.runner.codex.networkAccess) }
+          : {}),
         ...(runnerOf(launch) === 'opencode' ? { permission: this.openCodePermissionFor() } : {}),
       },
     };

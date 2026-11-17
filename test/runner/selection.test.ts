@@ -3,6 +3,7 @@ import { configSchema } from '../../src/config.js';
 import { parseGraph } from '../../src/graph/load.js';
 import { mapIssues } from '../../src/import/mapping.js';
 import {
+  codexNetworkAccess,
   DEFAULT_MODEL_BY_KIND,
   EFFORT_FALLBACK,
   EFFORT_LEVELS_BY_KIND,
@@ -18,6 +19,19 @@ import { makeHarness, type Harness } from '../loop/harness.js';
 const open: Harness[] = [];
 afterEach(() => {
   for (const h of open.splice(0)) h.cleanup();
+});
+
+// See specs/agent-protocol "Codex brief states the network limit".
+describe('codexNetworkAccess', () => {
+  it('counts the key under workspace-write only; danger-full-access has network, read-only has none', () => {
+    expect(codexNetworkAccess('workspace-write', undefined)).toBe(false);
+    expect(codexNetworkAccess('workspace-write', false)).toBe(false);
+    expect(codexNetworkAccess('workspace-write', true)).toBe(true);
+    expect(codexNetworkAccess('read-only', true)).toBe(false);
+    expect(codexNetworkAccess('read-only', undefined)).toBe(false);
+    expect(codexNetworkAccess('danger-full-access', undefined)).toBe(true);
+    expect(codexNetworkAccess('danger-full-access', false)).toBe(true);
+  });
 });
 
 // See specs/worker-runners "Runner kinds and defaults" and "Per-kind effort sets".

@@ -248,6 +248,76 @@ describe('runner-specific brief text', () => {
   });
 });
 
+// See specs/agent-protocol "Codex brief states the network limit".
+describe('codex network limit in the Definition of done', () => {
+  const launch = { launchId: 'L1', taskId: 'T1', attempt: 1, launchNo: 1, status: 'live', token: 't', branch: 'task/T1/l1', worktree: '/w', baseSha: 'base', graphRev: 'r', createdAt: 1 } as const;
+  const base = {
+    launch: launch as unknown as Parameters<typeof composeBrief>[0]['launch'],
+    node: { id: 'T1', kind: 'task' as const, payload: { title: 'x', description: 'd', acceptanceCriteria: ['a'] }, deps: [] },
+    depReports: [],
+    apiBaseUrl: 'http://127.0.0.1:1',
+    retryWindowMs: 1000,
+    checkCommand: 'npm ci && npm test' as string | undefined,
+    integrationBranch: 'main',
+  };
+  const done = (md: string) => md.split('## Definition of done\n')[1]!.split('\n## ')[0]!;
+  // Phrases other tests assert absent from briefs; neither bullet may hold them.
+  const forbidden = ['127.0.0.1', 'commit and resubmit', 'You may rebase', 'Rebase that branch or start over', 'squash the work-in-progress commit', 'commit the delta', 'Run the check command before submitting', 'Bash rules are in force'];
+  const bulletOf = (md: string, marker: string) => done(md).split('\n').find((l) => l.includes(marker))!;
+
+  it('networkAccess false: the full bullet after the check command bullet, and brief.json carries the field', () => {
+    const { markdown, json } = composeBrief({ ...base, runner: { kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write', networkAccess: false } }, { fallbackPath: '/x' });
+    const d = done(markdown);
+    for (const s of ['no network access', 'package store outside', 'outside the sandbox', 'after you submit', 'do not ask with a', 'do not wait', 'report summary', 'A login, a credential']) expect(d, s).toContain(s);
+    const lines = d.split('\n');
+    const check = lines.findIndex((l) => l.startsWith('- Run the check command before submitting'));
+    const bullet = lines.findIndex((l) => l.includes('no network access'));
+    expect(check).toBeGreaterThanOrEqual(0);
+    expect(bullet).toBeGreaterThan(check);
+    const text = bulletOf(markdown, 'no network access');
+    expect(text.startsWith('- Lease:')).toBe(false);
+    for (const s of forbidden) expect(text, s).not.toContain(s);
+    expect(json.runner?.networkAccess).toBe(false);
+    expect(markdown).toContain('change `runner.codex.sandbox` for your next launch');
+  });
+
+  it('networkAccess true under workspace-write: the short bullet, which names the key and not network access', () => {
+    const { markdown } = composeBrief({ ...base, runner: { kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write', networkAccess: true } }, { fallbackPath: '/x' });
+    const d = done(markdown);
+    for (const s of ['`runner.codex.networkAccess` is on', 'may still be refused', 'package store outside', 'after you submit', 'do not wait', 'A login, a credential']) expect(d, s).toContain(s);
+    expect(d).not.toContain('no network access');
+    expect(d).not.toContain('Your commands have network access');
+    const text = bulletOf(markdown, 'may still be refused');
+    for (const s of forbidden) expect(text, s).not.toContain(s);
+  });
+
+  it('danger-full-access, another kind, or no networkAccess field: neither bullet', () => {
+    for (const runner of [
+      { kind: 'codex', commitPolicy: 'agent', sandbox: 'danger-full-access', networkAccess: true },
+      { kind: 'opencode', commitPolicy: 'agent', networkAccess: false },
+      { kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write' },
+    ] as const) {
+      const { markdown } = composeBrief({ ...base, runner }, { fallbackPath: '/x' });
+      expect(markdown, JSON.stringify(runner)).not.toContain('no network access');
+      expect(markdown, JSON.stringify(runner)).not.toContain('may still be refused');
+    }
+  });
+
+  it('with no check command the bullets speak of the test suite and promise no daemon check', () => {
+    const off = composeBrief({ ...base, checkCommand: undefined, runner: { kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write', networkAccess: false } }, { fallbackPath: '/x' });
+    const d = done(off.markdown);
+    for (const s of ['no network access', 'do not wait', "the project's test suite"]) expect(d, s).toContain(s);
+    expect(d).not.toContain('outside the sandbox');
+    expect(d).not.toContain('after you submit');
+    expect(bulletOf(off.markdown, 'no network access')).toContain("Run the parts of the project's test suite that do run");
+    const on = composeBrief({ ...base, checkCommand: undefined, runner: { kind: 'codex', commitPolicy: 'daemon', sandbox: 'workspace-write', networkAccess: true } }, { fallbackPath: '/x' });
+    const d2 = done(on.markdown);
+    expect(d2).toContain('may still be refused');
+    expect(d2).not.toContain('after you submit');
+    expect(bulletOf(on.markdown, 'may still be refused')).toContain("When a part of the project's test suite is refused in this way");
+  });
+});
+
 // Golden briefs in test/fixtures/brief: the claude-code and codex files were written by the compose before opencode had a branch.
 // See specs/agent-protocol "Standalone brief" and "Check command and tool rules in the brief".
 describe('golden briefs per kind', () => {

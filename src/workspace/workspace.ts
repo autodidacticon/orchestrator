@@ -63,6 +63,8 @@ export interface BriefRunner {
   kind: RunnerKind;
   commitPolicy: CommitPolicy;
   sandbox?: CodexSandbox;
+  /** Set for codex only (codexNetworkAccess); false means the worker's commands cannot reach the network. */
+  networkAccess?: boolean;
   permission?: { mode: OpenCodePermission; bashPatterns?: string[] };
 }
 

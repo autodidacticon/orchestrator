@@ -30,6 +30,17 @@ export function defaultCodexCommit(sandbox: CodexSandbox): CommitPolicy {
   return sandbox === 'danger-full-access' ? 'agent' : 'daemon';
 }
 
+/**
+ * Whether a Codex launch's commands can reach the network, as the brief states it: danger-full-access has no sandbox;
+ * `runner.codex.networkAccess` is a `sandbox_workspace_write` key, so it counts under workspace-write only. Follows the
+ * configuration keys, not the text of a custom `runner.codex.command`. See specs/agent-protocol "Codex brief states the network limit".
+ */
+export function codexNetworkAccess(sandbox: CodexSandbox, networkAccess: boolean | undefined): boolean {
+  if (sandbox === 'danger-full-access') return true;
+  if (sandbox === 'workspace-write') return networkAccess === true;
+  return false;
+}
+
 /** The effort levels each kind's CLI accepts; a superset check, the CLI stays the final validator. See specs/worker-runners "Per-kind effort sets". */
 export const EFFORT_LEVELS_BY_KIND = {
   'claude-code': ['low', 'medium', 'high', 'xhigh', 'max'],
