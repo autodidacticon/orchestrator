@@ -48,9 +48,19 @@ Pick a worker count no larger than the run's `capacity` (from `status`), usually
 run tag such as `work-1`. Run the plugin's workflow `work.js` with the Workflow tool, passing
 the capacity so the workflow clamps the count itself:
 
+Read `workflows/work.js` from the plugin directory (`<plugin dir>/workflows/work.js`) and pass
+its whole text inline as the Workflow tool's `script` input, with these `args`:
+
 ```
-Workflow({ scriptPath: "<plugin dir>/workflows/work.js", args: { workers: 2, runTag: "work-1", capacity: <status.config.capacity.value> } })
+Workflow({ script: "<the whole text of <plugin dir>/workflows/work.js>", args: { workers: 2, runTag: "work-1", capacity: <status.config.capacity.value> } })
 ```
+
+Pass the script inline: the Workflow tool loads a `scriptPath` only from the working directory, a
+directory added with `/add-dir` (or `--add-dir`), or a path it returned earlier in the session, and
+the plugin lives outside those, so `scriptPath` with the plugin path is refused. Use
+`scriptPath: "<plugin dir>/workflows/work.js"` with the same `args` only when the plugin directory
+has been added with `/add-dir`. After one inline run the Workflow tool returns a saved script path;
+a re-run with the same run tag may pass that path as `scriptPath`.
 
 Each worker loop runs a claimer agent that claims a launch with the worker id `<runTag>-<n>`;
 when nothing is claimable it waits up to 90 seconds, reads `status`, and tries again, up to

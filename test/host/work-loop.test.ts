@@ -869,3 +869,32 @@ describe('work.mjs lease renewal (ORC-85)', () => {
     expect(stopRule).toMatch(/claimable is 0 and preparing is 0 and verifying is empty/);
   });
 });
+
+// ORC-140: Claude Code refuses a Workflow scriptPath outside the working directory and added
+// directories, so the skills pass work.js inline. See specs/host-integration "Work skill and workflow".
+describe('Claude Code skills start the work workflow inline (ORC-140)', () => {
+  const root = path.resolve(here, '../..');
+  const flat = (f: string) => readFileSync(path.join(root, f), 'utf8').replace(/\s+/g, ' ');
+  for (const skill of ['run', 'work']) {
+    it(`the ${skill} skill passes work.js as the script input and keeps scriptPath for an added plugin directory`, () => {
+      const text = flat(`hosts/claude-code/skills/${skill}/SKILL.md`);
+      for (const word of [
+        'Read `workflows/work.js` from the plugin directory',
+        "pass its whole text inline as the Workflow tool's `script` input",
+        'Workflow({ script: "<the whole text of <plugin dir>/workflows/work.js>", args: { workers: 2, runTag: "work-1"',
+        'only when the plugin directory has been added with `/add-dir`',
+        'After one inline run the Workflow tool returns a saved script path',
+        'a re-run with the same run tag may pass that path as `scriptPath`',
+      ]) expect(text, `${skill}: ${word}`).toContain(word);
+      expect(text).not.toContain('Workflow({ scriptPath:');
+    });
+  }
+  it('the file the skills name, workflows/work.js, is in the plugin directory the package ships', () => {
+    const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { files: string[] };
+    const marketplace = JSON.parse(readFileSync(path.join(root, '.claude-plugin/marketplace.json'), 'utf8')) as { plugins: Array<{ source: string }> };
+    const pluginDir = path.posix.normalize(marketplace.plugins[0]!.source);
+    expect(pluginDir).toBe('hosts/claude-code');
+    expect(pkg.files.some((f) => pluginDir === f || pluginDir.startsWith(`${f.replace(/\/$/, '')}/`))).toBe(true);
+    expect(existsSync(path.join(root, pluginDir, 'workflows/work.js'))).toBe(true);
+  });
+});
