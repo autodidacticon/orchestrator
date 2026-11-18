@@ -4,6 +4,9 @@
  * configuration and the launch. See specs/toolchain-discovery "Runner command
  * composition" and specs/model-selection.
  */
+import path from 'node:path';
+import type { Launch } from '../state/store.js';
+
 export const ALLOWED_TOOLS_SLOT = '{allowedTools}';
 export const MODEL_SLOT = '{model}';
 export const EFFORT_SLOT = '{effort}';
@@ -45,4 +48,28 @@ export function hasEffortSlot(template: string): boolean {
 /** Each rule double-quoted, space-separated; rules are validated as safe before they get here. */
 export function quoteRules(rules: readonly string[]): string {
   return rules.map((r) => `"${r}"`).join(' ');
+}
+
+/**
+ * Fill a template's `{name}` slots from `vars`; a slot with no value is left as written. Every runner and the remote
+ * worker loop (src/worker/loop.ts) compose their command through this one function. See specs/worker-pool "Agent command".
+ */
+export function substitute(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? (vars[k] as string) : m));
+}
+
+/** The slots every template gets from the launch alone: paths under `.orchestrator/`, ids, model, and effort. */
+export function fixedSlots(launch: Pick<Launch, 'worktree' | 'launchId' | 'taskId' | 'model' | 'effort'>): Record<string, string> {
+  const orchDir = path.join(launch.worktree, '.orchestrator');
+  return {
+    brief: path.join(orchDir, 'brief.md'),
+    briefJson: path.join(orchDir, 'brief.json'),
+    worktree: launch.worktree,
+    launchId: launch.launchId,
+    taskId: launch.taskId,
+    mcpConfig: path.join(orchDir, 'mcp.json'),
+    // Fixed on the launch at preparation; validated as safe tokens before they got there. See specs/model-selection.
+    model: launch.model ?? '',
+    effort: launch.effort ?? '',
+  };
 }

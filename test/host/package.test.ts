@@ -13,8 +13,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { bin: Record<string, string>; exports: Record<string, { types?: string; default?: string } | string> };
 
 describe('package entrypoints', () => {
-  it('declares five executables and the subpath exports', () => {
-    expect(Object.keys(pkg.bin).sort()).toEqual(['orchestrator', 'orchestrator-ctl', 'orchestrator-mcp', 'orchestrator-mcp-shim', 'orchestrator-work']);
+  it('declares six executables and the subpath exports', () => {
+    expect(Object.keys(pkg.bin).sort()).toEqual(['orchestrator', 'orchestrator-ctl', 'orchestrator-mcp', 'orchestrator-mcp-shim', 'orchestrator-work', 'orchestrator-worker']);
+    // The remote worker loop is built from src. See specs/worker-pool "Worker loop".
+    expect(pkg.bin['orchestrator-worker']).toBe('dist/src/worker/loop.js');
     // The Codex work loop ships as a host script, not from dist. See specs/host-integration "Codex work loop".
     expect(pkg.bin['orchestrator-work']).toBe('hosts/codex/bin/work.mjs');
     expect(existsSync(path.join(root, pkg.bin['orchestrator-work'] as string))).toBe(true);

@@ -23,7 +23,7 @@ export function shimCommand(): { command: string; args: string[] } {
  * The shim's variables for a launch: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN, ORCH_RETRY_WINDOW_MS,
  * ORCH_COMMIT_POLICY when the agent environment carries it, then `extra`.
  */
-export function shimEnv(launch: Launch, env: Record<string, string>, retryWindowMs: number, extra?: Record<string, string>): Record<string, string> {
+export function shimEnv(launch: Pick<Launch, 'launchId' | 'token'>, env: Record<string, string>, retryWindowMs: number, extra?: Record<string, string>): Record<string, string> {
   return {
     ORCH_API: env['ORCH_API'] ?? '',
     ORCH_LAUNCH_ID: launch.launchId,

@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { withoutStore } from '../runs/childEnv.js';
 import type { Launch } from '../state/store.js';
 import type { AgentRunner, Liveness, SpawnResult } from './runner.js';
-import { quoteRules } from './command.js';
+import { fixedSlots, quoteRules, substitute } from './command.js';
 
 const execFileP = promisify(execFile);
 
@@ -27,25 +27,8 @@ export interface SubprocessRunnerOptions {
   compose?: (launch: Launch) => string;
 }
 
-export function substitute(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in vars ? (vars[k] as string) : m));
-}
-
-/** The slots every template gets from the launch alone: paths under `.orchestrator/`, ids, model, and effort. */
-export function fixedSlots(launch: Pick<Launch, 'worktree' | 'launchId' | 'taskId' | 'model' | 'effort'>): Record<string, string> {
-  const orchDir = path.join(launch.worktree, '.orchestrator');
-  return {
-    brief: path.join(orchDir, 'brief.md'),
-    briefJson: path.join(orchDir, 'brief.json'),
-    worktree: launch.worktree,
-    launchId: launch.launchId,
-    taskId: launch.taskId,
-    mcpConfig: path.join(orchDir, 'mcp.json'),
-    // Fixed on the launch at preparation; validated as safe tokens before they got there. See specs/model-selection.
-    model: launch.model ?? '',
-    effort: launch.effort ?? '',
-  };
-}
+/** The template substitution and the per-launch slots live in command.ts with the templates; re-exported for existing callers. */
+export { fixedSlots, substitute } from './command.js';
 
 export function logPath(logDir: string, launchId: string): string {
   return path.join(logDir, `${launchId}.log`);
