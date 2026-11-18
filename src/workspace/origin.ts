@@ -198,6 +198,26 @@ export class Origin {
     this.lastFetchAt = this.now();
   }
 
+  /**
+   * Fetch origin's `refs/heads/<branch>` into the clone's `refs/heads/<branch>` (forced) and answer its tip, or
+   * undefined when origin has no such branch. Runs on the serial chain like every other remote command; the integration
+   * branch's tracking ref and the fetch interval are left alone. Throws `OriginFetchError` (refused or unreachable) when
+   * the fetch fails otherwise. See specs/remote-workspace "Seal".
+   */
+  fetchBranch(branch: string): Promise<string | undefined> {
+    return this.serial(async () => {
+      await this.ensure();
+      const ref = `refs/heads/${branch}`;
+      const r = await this.remoteGit(['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', this.remote, `+${ref}:${ref}`]);
+      if (r.code !== 0) {
+        // The answer comes from origin, never from a ref an earlier fetch left in the clone.
+        if (!r.timedOut && /couldn't find remote ref/i.test(r.stderr)) return undefined;
+        throw new OriginFetchError(`git fetch ${this.remote} ${ref} failed: ${r.stderr.trim() || r.stdout.trim()}`, classifyFetchFailure(r.stderr, r.timedOut));
+      }
+      return revParse(this.repo, ref);
+    });
+  }
+
   /** Fetch unless one ran within `fetchIntervalMs`; a failed fetch keeps the last observed head. */
   async maybeFetch(opts: { awaitFetch?: boolean } = {}): Promise<void> {
     if (this.now() - this.lastFetchAt < (this.opts.fetchIntervalMs ?? 0)) return;

@@ -586,7 +586,10 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   tool(
     'launch_report',
     {
-      description: 'Worker: final report for a claimed launch. kind=submit needs a committed, clean worktree (409 with the dirty files otherwise: commit and call again with the same seq); kind=fail gives up. seq increases per call.',
+      description:
+        'Worker: final report for a claimed launch. kind=submit needs a committed, clean worktree (409 with the dirty files otherwise: commit and call again with the same seq); ' +
+        'on a remote launch it needs sealedSha, the launch branch tip pushed to origin (409 branchNotPushed or shaMismatch otherwise, 503 when origin cannot be fetched: call again with the same seq). ' +
+        'kind=fail gives up. seq increases per call.',
       inputSchema: {
         ...scoped,
         seq: z.number().int().nonnegative(),
@@ -599,6 +602,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
         tests: z.array(z.string()).optional(),
         acceptance: z.array(z.object({ criterion: z.string(), evidence: z.string() })).optional(),
         noChanges: z.object({ justification: z.string() }).optional(),
+        sealedSha: z.string().optional().describe('Remote launch: the full sha of the launch branch tip pushed to origin. Ignored on a local launch.'),
         proposals: z.array(z.object({ title: z.string(), description: z.string(), acceptanceCriteria: z.array(z.string()), deps: z.array(z.string()).optional(), scope: z.array(z.string()).optional(), labels: z.array(z.string()).optional() })).optional(),
         tried: z.string().optional(),
         why: z.string().optional(),

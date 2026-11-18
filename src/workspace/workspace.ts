@@ -7,11 +7,23 @@ import type { CodexSandbox, CommitPolicy, OpenCodePermission, RunnerKind } from 
 import type { Launch, StoredReport } from '../state/store.js';
 
 /** `committed` when the daemon committed a dirty worktree under the `daemon` commit policy. */
-export type SealResult = { ok: true; sealedSha: string; committed?: true } | { ok: false; dirty: string[] };
+export type SealResult = { ok: true; sealedSha: string; committed?: true } | { ok: false; dirty: string[] } | RemoteSealRefusal;
+
+/**
+ * Why the seal of a remote submit was refused: the launch branch is not on origin, origin holds another tip than the
+ * reported `sealedSha`, or origin could not be fetched (nothing is recorded, so the worker may retry).
+ * See specs/remote-workspace "Seal".
+ */
+export type RemoteSealRefusal =
+  | { ok: false; reason: 'branchNotPushed'; branch: string }
+  | { ok: false; reason: 'shaMismatch'; branch: string; expected: string; actual: string }
+  | { ok: false; reason: 'originUnreachable' | 'originRefused'; branch: string; message: string };
 
 export interface SealOptions {
   /** Commit a dirty worktree (minus `.orchestrator/`) as the orchestrator instead of refusing it. See specs/agent-protocol "Submission sealing". */
   autoCommit?: { message: string };
+  /** The tip the worker pushed, as its submit reports it. A remote seal compares origin's branch tip with it; a local seal ignores it. */
+  sealedSha?: string;
 }
 
 export interface PreserveOptions {

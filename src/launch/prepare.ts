@@ -266,7 +266,7 @@ async function settleJob(o: Orchestrator, job: PrepareJob): Promise<void> {
   let error: string | undefined;
   try {
     const sealed = await o.workspace.seal(row);
-    if (!sealed.ok) dirty = sealed.dirty.slice(0, PREPARE_DIRTY_NAMED);
+    if (!sealed.ok && 'dirty' in sealed) dirty = sealed.dirty.slice(0, PREPARE_DIRTY_NAMED);
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   }

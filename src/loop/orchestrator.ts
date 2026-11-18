@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { alwaysValid, type BriefValidator, noRemediation, type Remediator } from '../brief/validate.js';
 import { renewEveryMsOf } from '../brief/compose.js';
 import { scrubCarry } from '../brief/lost.js';
-import { checkSubmission } from '../agent/seal.js';
+import { checkSubmission, remoteSealedSha } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
 import { commitPolicyOfKind, type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, remoteAccessError, RUNNER_ACCESSES, storeDurabilityWarning } from '../config.js';
 import { type Gap, GapClock, noteIntervalMs } from '../health/gaps.js';
@@ -39,7 +39,7 @@ import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
 import { Origin } from '../workspace/origin.js';
-import { workspaceByAccess } from '../workspace/remote-workspace.js';
+import { RemoteWorkspace, workspaceByAccess } from '../workspace/remote-workspace.js';
 import { gateOnDurable, RUNNER_METHODS, StoreFatalError, storeLag, VERIFIER_METHODS, waitDurable, WORKSPACE_METHODS } from '../state/gate.js';
 import type { BriefInput, FallbackReport, SealResult, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
@@ -133,6 +133,18 @@ export type ReopenResult =
 const DEFERRED_RETRY_MS = 1000;
 /** Failure kinds of a check run that a gap in the daemon's clock may have caused. See specs/integration-pipeline "Failed check across a gap". */
 const GAP_REQUEUE_KINDS: ReadonlySet<string> = new Set(['checkFailed', 'checkTimeout']);
+
+/**
+ * The answer to a refused seal. A dirty worktree, a launch branch missing from origin, and another tip on origin than
+ * the reported one answer 409; origin that cannot be fetched answers 503. See specs/agent-protocol "Submission sealing"
+ * and specs/remote-workspace "Seal".
+ */
+export function sealRefusal(seal: Exclude<SealResult, { ok: true }>): ApiResponse {
+  if ('dirty' in seal) return { status: 409, body: { error: 'dirtyWorktree', files: seal.dirty } };
+  const { ok: _ok, ...detail } = seal;
+  const status = seal.reason === 'branchNotPushed' || seal.reason === 'shaMismatch' ? 409 : 503;
+  return { status, body: { error: seal.reason, ...detail } };
+}
 
 /** The inbox's answer to a caller that went away during its durable wait: nobody reads it, and nothing was removed. */
 const INBOX_CALLER_GONE: ApiResponse = { status: 499, body: { error: 'the caller went away; the notices stay for the next read' } };
@@ -397,7 +409,8 @@ export class Orchestrator implements OrchestratorCore {
     this.origin = origin;
     this.runner = gateOnDurable(this.store, deps.runner, RUNNER_METHODS);
     // Launch-side calls go to the workspace of the launch's access; the clone's own workspace keeps the integration branch. See specs/remote-workspace.
-    this.workspace = gateOnDurable(this.store, workspaceByAccess(deps.workspace), WORKSPACE_METHODS);
+    // A remote launch is sealed through origin. See specs/remote-workspace "Seal".
+    this.workspace = gateOnDurable(this.store, workspaceByAccess(deps.workspace, new RemoteWorkspace(origin)), WORKSPACE_METHODS);
     this.verifier = gateOnDurable(this.store, deps.verifier, VERIFIER_METHODS);
     this.graphSource = deps.graphSource;
     this.policy = deps.policy ?? chainPolicy(this.config);
@@ -915,9 +928,12 @@ export class Orchestrator implements OrchestratorCore {
   /**
    * Seal a submission under the launch's commit policy: `agent` refuses a dirty
    * worktree, `daemon` commits it as the orchestrator with the report summary as
-   * the message. See specs/agent-protocol "Submission sealing".
+   * the message. A remote launch is sealed against the `sealedSha` its worker reported, through origin; the commit
+   * policy does not apply because the daemon holds no tree. See specs/agent-protocol "Submission sealing" and
+   * specs/remote-workspace "Seal".
    */
-  async sealSubmission(launch: Launch, summary: unknown): Promise<SealResult> {
+  async sealSubmission(launch: Launch, summary: unknown, sealedSha?: string): Promise<SealResult> {
+    if (accessOf(launch) === 'remote') return this.workspace.seal(launch, { sealedSha });
     if (commitPolicyOf(launch) !== 'daemon') return this.workspace.seal(launch);
     const message = typeof summary === 'string' && summary.trim() ? summary : `${launch.taskId}: work committed by the orchestrator at submit`;
     return this.workspace.seal(launch, { autoCommit: { message } });
@@ -1485,8 +1501,17 @@ export class Orchestrator implements OrchestratorCore {
       return { status: 400, body: { error: 'malformed', issues: [{ path: ['proposals', badDep.index, 'deps'], message: `proposal "${badDep.title}" depends on ${badDep.dep}, which is not in the graph` }] } };
     }
 
-    const seal = await this.sealSubmission(launch, parsed.data.summary);
-    if (!seal.ok) return { status: 409, body: { error: 'dirtyWorktree', files: seal.dirty } };
+    // A remote submit names the tip it pushed; a local one is sealed from its worktree and any sealedSha is ignored.
+    let reportedSha: string | undefined;
+    if (accessOf(launch) === 'remote') {
+      const s = remoteSealedSha(body['sealedSha']);
+      if (!s.ok) return { status: 400, body: { error: s.error, field: s.field } };
+      reportedSha = s.sealedSha;
+    }
+
+    // A refused seal records nothing (no event, no dedup), so the same seq may be sent again once the cause is fixed.
+    const seal = await this.sealSubmission(launch, parsed.data.summary, reportedSha);
+    if (!seal.ok) return sealRefusal(seal);
 
     const res = this.store.transaction((): ApiResponse => {
       // The seal awaited git: recovery or the tick may have revoked this launch and relaunched the task meanwhile.

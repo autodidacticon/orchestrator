@@ -43,3 +43,16 @@ export function checkSubmission(input: SubmissionCheckInput): SubmissionCheck {
   }
   return { ok: true };
 }
+
+/**
+ * The `sealedSha` of a remote submit: the full hex object name of the tip the worker pushed, lower-cased. A 400 names
+ * the field when it is missing or not a full object name. A local submit never calls this: its `sealedSha` is ignored.
+ * See specs/agent-protocol "Submission sealing" and specs/remote-workspace "Seal".
+ */
+export function remoteSealedSha(raw: unknown): { ok: true; sealedSha: string } | { ok: false; error: string; field: 'sealedSha' } {
+  if (raw === undefined || raw === null || raw === '') return { ok: false, error: 'sealedSha is required on the submit of a remote launch: the sha of the launch branch tip pushed to origin', field: 'sealedSha' };
+  if (typeof raw !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(raw.trim())) {
+    return { ok: false, error: 'sealedSha must be the full hex object name of the pushed launch branch tip', field: 'sealedSha' };
+  }
+  return { ok: true, sealedSha: raw.trim().toLowerCase() };
+}

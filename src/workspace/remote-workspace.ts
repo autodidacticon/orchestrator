@@ -5,6 +5,7 @@
  */
 import type { Id } from '../graph/model.js';
 import { accessOf, type Launch } from '../state/store.js';
+import { type Origin, OriginConfigError, OriginFetchError } from './origin.js';
 import type { BriefInput, FallbackReport, PreserveOptions, RemoveOptions, SealOptions, SealResult, TagPushResult, Workspace } from './workspace.js';
 
 /** The error a tree-bound call raises for a remote launch. */
@@ -13,6 +14,9 @@ export function noWorktreeError(launch: Launch): Error {
 }
 
 export class RemoteWorkspace implements Workspace {
+  /** `origin`: the daemon's remote, through which a remote submit is sealed. Without it a seal refuses. */
+  constructor(private readonly origin?: Origin) {}
+
   /** The integration branch belongs to the daemon's own workspace, never to a remote launch. */
   async integrationHead(): Promise<string> {
     throw new Error('the remote workspace holds no integration branch; ask the daemon workspace');
@@ -21,8 +25,28 @@ export class RemoteWorkspace implements Workspace {
   /** The brief lives on the launch row (`briefMarkdown`, `briefJson`), composed by prepareLaunch. */
   async prepare(_launch: Launch, _brief: BriefInput): Promise<void> {}
 
-  async seal(launch: Launch, _opts?: SealOptions): Promise<SealResult> {
-    throw noWorktreeError(launch);
+  /**
+   * Seal a remote submit: fetch the launch branch from origin into the daemon's clone and compare its tip with the
+   * `sealedSha` the worker reported. There is no tree to inspect or commit, so `autoCommit` does not apply. Without a
+   * `sealedSha` or an origin there is nothing to seal against, and the call rejects as a tree-bound call does.
+   * See specs/remote-workspace "Seal".
+   */
+  async seal(launch: Launch, opts: SealOptions = {}): Promise<SealResult> {
+    const expected = opts.sealedSha;
+    if (expected === undefined || !this.origin) throw noWorktreeError(launch);
+    const branch = launch.branch;
+    let actual: string | undefined;
+    try {
+      actual = await this.origin.fetchBranch(branch);
+    } catch (err) {
+      // A remote that is not configured cannot be fetched either; like an unreachable one, nothing is recorded.
+      if (err instanceof OriginConfigError) return { ok: false, reason: 'originUnreachable', branch, message: err.message };
+      if (!(err instanceof OriginFetchError)) throw err;
+      return { ok: false, reason: err.kind === 'refused' ? 'originRefused' : 'originUnreachable', branch, message: err.message };
+    }
+    if (actual === undefined) return { ok: false, reason: 'branchNotPushed', branch };
+    if (actual !== expected) return { ok: false, reason: 'shaMismatch', branch, expected, actual };
+    return { ok: true, sealedSha: actual };
   }
 
   async readFallback(launch: Launch): Promise<FallbackReport | undefined> {
