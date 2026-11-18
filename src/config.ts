@@ -160,6 +160,8 @@ export const configSchema = z.object({
     .object({
       /** The URL of the clone's `origin` remote; set, the remote is added or re-pointed to it. Unset, the clone's existing `origin` is used. The remote is set only while pushIntegration is on, but under store.kind postgres the URL is also hashed for the run id whatever pushIntegration says (see src/runs/runDir.ts chooseRunId). */
       originUrl: z.string().min(1).optional(),
+      /** The URL a remote worker clones and pushes to, given as `repoUrl` in a remote claim; unset, `originUrl` is given, else the URL of the clone's `origin` remote. Passed through as written (user information included). Read at start; never hashed for the run id. See specs/pull-runner "Claim". */
+      workerOriginUrl: z.string().min(1).optional(),
       /** Origin is the source of truth: the verifier fetches before each job and pushes each publication with a lease, base selection reads origin's head, and milestone tags are pushed. Off, no git command contacts a remote. */
       pushIntegration: z.boolean().default(false),
       /** How often base selection and milestone pinning may fetch origin; 0 fetches on every read. The verifier fetches at every job. */

@@ -30,7 +30,8 @@ import {
   type StatusKind,
   type InterruptedContext,
 } from '../state/status.js';
-import { type Attachment, commitPolicyOf, type Launch, type RunnerMode, runIdOf, runnerOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
+import { git } from '../workspace/git.js';
+import { accessOf, type Attachment, commitPolicyOf, type Launch, type RunnerMode, runIdOf, runnerOf, setRunId, type Store, type TrackerRecord, trackerOf, type VerifierJob } from '../state/store.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { CascadeStep } from '../graph/query.js';
@@ -1919,11 +1920,14 @@ export class Orchestrator implements OrchestratorCore {
       this.store.appendEvent({ kind: 'launch.claimed', taskId: launch!.taskId, launchId: launch!.launchId, payload: { workerId, access } }, now);
     });
     crashPoint('claim.afterRecord');
-    // A baseline fingerprint so a release can tell whether the worker touched the tree.
-    try {
-      this.store.updateLaunch(launch.launchId, { fingerprint: await this.workspace.fingerprint(launch) });
-    } catch {
-      /* no worktree in logic tests */
+    // A baseline fingerprint so a release can tell whether the worker touched the tree. A remote launch has no tree on
+    // this host: it records none, and only the worker's calls show progress. See specs/pull-runner "Claim".
+    if (accessOf(launch) !== 'remote') {
+      try {
+        this.store.updateLaunch(launch.launchId, { fingerprint: await this.workspace.fingerprint(launch) });
+      } catch {
+        /* no worktree in logic tests */
+      }
     }
     const claimed = this.store.getLaunch(launch.launchId) ?? launch;
     this.wake();
@@ -1931,6 +1935,11 @@ export class Orchestrator implements OrchestratorCore {
   }
 
   private async claimResponse(launch: Launch, repeated: boolean): Promise<Record<string, unknown>> {
+    return accessOf(launch) === 'remote' ? this.remoteClaimResponse(launch, repeated) : this.localShapedResponse(launch, repeated);
+  }
+
+  /** The claim response of a local launch, read from its worktree. */
+  private async localShapedResponse(launch: Launch, repeated: boolean): Promise<Record<string, unknown>> {
     const dir = path.join(launch.worktree, '.orchestrator');
     let brief: unknown;
     try {
@@ -1973,6 +1982,35 @@ export class Orchestrator implements OrchestratorCore {
         : {}),
       ...(pending ? { pending } : {}),
     };
+  }
+
+  /**
+   * The claim response of a remote launch: every field of a local one but `worktree` and `briefPath`, plus the URL to
+   * clone, the integration branch and the brief from the launch row (never read from disk). `carry` is the stored
+   * brief's context when it holds `interrupted`, so a repeated claim answers the same. See specs/pull-runner "Claim".
+   */
+  private async remoteClaimResponse(launch: Launch, repeated: boolean): Promise<Record<string, unknown>> {
+    const { worktree: _worktree, briefPath: _briefPath, brief: _brief, ...rest } = await this.localShapedResponse(launch, repeated);
+    const context = launch.briefJson?.['context'] as Record<string, unknown> | undefined;
+    const repoUrl = await this.workerRepoUrl();
+    return {
+      ...rest,
+      access: 'remote',
+      ...(repoUrl !== undefined ? { repoUrl } : {}),
+      integrationBranch: this.config.integrationBranch,
+      brief: launch.briefJson,
+      briefMarkdown: launch.briefMarkdown,
+      ...(context && context['interrupted'] ? { carry: context } : {}),
+    };
+  }
+
+  /** The URL a remote worker clones: `git.workerOriginUrl`, else `git.originUrl`, else the clone's `origin` remote; as written. */
+  private async workerRepoUrl(): Promise<string | undefined> {
+    const configured = this.config.git.workerOriginUrl ?? this.config.git.originUrl;
+    if (configured) return configured;
+    const r = await git(this.config.repoPath, ['remote', 'get-url', 'origin'], { allowFail: true });
+    const url = r.stdout.trim();
+    return r.code === 0 && url ? url : undefined;
   }
 
   /**
