@@ -22,6 +22,8 @@ const NON_TERMINAL: readonly StatusKind[] = ['unstarted', 'running', 'waiting', 
 
 export const TRANSITIONS: readonly TransitionRow[] = [
   { from: 'unstarted', to: 'blocked', actor: 'orchestrator', nodeKind: 'task', trigger: 'briefValidationFailed', effects: [] },
+  // A remote run's task whose runner kind has commit policy daemon: no daemon holds its tree to commit. See specs/pull-runner "Remote run requirements".
+  { from: 'unstarted', to: 'blocked', actor: 'orchestrator', nodeKind: 'task', trigger: 'remoteNeedsAgentCommit', effects: [] },
   { from: 'unstarted', to: 'running', actor: 'orchestrator', nodeKind: 'task', trigger: 'admitted', effects: ['launches++'] },
   { from: 'running', to: 'submitted', actor: 'agent', nodeKind: 'task', trigger: 'submit', effects: [] },
   { from: 'running', to: 'failed', actor: 'agent', nodeKind: 'task', trigger: 'fail', effects: ['attempts++'] },

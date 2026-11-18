@@ -9,7 +9,7 @@ import { renewEveryMsOf } from '../brief/compose.js';
 import { scrubCarry } from '../brief/lost.js';
 import { checkSubmission } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
-import { type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, remoteAccessError, RUNNER_ACCESSES, storeDurabilityWarning } from '../config.js';
+import { commitPolicyOfKind, type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, remoteAccessError, RUNNER_ACCESSES, storeDurabilityWarning } from '../config.js';
 import { type Gap, GapClock, noteIntervalMs } from '../health/gaps.js';
 import { classifyReload, type ReloadReason } from '../graph/diff.js';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
@@ -51,7 +51,7 @@ import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, exceedsTimeBudget, 
 import { recordSignal } from '../health/progress.js';
 import { exceedsStuckFail, humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, type Overrides, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS, type WouldEnd } from '../runs/resolve.js';
-import { codexNetworkAccess, type CommitPolicy, defaultCodexCommit, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, type OpenCodePermission, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
+import { codexNetworkAccess, type CommitPolicy, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, type OpenCodePermission, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
 import { isolationEnv } from '../runs/childEnv.js';
 import { bashPatterns } from '../runner/opencode.js';
 import { composeAllowedTools } from '../toolchain/tools.js';
@@ -908,8 +908,7 @@ export class Orchestrator implements OrchestratorCore {
   commitPolicyFor(kind: RunnerKind): CommitPolicy {
     const eff = this.effective();
     // Only codex derives its policy (from the sandbox); the other kinds read their own `commit` leaf.
-    if (kind === 'codex') return eff.config.runner.codex.commit ?? defaultCodexCommit(eff.config.runner.codex.sandbox);
-    return kind === 'opencode' ? eff.config.runner.opencode.commit : eff.config.runner.claude.commit;
+    return commitPolicyOfKind(eff.config, kind);
   }
 
   /**
@@ -2437,7 +2436,9 @@ export class Orchestrator implements OrchestratorCore {
 
   async start(): Promise<void> {
     // Remote access needs a pull run with origin as the source of truth and no prepare command. See specs/pull-runner "Access modes".
-    const accessError = remoteAccessError(this.config, this.effectiveMode());
+    // The kind and its commit policy in force count, as the mode does.
+    const eff = this.effective();
+    const accessError = remoteAccessError({ ...this.config, runner: { ...eff.config.runner, kind: eff.kind.value, access: this.config.runner.access } }, this.effectiveMode());
     if (accessError) {
       this.log.error(accessError, { access: this.config.runner.access, mode: this.effectiveMode(), pushIntegration: this.config.git.pushIntegration, prepareCommand: this.config.prepareCommand !== undefined });
       throw new Error(accessError);

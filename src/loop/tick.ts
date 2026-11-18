@@ -488,6 +488,15 @@ export async function admitAndLaunch(o: Orchestrator): Promise<void> {
 
   for (const id of admission.launches) {
     if (o.inHold()) return;
+    // A remote worker commits and pushes its own work, so a kind whose commit policy is daemon cannot run on a remote run; no launch is created. See specs/pull-runner "Remote run requirements".
+    if (o.config.runner.access === 'remote') {
+      const kind = o.selectionFor(id).runner;
+      if (o.commitPolicyFor(kind) === 'daemon') {
+        const message = `runner kind ${kind} has commit policy daemon, and a remote worker must commit and push its own work: set runner.${kind === 'claude-code' ? 'claude' : kind}.commit to agent or relabel the task`;
+        o.transition(id, { kind: 'blocked', reason: { kind: 'remoteNeedsAgentCommit', message } }, 'orchestrator', 'remoteNeedsAgentCommit', undefined, { runner: kind });
+        continue;
+      }
+    }
     const node = o.requireNode(id);
     const payload = o.payloadOf(node);
     const v = o.briefValidator.validate(node, payload);

@@ -32,6 +32,7 @@ function fixture(): { dir: string; repo: string; bare: string } {
 const health = { stuckAfterMs: 0, stuckFailAfterMs: 0, reportGraceMs: 0 };
 const remoteRun = (bare: string) => ({
   leaseTtlMs: 60_000,
+  apiBaseUrl: 'http://orchestrator.example:8080',
   runner: { mode: 'pull' as const, access: 'remote' as const, claimWindowMs: 60_000 },
   git: { pushIntegration: true, originUrl: bare, fetchIntervalMs: 0 },
   health,
@@ -62,10 +63,15 @@ describe('config: runner.access', () => {
   });
 
   it('lists every unmet condition of a remote run', () => {
-    const ok = defaultConfig({ runner: { mode: 'pull', access: 'remote' }, git: { pushIntegration: true } });
+    const ok = defaultConfig({ runner: { mode: 'pull', access: 'remote' }, git: { pushIntegration: true }, apiBaseUrl: 'http://orchestrator.example:8080' });
     expect(remoteAccessProblems(ok)).toEqual([]);
     const bad = defaultConfig({ runner: { mode: 'spawn', access: 'remote' }, prepareCommand: 'npm ci' });
-    expect(remoteAccessProblems(bad)).toEqual(['runner.mode must be pull, not spawn', 'git.pushIntegration must be true', 'prepareCommand must be unset']);
+    expect(remoteAccessProblems(bad)).toEqual([
+      'runner.mode must be pull, not spawn',
+      'git.pushIntegration must be true',
+      'prepareCommand must be unset',
+      'apiBaseUrl must be set to the URL remote workers reach the daemon at',
+    ]);
     expect(remoteAccessProblems(defaultConfig({ runner: { mode: 'spawn' }, prepareCommand: 'x' }))).toEqual([]);
   });
 });

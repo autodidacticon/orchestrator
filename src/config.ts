@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import { renewEveryMsOf } from './brief/compose.js';
 import { DEFAULT_CLAUDE_COMMAND } from './runner/command.js';
-import { anyModelSchema, CODEX_SANDBOXES, COMMIT_POLICIES, DEFAULT_EFFORT, DEFAULT_MODEL_BY_KIND, effortSchemaFor, modelSchemaFor, OPENCODE_DATA_DIRS, OPENCODE_PERMISSIONS, RUNNER_KINDS } from './runner/selection.js';
+import { anyModelSchema, CODEX_SANDBOXES, type CommitPolicy, COMMIT_POLICIES, defaultCodexCommit, DEFAULT_EFFORT, DEFAULT_MODEL_BY_KIND, effortSchemaFor, modelSchemaFor, OPENCODE_DATA_DIRS, OPENCODE_PERMISSIONS, RUNNER_KINDS } from './runner/selection.js';
 import { isSafeRule } from './toolchain/tools.js';
 
 /** Admission ordering stages. See specs/scheduling-policy "Ordering chain". */
@@ -315,17 +315,30 @@ export type Config = z.infer<typeof configSchema>;
  * Why `runner.access: remote` cannot run under this configuration and runner mode: one line per unmet condition, empty
  * when it can (or under `local`). See specs/pull-runner "Access modes".
  */
-export function remoteAccessProblems(cfg: Pick<Config, 'runner' | 'git' | 'prepareCommand'>, mode: string = cfg.runner.mode): string[] {
+export function remoteAccessProblems(cfg: Pick<Config, 'runner' | 'git' | 'prepareCommand' | 'apiBaseUrl'>, mode: string = cfg.runner.mode): string[] {
   if (cfg.runner.access !== 'remote') return [];
   const problems: string[] = [];
   if (mode !== 'pull') problems.push(`runner.mode must be pull, not ${mode}`);
   if (!cfg.git.pushIntegration) problems.push('git.pushIntegration must be true');
   if (cfg.prepareCommand !== undefined) problems.push('prepareCommand must be unset');
+  // A remote brief names apiBaseUrl as the API: the bind address is not reachable from another machine. See specs/agent-protocol "Standalone brief".
+  if (!cfg.apiBaseUrl) problems.push('apiBaseUrl must be set to the URL remote workers reach the daemon at');
+  // A remote worker commits and pushes its own work: no daemon holds its tree to commit it. See specs/pull-runner "Remote run requirements".
+  const kind = cfg.runner.kind;
+  if (commitPolicyOfKind(cfg, kind) === 'daemon') problems.push(`the commit policy of runner.kind ${kind} must be agent, not daemon (set ${commitKey(kind)}: agent)`);
   return problems;
 }
 
+/** The commit policy a runner kind's configuration gives: codex derives it from its sandbox when `runner.codex.commit` is unset. See specs/worker-runners "Sandbox and commit policy". */
+export function commitPolicyOfKind(cfg: Pick<Config, 'runner'>, kind: (typeof RUNNER_KINDS)[number]): CommitPolicy {
+  if (kind === 'codex') return cfg.runner.codex.commit ?? defaultCodexCommit(cfg.runner.codex.sandbox);
+  return kind === 'opencode' ? cfg.runner.opencode.commit : cfg.runner.claude.commit;
+}
+
+const commitKey = (kind: (typeof RUNNER_KINDS)[number]): string => `runner.${kind === 'claude-code' ? 'claude' : kind}.commit`;
+
 /** The startup refusal for `remoteAccessProblems`, naming each unmet condition; undefined when there are none. */
-export function remoteAccessError(cfg: Pick<Config, 'runner' | 'git' | 'prepareCommand'>, mode?: string): string | undefined {
+export function remoteAccessError(cfg: Pick<Config, 'runner' | 'git' | 'prepareCommand' | 'apiBaseUrl'>, mode?: string): string | undefined {
   const problems = remoteAccessProblems(cfg, mode);
   return problems.length ? `runner.access remote refused: ${problems.join('; ')}` : undefined;
 }

@@ -35,7 +35,9 @@ export type BlockedKind =
   /** Set by the verifier only: origin refused the publication push git.pushRefusalLimit times. Agents cannot block with it. */
   | 'pushRefused'
   /** Set by the orchestrator only: the prepare command failed prepareFailureLimit times in a row. Agents cannot block with it. */
-  | 'prepareFailed';
+  | 'prepareFailed'
+  /** Set by the orchestrator only: on a remote run the task's runner kind has commit policy daemon. Agents cannot block with it. */
+  | 'remoteNeedsAgentCommit';
 
 export const BLOCKED_KINDS: readonly BlockedKind[] = [
   'needsDecision',
@@ -47,6 +49,7 @@ export const BLOCKED_KINDS: readonly BlockedKind[] = [
   'milestoneRejected',
   'pushRefused',
   'prepareFailed',
+  'remoteNeedsAgentCommit',
 ];
 
 /** A question an agent asks while blocking (live or via fallback). */

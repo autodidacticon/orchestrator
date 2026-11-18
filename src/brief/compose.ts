@@ -157,6 +157,9 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
   // Without a runner the brief is the Claude Code text under the `agent` commit policy. See specs/worker-runners "Sandbox and commit policy".
   const kind = input.runner?.kind ?? 'claude-code';
   const daemonCommits = input.runner?.commitPolicy === 'daemon';
+  // A remote worker works in its own clone: no daemon path, the branch pushed to origin. See specs/agent-protocol "Standalone brief".
+  const remote = launch.access === 'remote';
+  const interrupted = input.carry?.['interrupted'] as import('../state/status.js').InterruptedContext | undefined;
   const lines: string[] = [];
   lines.push(`# Task ${node.id}: ${title}`, '');
   if (description) lines.push(description, '');
@@ -191,7 +194,17 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     '',
   );
   lines.push('## Workspace', '');
-  lines.push(`- Worktree: \`${launch.worktree}\``, `- Branch: \`${launch.branch}\``, `- Base commit: \`${launch.baseSha}\``, `- Integration branch: \`${input.integrationBranch}\``);
+  if (remote)
+    lines.push(
+      '- Clone: the current directory, a clone of the repository that the worker loop made for this launch. Run every command from its root.',
+      interrupted
+        ? `- Branch: \`${launch.branch}\`, which the worker loop creates at \`${interrupted.headSha}\`, the head of your previous launch's work, not at the base commit`
+        : `- Branch: \`${launch.branch}\`, which the worker loop creates at the base commit`,
+      `- Base commit: \`${launch.baseSha}\``,
+      `- Integration branch: \`${input.integrationBranch}\``,
+      `- Submit: commit all work on branch \`${launch.branch}\` and push it to \`origin\` (\`git push origin ${launch.branch}\`) before you call \`report\` with kind submit. The orchestrator reads your work from \`origin\`, not from your clone.`,
+    );
+  else lines.push(`- Worktree: \`${launch.worktree}\``, `- Branch: \`${launch.branch}\``, `- Base commit: \`${launch.baseSha}\``, `- Integration branch: \`${input.integrationBranch}\``);
   if (kind === 'claude-code' && input.allowedTools?.length) {
     const bash = input.allowedTools.filter((r) => r.startsWith('Bash('));
     lines.push(
@@ -269,7 +282,14 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
         `- Your previous launch \`${k.priorLaunchId}\` was interrupted (${k.reason}) and its work was kept on its branch, but that branch was lost with the orchestrator's previous clone and nothing of it remains. Start from your base commit.`,
       );
     }
-    if (c['interrupted']) {
+    if (c['interrupted'] && remote) {
+      const k = c['interrupted'] as import('../state/status.js').InterruptedContext;
+      lines.push(
+        `- Your previous launch \`${k.priorLaunchId}\` was interrupted (${k.reason}); this is interruption ${k.interruptions} for this task. Its work so far is at \`${k.headSha}\`${
+          k.wipCommit ? `, and commit \`${k.wipCommit}\` is a work-in-progress commit of changes it had not committed` : ''
+        }. Your branch \`${launch.branch}\` starts at \`${k.headSha}\` (the worker loop creates it there), not at the base commit: continue from it${k.wipCommit ? ' and squash the work-in-progress commit before submitting' : ''}, or reset it to the base commit \`${launch.baseSha}\` and start over.`,
+      );
+    } else if (c['interrupted']) {
       const k = c['interrupted'] as import('../state/status.js').InterruptedContext;
       lines.push(
         `- Your previous launch \`${k.priorLaunchId}\` was interrupted (${k.reason}); this is interruption ${k.interruptions} for this task. Its branch \`${k.priorBranch}\` holds the work so far at \`${k.headSha}\`${
@@ -329,7 +349,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
     ...(input.leaseTtlMs ? [leaseRule(input.leaseTtlMs)] : []),
     // The stuck limits and the time budget. See specs/agent-protocol "Brief states the limits in force".
     ...limitsLines(input.limits),
-    `- If the API fails for more than ${Math.round(input.retryWindowMs / 1000)}s, write your report to \`${opts.fallbackPath}\` and exit.`,
+    `- If the API fails for more than ${Math.round(input.retryWindowMs / 1000)}s, write your report to \`${opts.fallbackPath}\`${remote ? ', relative to the root of your clone,' : ''} and exit.`,
     '- If any call returns 401, stop immediately: your launch has been revoked.',
     '',
   );

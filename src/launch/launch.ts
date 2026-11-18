@@ -108,7 +108,10 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
 /** The brief of a remote launch, composed as for a worktree and kept on the row. See specs/remote-workspace "Brief on the launch row". */
 export function remoteBrief(core: OrchestratorCore, launch: Launch): { briefMarkdown: string; briefJson: Record<string, unknown> } {
   // No worktree holds a fallback file or tells whether the repository has an openspec root: the paths are relative to the worker's checkout.
-  const { markdown, json } = composeBrief(core.briefInput(launch), {
+  // The URL a remote worker reaches the daemon at is apiBaseUrl, which startup requires on a remote run; never the bind address.
+  const input = core.briefInput(launch);
+  const apiBaseUrl = core.config.apiBaseUrl ? core.config.apiBaseUrl.replace(/\/+$/, '') : input.apiBaseUrl;
+  const { markdown, json } = composeBrief({ ...input, apiBaseUrl }, {
     fallbackPath: path.join('.orchestrator', 'report.json'),
     openspec: existsSync(path.join(core.config.repoPath, 'openspec')),
   });
