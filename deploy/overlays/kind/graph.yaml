@@ -1,6 +1,7 @@
-# The kind overlay's graph: one ready task, so a pull-mode daemon parks a claimable launch for it. deploy/smoke.sh
-# works SMOKE itself (claims it, commits in the pod's worktree, submits) until it is published; SMOKE-PARKED, which
-# depends on it, is then parked and stays claimable across the restart drill. deploy/smoke.sh sends the graph with PUT /v1/graph; the daemon keeps it in the store.
+# The kind overlay's graph, sent by deploy/smoke.sh with PUT /v1/graph; the daemon keeps it in the store.
+# deploy/smoke.sh works SMOKE with one orchestrator-worker pod (ORCH_WORKER_TASK=SMOKE, ORCH_WORKER_MAX_LAUNCHES=1)
+# until it is published. SMOKE-PARKED, SMOKE-M3-A and SMOKE-M3-B, which depend on it, are then parked and stay
+# claimable through the drills; the worker Deployment, scaled to 2 after them, works all three.
 nodes:
   - id: SMOKE
     title: Smoke task
@@ -11,6 +12,18 @@ nodes:
   - id: SMOKE-PARKED
     title: Parked smoke task
     deps: [SMOKE]
-    description: Never claimed by deploy/smoke.sh; its launch stays parked across the restart drill.
+    description: Parked through the drills, whose last assertion claims it and releases it; a worker pod works it after them.
     acceptanceCriteria:
       - The launch is still claimable after the daemon restarts.
+  - id: SMOKE-M3-A
+    title: Worker pool task A
+    deps: [SMOKE]
+    description: Append a line to README.md in the fixture repository, worked by a worker pod.
+    acceptanceCriteria:
+      - README.md has one more line than before.
+  - id: SMOKE-M3-B
+    title: Worker pool task B
+    deps: [SMOKE]
+    description: Append a line to README.md in the fixture repository, worked by a worker pod.
+    acceptanceCriteria:
+      - README.md has one more line than before.

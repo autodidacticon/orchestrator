@@ -177,3 +177,61 @@ describe('launch start and state', () => {
     expect(launchState({ byStatus: { failed: ['T1'] } }, 'w', c)).toBe('ended');
   });
 });
+
+/** A daemon that hands out a launch on every claim (no repoUrl, so the loop releases it) and records the claim bodies. */
+function grantingDaemon() {
+  const claims: Array<Record<string, unknown>> = [];
+  const routes: string[] = [];
+  let n = 0;
+  const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+    const route = String(url).replace('http://daemon.test', '');
+    routes.push(`${init?.method ?? 'GET'} ${route}`);
+    if (route === '/v1/claims') {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      claims.push(body);
+      n++;
+      return new Response(JSON.stringify({ ok: true, launchId: `L${n}`, taskId: body['taskId'] ?? `T${n}`, token: 't', branch: `task/T${n}/l1`, baseSha: 'a'.repeat(40) }), { status: 200 });
+    }
+    if (route.endsWith('/release')) return new Response(JSON.stringify({ ok: true, outcome: 'unstarted' }), { status: 200 });
+    if (route === '/v1/status') return new Response(JSON.stringify({ finished: false, byStatus: {} }), { status: 200 });
+    return new Response('{}', { status: 500 });
+  }) as typeof fetch;
+  return { fetchFn, claims, routes };
+}
+
+describe('task filter and launch limit', () => {
+  it('reads ORCH_WORKER_TASK and ORCH_WORKER_MAX_LAUNCHES, and refuses a malformed limit', () => {
+    const base = { ORCH_API: 'http://d', ORCH_WORKER_AGENT: 'scripted' };
+    expect(workerSettings({ ...base, ORCH_WORKER_TASK: ' SMOKE ', ORCH_WORKER_MAX_LAUNCHES: '1' }, () => 'h')).toMatchObject({ task: 'SMOKE', maxLaunches: 1 });
+    const none = workerSettings({ ...base, ORCH_WORKER_TASK: '', ORCH_WORKER_MAX_LAUNCHES: '0' }, () => 'h');
+    expect(none.task).toBeUndefined();
+    expect(none.maxLaunches).toBeUndefined();
+    expect(() => workerSettings({ ...base, ORCH_WORKER_MAX_LAUNCHES: '-1' })).toThrow(/ORCH_WORKER_MAX_LAUNCHES/);
+    expect(() => workerSettings({ ...base, ORCH_WORKER_MAX_LAUNCHES: 'one' })).toThrow(/ORCH_WORKER_MAX_LAUNCHES/);
+  });
+
+  it('ORCH_WORKER_TASK: every claim names that task id, with access remote', async () => {
+    const clock = fakeClock();
+    const daemon = grantingDaemon();
+    expect(await runWorkerLoop(settings({ task: 'SMOKE', maxLaunches: 2 }), { fetch: daemon.fetchFn, sleep: clock.sleep, now: clock.now, out: () => undefined, err: () => undefined })).toBe(0);
+    expect(daemon.claims).toEqual([
+      { workerId: 'w-1', access: 'remote', taskId: 'SMOKE' },
+      { workerId: 'w-1', access: 'remote', taskId: 'SMOKE' },
+    ]);
+    // Without the setting the claim names no task.
+    const any = grantingDaemon();
+    await runWorkerLoop(settings({ maxLaunches: 1 }), { fetch: any.fetchFn, sleep: clock.sleep, now: clock.now, out: () => undefined, err: () => undefined });
+    expect(any.claims).toEqual([{ workerId: 'w-1', access: 'remote' }]);
+  });
+
+  it('ORCH_WORKER_MAX_LAUNCHES: exits 0 after that many launches, without claiming again', async () => {
+    const clock = fakeClock();
+    const daemon = grantingDaemon();
+    const out: string[] = [];
+    expect(await runWorkerLoop(settings({ maxLaunches: 3 }), { fetch: daemon.fetchFn, sleep: clock.sleep, now: clock.now, out: (l) => out.push(l), err: () => undefined })).toBe(0);
+    expect(daemon.claims).toHaveLength(3);
+    // Each launch was worked to its end (here: released, as the claim carried no repoUrl) before the next claim.
+    expect(daemon.routes.filter((r) => r.endsWith('/release'))).toEqual(['POST /v1/launches/L1/release', 'POST /v1/launches/L2/release', 'POST /v1/launches/L3/release']);
+    expect(out.at(-1)).toBe('worker w-1 max-launches - -');
+  });
+});

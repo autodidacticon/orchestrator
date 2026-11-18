@@ -37,7 +37,7 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
   const kind = hasKubectl ? render('deploy/overlays/kind') : [];
 
   it('base renders the namespace, config, Postgres cluster, daemon, and service, and no volume claim', () => {
-    expect(kinds(base)).toEqual(['Cluster/postgres', 'ConfigMap/orchestrator-config', 'Deployment/orchestrator', 'Namespace/orch', 'Service/orchestrator']);
+    expect(kinds(base)).toEqual(['Cluster/postgres', 'ConfigMap/orchestrator-config', 'Deployment/orchestrator', 'Deployment/orchestrator-worker', 'Namespace/orch', 'Service/orchestrator']);
     for (const r of base) if (r.kind !== 'Namespace') expect(r.metadata.namespace).toBe('orch');
   });
 
@@ -109,6 +109,51 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     expect(find(kind, 'Service', 'git-origin').spec.ports[0].port).toBe(9418);
     const init = find(kind, 'Deployment', 'orchestrator').spec.template.spec.initContainers[0];
     expect(env(init, 'REPO_URL')).toBe('git://git-origin.orch.svc:9418/fixture.git');
+  });
+
+  // See specs/cluster-runtime "Worker Deployment".
+  for (const [label, rs] of [['base', base], ['kind overlay', kind]] as const) {
+    it(`the ${label} renders orchestrator-worker: replicas 0, POD_NAME from the Downward API, an emptyDir clone cache, ORCH_API at the daemon Service`, () => {
+      const spec = find(rs, 'Deployment', 'orchestrator-worker').spec;
+      expect(spec.replicas).toBe(0);
+      const pod = spec.template.spec;
+      // Its own label: the daemon's selectors (the Service, deploy/smoke.sh's pod lookups) never match a worker pod.
+      expect(spec.template.metadata.labels['app.kubernetes.io/name']).toBe('orchestrator-worker');
+      expect(spec.selector.matchLabels['app.kubernetes.io/name']).toBe('orchestrator-worker');
+      const [worker] = pod.containers;
+      expect(pod.containers).toHaveLength(1);
+      expect(worker.image).toBe('orchestrator:dev');
+      expect(worker.command).toEqual(['orchestrator-worker']);
+      const podName = (worker.env as Array<{ name: string; valueFrom?: { fieldRef?: { fieldPath: string } } }>).find((e) => e.name === 'POD_NAME');
+      expect(podName?.valueFrom?.fieldRef?.fieldPath).toBe('metadata.name');
+      const svc = find(rs, 'Service', 'orchestrator');
+      const port = svc.spec.ports[0].port;
+      expect(env(worker, 'ORCH_API')).toBe(`http://${svc.metadata.name}.${svc.metadata.namespace}.svc:${port}`);
+      expect(env(worker, 'ORCH_API')).toBe('http://orchestrator.orch.svc:8080');
+      // The clone cache is the loop's ORCH_WORKER_CACHE (default /var/cache/orchestrator), on an emptyDir.
+      const cache = env(worker, 'ORCH_WORKER_CACHE') ?? '/var/cache/orchestrator';
+      const mount = worker.volumeMounts.find((m: { mountPath: string }) => m.mountPath === cache);
+      expect(mount).toBeDefined();
+      expect(pod.volumes.find((v: { name: string }) => v.name === mount.name)).toEqual({ name: mount.name, emptyDir: {} });
+      expect(pod.volumes.some((v: Record<string, unknown>) => 'persistentVolumeClaim' in v)).toBe(false);
+      // The base names no agent; the kind overlay runs the scripted one.
+      expect(env(worker, 'ORCH_WORKER_AGENT')).toBe(label === 'base' ? undefined : 'scripted');
+    });
+  }
+
+  it('the kind overlay replaces orchestrator.yaml with a remote run: the base keys plus runner.access remote, git.workerOriginUrl at git-origin, and capacity 3', () => {
+    const cfgOf = (rs: Resource[]) => parse((rs.find((r) => r.kind === 'ConfigMap' && r.metadata.name.startsWith('orchestrator-config')) as Resource).data?.['orchestrator.yaml'] ?? '') as Record<string, any>;
+    const baseCfg = cfgOf(base);
+    const kindCfg = cfgOf(kind);
+    expect(baseCfg.runner.access).toBeUndefined();
+    expect(kindCfg.runner.access).toBe('remote');
+    expect(kindCfg.git.workerOriginUrl).toBe('git://git-origin.orch.svc:9418/fixture.git');
+    expect(kindCfg.git.workerOriginUrl).toBe(env(find(kind, 'Deployment', 'orchestrator').spec.template.spec.initContainers[0], 'REPO_URL'));
+    // Everything else is the base file: kustomize replaces the file whole, so the overlay repeats each base key.
+    // capacity 3 parks all three dependants of SMOKE before the drill snapshot.
+    expect(kindCfg.capacity).toBe(3);
+    const strip = (c: Record<string, any>) => ({ ...c, capacity: undefined, runner: { ...c.runner, access: undefined }, git: { ...c.git, workerOriginUrl: undefined } });
+    expect(JSON.parse(JSON.stringify(strip(kindCfg)))).toEqual(JSON.parse(JSON.stringify(strip(baseCfg))));
   });
 
   it('the kind overlay keeps one ready task for the smoke script to send, and the daemon mounts the ConfigMap', () => {

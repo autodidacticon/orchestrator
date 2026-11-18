@@ -46,12 +46,25 @@ PG_LOG_TIMEOUT_S="${PG_LOG_TIMEOUT_S:-30}"
 # The CloudNativePG operator, installed before the overlay, whose Cluster needs its CRD.
 CNPG_MANIFEST="${CNPG_MANIFEST:-https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml}"
 API="http://127.0.0.1:${LOCAL_PORT}"
-# The task the script works itself until it is published, and the task whose launch stays parked.
+# The task one worker pod works until it is published, and the task whose launch stays parked through the drills.
 WORK_TASK=SMOKE
 PARKED_TASK=SMOKE-PARKED
+# The tasks the worker Deployment works after the drills, with PARKED_TASK. Every smoke task, for the M3 assertions.
+M3_TASKS='SMOKE-M3-A SMOKE-M3-B'
+ALL_TASKS="$WORK_TASK $PARKED_TASK $M3_TASKS"
 WORKER_ID=smoke
+# The pod that works WORK_TASK: orchestrator-worker with ORCH_WORKER_TASK and ORCH_WORKER_MAX_LAUNCHES=1.
+SMOKE_WORKER_POD=smoke-worker
+# The daemon's Service URL inside the cluster, as deploy/base/worker.yaml names it.
+DAEMON_URL=http://orchestrator.orch.svc:8080
+# How long the worker Deployment may take to finish the run once it is scaled up.
+FINISH_TIMEOUT_S="${FINISH_TIMEOUT_S:-600}"
 # --break pvc: a claim whose name does not mention the orchestrator, mounted into the daemon pod.
 BREAK_CLAIM=data-smoke-break
+# The run's access (runner.access in the kind overlay's orchestrator.yaml). Startup recovery prepares a local parked
+# launch's lost worktree again; a remote parked launch has no worktree on the daemon and is kept as it is.
+RUN_ACCESS="$(sed -n 's/^  access: *\([a-z]*\).*/\1/p' "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/overlays/kind/orchestrator.yaml" | head -n1)"
+RUN_ACCESS="${RUN_ACCESS:-local}"
 
 DRY_RUN=0
 FRESH=0
@@ -116,7 +129,10 @@ FROZEN=''
 OUTAGE_WRITE_PID=''
 BREAK_PATCHED=''
 PG_LOG_PID='' PG_LOG=''
+WORKER_LOG_DIR='' WORKER_LOG_PIDS=''
 cleanup() {
+  for pid in $WORKER_LOG_PIDS; do kill "$pid" 2>/dev/null || true; done
+  if [ -n "$WORKER_LOG_DIR" ]; then rm -rf "$WORKER_LOG_DIR"; fi
   if [ -n "$FROZEN" ]; then thaw_postgres "$FROZEN" || true; fi
   if [ -n "$PG_LOG_PID" ]; then kill "$PG_LOG_PID" 2>/dev/null || true; fi
   if [ -n "$PG_LOG" ]; then rm -f "$PG_LOG"; fi
@@ -247,28 +263,28 @@ published_sha() {
     | jq -er --arg t "$1" '[.events[] | select(.taskId == $t and .payload.to == "done")] | last | .payload.publishedSha'
 }
 
-# Work $WORK_TASK as a pull-mode worker would: claim its launch, commit in the pod's worktree, submit. A task already
-# submitted or done (a rerun on a kept cluster) is left alone.
+# Work $WORK_TASK with one worker pod: orchestrator-worker running the scripted agent, claiming only $WORK_TASK
+# (ORCH_WORKER_TASK) and exiting after that launch (ORCH_WORKER_MAX_LAUNCHES=1). The run is remote, so the agent
+# clones origin, commits on the launch branch, pushes it, and submits with its sha. The pod is kept after it exits:
+# the M3 log assertion reads its log. A task already submitted or done (a rerun on a kept cluster) is left alone.
 work_one_task() {
   if status_is ".byStatus.done + .byStatus.submitted | index(\"$WORK_TASK\")"; then
     skip "working $WORK_TASK" 'it is already submitted or done on this kept cluster'
     return 0
   fi
-  local claim launch token worktree
-  claim="$(curl -fsS -X POST -H 'content-type: application/json' \
-    --data "{\"workerId\":\"$WORKER_ID\",\"taskId\":\"$WORK_TASK\"}" "$API/v1/claims")" || return 1
-  launch="$(jq -er .launchId <<<"$claim")"; token="$(jq -er .token <<<"$claim")"; worktree="$(jq -er .worktree <<<"$claim")"
-  echo "    claimed launch $launch, worktree $worktree"
-  kc exec "$(daemon_pod)" -c orchestrator -- sh -ec '
-    cd "$1"
-    git diff --quiet HEAD -- README.md || exit 0
-    echo "A line appended by deploy/smoke.sh." >> README.md
-    git add README.md
-    git commit -q -m "Append a line to README.md"' sh "$worktree"
-  jq -n '{kind: "submit", seq: 1, summary: "Append a line to README.md (deploy/smoke.sh acting as the worker).",
-          acceptance: [{criterion: "README.md has one more line than before.", evidence: "deploy/smoke.sh appended one line and committed it."}]}' \
-    | curl -fsS -X POST -H 'content-type: application/json' -H "Authorization: Bearer $token" --data-binary @- \
-      "$API/v1/launches/$launch/report" | jq -e '.accepted == true' >/dev/null
+  kc delete pod "$SMOKE_WORKER_POD" --ignore-not-found --wait=true >/dev/null
+  kc run "$SMOKE_WORKER_POD" --image="$IMAGE" --image-pull-policy=IfNotPresent --restart=Never \
+    --labels=app.kubernetes.io/name=orchestrator-smoke-worker \
+    --env="ORCH_API=$DAEMON_URL" --env=ORCH_WORKER_AGENT=scripted --env="ORCH_WORKER_TASK=$WORK_TASK" \
+    --env=ORCH_WORKER_MAX_LAUNCHES=1 --env=ORCH_WORKER_CACHE=/tmp/orchestrator-cache --env="POD_NAME=$SMOKE_WORKER_POD" \
+    --command -- orchestrator-worker >/dev/null
+  retry "$PUBLISH_TIMEOUT_S" smoke_worker_exited || { echo "    $SMOKE_WORKER_POD did not exit within ${PUBLISH_TIMEOUT_S}s"; return 1; }
+  kc logs "pod/$SMOKE_WORKER_POD" | sed 's/^/    /'
+  [ "$(kc get pod "$SMOKE_WORKER_POD" -o jsonpath='{.status.phase}')" = Succeeded ] || return 1
+  kc logs "pod/$SMOKE_WORKER_POD" | grep -qE "^worker [^ ]+ report accepted [^ ]+ $WORK_TASK\$"
+}
+smoke_worker_exited() {
+  case "$(kc get pod "$SMOKE_WORKER_POD" -o jsonpath='{.status.phase}')" in Succeeded | Failed) return 0 ;; *) return 1 ;; esac
 }
 
 # --- The restart drill's snapshot and assertions. ---
@@ -321,24 +337,46 @@ same() {
   printf '%s\n' "$got" | sed 's/^/    /'
 }
 
-# Succeeds when startup recovery has dealt with every launch in $2 (launchId|... lines): each has a launch.reprepared,
-# launch.ended, launch.revoked or launch.failed event after sequence $1. /readyz passes before recovery runs, and the
-# claimable rows read the same until it has.
+# Succeeds when startup recovery has dealt with every launch in $2 (launchId|... lines) recorded before sequence $1.
+# Local access: each has a launch.reprepared, launch.ended, launch.revoked or launch.failed event after $1. /readyz
+# passes before recovery runs, and the claimable rows read the same until it has.
+# Remote access: recovery keeps a remote parked launch as it is (it has no worktree on the daemon to prepare again), so
+# it records none of those events for any recorded launch. The wait is on the new daemon answering: /readyz passes,
+# /v1/status serves latestSeq >= $1, and the claimable set reads consistently from the events and /v1/status. The
+# unchanged launch id and token checks that follow carry the proof that each recorded launch is still parked.
 recovery_settled() {
-  local done_ids id
+  local done_ids id latest
   if [ -z "$2" ]; then echo "    no recorded claimable launch to wait for"; return 1; fi
   done_ids="$(events_of launch.reprepared,launch.ended,launch.revoked,launch.failed "$1" | jq -r '.launchId')" || return 1
+  if [ "$RUN_ACCESS" = remote ]; then
+    readyz_ok || return 1
+    latest="$(status_get .latestSeq)" || return 1
+    [ "$latest" -ge "$1" ] || { echo "    latestSeq $latest is below the recorded seq $1"; return 1; }
+    api_claimable >/dev/null || return 1
+    for id in $(cut -d'|' -f1 <<<"$2"); do
+      if grep -qxF "$id" <<<"$done_ids"; then echo "    remote run: recovery recorded an event for the parked launch $id after seq $1"; return 1; fi
+    done
+    echo "    remote run: /readyz passes, latestSeq $latest >= $1, and no launch.reprepared/ended/revoked/failed after seq $1 names a recorded claimable launch"
+    return 0
+  fi
   for id in $(cut -d'|' -f1 <<<"$2"); do
     grep -qxF "$id" <<<"$done_ids" || return 1
   done
   echo "    recovery events after seq $1 name every recorded claimable launch"
 }
 
-# Succeeds when the launch.reprepared events after sequence $1 name exactly the launches in $2, one event each.
+# Local access: succeeds when the launch.reprepared events after sequence $1 name exactly the launches in $2, one
+# event each. Remote access: recovery never prepares a remote parked launch again, so there is no launch.reprepared
+# after $1 at all (and $2 names at least one launch).
 reprepared_once_each() {
   local got
   got="$(events_of launch.reprepared "$1" | jq -r '.launchId' | sort)" || return 1
   echo "    launch.reprepared after seq $1: $(tr '\n' ' ' <<<"$got")"
+  if [ "$RUN_ACCESS" = remote ]; then
+    echo "    remote run: expecting none for the claimable launches $(cut -d'|' -f1 <<<"$2" | tr '\n' ' ')"
+    [ -n "$2" ] && [ -z "$got" ]
+    return
+  fi
   [ -n "$2" ] && [ "$got" = "$(cut -d'|' -f1 <<<"$2")" ]
 }
 
@@ -391,7 +429,7 @@ daemon_restarts() { kc get pod -l app.kubernetes.io/name=orchestrator -o jsonpat
 # the record is durable, so it stays pending while Postgres is frozen. Prints the HTTP status when it completes.
 outage_write() {
   curl -sS -o /dev/null -w '%{http_code}\n' --max-time 300 -X POST -H 'content-type: application/json' \
-    --data "{\"workerId\":\"$WORKER_ID-outage\",\"taskId\":\"$WORK_TASK-NO-SUCH-TASK\"}" "$API/v1/claims"
+    --data "{\"workerId\":\"$WORKER_ID-outage\",\"taskId\":\"$WORK_TASK-NO-SUCH-TASK\",\"access\":\"remote\"}" "$API/v1/claims"
 }
 
 readyz_code() { curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$API/readyz"; }
@@ -486,12 +524,13 @@ stop_daemon_process() {
   kc exec "$(daemon_pod)" -c orchestrator -- sh -c 'kill -TERM 1'
   PG_T0=$(date +%s)
 }
-# Remove the brief of every claimable launch in $1 (launchId|... lines) from its worktree in the daemon pod. Startup
+# Local access: remove the brief of every claimable launch in $1 (launchId|... lines) from its worktree in the daemon pod. Startup
 # recovery then prepares each again and records launch.reprepared, the sign that it has dealt with that launch. A
 # container restart keeps the pod's emptyDir, so without this recovery would leave the worktrees alone and record nothing.
 remove_parked_briefs() {
   local run_dir id
   [ -n "$1" ] || { echo "    no claimable launch to remove the brief of"; return 1; }
+  if [ "$RUN_ACCESS" = remote ]; then echo "    remote run: a parked launch has no worktree on the daemon; nothing to remove"; return 0; fi
   run_dir="$(status_get .runDir)" || return 1
   for id in $(cut -d'|' -f1 <<<"$1"); do
     kc exec "$(daemon_pod)" -c orchestrator -- rm -f "$run_dir/worktrees/$id/.orchestrator/brief.json" || return 1
@@ -526,12 +565,13 @@ delete_postgres_pod() {
 
 # --- The last check: the recorded claimable launch still hands out the recorded launch id and token. ---
 
-# Claim $PARKED_TASK and succeed when the claim names a launch recorded before the first restart, with the token
-# recorded for it (compared by md5 in Postgres). The launch is released again afterwards.
+# Claim $PARKED_TASK (with access remote, the run's access) and succeed when the claim names a launch recorded before
+# the first restart, with the token recorded for it (compared by md5 in Postgres). The launch is released again
+# afterwards, so a worker pod works it in the M3 step.
 claim_returns_recorded_launch() {
   local claim launch token hash ok=1
   claim="$(curl -fsS -X POST -H 'content-type: application/json' \
-    --data "{\"workerId\":\"$WORKER_ID-final\",\"taskId\":\"$PARKED_TASK\"}" "$API/v1/claims")" || return 1
+    --data "{\"workerId\":\"$WORKER_ID-final\",\"taskId\":\"$PARKED_TASK\",\"access\":\"remote\"}" "$API/v1/claims")" || return 1
   launch="$(jq -er .launchId <<<"$claim")"; token="$(jq -er .token <<<"$claim")"
   case "$token" in *[!0-9A-Za-z_-]*) echo "    unexpected token characters"; ok=0 ;; esac
   hash="$(psql_q "select md5('$token')")" || ok=0
@@ -540,6 +580,48 @@ claim_returns_recorded_launch() {
   curl -fsS -o /dev/null -X POST -H 'content-type: application/json' --data '{"reason":"deploy/smoke.sh final claim check"}' \
     "$API/v1/launches/$launch/release" || true
   [ "$ok" = 1 ]
+}
+
+# --- M3: the worker Deployment. ---
+
+# Follow the log of every worker pod into its own file, in the background, from each container's first line. A worker
+# exits 0 once the run is finished and the Deployment restarts it, so a later `kubectl logs` would show the restarted
+# container, not the one that did the work.
+follow_worker_logs() {
+  local pod
+  WORKER_LOG_DIR="$(mktemp -d -t smoke-worker-logs.XXXXXX)"
+  for pod in $(kc get pod -l app.kubernetes.io/name=orchestrator-worker -o jsonpath='{.items[*].metadata.name}'); do
+    kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" logs -f "$pod" -c worker --tail=-1 >"$WORKER_LOG_DIR/$pod.log" 2>&1 &
+    WORKER_LOG_PIDS="$WORKER_LOG_PIDS $!"
+    echo "    following $pod"
+  done
+  [ -n "$WORKER_LOG_PIDS" ]
+}
+worker_logs_ended() {
+  local pid
+  for pid in $WORKER_LOG_PIDS; do ! kill -0 "$pid" 2>/dev/null || return 1; done
+}
+
+# Succeeds when the first-parent history of origin's main carries an Orchestrator-Task trailer for every smoke task.
+origin_carries_all_tasks() {
+  local tasks t ok=1; tasks="$(origin_trailer_tasks refs/heads/main)" || return 1
+  echo "    Orchestrator-Task trailers on origin main: $(tr '\n' ' ' <<<"$tasks")"
+  for t in $ALL_TASKS; do grep -qxF "$t" <<<"$tasks" || { echo "    missing: $t"; ok=0; }; done
+  [ "$ok" = 1 ]
+}
+
+# Succeeds when the worker logs (the $SMOKE_WORKER_POD pod's and each worker pod's, followed since the scale-up) hold
+# exactly one `report accepted` line for each smoke task, and none for another task.
+one_accepted_report_per_task() {
+  local lines counts want t
+  retry "$PG_LOG_TIMEOUT_S" worker_logs_ended || { echo "    a worker log follower did not end within ${PG_LOG_TIMEOUT_S}s"; return 1; }
+  WORKER_LOG_PIDS=''
+  lines="$( { kc logs "pod/$SMOKE_WORKER_POD"; cat "$WORKER_LOG_DIR"/*.log; } | grep -E '^worker [^ ]+ report accepted ' )" || return 1
+  printf '%s\n' "$lines" | sed 's/^/    /'
+  counts="$(awk '{ print $NF }' <<<"$lines" | sort | uniq -c | awk '{ print $2 "=" $1 }' | sort)"
+  want="$(for t in $ALL_TASKS; do echo "$t=1"; done | sort)"
+  echo "    accepted reports per task: $(tr '\n' ' ' <<<"$counts")"
+  [ "$counts" = "$want" ]
 }
 
 if [ "$FRESH" = 1 ]; then
@@ -587,6 +669,8 @@ step retry "$STATUS_TIMEOUT_S" status_is "(.claimable | index(\"$WORK_TASK\")) o
 step work_one_task
 check "drill: $WORK_TASK published" retry "$PUBLISH_TIMEOUT_S" status_is ".byStatus.done | index(\"$WORK_TASK\")"
 check "drill: $PARKED_TASK claimable" retry "$STATUS_TIMEOUT_S" status_is ".claimable | index(\"$PARKED_TASK\")"
+# Every task that depends on $WORK_TASK is parked before the snapshot, so the claimable set does not grow during the drills.
+step retry "$STATUS_TIMEOUT_S" status_is "[\"$PARKED_TASK\", $(printf '"%s", ' $M3_TASKS | sed 's/, $//')] - .claimable | length == 0"
 
 if [ "$BREAK" = pvc ]; then
   # Before the snapshot: the patch rolls the daemon once, and the drill below restarts it once more.
@@ -629,7 +713,7 @@ check 'drill: API and psql agree on the task states before the restart' same "$A
 
 if [ "$BREAK" = claimable ]; then
   echo "smoke: --break claimable: claiming $PARKED_TASK's parked launch before the restart"
-  step curl -fsS -o /dev/null -X POST -H 'content-type: application/json' --data "{\"workerId\":\"$WORKER_ID-break\",\"taskId\":\"$PARKED_TASK\"}" "$API/v1/claims"
+  step curl -fsS -o /dev/null -X POST -H 'content-type: application/json' --data "{\"workerId\":\"$WORKER_ID-break\",\"taskId\":\"$PARKED_TASK\",\"access\":\"remote\"}" "$API/v1/claims"
 fi
 
 # Delete the daemon pod and wait for its replacement: a fresh clone and an empty run directory.
@@ -715,5 +799,14 @@ check 'pg-restart: task states unchanged (psql)' same "$PG_STATES1" pg_states
 
 # Across both restarts a claim of the parked task hands out the launch id and token recorded before the first one.
 check "final: a claim of $PARKED_TASK returns the recorded launch id and token" claim_returns_recorded_launch
+
+# M3: the worker Deployment, scaled to 2, works the parked launches: $PARKED_TASK and the M3 tasks. Each pod claims with
+# access remote, clones git-origin, runs the scripted agent, pushes the launch branch and submits; the verifier publishes.
+step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" scale deployment/orchestrator-worker --replicas=2
+step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deployment/orchestrator-worker --timeout="$ROLLOUT_TIMEOUT"
+step follow_worker_logs
+check 'M3: the run is finished' retry "$FINISH_TIMEOUT_S" status_is '.finished == true'
+check "M3: every smoke task is on origin's integration branch" origin_carries_all_tasks
+check 'M3: worker logs show one accepted report per task' one_accepted_report_per_task
 
 if [ "$DRY_RUN" = 1 ]; then echo "smoke: dry run, nothing executed"; else echo "smoke: ok"; fi

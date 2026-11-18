@@ -10,6 +10,7 @@ resources:
   - postgres.yaml
   - deployment.yaml
   - service.yaml
+  - worker.yaml
 # The hash suffix rolls the daemon when the file changes: subPath mounts do not see ConfigMap updates.
 # The graph is not here: it lives in the store and is loaded with PUT /v1/graph.
 configMapGenerator:

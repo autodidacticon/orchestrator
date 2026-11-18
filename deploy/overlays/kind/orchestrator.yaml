@@ -1,0 +1,23 @@
+# The kind overlay's orchestrator.yaml: the base file (deploy/base/orchestrator.yaml) plus a remote run, so the
+# worker pods (deploy/base/worker.yaml) claim its launches and work them in their own clones. kustomize cannot merge
+# inside a file, so this replaces the base file whole; keep the two in step.
+runner:
+  mode: pull
+  # Every launch is remote: a worker claims with access remote, clones origin, and pushes the launch branch.
+  access: remote
+daemon:
+  idleExitMs: 0
+# Three launches at once (default 2): once SMOKE is published, SMOKE-PARKED, SMOKE-M3-A and SMOKE-M3-B are all parked
+# before deploy/smoke.sh records its drill snapshot, so no launch is admitted during the drills.
+capacity: 3
+apiBind: 0.0.0.0
+apiPort: 8080
+apiBaseUrl: http://orchestrator.orch.svc:8080
+store:
+  kind: postgres
+  urlFile: /var/run/secrets/orchestrator/postgres/uri
+  flushDeadlineMs: 120000
+git:
+  pushIntegration: true
+  # The repoUrl a remote claim answers: the in-cluster git-origin Service, which worker pods reach.
+  workerOriginUrl: git://git-origin.orch.svc:9418/fixture.git

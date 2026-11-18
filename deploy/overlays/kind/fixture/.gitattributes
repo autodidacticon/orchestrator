@@ -1,0 +1,2 @@
+# Concurrent smoke tasks each append one line to README.md; a union merge lets their rebases land without a conflict.
+README.md merge=union

@@ -43,7 +43,8 @@ spec:
               [ -d /srv/git/fixture.git ] && exit 0
               rm -rf /tmp/seed
               git init -q -b main /tmp/seed
-              cp -L /fixture/* /tmp/seed/
+              # The glob skips dot files (and the ConfigMap mount's ..data links); .gitattributes is copied by name.
+              cp -L /fixture/* /fixture/.gitattributes /tmp/seed/
               git -C /tmp/seed add -A
               git -C /tmp/seed -c user.name=fixture -c user.email=fixture@orch.svc commit -q -m "Fixture"
               git clone -q --bare /tmp/seed /srv/git/fixture.git

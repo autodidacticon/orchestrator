@@ -44,6 +44,10 @@ export interface WorkerSettings {
   /** The first delay after a 404 (`ORCH_WORKER_BACKOFF_MS`), doubled up to `backoffMaxMs` (`ORCH_WORKER_BACKOFF_MAX_MS`). */
   backoffMs: number;
   backoffMaxMs: number;
+  /** Claim only this task id (`ORCH_WORKER_TASK`); unset claims any. */
+  task?: string;
+  /** Exit 0 after this many launches (`ORCH_WORKER_MAX_LAUNCHES`); unset or 0 never. */
+  maxLaunches?: number;
 }
 
 function nonNegative(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -64,6 +68,13 @@ export function workerSettings(env: NodeJS.ProcessEnv, host: () => string = host
   if (agentRaw === 'command' && !command) throw new Error('ORCH_WORKER_COMMAND is required when ORCH_WORKER_AGENT is command (the default): the agent command template');
   const workerId = env['POD_NAME']?.trim() || env['ORCH_WORKER_ID']?.trim() || host();
   const backoffMs = nonNegative(env, 'ORCH_WORKER_BACKOFF_MS', DEFAULT_BACKOFF_MS);
+  const task = env['ORCH_WORKER_TASK']?.trim() || undefined;
+  const maxRaw = env['ORCH_WORKER_MAX_LAUNCHES'];
+  let maxLaunches: number | undefined;
+  if (maxRaw !== undefined && maxRaw.trim() !== '') {
+    maxLaunches = Number(maxRaw);
+    if (!Number.isSafeInteger(maxLaunches) || maxLaunches < 0) throw new Error(`ORCH_WORKER_MAX_LAUNCHES must be a non-negative integer; got ${JSON.stringify(maxRaw)}`);
+  }
   return {
     api: api.replace(/\/+$/, ''),
     workerId,
@@ -74,6 +85,8 @@ export function workerSettings(env: NodeJS.ProcessEnv, host: () => string = host
     retryWindowMs: nonNegative(env, 'ORCH_RETRY_WINDOW_MS', DEFAULT_RETRY_WINDOW_MS),
     backoffMs: Math.max(1, backoffMs),
     backoffMaxMs: Math.max(Math.max(1, backoffMs), nonNegative(env, 'ORCH_WORKER_BACKOFF_MAX_MS', DEFAULT_BACKOFF_MAX_MS)),
+    ...(task ? { task } : {}),
+    ...(maxLaunches ? { maxLaunches } : {}),
   };
 }
 
@@ -275,14 +288,19 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
   const backoff = new Backoff(s.backoffMs, s.backoffMaxMs);
   let idleSince = now();
   let refusedOnce = false;
+  let launches = 0;
   log('start');
   for (;;) {
-    const c = await call('POST', '/v1/claims', { workerId: s.workerId, access: 'remote' });
+    const c = await call('POST', '/v1/claims', { workerId: s.workerId, access: 'remote', ...(s.task ? { taskId: s.task } : {}) });
     if (c.status === 200) {
       backoff.reset();
       refusedOnce = false;
       await workLaunch(s, call, claimOf(c.body), { log, err, sleep, schedule: deps.schedule, scriptedIdleMs: deps.scriptedIdleMs });
       idleSince = now();
+      if (s.maxLaunches && ++launches >= s.maxLaunches) {
+        log('max-launches');
+        return 0;
+      }
       continue;
     }
     if (c.status === 400) {
@@ -515,6 +533,8 @@ finished. Environment:
                              {worktree}, {launchId}, {taskId}, {mcpConfig}, {allowedTools},
                              {model} and {effort} are substituted
   ORCH_WORKER_IDLE_EXIT_MS   exit 0 after this long with nothing claimable (default 0, never)
+  ORCH_WORKER_TASK           claim only this task id (default: any task)
+  ORCH_WORKER_MAX_LAUNCHES   exit 0 after this many launches (default 0, never)
   ORCH_RETRY_WINDOW_MS       how long connection failures are retried (default ${DEFAULT_RETRY_WINDOW_MS})
   ORCH_WORKER_BACKOFF_MS     first poll delay with nothing claimable (default ${DEFAULT_BACKOFF_MS})
   ORCH_WORKER_BACKOFF_MAX_MS the longest poll delay (default ${DEFAULT_BACKOFF_MAX_MS})

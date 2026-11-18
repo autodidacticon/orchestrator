@@ -49,8 +49,8 @@ describe('daemon image', () => {
     for (const dev of Object.keys(pkg.devDependencies)) expect(final.body).not.toContain(` ${dev}`);
   });
 
-  it('puts orchestrator and orchestrator-ctl on PATH from the package bins', () => {
-    for (const name of ['orchestrator', 'orchestrator-ctl']) {
+  it('puts orchestrator, orchestrator-ctl and orchestrator-worker on PATH from the package bins', () => {
+    for (const name of ['orchestrator', 'orchestrator-ctl', 'orchestrator-worker']) {
       const target = (pkg.bin[name] as string).replace(/^\.\//, '');
       expect(final.body).toMatch(new RegExp(`ln -s \\S*${target.replace(/[.]/g, '\\.')} /usr/local/bin/${name}(\\s|$)`));
     }

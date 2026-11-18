@@ -1,4 +1,4 @@
-# The orchestrator daemon image. See deploy/README.md.
+# The orchestrator image: the daemon, orchestrator-ctl, and the remote worker loop (orchestrator-worker). See deploy/README.md.
 # It carries Node, git, and ssh only: project toolchains belong to the worker and verifier images.
 
 FROM node:22-slim AS build
@@ -21,8 +21,9 @@ RUN npm ci --omit=dev --ignore-scripts \
   && find node_modules -mindepth 1 -maxdepth 1 -type d -empty -delete \
   && npm cache clean --force
 COPY --from=build /app/dist/src ./dist/src
-RUN chmod +x dist/src/main.js dist/src/operator/cli.js \
+RUN chmod +x dist/src/main.js dist/src/operator/cli.js dist/src/worker/loop.js \
   && ln -s /opt/orchestrator/dist/src/main.js /usr/local/bin/orchestrator \
-  && ln -s /opt/orchestrator/dist/src/operator/cli.js /usr/local/bin/orchestrator-ctl
+  && ln -s /opt/orchestrator/dist/src/operator/cli.js /usr/local/bin/orchestrator-ctl \
+  && ln -s /opt/orchestrator/dist/src/worker/loop.js /usr/local/bin/orchestrator-worker
 USER node
 CMD ["orchestrator"]

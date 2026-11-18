@@ -1,0 +1,45 @@
+# The remote worker pool: each pod runs orchestrator-worker, which claims remote launches over the daemon's API, works
+# each in its own clone (an emptyDir clone cache), and pushes the launch branch to origin. Scaled to 0 here: a
+# deployment sets the replicas and the agent (ORCH_WORKER_AGENT and ORCH_WORKER_COMMAND, see specs/worker-pool).
+# The run must be remote (runner.access: remote in orchestrator.yaml). See deploy/README.md "Workers".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator-worker
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orchestrator-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orchestrator-worker
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      containers:
+        - name: worker
+          image: orchestrator:dev
+          imagePullPolicy: IfNotPresent
+          command: ["orchestrator-worker"]
+          env:
+            # The worker id the daemon records for each claim: the pod's own name.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # The daemon's Service.
+            - name: ORCH_API
+              value: http://orchestrator.orch.svc:8080
+            - name: ORCH_WORKER_CACHE
+              value: /var/cache/orchestrator
+          volumeMounts:
+            - name: clone-cache
+              mountPath: /var/cache/orchestrator
+      volumes:
+        # One clone per repository, kept for the pod's life; a new pod clones again.
+        - name: clone-cache
+          emptyDir: {}
