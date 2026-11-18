@@ -265,10 +265,10 @@ describe('runner modes', () => {
     expect(s.launchOf('T1').pid).toBeGreaterThan(0);
   });
 
-  it('claim semantics in-process: oldest first, named task, idempotent re-claim, one launch per worker, remote reserved', async () => {
+  it('claim semantics in-process: oldest first, named task, idempotent re-claim, one launch per worker, remote refused on a local run', async () => {
     const h = harness({ mode: 'pull' });
     await h.orch.tick();
-    expect((await h.orch.claim({ workerId: 'w1', access: 'remote' })).status).toBe(501);
+    expect((await h.orch.claim({ workerId: 'w1', access: 'remote' })).status).toBe(409);
     expect((await h.orch.claim({ workerId: 'w2', taskId: 'T9' })).status).toBe(404);
     const first = await h.orch.claim({ workerId: 'w1' });
     expect(first.body).toMatchObject({ taskId: 'T1', repeated: false });

@@ -4,7 +4,9 @@
  * See specs/crash-recovery "Launch lifecycle records".
  */
 import { randomBytes, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { composeBrief } from '../brief/compose.js';
 import { crashPoint } from '../crash.js';
 import type { Id } from '../graph/model.js';
 import type { Lease } from '../state/status.js';
@@ -40,6 +42,8 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
   // Fixed here for the life of the launch; a later override reaches launches prepared afterwards. See specs/model-selection "Resolution fixed at preparation".
   const { runner, model, effort, effortRequested } = core.selectionFor(taskId);
   const commitPolicy = core.commitPolicyFor(runner);
+  // Fixed on the row for its life. A remote launch gets no worktree: its brief is kept on the row. See specs/remote-workspace.
+  const access = config.runner.access;
 
   const launch = store.transaction((): Launch => {
     const entry = core.entry(taskId);
@@ -61,7 +65,7 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
       status: 'preparing',
       token,
       branch: branchName(taskId, launchNo),
-      worktree: worktreePath(config.dataDir, launchId),
+      worktree: access === 'remote' ? '' : worktreePath(config.dataDir, launchId),
       baseSha,
       graphRev: lease.graphRev,
       createdAt: now,
@@ -70,6 +74,7 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
       model,
       effort,
       commitPolicy,
+      access,
     };
     store.createLaunch(row);
     if (opts.sameAttempt) {
@@ -86,13 +91,28 @@ export async function prepareLaunch(core: OrchestratorCore, taskId: Id, opts: St
       store.setEntry(taskId, next);
       core.recordTransition(taskId, entry.status.kind, 'running', 'orchestrator', 'admitted');
     }
-    store.appendEvent({ kind: 'launch.created', taskId, launchId, payload: { attempt, launchNo, sameAttempt: Boolean(opts.sameAttempt), runner, model, effort, commitPolicy, ...(effortRequested ? { effortRequested } : {}) } }, now);
+    store.appendEvent({ kind: 'launch.created', taskId, launchId, payload: { attempt, launchNo, sameAttempt: Boolean(opts.sameAttempt), runner, model, effort, commitPolicy, access, ...(effortRequested ? { effortRequested } : {}) } }, now);
     return row;
   });
   crashPoint('launch.afterRow');
 
+  if (access === 'remote') {
+    const brief = remoteBrief(core, launch);
+    store.updateLaunch(launchId, brief);
+    return { ...launch, ...brief };
+  }
   await workspace.prepare(launch, core.briefInput(launch));
   return launch;
+}
+
+/** The brief of a remote launch, composed as for a worktree and kept on the row. See specs/remote-workspace "Brief on the launch row". */
+export function remoteBrief(core: OrchestratorCore, launch: Launch): { briefMarkdown: string; briefJson: Record<string, unknown> } {
+  // No worktree holds a fallback file or tells whether the repository has an openspec root: the paths are relative to the worker's checkout.
+  const { markdown, json } = composeBrief(core.briefInput(launch), {
+    fallbackPath: path.join('.orchestrator', 'report.json'),
+    openspec: existsSync(path.join(core.config.repoPath, 'openspec')),
+  });
+  return { briefMarkdown: markdown, briefJson: json as unknown as Record<string, unknown> };
 }
 
 /** Spawn a prepared launch: launching -> process -> live with a pid. */

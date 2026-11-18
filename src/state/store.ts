@@ -2,6 +2,7 @@
  * Store interface. Synchronous on purpose: node:sqlite is synchronous, which
  * makes a claim, a dedup write, or a transition one transaction.
  */
+import type { RunnerAccess } from '../config.js';
 import type { Id } from '../graph/model.js';
 import type { TokenUsage, UsageSource } from '../runner/runner.js';
 import type { CommitPolicy, Effort, RunnerKind } from '../runner/selection.js';
@@ -10,6 +11,11 @@ import type { Entry } from './status.js';
 export type LaunchStatus = 'preparing' | 'claimable' | 'launching' | 'live' | 'ended' | 'revoked';
 
 export type RunnerMode = 'spawn' | 'pull' | 'mixed';
+
+/** The access a launch was created for; a row from before `access` existed is local. See specs/pull-runner "Access modes". */
+export function accessOf(launch: Pick<Launch, 'access'>): RunnerAccess {
+  return launch.access ?? 'local';
+}
 
 /** A session's operator MCP server registered with the daemon: its pid chain and, once ended, why. */
 export interface Attachment {
@@ -65,6 +71,14 @@ export interface Launch {
   effort?: Effort;
   /** Who commits the work, from the kind's `commit` key at preparation; a row without one is `agent` (see `commitPolicyOf`). See specs/worker-runners "Sandbox and commit policy". */
   commitPolicy?: CommitPolicy;
+  /**
+   * Where the launch's worker runs, from `runner.access` when the row is created; never changes. A row without one is
+   * `local` (see `accessOf`). A remote launch has no worktree (`worktree` is empty). See specs/pull-runner "Access modes".
+   */
+  access?: RunnerAccess;
+  /** The composed brief of a remote launch, kept on the row since no worktree holds it. See specs/remote-workspace. */
+  briefMarkdown?: string;
+  briefJson?: Record<string, unknown>;
   /** Usage read from the runner when the launch ended. */
   costUsd?: number;
   turns?: number;

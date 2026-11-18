@@ -350,6 +350,8 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
   server.addRoute('PUT', /^\/v1\/runner$/, async (_req, body) => {
     const mode = body['mode'];
     if (mode !== 'spawn' && mode !== 'pull' && mode !== 'mixed') return { status: 400, body: { error: 'mode must be spawn, pull, or mixed' } };
+    // A remote run has no worktree to spawn an agent in: it stays in pull mode. See specs/pull-runner "Access modes".
+    if (orch.config.runner.access === 'remote' && mode !== 'pull') return { status: 409, body: { ok: false, reason: `runner.access is remote, so runner.mode must stay pull, not ${mode}`, access: 'remote', mode } };
     orch.setMode(mode);
     return { status: 200, body: { ok: true, runner: { mode, claimWindowMs: orch.config.runner.claimWindowMs } } };
   });

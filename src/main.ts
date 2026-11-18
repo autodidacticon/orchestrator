@@ -11,7 +11,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ApiServer } from './agent/server.js';
 import { SlotValidator } from './brief/template.js';
-import { type Config, loadConfig, redactedStore, storeConfigError, storeSchemaOf, storeUrlSource, urlSecrets } from './config.js';
+import { type Config, loadConfig, redactedStore, remoteAccessError, storeConfigError, storeSchemaOf, storeUrlSource, urlSecrets } from './config.js';
 import { FileGraphSource, StoreGraphSource } from './graph/source.js';
 import type { Logger } from './loop/core.js';
 import { Orchestrator } from './loop/orchestrator.js';
@@ -261,6 +261,14 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   // Nothing past this point holds the database password: the report, status, config.json and the orchestrator see it removed.
   const resolved = withoutPassword(resolveLayers(first.inputs, overrides));
   const config = resolved.config;
+
+  // Remote access needs a pull run with origin as the source of truth and no prepare command; refused before anything listens. See specs/pull-runner "Access modes".
+  const accessError = remoteAccessError(config, store.getKv('runner.mode') || config.runner.mode);
+  if (accessError) {
+    stderrLogger.error(accessError, { access: config.runner.access, mode: store.getKv('runner.mode') || config.runner.mode, pushIntegration: config.git.pushIntegration, prepareCommand: config.prepareCommand !== undefined });
+    await opened.close();
+    throw new Error(accessError);
+  }
 
   // The branch the run first used is pinned; only an explicit layer can name another one, and only on an untouched run. See specs/toolchain-discovery "Integration branch detection and pinning".
   if (pinned && config.integrationBranch !== pinned) {

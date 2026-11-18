@@ -28,7 +28,7 @@ describe('claim and release over the real API', () => {
     const [l2] = h.store.listLaunches({ taskId: 'T2' });
     expect(l1?.status).toBe('claimable');
     expect((await http(h, 'POST', `/v1/launches/${l2!.launchId}/heartbeat`, {}, l2!.token)).status).toBe(401);
-    expect((await http(h, 'POST', '/v1/claims', { workerId: 'w1', access: 'remote' })).status).toBe(501);
+    expect((await http(h, 'POST', '/v1/claims', { workerId: 'w1', access: 'remote' })).status).toBe(409); // a remote worker on a local run; see specs/pull-runner "Access modes"
     expect((await http(h, 'POST', '/v1/claims', { workerId: '' })).status).toBe(400);
 
     const c1 = await http(h, 'POST', '/v1/claims', { workerId: 'w1' });

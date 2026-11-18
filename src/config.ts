@@ -21,6 +21,10 @@ export const DEFAULT_GAP_AFTER_MS = 60_000;
 export const DEFAULT_GAP_HOLD_MS = 60_000;
 
 /** One model's token rates in USD per million tokens; the optional rates fall back as `priceUsage` states. */
+/** Where a run's workers run. See specs/pull-runner "Access modes". */
+export const RUNNER_ACCESSES = ['local', 'remote'] as const;
+export type RunnerAccess = (typeof RUNNER_ACCESSES)[number];
+
 const rate = z.number().nonnegative();
 export const priceSchema = z
   .object({
@@ -85,6 +89,11 @@ export const configSchema = z.object({
     .object({
       /** spawn: the daemon spawns a process; pull: launches wait for a worker; mixed: parked for claimWindowMs, then spawned. */
       mode: z.enum(['spawn', 'pull', 'mixed']).default('spawn'),
+      /**
+       * Where workers run: `local` workers use a worktree the daemon prepares; `remote` workers get the brief from the
+       * launch row and clone for themselves. Read at start only, never an override. See specs/pull-runner "Access modes".
+       */
+      access: z.enum(RUNNER_ACCESSES, { errorMap: () => ({ message: `runner.access must be one of ${RUNNER_ACCESSES.join(', ')}` }) }).default('local'),
       claimWindowMs: z.number().int().nonnegative().default(60_000),
       /** The agent CLI launches run under. See specs/worker-runners "Runner kinds and defaults". */
       kind: z.enum(RUNNER_KINDS).default('claude-code'),
@@ -301,6 +310,25 @@ export const configSchema = z.object({
 });
 
 export type Config = z.infer<typeof configSchema>;
+
+/**
+ * Why `runner.access: remote` cannot run under this configuration and runner mode: one line per unmet condition, empty
+ * when it can (or under `local`). See specs/pull-runner "Access modes".
+ */
+export function remoteAccessProblems(cfg: Pick<Config, 'runner' | 'git' | 'prepareCommand'>, mode: string = cfg.runner.mode): string[] {
+  if (cfg.runner.access !== 'remote') return [];
+  const problems: string[] = [];
+  if (mode !== 'pull') problems.push(`runner.mode must be pull, not ${mode}`);
+  if (!cfg.git.pushIntegration) problems.push('git.pushIntegration must be true');
+  if (cfg.prepareCommand !== undefined) problems.push('prepareCommand must be unset');
+  return problems;
+}
+
+/** The startup refusal for `remoteAccessProblems`, naming each unmet condition; undefined when there are none. */
+export function remoteAccessError(cfg: Pick<Config, 'runner' | 'git' | 'prepareCommand'>, mode?: string): string | undefined {
+  const problems = remoteAccessProblems(cfg, mode);
+  return problems.length ? `runner.access remote refused: ${problems.join('; ')}` : undefined;
+}
 
 /** What a caller may pass before defaults apply: every defaulted key optional, nested blocks partial. */
 export type ConfigInput = z.input<typeof configSchema>;

@@ -9,7 +9,7 @@ import { renewEveryMsOf } from '../brief/compose.js';
 import { scrubCarry } from '../brief/lost.js';
 import { checkSubmission } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
-import { type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, storeDurabilityWarning } from '../config.js';
+import { type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, remoteAccessError, RUNNER_ACCESSES, storeDurabilityWarning } from '../config.js';
 import { type Gap, GapClock, noteIntervalMs } from '../health/gaps.js';
 import { classifyReload, type ReloadReason } from '../graph/diff.js';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
@@ -38,6 +38,7 @@ import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
 import { Origin } from '../workspace/origin.js';
+import { workspaceByAccess } from '../workspace/remote-workspace.js';
 import { gateOnDurable, RUNNER_METHODS, StoreFatalError, storeLag, VERIFIER_METHODS, waitDurable, WORKSPACE_METHODS } from '../state/gate.js';
 import type { BriefInput, FallbackReport, SealResult, Workspace } from '../workspace/workspace.js';
 import type { Logger, OrchestratorCore } from './core.js';
@@ -394,7 +395,8 @@ export class Orchestrator implements OrchestratorCore {
     (deps.verifier as { useOrigin?: (o: Origin | undefined) => void }).useOrigin?.(origin);
     this.origin = origin;
     this.runner = gateOnDurable(this.store, deps.runner, RUNNER_METHODS);
-    this.workspace = gateOnDurable(this.store, deps.workspace, WORKSPACE_METHODS);
+    // Launch-side calls go to the workspace of the launch's access; the clone's own workspace keeps the integration branch. See specs/remote-workspace.
+    this.workspace = gateOnDurable(this.store, workspaceByAccess(deps.workspace), WORKSPACE_METHODS);
     this.verifier = gateOnDurable(this.store, deps.verifier, VERIFIER_METHODS);
     this.graphSource = deps.graphSource;
     this.policy = deps.policy ?? chainPolicy(this.config);
@@ -1866,8 +1868,12 @@ export class Orchestrator implements OrchestratorCore {
    */
   async claim(opts: { workerId: string; taskId?: Id; access?: string; attachment?: string; runner?: unknown }): Promise<ApiResponse> {
     const access = opts.access ?? 'local';
-    if (access === 'remote') return { status: 501, body: { error: 'access remote is reserved for a later change; only local workers are supported', access } };
-    if (access !== 'local') return { status: 400, body: { error: `unknown access ${access}` } };
+    if (!(RUNNER_ACCESSES as readonly string[]).includes(access)) return { status: 400, body: { error: `unknown access ${access}` } };
+    // A worker of the other access cannot work this run's launches: refused before anything changes. See specs/pull-runner "Access modes".
+    const runAccess = this.config.runner.access;
+    if (access !== runAccess) {
+      return { status: 409, body: { ok: false, reason: `this run is ${runAccess}; a worker with access ${access} cannot claim its launches`, access, runAccess } };
+    }
     const workerId = String(opts.workerId ?? '').trim();
     if (!workerId) return { status: 400, body: { error: 'workerId is required' } };
     // The kinds this worker can run; absent means any. A worker never takes a launch prepared for a CLI it does not run. See specs/pull-runner "Claim".
@@ -1929,7 +1935,8 @@ export class Orchestrator implements OrchestratorCore {
     const dir = path.join(launch.worktree, '.orchestrator');
     let brief: unknown;
     try {
-      brief = JSON.parse(await readFile(path.join(dir, 'brief.json'), 'utf8'));
+      // A remote launch has no worktree: never read a path relative to the daemon's directory.
+      brief = launch.worktree ? JSON.parse(await readFile(path.join(dir, 'brief.json'), 'utf8')) : undefined;
     } catch {
       brief = undefined;
     }
@@ -2429,6 +2436,12 @@ export class Orchestrator implements OrchestratorCore {
   }
 
   async start(): Promise<void> {
+    // Remote access needs a pull run with origin as the source of truth and no prepare command. See specs/pull-runner "Access modes".
+    const accessError = remoteAccessError(this.config, this.effectiveMode());
+    if (accessError) {
+      this.log.error(accessError, { access: this.config.runner.access, mode: this.effectiveMode(), pushIntegration: this.config.git.pushIntegration, prepareCommand: this.config.prepareCommand !== undefined });
+      throw new Error(accessError);
+    }
     // See specs/state-backend "Postgres store without push integration".
     const durability = this.config.store && this.config.git ? storeDurabilityWarning(this.config) : undefined;
     if (durability) {
