@@ -2,7 +2,7 @@
  * Progress signals: what counts as evidence that an agent is working. See
  * specs/health-monitoring "Progress signals".
  */
-import type { Launch, Store } from '../state/store.js';
+import { accessOf, type Launch, type Store } from '../state/store.js';
 import type { Workspace } from '../workspace/workspace.js';
 
 export type SignalKind = 'spawned' | 'commit' | 'worktree' | 'heartbeat' | 'heartbeatText' | 'report' | 'block' | 'inbox' | 'log' | 'resumed';
@@ -29,10 +29,29 @@ export function recordSignal(o: SignalSink, launch: Launch, kind: SignalKind, te
 export const headOf = (fingerprint: string | undefined): string | undefined => fingerprint?.split(':')[0];
 
 /**
- * Compare the worktree fingerprint with the stored one. The first sight is a
- * baseline; afterwards a moved head is `commit` and any other change is `worktree`.
+ * Compare a fingerprint with the stored one. The first sight is a baseline; afterwards a moved head is `commit` and
+ * any other change is `worktree`, and the new value is stored on the row. The same value records nothing.
+ */
+export function applyFingerprint(o: SignalSink, launch: Launch, fp: string): Launch {
+  if (!launch.fingerprint) {
+    o.store.updateLaunch(launch.launchId, { fingerprint: fp });
+    return { ...launch, fingerprint: fp };
+  }
+  if (fp === launch.fingerprint) return launch;
+  const kind: SignalKind = headOf(fp) !== headOf(launch.fingerprint) ? 'commit' : 'worktree';
+  const now = o.now();
+  o.store.updateLaunch(launch.launchId, { fingerprint: fp });
+  recordSignal(o, { ...launch, fingerprint: fp }, kind);
+  return o.store.getLaunch(launch.launchId) ?? { ...launch, fingerprint: fp, progressAt: now, lastSignal: kind };
+}
+
+/**
+ * Read the worktree fingerprint of a local launch and compare it with the stored one (`applyFingerprint`). A remote
+ * launch has no tree on this host: it is never read here, and its fingerprint comes from its worker's heartbeats
+ * (`Orchestrator.agentCall`). See specs/health-monitoring "Progress signals".
  */
 export async function observeFingerprint(o: SignalSink & { workspace: Workspace; config: { tickIntervalMs: number } }, launch: Launch): Promise<Launch> {
+  if (accessOf(launch) === 'remote') return launch;
   const now = o.now();
   // A signal newer than one tick makes the git calls redundant for this tick.
   if (launch.progressAt !== undefined && now - launch.progressAt < o.config.tickIntervalMs && launch.fingerprint) return launch;
@@ -42,13 +61,5 @@ export async function observeFingerprint(o: SignalSink & { workspace: Workspace;
   } catch {
     return launch;
   }
-  if (!launch.fingerprint) {
-    o.store.updateLaunch(launch.launchId, { fingerprint: fp });
-    return { ...launch, fingerprint: fp };
-  }
-  if (fp === launch.fingerprint) return launch;
-  const kind: SignalKind = headOf(fp) !== headOf(launch.fingerprint) ? 'commit' : 'worktree';
-  o.store.updateLaunch(launch.launchId, { fingerprint: fp });
-  recordSignal(o, { ...launch, fingerprint: fp }, kind);
-  return o.store.getLaunch(launch.launchId) ?? { ...launch, fingerprint: fp, progressAt: now, lastSignal: kind };
+  return applyFingerprint(o, launch, fp);
 }

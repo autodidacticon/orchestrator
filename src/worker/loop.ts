@@ -15,6 +15,7 @@ import { withoutStore } from '../runs/childEnv.js';
 import type { Launch } from '../state/store.js';
 import { fixedSlots, quoteRules, substitute } from '../runner/command.js';
 import { shimCommand, shimEnv } from '../runner/shim-command.js';
+import { treeFingerprint } from '../workspace/fingerprint.js';
 import { FALLBACK_FILE, gitOut, ORCH_DIR, prepareClone } from './clone.js';
 import { type ApiCall, apiClient, type ApiResult, realSleep } from './http.js';
 import { runScriptedAgent } from './scripted.js';
@@ -108,6 +109,8 @@ export interface RemoteClaim {
   brief?: Record<string, unknown>;
   briefMarkdown?: string;
   carry?: { interrupted?: { headSha?: string } };
+  /** The lease facts of the claim (`lease.ttlMs`, `lease.renewEveryMs`). */
+  lease?: { ttlMs?: number; renewEveryMs?: number };
 }
 
 function claimOf(body: Record<string, unknown>): RemoteClaim {
@@ -124,6 +127,94 @@ function claimOf(body: Record<string, unknown>): RemoteClaim {
     brief: body['brief'] && typeof body['brief'] === 'object' ? (body['brief'] as Record<string, unknown>) : undefined,
     briefMarkdown: str('briefMarkdown'),
     carry: body['carry'] && typeof body['carry'] === 'object' ? (body['carry'] as RemoteClaim['carry']) : undefined,
+    lease: body['lease'] && typeof body['lease'] === 'object' ? (body['lease'] as RemoteClaim['lease']) : undefined,
+  };
+}
+
+/** How often the loop heartbeats a launch: the claim's `lease.renewEveryMs`, else a third of `lease.ttlMs`; undefined without either. */
+export function heartbeatEveryMs(claim: Pick<RemoteClaim, 'lease'>): number | undefined {
+  const every = claim.lease?.renewEveryMs;
+  if (typeof every === 'number' && Number.isFinite(every) && every > 0) return every;
+  const ttl = claim.lease?.ttlMs;
+  if (typeof ttl === 'number' && Number.isFinite(ttl) && ttl > 0) return Math.max(1, Math.floor(ttl / 3));
+  return undefined;
+}
+
+/** The clone's fingerprint as a loop heartbeat carries it: the one function `GitWorkspace.fingerprint` uses. */
+export const cloneFingerprint: (dir: string) => Promise<string> = treeFingerprint;
+
+/** Run `fn` once after `ms`; answers a cancel. */
+export type Schedule = (fn: () => void, ms: number) => () => void;
+
+const realSchedule: Schedule = (fn, ms) => {
+  const t = setTimeout(fn, ms);
+  return () => clearTimeout(t);
+};
+
+export interface LoopHeartbeat {
+  /** Cancel the next heartbeat and wait for one in flight; none is sent after this resolves. */
+  stop(): Promise<void>;
+  /** Heartbeats sent so far. */
+  sent(): number;
+  /** Whether a heartbeat was answered 401: the launch was revoked, and none follows. */
+  revoked(): boolean;
+}
+
+/**
+ * The loop's heartbeat for one launch: every `everyMs` from the claim until `stop`, `POST /v1/launches/:id/heartbeat`
+ * with the launch token, carrying the clone's fingerprint once the clone exists (`clone()`). It carries no text, so
+ * the daemon renews the lease and counts only a changed fingerprint as progress. A 401 ends the heartbeats for the
+ * launch. The next heartbeat is scheduled after the previous one is answered, so two never overlap.
+ * See specs/worker-pool "Loop heartbeat".
+ */
+export function startLoopHeartbeat(o: { call: ApiCall; claim: Pick<RemoteClaim, 'launchId' | 'token'>; everyMs: number; clone: () => string | undefined; schedule?: Schedule; err?: (text: string) => void; fingerprint?: (dir: string) => Promise<string> }): LoopHeartbeat {
+  const schedule = o.schedule ?? realSchedule;
+  const fingerprintOf = o.fingerprint ?? cloneFingerprint;
+  let stopped = false;
+  let revoked = false;
+  let sent = 0;
+  let cancel: (() => void) | undefined;
+  let inFlight: Promise<void> | undefined;
+  const beat = async () => {
+    const body: Record<string, unknown> = {};
+    const dir = o.clone();
+    if (dir) {
+      try {
+        body['fingerprint'] = await fingerprintOf(dir);
+      } catch (e) {
+        o.err?.(`heartbeat ${o.claim.launchId}: no fingerprint: ${e instanceof Error ? e.message : String(e)}\n`);
+      }
+    }
+    if (stopped) return;
+    sent++;
+    try {
+      const r = await o.call('POST', `/v1/launches/${o.claim.launchId}/heartbeat`, body, o.claim.token);
+      if (r.status === 401) revoked = true;
+      else if (r.status !== 200) o.err?.(`heartbeat ${o.claim.launchId}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}\n`);
+    } catch (e) {
+      o.err?.(`heartbeat ${o.claim.launchId}: ${e instanceof Error ? e.message : String(e)}\n`);
+    }
+  };
+  const arm = () => {
+    if (stopped || revoked) return;
+    cancel = schedule(() => {
+      cancel = undefined;
+      inFlight = beat().finally(() => {
+        inFlight = undefined;
+        arm();
+      });
+    }, o.everyMs);
+  };
+  arm();
+  return {
+    stop: async () => {
+      stopped = true;
+      cancel?.();
+      cancel = undefined;
+      await inFlight;
+    },
+    sent: () => sent,
+    revoked: () => revoked,
   };
 }
 
@@ -154,6 +245,10 @@ export interface WorkerDeps {
   out?: (line: string) => void;
   /** Details and the agent's output (stderr). */
   err?: (text: string) => void;
+  /** The heartbeat timer (default `setTimeout`). */
+  schedule?: Schedule;
+  /** The scripted agent's silent step before it works, in ms (tests of the heartbeat). */
+  scriptedIdleMs?: number;
 }
 
 /** Where the daemon has a launch after its agent exited: reported (submitted or done), still held by this worker, or ended. */
@@ -186,7 +281,7 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
     if (c.status === 200) {
       backoff.reset();
       refusedOnce = false;
-      await workLaunch(s, call, claimOf(c.body), { log, err, sleep });
+      await workLaunch(s, call, claimOf(c.body), { log, err, sleep, schedule: deps.schedule, scriptedIdleMs: deps.scriptedIdleMs });
       idleSince = now();
       continue;
     }
@@ -216,19 +311,37 @@ interface LaunchTools {
   log: (event: string, c?: Pick<RemoteClaim, 'launchId' | 'taskId'>, detail?: string) => void;
   err: (text: string) => void;
   sleep: (ms: number) => Promise<void>;
+  schedule?: Schedule;
+  scriptedIdleMs?: number;
 }
 
 /** One claimed launch, from the clone to the daemon's verdict. Never throws: a failure is logged and the loop claims again. */
 async function workLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools): Promise<void> {
   const { log } = t;
   log('claimed', claim);
+  let clone: string | undefined;
+  // Heartbeats run from the claim until the agent exits, whether or not the agent calls the API itself.
+  const every = heartbeatEveryMs(claim);
+  const heartbeat = every !== undefined ? startLoopHeartbeat({ call, claim, everyMs: every, clone: () => clone, schedule: t.schedule, err: t.err }) : undefined;
+  try {
+    await workClaimed(s, call, claim, t, (dir) => (clone = dir), () => heartbeat?.stop());
+  } finally {
+    await heartbeat?.stop();
+  }
+}
+
+/** The launch's work after the claim: clone, agent, relay, verdict. Stops the heartbeat once the agent has exited. */
+async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools, setClone: (dir: string) => void, stopHeartbeat: () => Promise<void> | undefined): Promise<void> {
+  const { log } = t;
   let accepted = false;
   let clone: string | undefined;
   try {
     if (!claim.repoUrl) throw new Error('the claim carries no repoUrl (set git.workerOriginUrl or git.originUrl on the daemon)');
     clone = await prepareClone({ cache: s.cache, repoUrl: claim.repoUrl, branch: claim.branch, start: startOf(claim) });
+    setClone(clone);
   } catch (e) {
     log('checkout-failed', claim, e instanceof Error ? e.message : String(e));
+    await stopHeartbeat();
     await release(call, s, claim, `the worker could not prepare its clone: ${e instanceof Error ? e.message : String(e)}`, t);
     return;
   }
@@ -242,6 +355,7 @@ async function workLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, 
         clone,
         workerId: s.workerId,
         sleep: t.sleep,
+        ...(t.scriptedIdleMs ? { idleMs: t.scriptedIdleMs } : {}),
         launch: { launchId: claim.launchId, taskId: claim.taskId, token: claim.token, branch: claim.branch, acceptanceCriteria: criteriaOf(claim) },
       });
       accepted = isAccepted(res);
@@ -254,6 +368,7 @@ async function workLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, 
   } catch (e) {
     log('agent-error', claim, e instanceof Error ? e.message : String(e));
   }
+  await stopHeartbeat();
   const relayed = await relayFallback(s, call, claim, clone, t);
   accepted ||= relayed;
   let state: 'reported' | 'held' | 'ended' = 'ended';

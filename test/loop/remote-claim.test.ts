@@ -159,9 +159,11 @@ describe('remote claim response', () => {
     expect(calls).toBe(0);
     expect(h!.store.getLaunch(l.launchId)).toMatchObject({ status: 'live' });
     expect(h!.store.getLaunch(l.launchId)!.fingerprint).toBeUndefined();
-    // The wrapper is live: the tick's progress observation reads the fingerprint. (A remote release never does; see
-    // test/slice/remote-release.test.ts.)
+    // Reconcile does not fingerprint a remote launch either (ORC-26: its fingerprint comes from its worker's
+    // heartbeats; see test/health/progress.test.ts). The wrapper is live: a direct call counts.
     await h!.orch.tick();
-    expect(calls).toBeGreaterThan(0);
+    expect(calls).toBe(0);
+    await ws.fingerprint(h!.store.getLaunch(l.launchId)!);
+    expect(calls).toBe(1);
   }, 30_000);
 });

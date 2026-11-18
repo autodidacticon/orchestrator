@@ -1,7 +1,6 @@
 /**
  * Real workspace over git worktrees. See specs/integration-pipeline "Repository layout".
  */
-import { createHash } from 'node:crypto';
 import { mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { composeBrief } from '../brief/compose.js';
@@ -9,6 +8,7 @@ import type { Id } from '../graph/model.js';
 import type { Launch } from '../state/store.js';
 import { existsSync } from 'node:fs';
 import { dirtyFiles, git, LocalTagConflictError, refExists, revParse, tagIdempotent, worktreeAdd, worktreeList, worktreeReattach, worktreeRemove } from './git.js';
+import { treeFingerprint } from './fingerprint.js';
 import { type Origin, TagConflictError } from './origin.js';
 import type { BriefInput, FallbackReport, PreserveOptions, RemoveOptions, SealOptions, SealResult, TagPushResult, Workspace } from './workspace.js';
 
@@ -179,17 +179,8 @@ export class GitWorkspace implements Workspace {
     return { headSha: await revParse(launch.worktree, 'HEAD'), wipCommit };
   }
 
-  /**
-   * Head sha plus a hash over `git status --porcelain` (minus .orchestrator/) and `git diff-index -p HEAD`, so edits to an already dirty file still register.
-   * `diff-index` is plumbing and never refreshes the index; porcelain `git diff` does, taking index.lock even under GIT_OPTIONAL_LOCKS=0.
-   * A touch that keeps a tracked file's content shows in neither, so it does not change the fingerprint.
-   */
+  /** The shared tree fingerprint (src/workspace/fingerprint.ts), the same function a remote worker's loop uses for its clone. */
   async fingerprint(launch: Launch): Promise<string> {
-    const head = await revParse(launch.worktree, 'HEAD');
-    const status = await git(launch.worktree, ['status', '--porcelain=v1', '-z', '--untracked-files=all'], { allowFail: true });
-    const entries = status.stdout.split('\0').filter((e) => e && !e.slice(3).startsWith(`${ORCH_DIR}/`));
-    const diff = await git(launch.worktree, ['diff-index', '-p', 'HEAD', '--', '.', `:(exclude)${ORCH_DIR}`], { allowFail: true });
-    const hash = createHash('sha256').update(entries.join('\0')).update('\n').update(diff.stdout).digest('hex').slice(0, 16);
-    return `${head}:${hash}`;
+    return treeFingerprint(launch.worktree);
   }
 }

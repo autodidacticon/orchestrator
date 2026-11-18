@@ -25,6 +25,8 @@ export interface ScriptedAgentContext {
   clone: string;
   workerId: string;
   sleep: (ms: number) => Promise<void>;
+  /** A silent step before the agent starts: it sleeps this long without calling the API (tests of the loop's heartbeat). */
+  idleMs?: number;
 }
 
 /** The identity the scripted agent commits as. */
@@ -40,6 +42,7 @@ const SUBMIT_ATTEMPTS = 5;
 export async function runScriptedAgent(ctx: ScriptedAgentContext): Promise<ApiResult | undefined> {
   const { launch, clone } = ctx;
   const env = { ...process.env, ...SCRIPTED_IDENTITY };
+  if (ctx.idleMs && ctx.idleMs > 0) await ctx.sleep(ctx.idleMs);
   const readme = path.join(clone, 'README.md');
   const text = await readFile(readme, 'utf8').catch(() => '');
   await appendFile(readme, `${text && !text.endsWith('\n') ? '\n' : ''}${scriptedLine(launch.taskId, ctx.workerId)}\n`);

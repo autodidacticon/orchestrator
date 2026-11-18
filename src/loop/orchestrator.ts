@@ -49,7 +49,8 @@ import { runTick } from './tick.js';
 import { clearPrepareRetry, defaultPrepareRunner, pendingPrepareRetries, type PrepareJob, type PrepareRunner, startPrepareCommand, stopPrepareJobs } from '../launch/prepare.js';
 import { deriveEffects } from '../tracker/effects.js';
 import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, exceedsTimeBudget, priceFor, priceUsage, runCostUsd, tokensOf, unpricedLaunches } from '../health/budgets.js';
-import { recordSignal } from '../health/progress.js';
+import { applyFingerprint, recordSignal } from '../health/progress.js';
+import { FINGERPRINT_PATTERN } from '../workspace/fingerprint.js';
 import { exceedsStuckFail, humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
 import { applyOverridePatch, type ConfigReport, configSummary, type OverridableKey, type Overrides, readOverrides, reportOf, type Resolved, resolveLayers, type SetConfigResult, START_ONLY_KEYS, type WouldEnd } from '../runs/resolve.js';
 import { codexNetworkAccess, type CommitPolicy, EFFORT_FALLBACK, type Effort, isEffort, isEffortFor, isModelNameFor, isRunnerKind, type OpenCodePermission, RUNNER_KINDS, type RunnerKind, type Selection, zeroByKind } from '../runner/selection.js';
@@ -104,6 +105,16 @@ export function agentIntegerError(body: Record<string, unknown>): ApiResponse | 
   if (s === undefined) return undefined;
   if (typeof s === 'number' && Number.isSafeInteger(s) && s >= 0) return undefined;
   return { status: 400, body: { error: `seq must be a non-negative safe integer, got ${typeof s === 'number' ? String(s) : typeof s}`, field: 'seq' } };
+}
+
+/**
+ * A 400 naming `fingerprint` when a remote launch's heartbeat carries one that is not `<full hex sha>:<hex hash>`;
+ * undefined otherwise. Checked before the call writes anything. See specs/health-monitoring "Progress signals".
+ */
+export function heartbeatFingerprintError(body: Record<string, unknown>): ApiResponse | undefined {
+  const fp = body['fingerprint'];
+  if (fp === undefined || (typeof fp === 'string' && FINGERPRINT_PATTERN.test(fp))) return undefined;
+  return { status: 400, body: { error: 'fingerprint must be a full hex head sha, a colon and a hex hash', field: 'fingerprint' } };
 }
 
 /** A 400 naming the first bad field of a worker usage body, or undefined when it parses. Checked before anything is written. */
@@ -1330,11 +1341,21 @@ export class Orchestrator implements OrchestratorCore {
     return outcome;
   }
 
-  /** Every API call is progress; a heartbeat with new text is progress with the text kept. */
+  /**
+   * Every API call is progress; a heartbeat with new text is progress with the text kept. A heartbeat of a remote
+   * launch that carries `fingerprint` (its worker's clone, see specs/worker-pool "Loop heartbeat") is progress only
+   * when the fingerprint changed (`commit` or `worktree`) or its text did, so the loop's periodic heartbeats renew the
+   * lease without hiding a stuck agent. A local launch's `fingerprint` is ignored. See specs/health-monitoring "Progress signals".
+   */
   private recordProgress(launch: Launch, op: AgentOp, body: Record<string, unknown>): void {
-    const cur = this.store.getLaunch(launch.launchId);
+    let cur = this.store.getLaunch(launch.launchId);
     if (!cur) return;
     const text = body['progress'];
+    if (op === 'heartbeat' && accessOf(cur) === 'remote' && typeof body['fingerprint'] === 'string') {
+      cur = applyFingerprint(this, cur, body['fingerprint']);
+      if (typeof text === 'string' && text && text !== cur.progressText) recordSignal(this, cur, 'heartbeatText', text);
+      return;
+    }
     if (op === 'heartbeat' && typeof text === 'string' && text && text !== cur.progressText) {
       recordSignal(this, cur, 'heartbeatText', text);
       return;
@@ -1454,6 +1475,8 @@ export class Orchestrator implements OrchestratorCore {
     // Integer fields are checked before anything is written, the lease renewal included. See specs/agent-protocol "Integer fields".
     const bad = op === 'inbox' ? undefined : agentIntegerError(body);
     if (bad) return bad;
+    const badFingerprint = op === 'heartbeat' && accessOf(launch) === 'remote' ? heartbeatFingerprintError(body) : undefined;
+    if (badFingerprint) return badFingerprint;
     this.renewLease(launch);
     this.recordProgress(launch, op, body);
     switch (op) {

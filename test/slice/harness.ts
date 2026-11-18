@@ -81,7 +81,7 @@ export function harnessStore(file: string, journal?: { sink?: JournalSink; optio
   return new JournaledStore(image, sink, journal?.options);
 }
 
-export async function makeSlice(opts: { graph: string; config?: ConfigInput; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean; kind?: 'codex'; journal?: { sink?: JournalSink; options?: JournalOptions } }): Promise<SliceHarness> {
+export async function makeSlice(opts: { graph: string; config?: ConfigInput; verifier?: VerifierBackend; realVerifier?: boolean; fileGraph?: boolean; dir?: string; repo?: string; unobserved?: boolean; kind?: 'codex'; journal?: { sink?: JournalSink; options?: JournalOptions }; clock?: () => number }): Promise<SliceHarness> {
   const dir = opts.dir ?? mkdtempSync(path.join(tmpdir(), 'orch-slice-'));
   const repo = opts.repo ?? makeRepo(dir);
   const dataDir = path.join(dir, 'run');
@@ -141,7 +141,7 @@ export async function makeSlice(opts: { graph: string; config?: ConfigInput; ver
 
   const port = config.apiPort || (await freePort());
   const boot = async () => {
-    orch = new Orchestrator({ store, config, graphSource: source, runner, workspace, verifier });
+    orch = new Orchestrator({ store, config, graphSource: source, runner, workspace, verifier, ...(opts.clock ? { clock: opts.clock } : {}) });
     server = new ApiServer(orch);
     registerOperatorRoutes(server, orch);
     await server.listen(port);
