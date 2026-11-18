@@ -56,6 +56,7 @@ import { codexNetworkAccess, type CommitPolicy, EFFORT_FALLBACK, type Effort, is
 import { isolationEnv } from '../runs/childEnv.js';
 import { bashPatterns } from '../runner/opencode.js';
 import { composeAllowedTools } from '../toolchain/tools.js';
+import { sessionEndMatches } from '../runs/ancestry.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { PUSH_REFUSED, pushRetryDue, recordPushRetry } from '../verify/push-retry.js';
@@ -546,11 +547,16 @@ export class Orchestrator implements OrchestratorCore {
     return true;
   }
 
-  /** End every live attachment whose chain contains any of the pids (a session end posts its ancestry). */
+  /**
+   * End every live attachment that a session end's chain belongs to. `pids` is the hook's chain: its own pid, then
+   * its ancestors. An attachment matches when the nearest posted pid that is also in its chain is the hook's parent or
+   * grandparent (`pids[1]` or `pids[2]`); pid 1 never matches. A session nested further down the tree (under a shell
+   * or another process) therefore leaves its outer session attached. See specs/operator-control "Session attachments".
+   */
   endAttachmentsByPids(pids: number[], reason: string): string[] {
     const ended: string[] = [];
     for (const a of this.store.listAttachments()) {
-      if (a.ended || !a.pids.some((p) => pids.includes(p))) continue;
+      if (a.ended || !sessionEndMatches(pids, a.pids)) continue;
       this.store.putAttachment({ ...a, ended: { at: this.now(), reason } });
       ended.push(a.id);
     }
