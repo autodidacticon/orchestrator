@@ -172,6 +172,24 @@ export async function gitTopLevel(dir: string): Promise<string> {
   return realpathSync(stdout.trim());
 }
 
+/**
+ * The repository a path names for the run directory: the real path of its git top level, except that a path inside a
+ * linked worktree (one made by `git worktree add`, such as a launch worktree) names the main working tree of its
+ * repository, the directory above `git rev-parse --git-common-dir`. A worktree of a bare repository, or a common dir
+ * not named `.git`, has no main working tree to name and keeps its own top level. Throws when dir is not inside a git
+ * repository. See specs/operator-mcp "Operator MCP server".
+ */
+export async function repoOfWorktree(dir: string): Promise<string> {
+  const { stdout } = await execFileP('git', ['rev-parse', '--path-format=absolute', '--show-toplevel', '--git-dir', '--git-common-dir'], { cwd: dir });
+  const [top, gitDir, commonDir] = stdout.trim().split('\n').map((l) => l.trim());
+  if (!top || !gitDir || !commonDir) throw new Error(`git rev-parse gave no top level for ${dir}`);
+  const realTop = realpathSync(top);
+  const realCommon = realpathSync(commonDir);
+  if (realpathSync(gitDir) === realCommon || path.basename(realCommon) !== '.git') return realTop;
+  const main = path.dirname(realCommon);
+  return existsSync(main) ? main : realTop;
+}
+
 export interface RunPaths {
   repo: string;
   runDir: string;

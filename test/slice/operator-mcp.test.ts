@@ -593,6 +593,53 @@ describe('operator MCP server', () => {
     expect(tasksOf(again)).toEqual(['B1', 'B2', 'B3', 'B4', 'B5']);
   }, 60_000);
 
+  // A launch worktree names the run it belongs to; a worker tool's repo binds that call only. See specs/operator-mcp "Operator MCP server".
+  it('a launch worktree as repo reaches its repository\'s daemon, and a worker tool\'s repo does not move the session', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
+    const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));
+    const otherBase = mkdtempSync(path.join(tmpdir(), 'orch-mcp-other-'));
+    const pluginRoot = realpathSync(mkdtempSync(path.join(tmpdir(), 'orch-mcp-plugin-root-')));
+    dirs.push(home, base, otherBase, pluginRoot);
+    const repo = realpathSync(makeRepo(base));
+    const other = realpathSync(makeRepo(otherBase));
+    writeFileSync(path.join(repo, 'orchestrator.yaml'), ['checkCommand: "true"', 'tickIntervalMs: 150', 'runner: { mode: pull }'].join('\n'));
+    const { ORCH_REPO: _unset, ...rest } = process.env as Record<string, string>;
+    env = { ...rest, ORCH_HOME: home };
+    const run = await startDaemon({ repo, env: { ...env, ORCH_REPO: repo } });
+    const put = await fetch(`${run.url}/v1/graph`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ content: 'nodes:\n  - { id: T1, deps: [], description: d, acceptanceCriteria: [a] }\n' }) });
+    expect(put.status).toBe(200);
+    // A linked worktree of the repository, under the run directory like the daemon's launch worktrees.
+    const worktree = path.join(runPaths(repo, env).runDir, 'worktrees', 'launch-w');
+    gitIn(repo, 'worktree', 'add', '-q', '-b', 'task/T1/lw', worktree);
+    client = new Client({ name: 'test', version: '0' });
+    await client.connect(new StdioClientTransport({ command: 'node', args: ['--import', tsxLoader, entry], env, cwd: pluginRoot, stderr: 'pipe' }));
+    const tasksOf = (s: Record<string, unknown>) => Object.values(s['byStatus'] as Record<string, string[]>).flat();
+    const reachesR = async (args: Record<string, unknown> = {}) => {
+      const s = await tool('status', args);
+      expect(s).toMatchObject({ status: 200 });
+      expect(tasksOf(s)).toEqual(['T1']);
+    };
+
+    // An operator tool with the worktree as repo reaches R's daemon, and so does the next call without repo.
+    await reachesR({ repo: worktree });
+    await reachesR();
+    expect((await listRuns(env)).map((r) => r.repo)).toEqual([repo]);
+
+    // A worker tool naming another repository, which has no run, fails for that call only.
+    await reachesR({ repo });
+    const elsewhere = await client.callTool({ name: 'launch_heartbeat', arguments: { launchId: 'L1', token: 't', repo: other } });
+    expect(elsewhere.isError).toBe(true);
+    expect(parse(elsewhere)['error']).toContain(other);
+    await reachesR();
+
+    // A worker tool with a repo outside any git repository fails with the existing message; the session stays on R.
+    const notGit = await client.callTool({ name: 'launch_inbox', arguments: { launchId: 'L1', token: 't', repo: pluginRoot } });
+    expect(notGit.isError).toBe(true);
+    expect(parse(notGit)['error']).toMatch(/repo .* is not inside a git repository/);
+    await reachesR();
+    expect((await listRuns(env)).map((r) => r.repo)).toEqual([repo]);
+  }, 60_000);
+
   it('revives the daemon after an idle exit and refuses after a stop', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-mcp-home-'));
     const base = mkdtempSync(path.join(tmpdir(), 'orch-mcp-repo-'));

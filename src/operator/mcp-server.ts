@@ -11,7 +11,7 @@ import { ancestorPids } from '../runs/ancestry.js';
 import { daemonState, listRuns, remoteDaemonUrl, reviveDaemon, startDaemon, stopDaemon } from '../runs/lifecycle.js';
 import { CODEX_SANDBOXES, COMMIT_POLICIES, EFFORT_LEVELS_ALL, EFFORT_LEVELS_BY_KIND, isRunnerKind, OPENCODE_DATA_DIRS, OPENCODE_PERMISSIONS, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
 import { foldRunnerArgs, type Overrides } from '../runs/resolve.js';
-import { gitTopLevel, readConfigJson, readRepoConfigRaw, resolveRepoPath, runPaths } from '../runs/runDir.js';
+import { readConfigJson, readRepoConfigRaw, repoOfWorktree, resolveRepoPath, runPaths } from '../runs/runDir.js';
 
 /**
  * The cap keeps every tool call under the host's tool-call timeout: Claude Code's two-minute
@@ -30,6 +30,9 @@ export const TOOL_NAMES = [
   'claim', 'release', 'launch_heartbeat', 'launch_report', 'launch_block', 'launch_inbox', 'launch_log',
   'configure',
 ] as const;
+
+/** The worker tools: a `repo` they are passed binds that call only and never moves the session repository. See specs/operator-mcp "Operator MCP server". */
+export const WORKER_TOOL_NAMES: ReadonlySet<string> = new Set(['claim', 'release', 'launch_heartbeat', 'launch_report', 'launch_block', 'launch_inbox', 'launch_log']);
 
 export function clampWait(ms: number | undefined): number {
   if (ms === undefined || !Number.isFinite(ms)) return WAIT_DEFAULT_MS;
@@ -92,7 +95,7 @@ const RUNNER_ARG_TEXT = {
 
 /** The repo argument every tool takes. See specs/operator-mcp "Operator MCP server". */
 export const REPO_ARG_TEXT =
-  "The absolute path of the session's project (any directory inside its git repository). Optional: without it the call uses the repo this session last passed, else the server's --repo, ORCH_REPO, or the git top level of the server's working directory. A server whose working directory is not inside a git repository (a Codex or OpenCode plugin install runs it in the plugin root) refuses a call naming this argument until a repo is passed; pass it on every call.";
+  "The absolute path of the session's project (any directory inside its git repository). A path inside a linked worktree, such as a launch worktree, names its repository's main working tree. Optional: without it the call uses the repo this session last passed to a tool other than claim, release and the launch_* tools (whose repo applies to that call only), else the server's --repo, ORCH_REPO, or the git top level of the server's working directory. A server whose working directory is not inside a git repository (a Codex or OpenCode plugin install runs it in the plugin root) refuses a call naming this argument until a repo is passed; pass it on every call.";
 
 /** The plugin's start-mode default: pull-mode workers are this session's Claude subagents, so a codex or opencode run starts in spawn. */
 export function defaultModeFor(kind: RunnerKind): 'spawn' | 'pull' {
@@ -148,17 +151,23 @@ export class OperatorClient {
 
   constructor(private readonly ctx: OperatorContext) {}
 
-  /** Record a call's `repo`: an absolute path inside a git repository, kept as that repository's real top level. Returns the repository the call is bound to: its own, else the one the session last passed, else undefined for the server's default. */
-  async useRepo(repo: string | undefined): Promise<string | undefined> {
+  /**
+   * Resolve a call's `repo`: an absolute path inside a git repository, kept as that repository's real top level, or,
+   * for a path inside a linked worktree such as a launch worktree, as the main working tree of its repository. Returns
+   * the repository the call is bound to: its own, else the one the session last passed, else undefined for the
+   * server's default. The session remembers the repo unless `remember` is false (the worker tools, whose repo binds
+   * that call only).
+   */
+  async useRepo(repo: string | undefined, opts: { remember?: boolean } = {}): Promise<string | undefined> {
     if (repo === undefined) return this.sessionRepo;
     if (!path.isAbsolute(repo)) throw new Error(`repo must be an absolute path, got ${repo}`);
     let top: string;
     try {
-      top = await gitTopLevel(repo);
+      top = await repoOfWorktree(repo);
     } catch {
       throw new Error(`repo ${repo} is not inside a git repository`);
     }
-    this.sessionRepo = top;
+    if (opts.remember !== false) this.sessionRepo = top;
     return top;
   }
 
@@ -311,7 +320,7 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
       const { repo, ...rest } = args;
       let bound: string | undefined;
       try {
-        bound = await client.useRepo(repo as string | undefined);
+        bound = await client.useRepo(repo as string | undefined, { remember: !WORKER_TOOL_NAMES.has(name) });
       } catch (err) {
         return failure(err);
       }
