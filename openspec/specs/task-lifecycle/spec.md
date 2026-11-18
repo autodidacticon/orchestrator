@@ -23,6 +23,7 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 | From | To | Whose intent | Trigger |
 |---|---|---|---|
 | unstarted | blocked | orchestrator | brief validation failed, or a remediation candidate awaits review |
+| unstarted | blocked | orchestrator | remoteNeedsAgentCommit: on a remote run the task's runner kind has commit policy `daemon`; no launch is created |
 | unstarted | running | orchestrator | ready, brief valid, slot admitted; launch created |
 | running | submitted | agent | submit report accepted and sealed |
 | running | failed | agent | fail report |
@@ -95,6 +96,10 @@ The system SHALL permit exactly the transitions below and MUST reject any other 
 #### Scenario: Prepare failures at the limit block the task
 - **WHEN** a task's prepare command fails for the `prepareFailureLimit`-th time in a row
 - **THEN** the orchestrator applies `running -> blocked` with trigger `prepareFailed`, `attempts` and the carry unchanged, and the same request by an agent is rejected
+
+#### Scenario: A remote run blocks a task whose kind commits as the daemon
+- **WHEN** on a remote run the orchestrator admits a task whose runner kind has commit policy `daemon`
+- **THEN** it applies `unstarted -> blocked` with trigger `remoteNeedsAgentCommit` and creates no launch, and the same request by an agent is rejected
 
 ### Requirement: Admission
 The orchestrator SHALL admit `unstarted` ready tasks and resumable `waiting` tasks into run slots up to the configured capacity, admitting resumables before new launches and otherwise in first-in first-out order. A `waiting` task SHALL NOT hold a run slot, and the number of `waiting` tasks SHALL be bounded by `maxWaiting`.
@@ -224,7 +229,7 @@ A human SHALL accept a `submitted` milestone only against its pinned `integratio
 - **THEN** MVP is `submitted` at version 2 with the new integration head pinned, and accepting it against version 1 is refused as stale
 
 ### Requirement: Structured blocked reasons
-A `blocked` status SHALL carry a reason with a kind from `needsDecision`, `needsAccess`, `impossible`, `dependencyCancelled`, `outOfScope`, `insufficientSpec`, `milestoneRejected`, `pushRefused`, and `prepareFailed`, plus a message, and for `needsDecision` any options and the eventual answer. Only the verifier SHALL set `pushRefused`, and agents MUST NOT block with it. Only the orchestrator SHALL set `prepareFailed`, and agents MUST NOT block with it.
+A `blocked` status SHALL carry a reason with a kind from `needsDecision`, `needsAccess`, `impossible`, `dependencyCancelled`, `outOfScope`, `insufficientSpec`, `milestoneRejected`, `pushRefused`, `prepareFailed`, and `remoteNeedsAgentCommit`, plus a message, and for `needsDecision` any options and the eventual answer. Only the verifier SHALL set `pushRefused`, and agents MUST NOT block with it. Only the orchestrator SHALL set `prepareFailed`, and agents MUST NOT block with it. Only the orchestrator SHALL set `remoteNeedsAgentCommit`, and agents MUST NOT block with it.
 
 #### Scenario: Question survives into the next brief
 - **WHEN** a task is blocked with kind `needsDecision` and a human answers
@@ -241,6 +246,10 @@ A `blocked` status SHALL carry a reason with a kind from `needsDecision`, `needs
 #### Scenario: An agent cannot block with an orchestrator kind
 - **WHEN** an agent's block call names kind `prepareFailed` or `pushRefused`
 - **THEN** it is answered 400 and the task stays `running`
+
+#### Scenario: A kind that commits as the daemon on a remote run
+- **WHEN** a task is blocked with kind `remoteNeedsAgentCommit`
+- **THEN** its message names the runner kind and the commit policy `daemon`, and no launch exists for it
 
 ### Requirement: Fresh process per launch
 Every launch SHALL be a new process with a new worktree and branch. Resuming after `blocked` SHALL be a new launch whose brief carries the answer. Resuming after `waiting` SHALL continue the same process once admitted.

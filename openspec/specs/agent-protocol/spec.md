@@ -12,6 +12,8 @@ Before launching, the orchestrator SHALL write `<worktree>/.orchestrator/brief.m
 - attempt context when present: the prior failure report, verifier output, conflict details naming the files and the sibling that landed, and the human's answer. Under `agent`, the conflict, interruption, and revision texts tell the agent to rebase, merge or cherry-pick the prior branch, squash a work-in-progress commit, and commit the delta. Under `daemon` they tell it instead to inspect the prior branch with `git show`/`git diff` and reapply the changes as file edits;
 - the API base URL, the launch token, the fallback report path, and the instruction to stop immediately on a 401.
 
+A remote launch (`access: remote`) has no worktree: its brief is kept on the launch row (see specs/remote-workspace). The text the orchestrator writes into its workspace and reporting sections SHALL name no path on the daemon's machine (not the run directory, the worktrees root or the daemon's clone) and no loopback address; text carried verbatim (the payload, dependency reports, verifier output) is not rewritten. Its workspace section SHALL instead name the clone (the current directory, a clone of the repository the worker loop made), the branch, the base commit and the integration branch, and SHALL say that work is submitted by committing on the branch and pushing it to `origin` before `report submit`. Its API base URL SHALL be `apiBaseUrl` (without a trailing slash), never the bind address, and its fallback report path SHALL be the relative path `.orchestrator/report.json`, which the brief says is relative to the root of the clone; `brief.json` SHALL carry the same branch, base commit, API base URL and fallback path. For a carry holding `interrupted`, the remote brief SHALL say that the branch starts at `carry.interrupted.headSha` (the worker loop creates it there), not at the base commit, and SHALL NOT tell the agent to merge or cherry-pick the prior branch onto its base. Whether the remote brief carries the OpenSpec change rule SHALL follow whether the daemon's clone has an `openspec/` root. The commit-policy lines of the definition of done SHALL be those of `agent`, since a remote launch never has policy `daemon`, and the prepare-command item SHALL NOT appear, since a remote run has no `prepareCommand`. A local launch's brief SHALL be unchanged by this.
+
 The agent sees the shim's tools under a name that depends on its CLI: `mcp__orchestrator__<tool>` under Claude Code and Codex, `orchestrator_<tool>` under OpenCode. The `claude-code` and `codex` briefs keep their Reporting text (the `codex` one is in "Codex brief reports through the MCP server"). An `opencode` brief's Reporting section SHALL name `orchestrator_heartbeat`, `orchestrator_report`, `orchestrator_block`, `orchestrator_inbox` and `orchestrator_log` and tell the agent to prefer them to calling the API from a command. It SHALL keep the API and the fallback file, because no sandbox blocks loopback. It SHALL NOT name `mcp__orchestrator__` tools.
 
 An `opencode` brief's workspace section SHALL say that OpenCode permission rules are in force with nothing else confining the agent's commands. It SHALL say that a command a rule does not allow fails with "The user has specified a rule which prevents you from using this specific tool call." and is not approved at runtime. That is the `deny` error, which the model sees and continues past. It SHALL tell the agent not to retry it but to ask with a `needsAccess` question naming the command and continue with what it can, and say that the operator can run it or set `runner.opencode.permission` to `allow` for the next launch. Under `derived` it SHALL list the file tools (read, glob, grep, list, edit, write), then the `bashPatterns` followed by the check command's patterns. It SHALL say that every other command is denied and that each command of a chain (`&&`, `;`, `|`) must match one of them on its own. It SHALL NOT mention a sandbox.
@@ -45,6 +47,26 @@ An `opencode` brief's workspace section SHALL say that OpenCode permission rules
 #### Scenario: Brief without an openspec root has no change-directory rule
 - **WHEN** a brief is composed for a launch whose worktree has no `openspec/`
 - **THEN** its Definition of done does not mention OpenSpec
+
+#### Scenario: Remote brief names the clone and no daemon path
+- **WHEN** a brief is composed for a remote launch on a run with `apiBaseUrl` `http://orchestrator.example:8080/`
+- **THEN** its markdown names the branch, the base commit, the integration branch, `http://orchestrator.example:8080/v1/launches/<launchId>/...` and `.orchestrator/report.json`, and contains neither the run directory, the worktrees root, nor `127.0.0.1`
+
+#### Scenario: Remote brief says to push before submitting
+- **WHEN** a brief is composed for a remote launch
+- **THEN** it tells the agent to commit all work on the branch and push it to `origin` before calling `report` with kind submit
+
+#### Scenario: Remote brief after an interruption
+- **WHEN** a brief is composed for a remote launch whose task's carry holds `interrupted` with `headSha` H
+- **THEN** it says the branch starts at H, created there by the worker loop, not at the base commit
+
+#### Scenario: Remote brief.json matches the markdown
+- **WHEN** a brief is composed for a remote launch
+- **THEN** its JSON carries the same `branch`, `baseSha`, `apiBaseUrl` and `fallbackPath` that the markdown names
+
+#### Scenario: Remote brief in a repository with an openspec root
+- **WHEN** a remote launch is prepared on a run whose clone contains `openspec/`
+- **THEN** its brief carries the OpenSpec change-directory rule
 
 ### Requirement: Launch token scoping
 Every API call SHALL carry a bearer token issued for one launch. A call whose token does not match the launch in the path, or whose launch has been revoked or ended, SHALL be answered with 401 and SHALL have no effect.
@@ -82,7 +104,7 @@ Every mutating call (`report`, `block`, `log`) SHALL carry `seq`, a per-launch m
 - **THEN** the retry returns the stored response and the task transitions exactly once
 
 ### Requirement: Submission sealing
-On `report submit` the orchestrator SHALL inspect the worktree, ignoring `.orchestrator/`. Under the launch's `agent` commit policy, a worktree with uncommitted or untracked changes SHALL be rejected with 409 and the list of files, and the task SHALL remain `running`. Under `daemon`, the orchestrator SHALL commit those changes on the launch branch: author and committer `orchestrator`, hooks skipped, the report summary as the message. It SHALL then seal the new head, and the `agent.report` event SHALL carry `committedByOrchestrator: true`. Under either policy, a clean worktree SHALL NOT be committed. Once the worktree is clean or committed, the branch head SHALL be recorded as `sealedSha` and the task SHALL become `submitted`. Commits made after sealing SHALL be ignored by verification.
+On `report submit` the orchestrator SHALL inspect the worktree, ignoring `.orchestrator/`. Under the launch's `agent` commit policy, a worktree with uncommitted or untracked changes SHALL be rejected with 409 and the list of files, and the task SHALL remain `running`. Under `daemon`, the orchestrator SHALL commit those changes on the launch branch: author and committer `orchestrator`, hooks skipped, the report summary as the message. It SHALL then seal the new head, and the `agent.report` event SHALL carry `committedByOrchestrator: true`. Under either policy, a clean worktree SHALL NOT be committed. Once the worktree is clean or committed, the branch head SHALL be recorded as `sealedSha` and the task SHALL become `submitted`. Commits made after sealing SHALL be ignored by verification. On a remote launch the daemon holds no worktree: the submit report SHALL carry `sealedSha`, the full object name of the launch branch tip the worker pushed to origin, and the orchestrator SHALL seal it as the `remote-workspace` capability's "Seal" requires instead of inspecting a tree; the commit policy does not apply. A remote submit without `sealedSha`, or with a value that is not a full hex object name, SHALL answer 400 naming `sealedSha` and record nothing. On a local launch `sealedSha` in the report SHALL be ignored. A refused seal, local or remote, SHALL record no `agent.report` event and no deduplicated response, so the same `seq` may be sent again.
 
 #### Scenario: Dirty worktree rejected
 - **WHEN** an agent of a launch with the `agent` policy submits with an unstaged modification to `src/a.ts`
@@ -95,6 +117,14 @@ On `report submit` the orchestrator SHALL inspect the worktree, ignoring `.orche
 #### Scenario: Later commits ignored
 - **WHEN** an agent submits at commit C1 and then commits C2 on the same branch
 - **THEN** verification uses C1
+
+#### Scenario: Remote submit without sealedSha
+- **WHEN** the worker of a remote launch submits without `sealedSha`
+- **THEN** the response is 400 naming `sealedSha`, no `agent.report` event is appended, and the task is still `running`
+
+#### Scenario: Local submit ignores sealedSha
+- **WHEN** an agent of a local launch commits C1 and submits with `sealedSha` set to any other value
+- **THEN** the submission is sealed at C1 from the worktree and the task is `submitted`
 
 ### Requirement: Declared no-op
 If `sealedSha` equals `baseSha`, the submit report MUST carry `noChanges` with a justification; otherwise the submission SHALL fail with reason `emptySubmission` and `attempts` SHALL increase. This holds under both commit policies: under `daemon`, a clean worktree is not committed, so its `sealedSha` is still `baseSha`.

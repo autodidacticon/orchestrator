@@ -23,7 +23,7 @@ The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `m
 - **THEN** both are spawned on the next tick
 
 ### Requirement: Claim
-`POST /v1/claims` SHALL take `workerId`, an optional `taskId`, an optional `access`, and an optional `runner`: one runner kind or a list of the kinds the worker can run; a value outside the kinds SHALL be refused with 400. Without `taskId` it SHALL hand over the oldest claimable launch by creation time among those whose kind the filter names (any kind without a filter); with `taskId` it SHALL hand over that task's claimable launch, answering 404 when the task has no launch, 409 naming the launch state when its launch is not claimable, and 409 naming the launch's `runner` when its kind is outside the filter. When nothing is claimable for the filter, or the run is paused, it SHALL answer 404 with `paused` set accordingly, and a launch of another kind SHALL stay parked. A worker that already holds a launch SHALL get it back whatever its filter. On success the launch SHALL become `live` with `worker: { id, claimedAt }` and no pid, its lease SHALL be reset to expire `leaseTtlMs` after the claim, and the response SHALL be `{ launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner, commitPolicy, model, effort }`, where `brief` is the launch's `brief.json` content, `briefPath` the path of its `brief.md`, and `runner`, `commitPolicy`, `model`, and `effort` the values fixed when the launch was prepared. For a `codex` launch the response SHALL also carry `codex: { settings, maxWaitMs, retryWindowMs, env }`: the effective `runner.codex` keys, the long-poll ceiling, the retry window, and the agent environment a spawned launch would get, so that a worker loop composes the same `codex exec` command. For an `opencode` launch the response SHALL carry `opencode: { settings, allowedTools, maxWaitMs, retryWindowMs, env }` instead: the effective `runner.opencode` keys, the rules the OpenCode runner derives its permission ruleset from (the composed allow list, else the detected toolchain and the claude file rules, the same list the runner is given), the long-poll ceiling, the retry window, and the agent environment, so that a worker loop composes the same `opencode run` command and per-launch config, including the derived permission ruleset. A launch of one kind SHALL NOT carry another kind's block. The token of a claimable launch SHALL NOT authenticate until the claim is recorded. The work workflow's Claude Code workers SHALL claim with `runner: "claude-code"`, and the work loop with `runner: "codex"` or `runner: "opencode"`, the kind it was started for.
+`POST /v1/claims` SHALL take `workerId`, an optional `taskId`, an optional `access`, and an optional `runner`: one runner kind or a list of the kinds the worker can run; a value outside the kinds SHALL be refused with 400. Without `taskId` it SHALL hand over the oldest claimable launch by creation time among those whose kind the filter names (any kind without a filter); with `taskId` it SHALL hand over that task's claimable launch, answering 404 when the task has no launch, 409 naming the launch state when its launch is not claimable, and 409 naming the launch's `runner` when its kind is outside the filter. When nothing is claimable for the filter, or the run is paused, it SHALL answer 404 with `paused` set accordingly, and a launch of another kind SHALL stay parked. A worker that already holds a launch SHALL get it back whatever its filter. On success the launch SHALL become `live` with `worker: { id, claimedAt }` and no pid, its lease SHALL be reset to expire `leaseTtlMs` after the claim, and the response SHALL be `{ launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner, commitPolicy, model, effort }`, where `brief` is the launch's `brief.json` content, `briefPath` the path of its `brief.md`, and `runner`, `commitPolicy`, `model`, and `effort` the values fixed when the launch was prepared. For a `codex` launch the response SHALL also carry `codex: { settings, maxWaitMs, retryWindowMs, env }`: the effective `runner.codex` keys, the long-poll ceiling, the retry window, and the agent environment a spawned launch would get, so that a worker loop composes the same `codex exec` command. For an `opencode` launch the response SHALL carry `opencode: { settings, allowedTools, maxWaitMs, retryWindowMs, env }` instead: the effective `runner.opencode` keys, the rules the OpenCode runner derives its permission ruleset from (the composed allow list, else the detected toolchain and the claude file rules, the same list the runner is given), the long-poll ceiling, the retry window, and the agent environment, so that a worker loop composes the same `opencode run` command and per-launch config, including the derived permission ruleset. A launch of one kind SHALL NOT carry another kind's block. The token of a claimable launch SHALL NOT authenticate until the claim is recorded. For a launch with `access: remote` the response SHALL carry every field of the local response except `worktree` and `briefPath`, plus `access: "remote"`, `repoUrl`, `integrationBranch`, and `briefMarkdown`: `repoUrl` is `git.workerOriginUrl` when set, else `git.originUrl`, else the URL of the daemon clone's `origin` remote, passed through as written (user information included); `brief` is the launch row's stored `briefJson` and `briefMarkdown` its stored brief text, neither read from disk. When the stored brief's context holds `interrupted` (a kept release), the remote response SHALL carry it as `carry`, so that the worker starts its branch at `carry.interrupted.headSha`. A repeated claim of a remote launch SHALL answer the same body with `repeated: true`. A remote claim SHALL record no baseline `fingerprint` on the launch and SHALL NOT read the workspace fingerprint. `git.workerOriginUrl` is a config-file key read at start; it SHALL NOT change the meaning of `git.originUrl`, which stays the URL of the daemon clone's `origin` and the input of the run id. The local response SHALL be unchanged. The work workflow's Claude Code workers SHALL claim with `runner: "claude-code"`, and the work loop with `runner: "codex"` or `runner: "opencode"`, the kind it was started for.
 
 #### Scenario: Oldest first
 - **WHEN** T1 and then T2 were parked and a worker claims without a task id
@@ -69,6 +69,26 @@ The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `m
 - **WHEN** T1's launch is parked for `codex` and then T2's for `claude-code`, and a worker claims without `runner`
 - **THEN** it receives T1's launch, oldest first as before
 
+#### Scenario: Remote claim response
+- **WHEN** a remote worker claims T1's parked launch on a run with `runner.access: remote`
+- **THEN** the response is 200 with `access: "remote"`, `launchId`, `taskId`, `token`, `branch`, `baseSha`, `repoUrl`, `integrationBranch`, `brief` equal to the stored `briefJson`, `briefMarkdown` equal to the stored text, `apiUrl`, `workerId`, and `leaseTtlMs`, and it has no `worktree` and no `briefPath`
+
+#### Scenario: Repository URL for a remote worker
+- **WHEN** a remote claim is answered
+- **THEN** `repoUrl` is `git.workerOriginUrl` when set, `git.originUrl` when only that is set, and the clone's `origin` URL when neither is
+
+#### Scenario: Remote claim after a kept release
+- **WHEN** a remote worker claims the launch of a task whose carry holds `interrupted` with `headSha` and `priorBranch`
+- **THEN** the response carries `carry.interrupted.headSha` and `carry.interrupted.priorBranch`, and a repeated claim carries them too
+
+#### Scenario: Remote claim records no fingerprint
+- **WHEN** a remote worker claims a launch
+- **THEN** the launch has no `fingerprint` and the workspace fingerprint is not read
+
+#### Scenario: Remote worker clones the repository URL
+- **WHEN** a remote worker on a run with `git.pushIntegration: true` runs `git clone <repoUrl>`
+- **THEN** the clone succeeds and `origin/<integrationBranch>` in it equals the claim's `baseSha`
+
 ### Requirement: Worker identity
 `workerId` SHALL be an opaque string chosen by the worker and unique within a run. A worker SHALL hold at most one live launch. A claim by a worker that already holds a live launch SHALL return that launch again with the same token when `taskId` is absent or matches, and 409 otherwise. The repeated response SHALL also carry `pending: { seq, question, answer? }` when the launch has an open question or an admitted answer, so that a fresh worker can collect the answer with `block` and the same seq. `status` SHALL list every worker with its launch.
 
@@ -85,7 +105,7 @@ The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `m
 - **THEN** the response is 409 naming T1's launch
 
 ### Requirement: Release
-`POST /v1/launches/:id/release` with a `reason` and an optional boolean `keep` SHALL apply to a live launch held by a worker and SHALL answer 409 for any other launch. When no progress has been observed since the claim, meaning no commit or dirty file in the worktree and no API call under the token, the launch SHALL end with reason `released`, the task SHALL return to `unstarted` without consuming an attempt, and the worktree SHALL be removed so that the next admission prepares a new launch. When progress has been observed and `keep` is false, the release SHALL be a failed attempt with reason `released` and the worker's reason as message. When progress has been observed and `keep` is true, the orchestrator SHALL commit any uncommitted changes in the worktree as a work-in-progress commit on the launch branch, SHALL end the launch with reason `released`, SHALL remove the worktree and keep the branch, SHALL return the task to `unstarted` with `attempts` unchanged, and SHALL store `carry.interrupted = { priorLaunchId, priorBranch, headSha, wipCommit?, reason }` so that the next brief carries it; the response SHALL report `kept` true with the branch and head sha. A release while the task is `waiting` SHALL act as process death: the task becomes `blocked` with its question preserved, and with `keep` the same `interrupted` context SHALL be stored and the branch kept. The overlay entry SHALL carry `interruptions`, increased by one on every kept release after progress or while waiting, reset to zero when the task submits, carried in the `interrupted` context, and reported with each live launch in `status`. The configuration SHALL accept `daemon.maxKeptReleases`, default 3, where 0 means unlimited; a release with `keep` for a task whose `interruptions` already equals or exceeds it SHALL behave as a release without `keep`. Lease expiry on a claimed launch SHALL follow "Lease expiry": a kept release when the worktree shows progress since the claim and the bound allows, a failed attempt with reason `leaseExpired` otherwise.
+`POST /v1/launches/:id/release` with a `reason` and an optional boolean `keep` SHALL apply to a live launch held by a worker and SHALL answer 409 for any other launch. When no progress has been observed since the claim, meaning no commit or dirty file in the worktree and no API call under the token, the launch SHALL end with reason `released`, the task SHALL return to `unstarted` without consuming an attempt, and the worktree SHALL be removed so that the next admission prepares a new launch. When progress has been observed and `keep` is false, the release SHALL be a failed attempt with reason `released` and the worker's reason as message. When progress has been observed and `keep` is true, the orchestrator SHALL commit any uncommitted changes in the worktree as a work-in-progress commit on the launch branch, SHALL end the launch with reason `released`, SHALL remove the worktree and keep the branch, SHALL return the task to `unstarted` with `attempts` unchanged, and SHALL store `carry.interrupted = { priorLaunchId, priorBranch, headSha, wipCommit?, reason }` so that the next brief carries it; the response SHALL report `kept` true with the branch and head sha. A release while the task is `waiting` SHALL act as process death: the task becomes `blocked` with its question preserved, and with `keep` the same `interrupted` context SHALL be stored and the branch kept. The overlay entry SHALL carry `interruptions`, increased by one on every kept release after progress or while waiting, reset to zero when the task submits, carried in the `interrupted` context, and reported with each live launch in `status`. The configuration SHALL accept `daemon.maxKeptReleases`, default 3, where 0 means unlimited; a release with `keep` for a task whose `interruptions` already equals or exceeds it SHALL behave as a release without `keep`. Lease expiry on a claimed launch SHALL follow "Lease expiry": a kept release when the worktree shows progress since the claim and the bound allows, a failed attempt with reason `leaseExpired` otherwise. A remote launch (`access: remote`) has no worktree on the daemon's host: the release body MAY carry `headSha`, the launch branch tip the worker pushed, and `wipCommit`, its work-in-progress commit, each a full hex object name (a malformed one SHALL be answered 400 naming the field, and a local release SHALL ignore both). For a remote launch, progress SHALL be any agent API call since the claim or a `headSha` that differs from the base sha, and the orchestrator SHALL NOT fingerprint, preserve or remove anything. A kept remote release SHALL fetch the launch branch from origin and require its tip to equal `headSha`: no branch on origin SHALL answer 409 `branchNotPushed`, another tip 409 `shaMismatch`, and an origin that cannot be fetched 503 `originUnreachable` or `originRefused`; on any of these the task and the launch SHALL be unchanged, the launch SHALL stay live, and no `launch.released` event SHALL be appended. A remote release with `keep` but no `headSha` cannot be kept and SHALL behave as a release without `keep`, with `keepError` naming `headSha`. Otherwise a kept remote release SHALL store `carry.interrupted = { priorLaunchId, priorBranch, headSha, wipCommit?, reason, interruptions }` as a local one does, under the same `daemon.maxKeptReleases` bound, and its `launch.released` event SHALL carry `headSha`.
 
 #### Scenario: Release without progress
 - **WHEN** a worker releases a launch it has not touched
@@ -115,16 +135,44 @@ The configuration SHALL accept `runner.mode` with values `spawn`, `pull`, and `m
 - **WHEN** `daemon.maxKeptReleases` is 2 and T2, which has not submitted, is released with `keep` after progress for the third time
 - **THEN** T2 is `failed` with reason `released`, `attempts` increases, and `interruptions` stays at 2
 
+#### Scenario: Remote kept release
+- **WHEN** a remote worker commits, pushes the launch branch and releases with `keep` true and `headSha` equal to the pushed tip
+- **THEN** the answer has `kept: true`, the task is `unstarted` with `attempts` unchanged, `carry.interrupted.headSha` is the tip, the next remote claim carries it, and no fingerprint, preserve or worktree removal was made
+
+#### Scenario: Remote keep with another tip
+- **WHEN** a remote worker releases with `keep` and a `headSha` that is not the launch branch tip at origin, or the branch is not on origin
+- **THEN** the answer is 409 with `shaMismatch` or `branchNotPushed` and the launch stays `live`
+
+#### Scenario: Remote keep without progress
+- **WHEN** a remote worker that made no API call since the claim releases with `keep` and `headSha` equal to the base sha
+- **THEN** the answer has `kept: false` and the task is `unstarted` with `attempts` unchanged, as for a local release without progress
+
+#### Scenario: Remote keeps are bounded
+- **WHEN** a remote task's `interruptions` has reached `daemon.maxKeptReleases` and its worker releases with `keep` after pushing
+- **THEN** the answer has `kept: false` and `keepError` naming the bound
+
 ### Requirement: Access modes
-`access` SHALL be `local` or `remote` and SHALL default to `local`. `local` means the worker runs on the daemon's machine, reaches the loopback API, and works in the worktree the daemon prepared. `remote` SHALL be answered 501 naming it as reserved, so that a later change can implement it without changing the request shape.
+A run SHALL have one access, the file key `runner.access`, `local` or `remote`, default `local`, read at start; it SHALL NOT be a runtime override. `local` means the worker runs on the daemon's machine, reaches the loopback API, and works in the worktree the daemon prepared. `remote` means the worker runs elsewhere and gets no worktree from the daemon (see specs/remote-workspace). Any other value SHALL fail configuration loading with a message naming `runner.access`. The daemon SHALL refuse to start with `runner.access: remote` unless the runner mode in force is `pull`, `git.pushIntegration` is true, and `prepareCommand` is unset, with one message naming each unmet condition; on a remote run `PUT /v1/runner` SHALL refuse any mode other than `pull` with 409. Every launch row SHALL carry the run's access in `access`, set when the row is created and never changed; a row without it is `local`. A claim's `access` SHALL be `local` or `remote` and SHALL default to `local`; any other value SHALL be answered 400. A claim whose `access` differs from the run's SHALL be answered 409 with `reason`, `access` and `runAccess`, and SHALL change no launch.
 
 #### Scenario: Local is the default
 - **WHEN** a claim omits `access`
 - **THEN** it is treated as `local`
 
-#### Scenario: Remote is reserved
-- **WHEN** a worker claims with `access: 'remote'`
-- **THEN** the response is 501 naming `remote` as reserved and no launch changes
+#### Scenario: Remote worker on a local run
+- **WHEN** a worker claims with `access: 'remote'` on a run whose `runner.access` is `local`
+- **THEN** the response is 409 with `access: 'remote'` and `runAccess: 'local'`, and the claimable launch stays `claimable`
+
+#### Scenario: Local worker on a remote run
+- **WHEN** a worker claims with `access: 'local'`, or without `access`, on a run whose `runner.access` is `remote`
+- **THEN** the response is 409 with `access: 'local'` and `runAccess: 'remote'`, and the claimable launch stays `claimable` with no worker
+
+#### Scenario: Remote run in spawn mode refused
+- **WHEN** the daemon starts with `runner.access: remote`, `runner.mode: spawn`, `git.pushIntegration: false` and `prepareCommand` set
+- **THEN** startup fails with a message naming `runner.mode`, `git.pushIntegration` and `prepareCommand`, and no launch is created
+
+#### Scenario: Launch rows carry the access
+- **WHEN** a local run admits a task
+- **THEN** its launch row has `access: 'local'` and a worktree path
 
 ### Requirement: Session attachments
 A claim MAY carry `attachment`, the id of a registered session attachment, which SHALL be stored on the launch's worker record as `worker.attachment`. When an attachment ends, by its own end request, by the first pid of its chain being found dead at reconcile, or by a session end naming any pid in its chain, every live claimed launch whose worker carries it SHALL be released with `keep` and reason `sessionEnded` at the next reconcile. A claim without an attachment SHALL be governed by its lease alone, as before. A kept release SHALL end the launch, so the former worker's token SHALL no longer authenticate.
@@ -194,7 +242,7 @@ A renewal SHALL NOT be a progress signal. It SHALL leave `progressAt`, `lastSign
 - **THEN** its `progressAt` is still the claim time, `lastSignal` is still `claimed`, a `launch.stuck` event is appended once, and `status.stuck` lists its task
 
 ### Requirement: Lease expiry
-When a `running` claimed launch's lease expires, the orchestrator SHALL check the worktree for progress since the claim: a commit (head is not the base sha), a change to a tracked file, or a path the worker staged. An untracked file alone SHALL NOT be progress, and the work-in-progress commit of an expiry SHALL NOT include untracked files: a file is added to the kept commit only when the worker stages it. With progress and `interruptions` under `daemon.maxKeptReleases` (0: unlimited), the expiry SHALL be a kept release: the branch is kept with uncommitted tracked and staged work committed on it, the task is `unstarted` with `attempts` unchanged, and `carry.interrupted` has `reason: "leaseExpired"`. When the work-in-progress commit fails (another process holds the index lock, say), the orchestrator SHALL read the worktree head instead: a head that is not the base sha SHALL still make the expiry a kept release at that head, without `wipCommit`; a head at the base sha SHALL make it a failed attempt. A release with `keep` is unaffected: it commits untracked files too.
+When a `running` claimed launch's lease expires, the orchestrator SHALL check the worktree for progress since the claim: a commit (head is not the base sha), a change to a tracked file, or a path the worker staged. An untracked file alone SHALL NOT be progress, and the work-in-progress commit of an expiry SHALL NOT include untracked files: a file is added to the kept commit only when the worker stages it. With progress and `interruptions` under `daemon.maxKeptReleases` (0: unlimited), the expiry SHALL be a kept release: the branch is kept with uncommitted tracked and staged work committed on it, the task is `unstarted` with `attempts` unchanged, and `carry.interrupted` has `reason: "leaseExpired"`. When the work-in-progress commit fails (another process holds the index lock, say), the orchestrator SHALL read the worktree head instead: a head that is not the base sha SHALL still make the expiry a kept release at that head, without `wipCommit`; a head at the base sha SHALL make it a failed attempt. A release with `keep` is unaffected: it commits untracked files too. A remote launch's expiry SHALL NOT check a worktree, preserve or remove anything: the orchestrator SHALL read the launch branch tip at origin (`ls-remote`). A tip other than the base sha, with `interruptions` under the bound, SHALL make the expiry a kept release at that tip with reason `leaseExpired` and no `wipCommit`; no branch, or a tip at the base sha, SHALL make it a failed attempt with reason `leaseExpired`. The tick SHALL NOT wait for this read beyond the short bound of integration-pipeline "The tick never waits for origin", and not at all while another remote command is queued or running; startup recovery SHALL await it in full. When origin cannot be read, or the tick's read is still running, the expiry SHALL be left for a later tick, with the launch live, until twice the lease TTL has passed since the lease was last renewed (its expiry time plus one TTL); then the attempt SHALL fail with `leaseExpired`.
 
 #### Scenario: Expiry after a commit is kept
 - **WHEN** a claimed launch commits, the commit is observed, and the launch then makes no call past the TTL
@@ -216,8 +264,20 @@ When a `running` claimed launch's lease expires, the orchestrator SHALL check th
 - **WHEN** a claimed launch has committed, has uncommitted changes, and holds `index.lock` when its lease expires
 - **THEN** the expiry is a kept release at the launch's last commit with no `wipCommit`, `attempts` is unchanged, and the branch is kept
 
+#### Scenario: Remote expiry after a push is kept
+- **WHEN** a remote launch pushed its branch one commit ahead of the base and its lease expires
+- **THEN** `launch.released` has `kept: true`, `reasonCode: "leaseExpired"` and `headSha` the pushed tip, and the task is `unstarted` with `attempts` unchanged
+
+#### Scenario: Remote expiry with nothing pushed
+- **WHEN** a remote launch's lease expires and origin has no launch branch
+- **THEN** the attempt fails with reason `leaseExpired`
+
+#### Scenario: Remote expiry with origin unreachable
+- **WHEN** a remote launch's lease expires while origin cannot be reached
+- **THEN** the first tick fails nothing and the launch stays live, and once twice the lease TTL has passed the attempt fails with `leaseExpired`
+
 ### Requirement: Kept expiry record
-A kept expiry SHALL end the launch with reason `leaseExpired`, and its `launch.ended` event SHALL carry `kept: true`. It SHALL append `launch.released` with `reasonCode: "leaseExpired"`, `progressed: true` and `kept: true`. It SHALL increase `interruptions` by one and store `carry.interrupted = { priorLaunchId, priorBranch, headSha, wipCommit?, reason, interruptions }`, so that the retry's brief names the kept branch.
+A kept expiry SHALL end the launch with reason `leaseExpired`, and its `launch.ended` event SHALL carry `kept: true`. It SHALL append `launch.released` with `reasonCode: "leaseExpired"`, `progressed: true` and `kept: true`; for a remote launch it SHALL also carry `headSha`, the tip read at origin. It SHALL increase `interruptions` by one and store `carry.interrupted = { priorLaunchId, priorBranch, headSha, wipCommit?, reason, interruptions }`, so that the retry's brief names the kept branch.
 
 #### Scenario: Events of a kept expiry
 - **WHEN** a claimed launch with a commit expires
@@ -456,4 +516,19 @@ With `prepareCommand` unset the entry SHALL never be read or written.
 #### Scenario: Limit 1 and backoff 0
 - **WHEN** `prepareFailureLimit` is 1, or `prepareRetryBackoffMs` is 0
 - **THEN** the first failure blocks the task and writes no entry, or the task is admitted again in the same tick that applies the failure
+
+### Requirement: Remote run requirements
+Besides the conditions of "Access modes", the daemon SHALL refuse to start with `runner.access: remote` when `apiBaseUrl` is unset, with a message naming `apiBaseUrl`, and when the commit policy of the runner kind in force is `daemon` (for `codex`, `runner.codex.commit`, or the policy derived from its sandbox when unset), with a message naming the commit policy, the kind and its `commit` key. These conditions SHALL be checked against the configuration in force, overrides included, and named in the same message as the others. On a remote run, admission SHALL block a task whose runner kind (its `runner` selector, else the kind in force) has commit policy `daemon` with reason kind `remoteNeedsAgentCommit`, before brief validation and without creating a launch.
+
+#### Scenario: Remote run without apiBaseUrl
+- **WHEN** the daemon starts with `runner.access: remote`, `runner.mode: pull`, `git.pushIntegration: true` and no `apiBaseUrl`
+- **THEN** startup fails with a message naming `apiBaseUrl`, and no launch is created
+
+#### Scenario: Remote run whose default kind commits as the daemon
+- **WHEN** the daemon starts a remote run with `runner.kind: codex` and `runner.codex.commit` unset under the default `workspace-write` sandbox
+- **THEN** startup fails with a message naming the commit policy `daemon` and `runner.codex.commit`
+
+#### Scenario: A task labelled to a daemon-commit kind on a remote run
+- **WHEN** a remote run whose default kind is `claude-code` admits a task with the selector `runner: codex` and `runner.codex.commit` unset
+- **THEN** the task is `blocked` with reason kind `remoteNeedsAgentCommit` and no launch is created
 
