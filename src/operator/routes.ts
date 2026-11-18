@@ -306,8 +306,11 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
   server.addRoute('POST', /^\/v1\/launches\/([^/]+)\/release$/, async (_req, body, [id]) => {
     const reason = String(body['reason'] ?? 'released by worker');
     const keep = body['keep'] === true || body['keep'] === 'true';
-    orch.store.appendEvent({ kind: 'operator.release', launchId: id as string, payload: { reason, keep } }, orch.now());
-    return orch.release(id as string, reason, { keep });
+    // A remote launch names the tip it pushed (and its work-in-progress commit); a local release ignores both. See specs/pull-runner "Release".
+    const headSha = body['headSha'];
+    const wipCommit = body['wipCommit'];
+    orch.store.appendEvent({ kind: 'operator.release', launchId: id as string, payload: { reason, keep, ...(headSha !== undefined ? { headSha } : {}), ...(wipCommit !== undefined ? { wipCommit } : {}) } }, orch.now());
+    return orch.release(id as string, reason, { keep, headSha, wipCommit });
   });
   // The work loop renews a claimed launch's lease while its agent process lives; authenticated by the launch token like an agent call,
   // but not a progress signal. See specs/pull-runner "Lease renewal by the work loop".

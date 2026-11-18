@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { alwaysValid, type BriefValidator, noRemediation, type Remediator } from '../brief/validate.js';
 import { renewEveryMsOf } from '../brief/compose.js';
 import { scrubCarry } from '../brief/lost.js';
-import { checkSubmission, remoteSealedSha } from '../agent/seal.js';
+import { checkSubmission, optionalFullSha, remoteSealedSha } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
 import { commitPolicyOfKind, type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, remoteAccessError, RUNNER_ACCESSES, storeDurabilityWarning } from '../config.js';
 import { type Gap, GapClock, noteIntervalMs } from '../health/gaps.js';
@@ -38,7 +38,7 @@ import type { CascadeStep } from '../graph/query.js';
 import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
 import type { VerifierBackend } from '../verify/job.js';
-import { Origin } from '../workspace/origin.js';
+import { Origin, OriginConfigError, OriginFetchError } from '../workspace/origin.js';
 import { RemoteWorkspace, workspaceByAccess } from '../workspace/remote-workspace.js';
 import { gateOnDurable, RUNNER_METHODS, StoreFatalError, storeLag, VERIFIER_METHODS, waitDurable, WORKSPACE_METHODS } from '../state/gate.js';
 import type { BriefInput, FallbackReport, SealResult, Workspace } from '../workspace/workspace.js';
@@ -1202,7 +1202,7 @@ export class Orchestrator implements OrchestratorCore {
    * the branch is kept, the attempt is not spent, and the next brief names the branch. Otherwise it is a
    * failed attempt (`leaseExpired`). See specs/pull-runner "Lease expiry".
    */
-  async expireClaim(launch: Launch): Promise<'kept' | 'failed' | 'skipped'> {
+  async expireClaim(launch: Launch, opts: { awaitOrigin?: boolean } = {}): Promise<'kept' | 'failed' | 'skipped'> {
     const message = `no contact from worker for ${this.config.leaseTtlMs}ms`;
     const expired = (): boolean => {
       // A sleep since the caller read the clock (inside the tick's loop, or while git ran) renews the lease first. See specs/pull-runner "Lease renewal after a gap".
@@ -1212,6 +1212,7 @@ export class Orchestrator implements OrchestratorCore {
       return e.status.kind === 'running' && e.lease?.launchId === launch.launchId && e.lease.expiresAt <= this.now() && this.store.getLaunch(launch.launchId)?.status === 'live';
     };
     if (!expired()) return 'skipped';
+    if (accessOf(launch) === 'remote') return this.expireRemoteClaim(launch, message, expired, opts.awaitOrigin === true);
     const bound = this.config.daemon.maxKeptReleases;
     const interruptions = this.entry(launch.taskId).interruptions ?? 0;
     let preserved: { headSha: string; wipCommit?: string } | undefined;
@@ -1258,6 +1259,67 @@ export class Orchestrator implements OrchestratorCore {
       });
     }
     await this.workspace.remove(launch);
+    this.wake();
+    return outcome;
+  }
+
+  /**
+   * Lease expiry of a remote launch: no tree on this host, so the branch tip at origin (`ls-remote`) is the progress
+   * test. A tip other than the base, under `daemon.maxKeptReleases`, is a kept release at that tip; no tip, or the
+   * base, fails the attempt with `leaseExpired`. While origin cannot be read (or the tick's read is still running) the
+   * expiry is skipped and tried on a later tick, until twice the lease TTL has passed since the lease was last renewed;
+   * then the attempt fails. The tick never waits for origin beyond its short bound; startup recovery (`awaitOrigin`)
+   * awaits the read in full. Nothing is preserved or removed. See specs/pull-runner "Lease expiry".
+   */
+  private async expireRemoteClaim(launch: Launch, message: string, expired: () => boolean, awaitOrigin: boolean): Promise<'kept' | 'failed' | 'skipped'> {
+    const bound = this.config.daemon.maxKeptReleases;
+    const interruptions = this.entry(launch.taskId).interruptions ?? 0;
+    let tip: string | undefined;
+    if (bound === 0 || interruptions < bound) {
+      let unreadable: string | undefined;
+      try {
+        if (!this.origin) throw new OriginConfigError('git.pushIntegration is off: no origin to read the launch branch from');
+        if (awaitOrigin) tip = await this.origin.branchTip(launch.branch);
+        else {
+          const read = await this.origin.branchTipFromTick(launch.branch);
+          if (read.pending) unreadable = 'the read of the branch tip at origin is still running';
+          else tip = read.tip;
+        }
+      } catch (err) {
+        if (!(err instanceof OriginFetchError) && !(err instanceof OriginConfigError)) throw err;
+        unreadable = err.message;
+      }
+      if (unreadable !== undefined) {
+        const expiresAt = this.entry(launch.taskId).lease?.expiresAt ?? this.now();
+        if (this.now() < expiresAt + this.config.leaseTtlMs) {
+          this.log.warn('cannot read the branch of an expired remote claim at origin; trying again on a later tick', { launchId: launch.launchId, branch: launch.branch, err: unreadable });
+          return 'skipped';
+        }
+        this.log.warn('origin unreadable for twice the lease TTL; failing the expired remote claim', { launchId: launch.launchId, branch: launch.branch, err: unreadable });
+        this.origin?.forgetBranchTip(launch.branch);
+      }
+    }
+    // A call that arrived while origin was read renewed the lease: the launch lives on.
+    if (!expired()) return 'skipped';
+    const headSha = tip?.toLowerCase();
+    const progressed = headSha !== undefined && headSha !== launch.baseSha.toLowerCase();
+    let outcome: 'kept' | 'failed' = 'failed';
+    if (progressed) {
+      const entry = this.entry(launch.taskId);
+      const interrupted: InterruptedContext = { priorLaunchId: launch.launchId, priorBranch: launch.branch, headSha: headSha!, reason: 'leaseExpired', interruptions: interruptions + 1 };
+      this.store.transaction(() => {
+        this.store.appendEvent({ kind: 'launch.released', taskId: launch.taskId, launchId: launch.launchId, payload: { reason: message, reasonCode: 'leaseExpired', progressed: true, keep: true, kept: true, workerId: launch.worker?.id, access: 'remote', headSha } }, this.now());
+        this.transition(launch.taskId, { kind: 'unstarted' }, 'orchestrator', 'released', { carry: { ...(entry.carry ?? {}), interrupted }, interruptions: interrupted.interruptions }, { reason: 'leaseExpired' });
+        this.endLaunch(launch, 'leaseExpired', { kept: true });
+      });
+      outcome = 'kept';
+    } else {
+      await this.recordUsage(launch);
+      this.store.transaction(() => {
+        this.fail(launch.taskId, { kind: 'leaseExpired', message }, 'orchestrator', 'deadOrExpired');
+        this.endLaunch(launch, 'leaseExpired');
+      });
+    }
     this.wake();
     return outcome;
   }
@@ -2044,7 +2106,7 @@ export class Orchestrator implements OrchestratorCore {
    * releases are under the bound: then the work is preserved on the branch and the
    * task returns to unstarted with an `interrupted` context. See specs/pull-runner "Release".
    */
-  async release(launchId: string, reason: string, opts: { keep?: boolean; reasonCode?: string } = {}): Promise<ApiResponse> {
+  async release(launchId: string, reason: string, opts: { keep?: boolean; reasonCode?: string; headSha?: unknown; wipCommit?: unknown } = {}): Promise<ApiResponse> {
     const launch = this.store.getLaunch(launchId);
     if (!launch || launch.status !== 'live' || !launch.worker) {
       return { status: 409, body: { ok: false, reason: `launch ${launchId} is not a live claimed launch` } };
@@ -2053,6 +2115,7 @@ export class Orchestrator implements OrchestratorCore {
     if (entry.lease?.launchId !== launchId || (entry.status.kind !== 'running' && entry.status.kind !== 'waiting')) {
       return { status: 409, body: { ok: false, reason: `launch ${launchId} is superseded; task is ${entry.status.kind}` } };
     }
+    if (accessOf(launch) === 'remote') return this.releaseRemote(launch, reason, opts);
     let fingerprint: string | undefined;
     try {
       fingerprint = await this.workspace.fingerprint(launch);
@@ -2102,6 +2165,77 @@ export class Orchestrator implements OrchestratorCore {
       this.endLaunch(launch, 'released');
     });
     await this.workspace.remove(launch);
+    this.wake();
+    return {
+      status: 200,
+      body: { ok: true, launchId, taskId: launch.taskId, outcome: outcome!, progressed, kept, ...(kept ? { branch: launch.branch, headSha: preserved!.headSha, ...(preserved!.wipCommit ? { wipCommit: preserved!.wipCommit } : {}) } : {}), ...(keepError ? { keepError } : {}) },
+    };
+  }
+
+  /**
+   * Release a remote launch. The daemon holds no tree for it: progress is any agent API call since the claim, or a
+   * reported `headSha` other than the base; the work is never fingerprinted, preserved or removed. A kept release
+   * requires the branch tip at origin to equal `headSha` (fetched through origin): otherwise it answers 409
+   * (`branchNotPushed`, `shaMismatch`) or 503 (`originUnreachable`, `originRefused`) and the launch stays live.
+   * A keep without `headSha` cannot be kept and is released without keep, with `keepError` naming the field.
+   * See specs/pull-runner "Release".
+   */
+  private async releaseRemote(launch: Launch, reason: string, opts: { keep?: boolean; reasonCode?: string; headSha?: unknown; wipCommit?: unknown }): Promise<ApiResponse> {
+    const launchId = launch.launchId;
+    const head = optionalFullSha(opts.headSha, 'headSha');
+    if (!head.ok) return { status: 400, body: { error: head.error, field: head.field } };
+    const wip = optionalFullSha(opts.wipCommit, 'wipCommit');
+    if (!wip.ok) return { status: 400, body: { error: wip.error, field: wip.field } };
+    const headSha = head.sha;
+    let entry = this.entry(launch.taskId);
+    const called = launch.lastSignal !== undefined && launch.lastSignal !== 'claimed' && launch.lastSignal !== 'spawned';
+    const progressed = called || (headSha !== undefined && headSha !== launch.baseSha.toLowerCase());
+    const bound = this.config.daemon.maxKeptReleases;
+    const interruptions = entry.interruptions ?? 0;
+    const wantsKeep = Boolean(opts.keep) && (progressed || entry.status.kind === 'waiting');
+    const underBound = bound === 0 || interruptions < bound;
+    let preserved: { headSha: string; wipCommit?: string } | undefined;
+    let keepError: string | undefined;
+    if (wantsKeep && underBound && headSha === undefined) {
+      keepError = 'a remote release with keep needs headSha, the launch branch tip pushed to origin';
+    } else if (wantsKeep && underBound) {
+      // The pushed tip, fetched into the clone as a remote submit is sealed. A refusal changes nothing.
+      const seal = await this.workspace.seal(launch, { sealedSha: headSha });
+      if (!seal.ok) return sealRefusal(seal);
+      preserved = { headSha: seal.sealedSha, ...(wip.sha ? { wipCommit: wip.sha } : {}) };
+      // A call, a report or another release may have ended the launch while origin was fetched.
+      const cur = this.store.getLaunch(launchId);
+      entry = this.entry(launch.taskId);
+      if (cur?.status !== 'live' || entry.lease?.launchId !== launchId || (entry.status.kind !== 'running' && entry.status.kind !== 'waiting')) {
+        return { status: 409, body: { ok: false, reason: `launch ${launchId} is superseded; task is ${entry.status.kind}` } };
+      }
+    } else if (wantsKeep) {
+      keepError = `kept releases exhausted (${interruptions} of ${bound})`;
+    }
+    const kept = preserved !== undefined;
+    const interrupted: InterruptedContext | undefined = kept
+      ? { priorLaunchId: launchId, priorBranch: launch.branch, headSha: preserved!.headSha, ...(preserved!.wipCommit ? { wipCommit: preserved!.wipCommit } : {}), reason: opts.reasonCode ?? reason, interruptions: interruptions + 1 }
+      : undefined;
+    let outcome: 'unstarted' | 'failed' | 'blocked';
+    this.store.transaction(() => {
+      this.store.appendEvent({ kind: 'launch.released', taskId: launch.taskId, launchId, payload: { reason, progressed, keep: Boolean(opts.keep), kept, workerId: launch.worker?.id, access: 'remote', ...(headSha ? { headSha } : {}) } }, this.now());
+      const keptPatch: Partial<Entry> = interrupted ? { carry: { ...(entry.carry ?? {}), interrupted }, interruptions: interrupted.interruptions } : {};
+      if (entry.status.kind === 'waiting') {
+        this.transition(launch.taskId, { kind: 'blocked', reason: { ...entry.status.question, answer: entry.status.answer } }, 'orchestrator', 'maxWaitOrDead', keptPatch);
+        outcome = 'blocked';
+      } else if (!progressed) {
+        this.transition(launch.taskId, { kind: 'unstarted' }, 'orchestrator', 'released');
+        outcome = 'unstarted';
+      } else if (kept) {
+        this.transition(launch.taskId, { kind: 'unstarted' }, 'orchestrator', 'released', keptPatch);
+        outcome = 'unstarted';
+      } else {
+        const out = this.fail(launch.taskId, { kind: 'released', message: reason }, 'orchestrator', 'deadOrExpired');
+        outcome = out.status.kind === 'blocked' ? 'blocked' : 'failed';
+      }
+      this.endLaunch(launch, 'released');
+    });
+    // No worktree on this host: nothing is removed. See specs/remote-workspace.
     this.wake();
     return {
       status: 200,

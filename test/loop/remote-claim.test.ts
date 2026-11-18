@@ -159,8 +159,9 @@ describe('remote claim response', () => {
     expect(calls).toBe(0);
     expect(h!.store.getLaunch(l.launchId)).toMatchObject({ status: 'live' });
     expect(h!.store.getLaunch(l.launchId)!.fingerprint).toBeUndefined();
-    // The wrapper is live: a release does read the fingerprint.
-    await h!.orch.release(l.launchId, 'done here');
-    expect(calls).toBe(1);
+    // The wrapper is live: the tick's progress observation reads the fingerprint. (A remote release never does; see
+    // test/slice/remote-release.test.ts.)
+    await h!.orch.tick();
+    expect(calls).toBeGreaterThan(0);
   }, 30_000);
 });

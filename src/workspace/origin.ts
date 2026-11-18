@@ -103,6 +103,11 @@ export class OriginConfigError extends Error {
   }
 }
 
+interface TipRead {
+  done: Promise<string | undefined>;
+  outcome?: { tip: string | undefined } | { error: unknown };
+}
+
 interface TagPush {
   sha: string;
   done: Promise<void>;
@@ -123,6 +128,8 @@ export class Origin {
   inFlight: string | undefined;
   /** Tag pushes started from the tick, by tag name, with their outcome once settled. */
   private readonly tagPushes = new Map<string, TagPush>();
+  /** Branch tip reads started from the tick, by branch, with their outcome once settled. */
+  private readonly tipReads = new Map<string, TipRead>();
 
   constructor(private readonly opts: OriginOptions) {
     this.remote = opts.remote ?? 'origin';
@@ -216,6 +223,59 @@ export class Origin {
       }
       return revParse(this.repo, ref);
     });
+  }
+
+  /**
+   * Read the tip of origin's `refs/heads/<branch>` with `ls-remote`, fetching nothing: undefined when origin has no such
+   * branch. Runs on the serial chain like every other remote command. Throws `OriginFetchError` (refused or
+   * unreachable) when origin cannot be read. See specs/pull-runner "Lease expiry".
+   */
+  branchTip(branch: string): Promise<string | undefined> {
+    return this.serial(async () => {
+      await this.ensure();
+      const ref = `refs/heads/${branch}`;
+      const r = await this.remoteGit(['ls-remote', '--heads', this.remote, ref]);
+      if (r.code !== 0) throw new OriginFetchError(`git ls-remote ${this.remote} ${ref} failed: ${r.stderr.trim() || r.stdout.trim()}`, classifyFetchFailure(r.stderr, r.timedOut));
+      for (const line of r.stdout.split('\n')) {
+        const [sha, name] = line.trim().split(/\s+/);
+        if (sha && name === ref) return sha.toLowerCase();
+      }
+      return undefined;
+    });
+  }
+
+  /**
+   * `branchTip` from the tick, which never waits for origin: a read the tick starts while origin is idle is awaited at
+   * most `tickWaitMs`; one queued behind another remote command is not awaited. `pending` while the read runs on; a
+   * later call answers its outcome (a failed read throws its error) and forgets it. See specs/integration-pipeline
+   * "The tick never waits for origin" and specs/pull-runner "Lease expiry".
+   */
+  async branchTipFromTick(branch: string): Promise<{ pending: true } | { pending: false; tip: string | undefined }> {
+    let read = this.tipReads.get(branch);
+    let wait = false;
+    if (!read) {
+      wait = !this.busy;
+      const started: TipRead = { done: this.branchTip(branch) };
+      started.done.then(
+        (tip) => (started.outcome = { tip }),
+        (error: unknown) => (started.outcome = { error }),
+      );
+      this.tipReads.set(branch, started);
+      read = started;
+      if (wait) await within(read.done, this.tickWaitMs).catch(() => undefined);
+      // Let the outcome handlers run when the read settled within the wait.
+      await Promise.resolve();
+    }
+    const outcome = read.outcome;
+    if (!outcome) return { pending: true };
+    if (this.tipReads.get(branch) === read) this.tipReads.delete(branch);
+    if ('error' in outcome) throw outcome.error;
+    return { pending: false, tip: outcome.tip };
+  }
+
+  /** Drop a tick's read of a branch tip (the launch ended); a running read runs on and is ignored. */
+  forgetBranchTip(branch: string): void {
+    this.tipReads.delete(branch);
   }
 
   /** Fetch unless one ran within `fetchIntervalMs`; a failed fetch keeps the last observed head. */

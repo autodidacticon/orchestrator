@@ -572,10 +572,14 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   tool(
     'release',
     {
-      description: 'Hand a claimed launch back with a reason. Untouched: the task returns to unstarted at no cost; after progress: a failed attempt, unless keep is true, which commits uncommitted work on the launch branch, keeps the branch, and returns the task to unstarted at no cost with an interrupted context for the next brief (bounded by daemon.maxKeptReleases).',
-      inputSchema: { launchId: z.string(), reason: z.string(), keep: z.boolean().optional() },
+      description:
+        'Hand a claimed launch back with a reason. Untouched: the task returns to unstarted at no cost; after progress: a failed attempt, unless keep is true, which commits uncommitted work on the launch branch, keeps the branch, and returns the task to unstarted at no cost with an interrupted context for the next brief (bounded by daemon.maxKeptReleases). A remote launch commits and pushes its work itself and passes headSha (the pushed launch branch tip, full sha) and optionally wipCommit; with keep, origin must hold headSha as the branch tip, or the answer is 409 and the launch stays live.',
+      inputSchema: { launchId: z.string(), reason: z.string(), keep: z.boolean().optional(), headSha: z.string().optional(), wipCommit: z.string().optional() },
     },
-    async (a, c) => guarded(() => c.call('POST', `/v1/launches/${encodeURIComponent(a.launchId)}/release`, { reason: a.reason, ...(a.keep ? { keep: true } : {}) })),
+    async (a, c) =>
+      guarded(() =>
+        c.call('POST', `/v1/launches/${encodeURIComponent(a.launchId)}/release`, { reason: a.reason, ...(a.keep ? { keep: true } : {}), ...(a.headSha ? { headSha: a.headSha } : {}), ...(a.wipCommit ? { wipCommit: a.wipCommit } : {}) }),
+      ),
   );
   const scoped = { launchId: z.string(), token: z.string() };
   const forwardLaunch = (c: RepoClient, op: 'heartbeat' | 'report' | 'block' | 'log' | 'inbox', launchId: string, token: string, body: Record<string, unknown>, timeoutMs = 30_000) =>

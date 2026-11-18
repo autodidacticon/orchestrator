@@ -176,7 +176,8 @@ export async function recover(o: Orchestrator): Promise<void> {
       // out while the daemon was down is expired as the tick would: kept with progress, failed without.
       // See specs/crash-recovery "Claimed lease expired while the daemon was down".
       if (entry.status.kind === 'running' && entry.lease && entry.lease.expiresAt <= o.now()) {
-        const outcome = await o.expireClaim(launch);
+        // Startup recovery awaits origin in full (a remote launch's branch tip). See specs/integration-pipeline "The tick never waits for origin".
+        const outcome = await o.expireClaim(launch, { awaitOrigin: true });
         o.log.info('recovery: claimed launch lease expired while the daemon was down', { taskId: launch.taskId, launchId: launch.launchId, outcome });
       }
       continue;

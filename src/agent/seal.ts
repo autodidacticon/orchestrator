@@ -56,3 +56,14 @@ export function remoteSealedSha(raw: unknown): { ok: true; sealedSha: string } |
   }
   return { ok: true, sealedSha: raw.trim().toLowerCase() };
 }
+
+/**
+ * An optional full hex object name in a request body (`headSha`, `wipCommit` of a remote release), lower-cased; absent
+ * when the field is missing or empty. A 400 names the field when it is present but not a full object name.
+ * See specs/pull-runner "Release".
+ */
+export function optionalFullSha(raw: unknown, field: string): { ok: true; sha?: string } | { ok: false; error: string; field: string } {
+  if (raw === undefined || raw === null || raw === '') return { ok: true };
+  if (typeof raw !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(raw.trim())) return { ok: false, error: `${field} must be a full hex object name`, field };
+  return { ok: true, sha: raw.trim().toLowerCase() };
+}

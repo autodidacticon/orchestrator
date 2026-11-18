@@ -16,7 +16,7 @@
  *   orchestrator-ctl pause | resume [--override-budget]
  *   orchestrator-ctl mode <spawn|pull|mixed>
  *   orchestrator-ctl claim <workerId> [--task <id>]
- *   orchestrator-ctl release <launchId> --reason <text> [--keep]
+ *   orchestrator-ctl release <launchId> --reason <text> [--keep] [--head-sha <sha>] [--wip-commit <sha>]
  *   orchestrator-ctl nudge <task> <message>
  *   orchestrator-ctl logs <task> [--launch <n>]
  *   orchestrator-ctl outbox [--after <id>] [--limit <n>]
@@ -134,6 +134,7 @@ export const USAGE = `orchestrator-ctl: operate a running orchestrator.
   orchestrator-ctl mode <spawn|pull|mixed>         who executes launches: the daemon, workers, or both
   orchestrator-ctl claim <workerId> [--task <id>]  hand a parked launch to a worker (prints its brief, token, worktree)
   orchestrator-ctl release <launchId> --reason <text> [--keep]   keep: preserve the work on the branch at no attempt cost
+                                                                 (remote launch: --head-sha <pushed tip> [--wip-commit <sha>])
   orchestrator-ctl nudge <task> <message>       queue a message for the task's running agent
   orchestrator-ctl logs <task> [--launch <n>]
   orchestrator-ctl outbox [--after <id>] [--limit <n>]   pending tracker effects and the policy
@@ -245,6 +246,8 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       repo: { type: 'string' },
       reap: { type: 'boolean', default: false },
       keep: { type: 'boolean', default: false },
+      'head-sha': { type: 'string' },
+      'wip-commit': { type: 'string' },
       release: { type: 'boolean', default: false },
       reason: { type: 'string' },
       answer: { type: 'string' },
@@ -398,7 +401,7 @@ export async function runCli(argv: string[]): Promise<CliResult> {
       return call(base, 'POST', '/v1/claims', { workerId: a, taskId: values.task, access: values.access });
     case 'release':
       if (!a) throw new Error('release needs a launch id');
-      return call(base, 'POST', `/v1/launches/${a}/release`, { reason: values.reason ?? rest.join(' '), ...(values.keep ? { keep: true } : {}) });
+      return call(base, 'POST', `/v1/launches/${a}/release`, { reason: values.reason ?? rest.join(' '), ...(values.keep ? { keep: true } : {}), ...(values['head-sha'] ? { headSha: values['head-sha'] } : {}), ...(values['wip-commit'] ? { wipCommit: values['wip-commit'] } : {}) });
     case 'nudge':
       if (!a) throw new Error('nudge needs a task id and a message');
       return call(base, 'POST', `/v1/tasks/${a}/nudge`, { message: rest.join(' ') });
