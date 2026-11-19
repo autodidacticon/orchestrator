@@ -125,18 +125,36 @@ function signal(pid: number, sig: NodeJS.Signals): void {
   }
 }
 
-/** SIGTERM the process group (or process), wait for grace, then SIGKILL. */
+function groupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * SIGTERM the process group (or process), wait for grace, then SIGKILL. For a group leader (a launch's
+ * `/bin/sh`) the wait is for the whole group, so an agent that writes its usage while it is terminated has
+ * written it when this returns. A pid that leads no group keeps the wait for that pid alone.
+ * See specs/health-monitoring "Usage accounting".
+ */
 export async function killTree(pid: number, graceMs: number): Promise<void> {
   if (!pidAlive(pid)) return;
   const pgid = await pgidOf(pid);
-  const target = pgid && pgid === pid ? -pgid : pid;
+  const leader = pgid !== undefined && pgid === pid;
+  const target = leader ? -pid : pid;
+  const gone = leader ? () => !groupAlive(pid) : () => !pidAlive(pid);
   signal(target, 'SIGTERM');
   const deadline = Date.now() + graceMs;
   while (Date.now() < deadline) {
-    if (!pidAlive(pid)) return;
-    await new Promise((r) => setTimeout(r, 50));
+    if (gone()) return;
+    await sleep(50);
   }
   signal(target, 'SIGKILL');
   if (pgid && pgid !== pid) signal(-pgid, 'SIGKILL');
-  for (let i = 0; i < 20 && pidAlive(pid); i++) await new Promise((r) => setTimeout(r, 50));
+  for (let i = 0; i < 20 && !gone(); i++) await sleep(50);
 }

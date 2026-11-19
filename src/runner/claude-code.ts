@@ -51,28 +51,44 @@ export class ClaudeCodeRunner extends SubprocessRunner {
   }
 }
 
-/** The last JSON object in a log that carries cost or turn counts; undefined when there is none. */
+/**
+ * The last JSON object in a log that carries cost or turn counts; undefined when there is none.
+ * Candidates are tried in two passes, each from the end and each at most PARSE_TRIES times: first every `{`
+ * that starts a line (so a one-line result object is found at once, whatever it holds), then every `{`.
+ * See specs/health-monitoring "Usage accounting".
+ */
 export function parseUsage(text: string): Usage | undefined {
   const tail = text.length > 256 * 1024 ? text.slice(text.length - 256 * 1024) : text;
-  let attempts = 0;
-  for (let i = tail.lastIndexOf('{'); i >= 0 && attempts < 200; i = tail.lastIndexOf('{', i - 1)) {
-    attempts++;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(tail.slice(i).trim());
-    } catch {
-      continue;
+  const lineStart = (i: number) => i === 0 || tail[i - 1] === '\n';
+  for (const pass of [lineStart, () => true]) {
+    let attempts = 0;
+    for (let i = tail.lastIndexOf('{'); i >= 0 && attempts < PARSE_TRIES; i = i > 0 ? tail.lastIndexOf('{', i - 1) : -1) {
+      if (!pass(i)) continue;
+      attempts++;
+      const usage = usageAt(tail, i);
+      if (usage) return usage;
     }
-    if (!parsed || typeof parsed !== 'object') continue;
-    const o = parsed as Record<string, unknown>;
-    const num = (k: string) => (typeof o[k] === 'number' && Number.isFinite(o[k]) ? (o[k] as number) : undefined);
-    const costUsd = num('total_cost_usd');
-    const durationMs = num('duration_ms');
-    const turns = num('num_turns');
-    if (costUsd === undefined && durationMs === undefined && turns === undefined) continue;
-    return { costUsd, turns, durationMs, tokens: parseTokens(o['usage']), source: 'claude-code' };
   }
   return undefined;
+}
+
+const PARSE_TRIES = 200;
+
+function usageAt(tail: string, i: number): Usage | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(tail.slice(i).trim());
+  } catch {
+    return undefined;
+  }
+  if (!parsed || typeof parsed !== 'object') return undefined;
+  const o = parsed as Record<string, unknown>;
+  const num = (k: string) => (typeof o[k] === 'number' && Number.isFinite(o[k]) ? (o[k] as number) : undefined);
+  const costUsd = num('total_cost_usd');
+  const durationMs = num('duration_ms');
+  const turns = num('num_turns');
+  if (costUsd === undefined && durationMs === undefined && turns === undefined) return undefined;
+  return { costUsd, turns, durationMs, tokens: parseTokens(o['usage']), source: 'claude-code' };
 }
 
 /**

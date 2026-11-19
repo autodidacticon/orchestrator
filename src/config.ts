@@ -229,7 +229,7 @@ export const configSchema = z.object({
       /** Idle time before a stuck launch is failed; 0 disables. */
       stuckFailAfterMs: z.number().int().nonnegative().default(45 * 60_000),
       /** How long a submitted task's process may keep running so the runner can write its usage; 0 reaps at once. See specs/health-monitoring "Usage accounting". */
-      reportGraceMs: z.number().int().nonnegative().default(30_000),
+      reportGraceMs: z.number().int().nonnegative().default(120_000),
       baseMovedNotice: z.boolean().default(true),
       /** Launches per task that died of `startupContended` and are relaunched without charging a retry; later ones count. Unset is DEFAULT_CONTENDED_RETRIES. See specs/task-lifecycle "Retry and exhaustion". */
       contendedRetries: z.number().int().nonnegative().optional(),

@@ -322,7 +322,7 @@ describe('limit overrides', () => {
     const zero = resolveLayers(file({ health: { stuckFailAfterMs: 1_800_000 }, budgets: { maxLaunchMs: 600_000 } }), { health: { stuckFailAfterMs: 0 }, budgets: { maxLaunchMs: 0 } });
     expect(zero.health.stuckFailAfterMs).toEqual({ value: 0, source: 'argument' });
     expect(zero.budgets.maxLaunchMs).toEqual({ value: 0, source: 'argument' });
-    expect(zero.config.health).toMatchObject({ stuckFailAfterMs: 0, stuckAfterMs: 900_000, reportGraceMs: 30_000 });
+    expect(zero.config.health).toMatchObject({ stuckFailAfterMs: 0, stuckAfterMs: 900_000, reportGraceMs: 120_000 });
     expect(zero.config.budgets).toMatchObject({ maxLaunchMs: 0, maxRunCostUsd: 0 });
     expect(resolveLayers(file({ budgets: { maxLaunchMs: 600_000 } })).budgets.maxLaunchMs).toEqual({ value: 600_000, source: 'file' });
   });
