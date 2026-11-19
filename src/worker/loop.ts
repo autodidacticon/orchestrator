@@ -19,6 +19,7 @@ import { treeFingerprint } from '../workspace/fingerprint.js';
 import { FALLBACK_FILE, gitOut, ORCH_DIR, prepareClone } from './clone.js';
 import { type ApiCall, apiClient, type ApiResult, realSleep } from './http.js';
 import { runScriptedAgent } from './scripted.js';
+import { TailKeeper, type UsagePostBody, usagePostBody } from './usage.js';
 import { type AgentHandle, DEFAULT_AGENT_STOP_MS, handBack, handBackExitCode, POD_TERMINATING, pushHead, stopAgent, TERMINATION_CALL_MS, TERMINATION_PUSH_MS, withLimit } from './terminate.js';
 
 export const DEFAULT_WORKER_CACHE = '/var/cache/orchestrator';
@@ -437,6 +438,8 @@ async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim,
   const ending = () => (term.requested() ? 0 : undefined);
   let accepted = false;
   let clone: string | undefined;
+  // The usage the command agent printed at the end of its standard output, parsed once the agent has exited.
+  let usage: UsagePostBody | undefined;
   try {
     if (!claim.repoUrl) throw new Error('the claim carries no repoUrl (set git.workerOriginUrl or git.originUrl on the daemon)');
     // The clone is not awaited past a termination request: the launch is released at once, and the container's end removes git.
@@ -473,7 +476,8 @@ async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim,
       accepted = isAccepted(res);
       if (res && !accepted) t.err(`worker ${s.workerId} submit ${claim.taskId}: ${res.status} ${JSON.stringify(res.body).slice(0, 300)}\n`);
     } else {
-      const agent = runCommand(composeAgentCommand(s.command!, claim, clone), clone, agentEnv(s, claim, clone), t.err);
+      const kept = new TailKeeper();
+      const agent = runCommand(composeAgentCommand(s.command!, claim, clone), clone, agentEnv(s, claim, clone), t.err, (d) => kept.push(d));
       const finished = await term.race(agent.closed);
       let code: number;
       if (finished.ok) code = finished.value;
@@ -484,6 +488,8 @@ async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim,
         code = stopped.killed ? stopped.code : await agent.closed;
       }
       t.err(`worker ${s.workerId} agent ${claim.taskId} exited with ${code}\n`);
+      // Only after the exit: an agent stopped by SIGTERM may still print its result object as it stops.
+      usage = usagePostBody(kept.text(), { workerId: s.workerId, model: claim.model });
     }
     log('agent-exit', claim);
   } catch (e) {
@@ -503,33 +509,57 @@ async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim,
   } catch (e) {
     t.err(`worker ${s.workerId} status: ${e instanceof Error ? e.message : String(e)}\n`);
   }
+  // The usage post is the last step of the launch, after the verdict, on every path.
   if (accepted || state === 'reported') {
     log('report accepted', claim);
+    await postUsage(call, claim, usage, t);
     return ending();
   }
   // Terminating, a status that could not be read counts as held: the work is pushed, and the release tried.
-  if (term.requested() && (state === 'held' || !read)) return handBackLaunch(s, call, claim, clone, t);
-  if (state === 'held') {
-    await release(call, s, claim, 'the agent exited without a report', t);
-    return ending();
+  if (term.requested() && (state === 'held' || !read)) {
+    const handed = await handBackLaunch(s, call, claim, clone, t);
+    // Within the grace period: posted only after a release that was answered, whatever its status.
+    if (handed.answered) await postUsage(call, claim, usage, t);
+    return handed.code;
   }
-  log('ended', claim);
+  if (state === 'held') await release(call, s, claim, 'the agent exited without a report', t);
+  else log('ended', claim);
+  await postUsage(call, claim, usage, t);
   return ending();
 }
 
-/** Hand a held launch back on termination (see src/worker/terminate.ts) and answer the loop's exit code. */
-async function handBackLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, clone: string, t: LaunchTools): Promise<number> {
+/**
+ * Post the usage the agent printed to `POST /v1/launches/:id/usage` (no launch token). A post recorded prints the
+ * `usage` line; any other answer, or a post that cannot be sent, goes to stderr and changes nothing else.
+ * See specs/worker-pool "Usage post".
+ */
+async function postUsage(call: ApiCall, claim: RemoteClaim, usage: UsagePostBody | undefined, t: LaunchTools): Promise<void> {
+  if (!usage) return;
+  try {
+    const r = await call('POST', `/v1/launches/${claim.launchId}/usage`, { ...usage });
+    if (r.status === 200 && r.body['recorded'] === true) t.log('usage', claim);
+    else t.err(`worker ${usage.workerId} usage ${claim.taskId}: ${r.status} ${JSON.stringify(r.body).slice(0, 300)}\n`);
+  } catch (e) {
+    t.err(`worker ${usage.workerId} usage ${claim.taskId}: ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+}
+
+/**
+ * Hand a held launch back on termination (see src/worker/terminate.ts): the loop's exit code, and whether the release
+ * was answered (with any status), which the usage post waits for.
+ */
+async function handBackLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, clone: string, t: LaunchTools): Promise<{ code: number; answered: boolean }> {
   const o = await handBack({ clone, branch: claim.branch, launchId: claim.launchId, workerId: s.workerId, call });
   if (o.wipError) t.err(`worker ${s.workerId} wip-commit ${claim.taskId}: ${o.wipError}\n`);
   if (!o.pushed) {
     t.log('push-failed', claim, o.pushError);
-    return 1;
+    return { code: 1, answered: false };
   }
   const r = o.release!;
   if (r.status === 200) t.log('released', claim, `${POD_TERMINATING} keep -> ${r.status} ${String(r.body['outcome'] ?? '')} kept ${String(r.body['kept'] ?? '')}${r.body['keepError'] ? ` (${String(r.body['keepError'])})` : ''}`);
   else if (r.status === undefined) t.log('release-failed', claim, r.error);
   else t.log('release-failed', claim, `${r.status} ${String(r.body['error'] ?? r.body['reason'] ?? JSON.stringify(r.body).slice(0, 200))}`);
-  return handBackExitCode(o);
+  return { code: handBackExitCode(o), answered: r.status !== undefined };
 }
 
 /** Release a launch whose agent has not started, without keep, with reason `podTerminating`; 0 when answered 200. */
@@ -586,11 +616,14 @@ async function writeLaunchFiles(s: WorkerSettings, claim: RemoteClaim, clone: st
 
 /**
  * Run the agent command in the clone through `/bin/sh -c`, in a process group of its own (so the loop can signal the
- * whole group), its output to `err`. The handle answers the exit code (signal: 128+) at the exit and once the pipes close.
+ * whole group), its output to `err`, and its standard output also to `onStdout`. The handle answers the exit code (signal: 128+) at the exit and once the pipes close.
  */
-function runCommand(cmd: string, cwd: string, env: Record<string, string | undefined>, err: (text: string) => void): AgentHandle {
+function runCommand(cmd: string, cwd: string, env: Record<string, string | undefined>, err: (text: string) => void, onStdout?: (d: Buffer) => void): AgentHandle {
   const child = spawn('/bin/sh', ['-c', cmd], { cwd, env: env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
-  child.stdout.on('data', (d: Buffer) => err(d.toString()));
+  child.stdout.on('data', (d: Buffer) => {
+    onStdout?.(d);
+    err(d.toString());
+  });
   child.stderr.on('data', (d: Buffer) => err(d.toString()));
   const codeOf = (code: number | null, signal: NodeJS.Signals | null) => code ?? (signal ? 128 : 1);
   let failed: ((code: number) => void)[] = [];
