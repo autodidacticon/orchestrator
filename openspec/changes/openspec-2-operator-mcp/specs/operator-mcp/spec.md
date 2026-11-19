@@ -1,0 +1,467 @@
+## MODIFIED Requirements
+
+### Requirement: Operator MCP server
+The package SHALL provide `orchestrator-mcp`, a stdio MCP server that exposes operator operations as tools and forwards each to the daemon's HTTP routes. It SHALL never open the store directly. `runs` SHALL include each run's exit record.
+
+#### Scenario: Tools forward to routes
+- **WHEN** the `answer` tool is called for task T1 with text
+- **THEN** the daemon records an operator answer event for T1 and the tool returns the route's response
+
+#### Scenario: Daemon not running
+- **WHEN** a tool other than `start`, `runs`, or `status` is called in a repository that has no run directory
+- **THEN** the tool returns an error naming the run directory and suggesting `start`
+
+#### Scenario: Revived after idle exit
+- **WHEN** the daemon exited idle and `status` is called
+- **THEN** the server starts the daemon, the call returns the current status, and `runs` shows the daemon alive
+
+#### Scenario: Refused after stop
+- **WHEN** `stop` was called and `status` is called
+- **THEN** the tool returns an error naming the stop and suggesting `start`, and no daemon is spawned
+
+#### Scenario: Attachment follows the server
+- **WHEN** the server forwards its first `status` call to a daemon
+- **THEN** the daemon's `status` lists one attachment whose chain starts with the server's pid, and closing the server's transport removes it within a tick
+
+#### Scenario: Re-attached after /clear
+- **WHEN** the session end hook ended the server's attachment and the next `claim` goes through the same server
+- **THEN** the server registers a new attachment before forwarding, the claim carries the new id, and `status` lists the new attachment and not the old one
+
+#### Scenario: Re-attached after an unknown flag
+- **WHEN** the server forwards `status` after its attachment was ended by the hook
+- **THEN** the status is returned, the response carries `x-orch-attachment: unknown`, and the server's next request carries a freshly registered attachment
+
+#### Scenario: Refused without a repository
+- **WHEN** the server runs in a directory that is not inside a git repository, with no `--repo` and no `ORCH_REPO`, and `status` is called without `repo`
+- **THEN** the tool fails with a message naming the working directory and the `repo` argument
+
+#### Scenario: Repository from the call
+- **WHEN** that server is called with `status` and `repo` set to a subdirectory of a repository whose run is loaded
+- **THEN** the call returns that run's status
+
+#### Scenario: Repository reused for the session
+- **WHEN** a later call on the same server omits `repo`
+- **THEN** it is served from the repository the earlier call passed, and `start` returns that repository and its run directory
+
+#### Scenario: Repository never forwarded
+- **WHEN** `configure` is called with `capacity` and `repo`
+- **THEN** the daemon receives only `capacity` and applies it
+
+#### Scenario: Concurrent calls with different repositories
+- **WHEN** a `wait` with `repo` A is in flight and a `status` with `repo` B is called on the same server
+- **THEN** the `status` returns B's run, the `wait` returns only A's events, seq and digest, and a later call without `repo` is served from B
+
+#### Scenario: Launch worktree names its repository
+- **WHEN** a daemon runs for repository R and `status` is called with `repo` set to a linked worktree of R
+- **THEN** the call returns R's run, a later `status` without `repo` returns R's run too, and no run directory is created for the worktree
+
+#### Scenario: Worker tool's repo binds one call
+- **WHEN** `status` was called with `repo` R and `launch_heartbeat` is then called with `repo` set to another git repository O that has no run
+- **THEN** the `launch_heartbeat` fails naming O, and a later `status` without `repo` returns R's run
+
+#### Scenario: Worker tool outside a git repository
+- **WHEN** `status` was called with `repo` R and a worker tool is then called with a `repo` outside any git repository
+- **THEN** the worker tool fails saying the `repo` is not inside a git repository, and a later `status` without `repo` returns R's run
+
+### Requirement: Tool set
+The server SHALL expose at least `start`, `stop`, `status`, `runs`, `import_issues`, `import_graph`, `wait`, `review`, `answer`, `cancel`, `reopen`, `unblock`, `accept`, `reject`, `pause`, `resume`, and `logs`, which form the base set, plus every tool another requirement of this capability adds. Mutating tools SHALL require the same arguments as the corresponding CLI commands. Every tool result SHALL be a single JSON text block.
+
+#### Scenario: Tool list
+- **WHEN** a client lists tools
+- **THEN** every tool of the base set is present with an input schema, and every advertised tool is in the implementation's list of names
+
+### Requirement: Wait tool
+`wait` SHALL take `afterSeq`, an optional `timeoutMs` defaulting to sixty seconds and capped at ninety seconds so that the call stays under the host's tool-call timeout: Claude Code's foreground limit, Codex's `mcp_servers.<id>.tool_timeout_sec`. It SHALL also take an optional `until` filter of `question`, `review`, `finished`, `stalled`, or `any`. It SHALL return the events since `afterSeq`, the latest sequence number, and the digest.
+
+#### Scenario: Wait for a question
+- **WHEN** `wait` is called with `until: question` and an agent blocks ten seconds later
+- **THEN** the call returns within eleven seconds with the question in `openQuestions`
+
+#### Scenario: Cap enforced
+- **WHEN** `wait` is called with `timeoutMs` of ten minutes
+- **THEN** it returns within ninety seconds
+
+#### Scenario: Wait keeps its daemon
+- **WHEN** a `wait` with `repo` A has returned from one poll on an event in A, and a call with `repo` B was made before its next poll
+- **THEN** the next poll still goes to A's daemon with A's seq, and the `wait` returns A's digest
+
+#### Scenario: Submitted event comes cut
+- **WHEN** a gated milestone E is submitted while a `wait` with `until: review` is polling
+- **THEN** the `wait` returns E's transition event to `submitted` with an `omitted` array in its payload, its summaries cut to `review.summaryChars` with `summaryLength` beside each, and the stored event is unchanged
+
+### Requirement: Start tool
+`start` SHALL perform the daemon lifecycle `start` for the resolved run, creating the run directory if needed, and SHALL return the URL, pid, run directory, graph path, and the runner mode in force. It SHALL be safe to call repeatedly. Its description SHALL name both kinds' default models.
+
+#### Scenario: Fresh repository
+- **WHEN** `start` is called in a repository with no run directory
+- **THEN** the run directory is created, a daemon is spawned, the URL answers `status` within the bounded time, and the mode in force is `pull`
+
+#### Scenario: Config wins over the plugin default
+- **WHEN** `start` is called without `mode` in a repository whose `orchestrator.yaml` sets `runner.mode: spawn`
+- **THEN** the mode in force is `spawn`
+
+#### Scenario: Running daemon keeps its mode
+- **WHEN** the daemon runs in `spawn` after `orchestrator-ctl mode spawn` and `start` is called without `mode`
+- **THEN** no second daemon is spawned and the mode stays `spawn`
+
+#### Scenario: Detection reported
+- **WHEN** `start` is called in a Node repository with no file
+- **THEN** the result's `config.checkCommand` is `{ value: "npm test", source: "detected" }` and `needsConfig` is empty
+
+#### Scenario: Check command given at start
+- **WHEN** `start` is called with `checkCommand: "make check"` on a running daemon
+- **THEN** the tool applies it through the configuration route and the result's `config.checkCommand` has source `argument`
+
+#### Scenario: Effort given at start
+- **WHEN** `start` is called with `effort: "high"` on a running daemon
+- **THEN** the tool applies it through the configuration route and the result's `config.effort` is `{ value: "high", source: "argument", applied: true }`
+
+#### Scenario: Codex run defaults to spawn
+- **WHEN** `start` is called with `runnerKind: "codex"` and no `mode` in a repository with no run directory and no `runner.mode` in its file
+- **THEN** the daemon is spawned with `--default-mode spawn`, the result's mode is `spawn`, its `config.runnerKind` is `{ value: "codex", source: "argument" }`, and its `modeNote` names codex and spawn
+
+#### Scenario: Codex in force from the file
+- **WHEN** `start` is called without arguments in a repository whose `orchestrator.yaml` sets `runner.kind: codex` and no `runner.mode`
+- **THEN** the mode in force is `spawn`
+
+#### Scenario: Claude Code run still defaults to pull
+- **WHEN** `start` is called without `mode` and without `runnerKind` in a repository whose run and file name no kind
+- **THEN** the mode in force is `pull`
+
+#### Scenario: Codex run in pull is warned about
+- **WHEN** `start` is called with `mode: "pull"` on a running daemon whose kind in force is `codex`
+- **THEN** the mode becomes `pull` and the result's `modeNote` warns that codex launches stay parked
+
+### Requirement: Review tool
+`review` SHALL take `milestone` and the optional arguments `task` (a string), `full` (a boolean), `statLines` and `summaryChars` (integers of 0 or more), forward the ones that are set to the daemon's review route as query parameters built with `URLSearchParams`, adding `full` only when it is `true`, and return the daemon's answer unchanged, so that the session can judge it or hand it to reviewers before calling `accept` or `reject`.
+
+#### Scenario: Review then accept
+- **WHEN** `review` is called for a submitted milestone and then `accept` is called with the returned sha and version
+- **THEN** the milestone becomes done
+
+#### Scenario: full false is the index
+- **WHEN** `review` is called with `full: false`
+- **THEN** no `full` parameter is sent and the answer is the index
+
+### Requirement: Worker tools
+The server SHALL additionally expose `claim` with `{ workerId, taskId?, access? }`, forwarding its attachment in the body, `release` with `{ launchId, reason, keep? }`, and the token-scoped tools `launch_heartbeat`, `launch_report`, `launch_block`, `launch_inbox`, and `launch_log`.
+
+#### Scenario: Claim through the tool
+- **WHEN** `claim` is called with worker id `w1` while T1 is parked
+- **THEN** the result carries T1's launch id, token, worktree, brief path, brief, base sha, and API URL, `status` lists `w1` under `workers`, and the launch's worker record carries the server's attachment
+
+#### Scenario: Block stays in the foreground
+- **WHEN** `launch_block` is called with seq 1 and no answer arrives for two minutes
+- **THEN** the call returns `{ pending: true }` within ninety seconds, and a second call with seq 1 after the operator answers returns `{ answer }`
+
+#### Scenario: Start sets the mode on a running daemon
+- **WHEN** `start` is called with mode `pull` while the daemon is already running in `spawn` mode
+- **THEN** no second daemon is spawned and `status` reports mode `pull`
+
+#### Scenario: Release with keep through the tool
+- **WHEN** `release` is called with `keep` true for a launch with commits
+- **THEN** the route receives `keep` true and the result reports `kept` true with the branch and head sha
+
+### Requirement: Configure tool
+The server SHALL expose `configure`, taking any of `checkCommand`, `capacity`, `allowedTools`, `runnerCommand`, `runnerKind`, `model`, `effort` (any level of either kind; the route refuses a level the kind lacks), `codex` (`{ model, effort }`), `sandbox` (the key `codex.sandbox`), and `commit` (the commit policy of `runnerKind` in the same call, else of the kind in force on the daemon), each a value or null to clear.
+
+#### Scenario: Tool list includes configure
+- **WHEN** a client lists tools
+- **THEN** `configure` is present with an input schema whose properties are `checkCommand`, `capacity`, `allowedTools`, `runnerCommand`, `runnerKind`, `model`, `effort`, `codex`, `sandbox`, and `commit`, all optional
+
+#### Scenario: Set the check command through the tool
+- **WHEN** `configure` is called with `checkCommand: "npm test"` while it was unresolved
+- **THEN** the daemon records the operator event, the result lists `checkCommand` under `applied`, and the next `wait` digest has an empty `needsConfig`
+
+#### Scenario: Refusal passes through
+- **WHEN** `configure` is called with `capacity: 0`
+- **THEN** the result carries status 400 naming `capacity` and `isError` is true
+
+#### Scenario: Set the model through the tool
+- **WHEN** `configure` is called with `model: "claude-sonnet-5-5"`
+- **THEN** the result lists `model` under `applied` and the next launch prepared has that model
+
+#### Scenario: Commit policy through the tool
+- **WHEN** the kind in force is `codex` and `configure` is called with `commit: "agent"`
+- **THEN** the result's `config.codex.commit` is `{ value: "agent", source: "argument" }` and `config.claude.commit` is unchanged
+
+#### Scenario: Ultra refused for Claude Code through the tool
+- **WHEN** `configure` is called with `runnerKind: "claude-code"` and `effort: "ultra"`
+- **THEN** the result carries status 400 naming `effort` and `isError` is true
+
+### Requirement: Configure and start tools: limit keys
+The `configure` tool SHALL take `budgets: { maxLaunchMs }` and `health: { stuckAfterMs, stuckFailAfterMs }`, each leaf an integer from 0 to `Number.MAX_SAFE_INTEGER` or null and each block an object or null, and forward them through the configuration route. The `start` tool SHALL take the same objects without null. Both objects SHALL be strict: a leaf the schema does not hold SHALL be refused by the tool, not dropped.
+
+#### Scenario: Configure raises a stuck limit
+- **WHEN** `configure` is called with `health: { stuckFailAfterMs: 5400000 }`
+- **THEN** the answer's `applied` holds `health` and its config gives the leaf as `{ value: 5400000, source: "argument" }`
+
+#### Scenario: A mistyped leaf is refused
+- **WHEN** `configure` is called with `health: { stuckFailAfterMS: 1 }`
+- **THEN** the call is an error naming the leaf and nothing is sent
+
+#### Scenario: The tools list the limit keys
+- **WHEN** a client lists the tools
+- **THEN** the input schemas of `configure` and `start` list `budgets` and `health`, and the `configure` description says that 0 disables a limit and that a change applies on the next tick
+
+### Requirement: Wait digest: profileHeld
+
+The wait digest SHALL carry `profileHeld`: one entry `{ runner, missing, tasks }` per runner kind that has a task with a held profile (model-selection "Profile hold at admission"). `missing` SHALL be the union of the missing keys over that kind's held tasks, `model` before `effort`, and `tasks` SHALL count them. Entries SHALL be ordered by their first held task in graph order. It SHALL be an empty list when nothing is held and when no graph is loaded. `needsConfig` SHALL be unchanged.
+
+#### Scenario: A held task is in the digest
+
+- **WHEN** the profile hold is on and a ready `claude-code` task with no selector is held after only the model was set
+- **THEN** the digest's `profileHeld` is `[{ runner: "claude-code", missing: ["effort"], tasks: 1 }]`
+- **AND** after both keys are set and a tick, `profileHeld` is `[]`
+
+#### Scenario: Without a graph
+
+- **WHEN** no graph is loaded
+- **THEN** the digest's `profileHeld` is `[]`
+
+### Requirement: Configure tool: endLive
+The `configure` tool SHALL take `endLive`, a boolean, and SHALL send it as `endLive: true` beside the patch to `PUT /v1/config`, never inside the patch, so it is neither folded with the runner arguments nor stored. The tool SHALL return the route's 409 with `wouldEnd` unchanged, as an error. The `start` tool SHALL NOT take `endLive`.
+
+#### Scenario: The refusal
+- **WHEN** `configure` is called with `budgets: { maxLaunchMs: 1 }` while a running task's launch is live
+- **THEN** the call is an error whose body is the route's 409 with `wouldEnd` naming that launch
+
+#### Scenario: The confirmed change
+- **WHEN** the same call is made with `endLive: true`
+- **THEN** the answer is 200 with `applied` holding `budgets`
+
+#### Scenario: Clearing a raise
+- **WHEN** `configure` is called with `budgets: { maxLaunchMs: null }` while a launch that is past the file's budget lives under a raise
+- **THEN** the call is an error with the route's 409 and `wouldEnd`, and the same call with `endLive: true` is applied
+
+#### Scenario: The tools list
+- **WHEN** a client lists the tools
+- **THEN** the `configure` input schema lists `endLive` beside its other properties, the `start` input schema does not, and the `configure` description says that a change that would end a live launch is refused without `endLive`
+
+### Requirement: Start tool turns the profile hold on
+
+The operator server SHALL pass `defaultConfirmProfile: true` (operator-control "Profile hold default for a spawned daemon") at its two local spawn sites: the `start` tool and the local revival every other tool makes after an idle exit or a crash. `orchestrator-ctl` SHALL NOT pass it. So a daemon a host's tools spawn holds tasks whose model or effort would come from a built-in default unless the file or the run chose otherwise.
+
+#### Scenario: A held task waits for configure
+
+- **WHEN** the `start` tool starts a fresh repository in `pull` mode whose file sets no `runner.confirmProfile` and no model, and one task with no selector is imported
+- **THEN** `start` returned `confirmProfile: true`, and `status` before the import had `runner.confirmProfile` true and `profiles` `[]`
+- **AND** `status.profiles` has one entry with `held: true` and `missing: ["model", "effort"]`, `status.claimable` is `[]`, and the wait digest's `profileHeld` is `[{ runner: "claude-code", missing: ["model", "effort"], tasks: 1 }]`
+- **AND** after `configure` with a model and an effort, `status.claimable` holds the task and `profileHeld` is `[]`
+
+#### Scenario: A revival turns the hold on for a run from before the update
+
+- **WHEN** a `pull` run started without the default holds T1 and T2 (T2 depends on T1), exits idle, and a tool call then revives its daemon
+- **THEN** `status` answers with `runner.confirmProfile` true and a `profiles` entry with `held: true` whose `sample` holds T2
+
+## ADDED Requirements
+
+### Requirement: Repo argument resolution
+Every tool SHALL take an optional `repo` argument, an absolute path inside the session's project, which the server SHALL resolve to the real path of its git top level, except a `repo` inside a linked worktree. The server SHALL never forward `repo` to the daemon. A relative `repo`, or one not inside a git repository, SHALL fail the call with a message saying so.
+
+#### Scenario: Relative repo refused
+- **WHEN** `status` is called with `repo` set to a relative path
+- **THEN** the call fails with a message saying that `repo` must be an absolute path, and nothing is forwarded to a daemon
+
+### Requirement: Repo argument from a linked worktree
+A `repo` inside a linked worktree (one made by `git worktree add`, such as a launch worktree, whose git directory is not its repository's common git directory) SHALL resolve to the real path of the main working tree of its repository, the directory above `git rev-parse --git-common-dir`, so that a launch worktree's path names the run it belongs to.
+
+#### Scenario: Subdirectory of a launch worktree
+- **WHEN** `status` is called with `repo` set to a subdirectory of a linked worktree of repository R
+- **THEN** the call is bound to the real path of R's main working tree and returns R's run
+
+### Requirement: Run directory resolution order
+The server SHALL resolve the run directory from the call's `repo`, else the `repo` the session last passed to a tool other than a worker tool, else a `--repo` argument, the `ORCH_REPO` environment variable, or the git top level of its working directory, in that order. When none of them yields a repository, the tool SHALL fail with a message naming the `repo` argument rather than resolve to another place, and the `repo` argument's description SHALL say so.
+
+#### Scenario: --repo before ORCH_REPO
+- **WHEN** the server was started with `--repo` R and `ORCH_REPO` set to another repository O, and `status` is called without `repo` before any call passed one
+- **THEN** the call returns R's run
+
+### Requirement: Worker tools bind their repo per call
+The worker tools (`claim`, `release`, `launch_heartbeat`, `launch_report`, `launch_block`, `launch_inbox`, and `launch_log`) SHALL use a `repo` they are passed for that call only and SHALL never change the session's repository; a worker tool's call that fails, whatever the reason, SHALL leave the session's repository as it was.
+
+#### Scenario: Claim does not move the session
+- **WHEN** the server was started with `--repo` R and `claim` is called with `repo` set to another repository O whose run is loaded
+- **THEN** the claim goes to O's daemon, and a later `status` without `repo` returns R's run
+
+### Requirement: Repository bound once per call
+The server SHALL make the choice of the call's repository once per call, before the tool's handler runs, and every request the call forwards SHALL go to the daemon of the repository chosen; because the server handles calls concurrently, a call that names another `repo` while it is in flight SHALL NOT change the daemon it reaches.
+
+#### Scenario: Two requests of one call reach one daemon
+- **WHEN** `configure` is called with `commit`, no `runnerKind` and `repo` A, so that it reads `GET /v1/config` before it sends `PUT /v1/config`, and a call with `repo` B is made while it is in flight
+- **THEN** both requests of the `configure` call go to A's daemon
+
+### Requirement: Daemon revived on demand
+Before forwarding any tool other than `start`, `stop`, and `runs` the server SHALL revive the daemon on demand as the operator-control specification defines, so that an idle exit or a crash is invisible to the session, and SHALL refuse only after an explicit stop or for a repository with no run directory.
+
+#### Scenario: runs does not revive
+- **WHEN** the daemon exited idle and `runs` is called
+- **THEN** no daemon is started and `runs` lists the run with its daemon not alive and its exit record
+
+### Requirement: Attachment registration
+On its first successful contact with a daemon, and again whenever that daemon's pid changes, the server SHALL register an attachment `{ id, pids }` with its own pid followed by its ancestor chain, walked with `ps -o ppid=` up to six levels within 300 ms.
+
+#### Scenario: Registered again after a restart
+- **WHEN** the server has registered its attachment with a daemon, that daemon is restarted with a new pid, and a tool call reaches it
+- **THEN** the server posts the attachment `{ id, pids }` to the new daemon's `/v1/attachments` before forwarding the call, with its own pid first in `pids`
+
+### Requirement: Attachment carried and ended
+The server SHALL send the attachment id in the `x-orch-attachment` header of every request it forwards, SHALL register again when a response carries `x-orch-attachment: unknown` (the operation stands and is not retried) and before forwarding any `claim`, SHALL carry the attachment on every `claim`, and SHALL end the attachment on every daemon it registered with, with reason `sessionEnded`, when its transport closes or it receives `SIGTERM`, `SIGINT`, or `SIGHUP`, waiting at most half a second.
+
+#### Scenario: Ended on SIGTERM
+- **WHEN** the server has an attachment registered with a daemon and receives `SIGTERM`
+- **THEN** it posts the end of the attachment with reason `sessionEnded` to that daemon, waiting at most half a second, and exits
+
+### Requirement: Tool name list
+The implementation SHALL keep one list of tool names that the tests compare against the server's advertised tools, so that adding a tool is one change in one place.
+
+#### Scenario: Advertised tools equal the list
+- **WHEN** a client lists the tools
+- **THEN** the sorted names of the advertised tools equal the sorted implementation list `TOOL_NAMES`
+
+### Requirement: Wait until filter
+When `until` is set `wait` SHALL return early only when the digest satisfies the filter, otherwise at the timeout.
+
+#### Scenario: Events without the filter's condition
+- **WHEN** `wait` is called with `until: finished` and `timeoutMs` of two seconds, and events arrive while the run is not finished
+- **THEN** the call returns at the timeout with `matched` false, the events collected, the latest seq and the digest
+
+### Requirement: Wait polls keep their daemon
+Every poll a `wait` makes SHALL go to the daemon of the repository the call was bound to, for the whole duration of the call.
+
+#### Scenario: Every slice to one daemon
+- **WHEN** a `wait` bound to repository A outlasts one poll slice of the daemon's event route
+- **THEN** every `GET /v1/events` the `wait` sends goes to A's daemon
+
+### Requirement: Wait submitted events come cut
+Every poll of `wait` SHALL send `cutSubmitted=true`, so that a milestone's submitted transition event comes with the cuts of the review index and an `omitted` list; the `wait` tool SHALL take no argument for it, and its description SHALL say that a submitted event comes cut and that `review` holds the rest. A daemon that ignores the `cutSubmitted` parameter returns the event whole.
+
+#### Scenario: No argument for the cut
+- **WHEN** a client lists the tools and `wait` is called
+- **THEN** the `wait` input schema has no `cutSubmitted` property, and every `GET /v1/events` the call sends carries `cutSubmitted=true`
+
+### Requirement: Start mode default for a spawned daemon
+When `start` spawns the daemon and no `mode` argument is given, `start` SHALL pass `--default-mode pull`, so that a run started from the plugin executes its launches through session workers unless the repository's `orchestrator.yaml` sets `runner.mode` or the run already holds a mode override. When the daemon is already running and no `mode` is given, the mode SHALL be left as it is.
+
+#### Scenario: Plugin default passed at spawn
+- **WHEN** `start` is called without `mode` and without `runnerKind` in a repository with no run directory, no run override and no `runner.kind`
+- **THEN** the daemon is spawned with `--default-mode pull`
+
+### Requirement: Start mode default for a codex run
+When the runner kind for the start is `codex`, `start` SHALL pass `--default-mode spawn` instead of `--default-mode pull`, because pull-mode workers are the session's Claude subagents and claim only `claude-code` launches. When the codex default applied, the result SHALL carry a `modeNote` saying so.
+
+#### Scenario: No note when the mode is given
+- **WHEN** `start` is called with `runnerKind: "codex"` and `mode: "spawn"` in a repository with no run directory
+- **THEN** the daemon is spawned with `--mode spawn`, the codex default does not apply, and the result carries no `modeNote`
+
+### Requirement: Start runner kind in force
+The runner kind for the start is the `runnerKind` argument; without one it is the kind already in force for the run: the run's stored override, as recorded in `config.json`, else `runner.kind` in `orchestrator.yaml`, else `claude-code`. The `start` tool SHALL NOT open the store to find the runner kind for the start.
+
+#### Scenario: Kind from the run's stored override
+- **WHEN** the run's `config.json` holds the override `runnerKind: codex`, `orchestrator.yaml` names no kind, and `start` is called without `runnerKind` and without `mode` while no daemon runs
+- **THEN** the runner kind for the start is `codex` and the daemon is spawned with `--default-mode spawn`
+
+### Requirement: Start warns about a codex run in pull mode
+When the kind in force after the start is `codex` and the mode in force is `pull`, the `modeNote` SHALL warn that codex launches stay parked.
+
+#### Scenario: Codex started in pull
+- **WHEN** `start` is called with `mode: "pull"` and `runnerKind: "codex"` in a repository with no run directory
+- **THEN** the mode in force is `pull` and the result's `modeNote` says that codex launches park until a codex worker claims them
+
+### Requirement: Start configuration arguments
+`start` SHALL accept the optional configuration arguments `checkCommand`, `integrationBranch`, `capacity`, `allowedTools`, `runnerCommand`, `runnerKind`, `model`, `effort` (any level of either kind), `codex` (`{ model, effort }`), `sandbox` (the key `codex.sandbox`), and `commit` (the commit policy of `runnerKind`, else of the kind in force) beside `mode`.
+
+#### Scenario: Sandbox bound to codex
+- **WHEN** `start` is called with `runnerKind: "codex"` and `sandbox: "read-only"`
+- **THEN** the override document holds `codex: { sandbox: "read-only" }` and the result's `config.codex.sandbox` is `{ value: "read-only", source: "argument" }`
+
+### Requirement: Start configuration result
+`start` SHALL pass the configuration arguments to the lifecycle `start` as one override document and return the `config` block with value and source per key, the `toolchain` record, `needsConfig`, and any `rejected` keys, so that the session can report what was detected and set what was not.
+
+#### Scenario: Start-only key on a running daemon
+- **WHEN** `start` is called with `integrationBranch` while the daemon is already running
+- **THEN** the result lists `integrationBranch` under `rejected` with a reason saying it is start-only, beside the `config` block, `toolchain` and `needsConfig`
+
+### Requirement: Review tool description
+The `review` tool's description SHALL name `task`, `full` and `omitted`, and say that `full` can be too large for a client.
+
+#### Scenario: The description names the views
+- **WHEN** a client lists the tools
+- **THEN** the `review` description contains `task`, `full`, `omitted` and `too large for a client`
+
+### Requirement: Token-scoped worker tools
+The token-scoped tools `launch_heartbeat`, `launch_report`, `launch_block`, `launch_inbox`, and `launch_log` SHALL each take `{ launchId, token, ...body }` and forward to the agent API route of the same name with the token as the bearer, so that a session subagent, which cannot run the per-agent MCP shim, can act as the agent.
+
+#### Scenario: Inbox with the token as bearer
+- **WHEN** `launch_inbox` is called with launch id L and token K
+- **THEN** the server sends `GET /v1/launches/L/inbox` with `authorization: Bearer K` and returns the route's response, `notices` included
+
+### Requirement: Launch block stays in the foreground
+`launch_block` SHALL stay a foreground call: it SHALL return the daemon's response when it arrives within at most ninety seconds and otherwise `{ pending: true, seq }`; the worker SHALL call it again with the same seq, and the daemon's replay rules SHALL return the answer once admitted.
+
+#### Scenario: Answer within the cap
+- **WHEN** the operator has answered task T's question and `launch_block` is called again with the same seq
+- **THEN** the call returns `{ answer }` with the operator's text
+
+### Requirement: Start mode argument
+`start` SHALL accept an optional `mode` of `spawn`, `pull`, or `mixed` and apply it to the run whether or not it spawned the daemon.
+
+#### Scenario: Mode on a daemon the call spawns
+- **WHEN** `start` is called with `mode: "spawn"` in a repository with no run directory
+- **THEN** the daemon is spawned with `--mode spawn` and the mode in force is `spawn`
+
+### Requirement: Configure forwards to the configuration route
+`configure` SHALL fold `sandbox` and `commit` into the per-kind blocks, forward to `PUT /v1/config`, and return the route's response as a single JSON text block, including a 400 or 409 unchanged.
+
+#### Scenario: Commit folded into the kind's block
+- **WHEN** `configure` is called with `runnerKind: "codex"` and `commit: "agent"`
+- **THEN** the body of `PUT /v1/config` holds `codex: { commit: "agent" }` and no top-level `commit`
+
+### Requirement: Configure, status and wait descriptions
+The `configure` description SHALL name both kinds' defaults and SHALL say that `ultra` is codex-only. The `status` tool description SHALL mention the `config`, `toolchain`, and `needsConfig` facts, `runnerKind`, the codex leaves, `claimableByKind`, and the per-launch `runner`, `model`, and `effort`, and the `wait` tool description SHALL mention `needsConfig` in the digest.
+
+#### Scenario: The descriptions name the configuration
+- **WHEN** a client lists the tools
+- **THEN** the `configure` description names `claude-opus-5-5` and `gpt-6-astra` and says that `ultra` is codex-only, the `status` description contains `runnerKind` and `claimableByKind`, and the `wait` description contains `needsConfig`
+
+### Requirement: Configure description names the limit keys
+The `configure` description SHALL name the limit keys `budgets: { maxLaunchMs }` and `health: { stuckAfterMs, stuckFailAfterMs }` and say that the values are milliseconds, that 0 disables a limit, that a change applies on the next tick, and that a null falls back to the file or the default.
+
+#### Scenario: The description names the keys
+- **WHEN** a client lists the tools
+- **THEN** the `configure` description contains `budgets { maxLaunchMs }`, `health { stuckAfterMs, stuckFailAfterMs }`, `0 disables a limit` and `applies on the next tick`
+
+### Requirement: Held task writes no event
+No event SHALL be written when a task becomes held; a session learns of it from `status.profiles` and from the digest of its next `wait` return.
+
+#### Scenario: Held without an event
+- **WHEN** the profile hold is on and a ready task with no selector is held after a tick
+- **THEN** no event is appended for the hold, no launch exists for the task, `status.profiles` lists it with `held: true`, and the digest's `profileHeld` counts it
+
+### Requirement: Configure description names endLive
+The `configure` description SHALL say that a change that would end a live launch is refused without `endLive`, that the 409 lists the launches under `wouldEnd`, and that `endLive` is sent only when the user says so.
+
+#### Scenario: The description names the refusal
+- **WHEN** a client lists the tools
+- **THEN** the `configure` description says that a change that would end a live launch is refused without `endLive`
+
+### Requirement: Remote daemon keeps its own profile hold
+The remote path (a remote `ORCH_URL`) SHALL NOT spawn and SHALL NOT change the profile hold; a remote daemon gets the profile hold only from its own file.
+
+#### Scenario: Remote daemon not spawned
+- **WHEN** `ORCH_URL` names a daemon on a host that is not loopback and that daemon does not answer, and `status` is called
+- **THEN** the call fails saying the daemon at that URL is unreachable and no local daemon is started
+
+### Requirement: Start result reports the profile hold
+The `start` result SHALL carry `confirmProfile`. There SHALL be no `start` argument that forces or clears the profile hold.
+
+#### Scenario: No argument for the hold
+- **WHEN** `start` starts a fresh repository whose file sets no `runner.confirmProfile`
+- **THEN** the result carries `confirmProfile: true`, and the `start` input schema has no `confirmProfile` property
+
+### Requirement: Descriptions name the profile hold
+The `start` description SHALL name `runner.confirmProfile` and `confirmProfile` and say that `orchestrator.yaml` wins; the `status` description SHALL name `profiles` and `runner.confirmProfile`; the `wait` description SHALL name `profileHeld`.
+
+#### Scenario: The descriptions name the hold
+- **WHEN** a client lists the tools
+- **THEN** the `start` description contains `runner.confirmProfile` and `confirmProfile`, the `status` description contains `profiles` and `runner.confirmProfile`, and the `wait` description contains `profileHeld`
