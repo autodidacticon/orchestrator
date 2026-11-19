@@ -1,7 +1,7 @@
 # remote-workspace Specification
 
 ## Purpose
-TBD - created by archiving change remote-access-mode. Update Purpose after archive.
+How the daemon handles a launch whose worker runs in its own clone on another machine: the launch is prepared without a worktree, its submit is sealed against origin, and its end leaves origin's branch in place.
 ## Requirements
 ### Requirement: Remote launch preparation
 On a run whose `runner.access` is `remote`, preparing a launch SHALL create no worktree and no directory under the run's worktrees root. The launch row SHALL have `access: 'remote'`, `worktree` the empty string, and the brief composed as for a local launch stored on the row as `briefMarkdown` (the markdown) and `briefJson` (the JSON). The launch SHALL then be parked `claimable` as any pull-mode launch. The branch name, base sha, token and selection SHALL be fixed as for a local launch.
