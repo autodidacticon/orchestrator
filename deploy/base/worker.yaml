@@ -20,6 +20,10 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+      # On SIGTERM the loop stops its agent (10 s, ORCH_WORKER_AGENT_STOP_MS), commits and pushes the work, and releases
+      # the launch with keep (reason podTerminating); every wait after the signal is bounded, 95 s at most in all.
+      # No preStop hook: the container's command is orchestrator-worker itself, which gets the signal. See deploy/README.md "The workers".
+      terminationGracePeriodSeconds: 120
       containers:
         - name: worker
           image: orchestrator:dev

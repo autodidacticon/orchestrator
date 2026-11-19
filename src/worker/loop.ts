@@ -19,6 +19,7 @@ import { treeFingerprint } from '../workspace/fingerprint.js';
 import { FALLBACK_FILE, gitOut, ORCH_DIR, prepareClone } from './clone.js';
 import { type ApiCall, apiClient, type ApiResult, realSleep } from './http.js';
 import { runScriptedAgent } from './scripted.js';
+import { type AgentHandle, DEFAULT_AGENT_STOP_MS, handBack, handBackExitCode, POD_TERMINATING, pushHead, stopAgent, TERMINATION_CALL_MS, TERMINATION_PUSH_MS, withLimit } from './terminate.js';
 
 export const DEFAULT_WORKER_CACHE = '/var/cache/orchestrator';
 export const DEFAULT_RETRY_WINDOW_MS = 60_000;
@@ -48,6 +49,8 @@ export interface WorkerSettings {
   task?: string;
   /** Exit 0 after this many launches (`ORCH_WORKER_MAX_LAUNCHES`); unset or 0 never. */
   maxLaunches?: number;
+  /** On termination, how long the agent's process group has after SIGTERM before SIGKILL (`ORCH_WORKER_AGENT_STOP_MS`); unset is 10000. */
+  agentStopMs?: number;
 }
 
 function nonNegative(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -75,6 +78,8 @@ export function workerSettings(env: NodeJS.ProcessEnv, host: () => string = host
     maxLaunches = Number(maxRaw);
     if (!Number.isSafeInteger(maxLaunches) || maxLaunches < 0) throw new Error(`ORCH_WORKER_MAX_LAUNCHES must be a non-negative integer; got ${JSON.stringify(maxRaw)}`);
   }
+  const stopRaw = env['ORCH_WORKER_AGENT_STOP_MS'];
+  const agentStopMs = stopRaw !== undefined && stopRaw.trim() !== '' ? nonNegative(env, 'ORCH_WORKER_AGENT_STOP_MS', DEFAULT_AGENT_STOP_MS) : undefined;
   return {
     api: api.replace(/\/+$/, ''),
     workerId,
@@ -87,6 +92,7 @@ export function workerSettings(env: NodeJS.ProcessEnv, host: () => string = host
     backoffMaxMs: Math.max(Math.max(1, backoffMs), nonNegative(env, 'ORCH_WORKER_BACKOFF_MAX_MS', DEFAULT_BACKOFF_MAX_MS)),
     ...(task ? { task } : {}),
     ...(maxLaunches ? { maxLaunches } : {}),
+    ...(agentStopMs !== undefined ? { agentStopMs } : {}),
   };
 }
 
@@ -262,6 +268,49 @@ export interface WorkerDeps {
   schedule?: Schedule;
   /** The scripted agent's silent step before it works, in ms (tests of the heartbeat). */
   scriptedIdleMs?: number;
+  /**
+   * The termination request: once aborted the loop stops the agent, hands a held launch back and claims no more. The
+   * entry point aborts it on SIGTERM and SIGINT. See specs/worker-pool "Pod termination".
+   */
+  termination?: AbortSignal;
+}
+
+/** The termination request as the loop reads it: whether it was made, and a race against it. */
+interface Termination {
+  requested(): boolean;
+  /** Resolves when the termination is requested; never without a request. */
+  wait: Promise<void>;
+  /** `p`'s value, or `{ ok: false }` when the termination is requested first (a later rejection of `p` is dropped). */
+  race<T>(p: Promise<T>): Promise<{ ok: true; value: T } | { ok: false }>;
+}
+
+function terminationOf(signal: AbortSignal | undefined): Termination {
+  const wait = new Promise<void>((resolve) => {
+    if (!signal) return;
+    if (signal.aborted) resolve();
+    else signal.addEventListener('abort', () => resolve(), { once: true });
+  });
+  return {
+    requested: () => signal?.aborted === true,
+    wait,
+    race: <T>(p: Promise<T>) =>
+      new Promise<{ ok: true; value: T } | { ok: false }>((resolve, reject) => {
+        // One listener per race, removed when `p` settles, so an idle loop's rounds leave nothing behind.
+        const onAbort = () => resolve({ ok: false });
+        if (signal?.aborted) onAbort();
+        else signal?.addEventListener('abort', onAbort, { once: true });
+        p.then(
+          (value) => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve({ ok: true, value });
+          },
+          (e: unknown) => {
+            signal?.removeEventListener('abort', onAbort);
+            reject(e);
+          },
+        );
+      }),
+  };
 }
 
 /** Where the daemon has a launch after its agent exited: reported (submitted or done), still held by this worker, or ended. */
@@ -280,7 +329,11 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
   const now = deps.now ?? Date.now;
   const out = deps.out ?? ((line: string) => void process.stdout.write(`${line}\n`));
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
-  const call = apiClient({ api: s.api, retryWindowMs: s.retryWindowMs, fetch: deps.fetch, sleep, now });
+  const longCall = apiClient({ api: s.api, retryWindowMs: s.retryWindowMs, fetch: deps.fetch, sleep, now });
+  // After the termination request every call gets a short retry window, so the hand-back fits the grace period.
+  const shortCall = apiClient({ api: s.api, retryWindowMs: Math.min(s.retryWindowMs, TERMINATION_CALL_MS), fetch: deps.fetch, sleep, now });
+  const term = terminationOf(deps.termination);
+  const call: ApiCall = (...a) => (term.requested() ? shortCall : longCall)(...a);
   const log = (event: string, c?: Pick<RemoteClaim, 'launchId' | 'taskId'>, detail?: string) => {
     out(`worker ${s.workerId} ${event} ${c?.launchId || '-'} ${c?.taskId || '-'}`);
     if (detail) err(`worker ${s.workerId} ${event}: ${detail}\n`);
@@ -289,13 +342,27 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
   let idleSince = now();
   let refusedOnce = false;
   let launches = 0;
+  let current: Pick<RemoteClaim, 'launchId' | 'taskId'> | undefined;
   log('start');
+  void term.wait.then(() => log('terminating', current));
   for (;;) {
+    if (term.requested()) return 0;
+    // A claim in flight is awaited: a launch it answers is released at once, without keep.
     const c = await call('POST', '/v1/claims', { workerId: s.workerId, access: 'remote', ...(s.task ? { taskId: s.task } : {}) });
     if (c.status === 200) {
+      const claim = claimOf(c.body);
+      const tools: LaunchTools = { log, err, sleep, schedule: deps.schedule, scriptedIdleMs: deps.scriptedIdleMs, term };
+      if (term.requested()) {
+        log('claimed', claim);
+        return releaseUnstarted(call, s, claim, tools);
+      }
       backoff.reset();
       refusedOnce = false;
-      await workLaunch(s, call, claimOf(c.body), { log, err, sleep, schedule: deps.schedule, scriptedIdleMs: deps.scriptedIdleMs });
+      current = claim;
+      const exit = await workLaunch(s, call, claim, tools);
+      current = undefined;
+      if (exit !== undefined) return exit;
+      if (term.requested()) return 0;
       idleSince = now();
       if (s.maxLaunches && ++launches >= s.maxLaunches) {
         log('max-launches');
@@ -303,6 +370,7 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
       }
       continue;
     }
+    if (term.requested()) return 0;
     if (c.status === 400) {
       log('claim-refused', undefined, `${c.status} ${JSON.stringify(c.body).slice(0, 300)}`);
       return 1;
@@ -312,7 +380,9 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
       refusedOnce = true;
       log('claim-refused', undefined, `${c.status} ${JSON.stringify(c.body).slice(0, 300)}`);
     }
-    const st = await call('GET', '/v1/status');
+    const read = await term.race(call('GET', '/v1/status'));
+    if (!read.ok) return 0;
+    const st = read.value;
     if (st.status === 200 && st.body['finished'] === true) {
       log('finished');
       return 0;
@@ -321,7 +391,7 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
       log('idle-exit');
       return 0;
     }
-    await sleep(backoff.delay());
+    if (!(await term.race(sleep(backoff.delay()))).ok) return 0;
   }
 }
 
@@ -331,41 +401,65 @@ interface LaunchTools {
   sleep: (ms: number) => Promise<void>;
   schedule?: Schedule;
   scriptedIdleMs?: number;
+  term: Termination;
 }
 
-/** One claimed launch, from the clone to the daemon's verdict. Never throws: a failure is logged and the loop claims again. */
-async function workLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools): Promise<void> {
+/**
+ * One claimed launch, from the clone to the daemon's verdict. Never throws: a failure is logged and the loop claims
+ * again. Answers the loop's exit code when the termination was requested during the launch, else nothing.
+ */
+async function workLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools): Promise<number | undefined> {
   const { log } = t;
   log('claimed', claim);
   let clone: string | undefined;
   // Heartbeats run from the claim until the agent exits, whether or not the agent calls the API itself.
   const every = heartbeatEveryMs(claim);
   const heartbeat = every !== undefined ? startLoopHeartbeat({ call, claim, everyMs: every, clone: () => clone, schedule: t.schedule, err: t.err }) : undefined;
+  // On termination a heartbeat in flight is awaited for at most TERMINATION_CALL_MS.
+  const stopHeartbeat = async () => {
+    if (!heartbeat) return;
+    if (t.term.requested()) await withLimit(heartbeat.stop(), TERMINATION_CALL_MS);
+    else await heartbeat.stop();
+  };
   try {
-    await workClaimed(s, call, claim, t, (dir) => (clone = dir), () => heartbeat?.stop());
+    return await workClaimed(s, call, claim, t, (dir) => (clone = dir), stopHeartbeat);
   } finally {
-    await heartbeat?.stop();
+    await stopHeartbeat();
   }
 }
 
-/** The launch's work after the claim: clone, agent, relay, verdict. Stops the heartbeat once the agent has exited. */
-async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools, setClone: (dir: string) => void, stopHeartbeat: () => Promise<void> | undefined): Promise<void> {
-  const { log } = t;
+/**
+ * The launch's work after the claim: clone, agent, relay, verdict. Stops the heartbeat once the agent has exited.
+ * Answers the loop's exit code when the termination was requested, else nothing.
+ */
+async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools, setClone: (dir: string) => void, stopHeartbeat: () => Promise<void>): Promise<number | undefined> {
+  const { log, term } = t;
+  const ending = () => (term.requested() ? 0 : undefined);
   let accepted = false;
   let clone: string | undefined;
   try {
     if (!claim.repoUrl) throw new Error('the claim carries no repoUrl (set git.workerOriginUrl or git.originUrl on the daemon)');
-    clone = await prepareClone({ cache: s.cache, repoUrl: claim.repoUrl, branch: claim.branch, start: startOf(claim) });
+    // The clone is not awaited past a termination request: the launch is released at once, and the container's end removes git.
+    const prepared = await term.race(prepareClone({ cache: s.cache, repoUrl: claim.repoUrl, branch: claim.branch, start: startOf(claim) }));
+    if (!prepared.ok) {
+      await stopHeartbeat();
+      return releaseUnstarted(call, s, claim, t);
+    }
+    clone = prepared.value;
     setClone(clone);
   } catch (e) {
     log('checkout-failed', claim, e instanceof Error ? e.message : String(e));
     await stopHeartbeat();
     await release(call, s, claim, `the worker could not prepare its clone: ${e instanceof Error ? e.message : String(e)}`, t);
-    return;
+    return ending();
   }
   log('checkout', claim, `${clone} on ${claim.branch} at ${startOf(claim)}`);
   try {
     await writeLaunchFiles(s, claim, clone);
+    if (term.requested()) {
+      await stopHeartbeat();
+      return releaseUnstarted(call, s, claim, t);
+    }
     log('agent-start', claim);
     if (s.agent === 'scripted') {
       const res = await runScriptedAgent({
@@ -379,7 +473,16 @@ async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim,
       accepted = isAccepted(res);
       if (res && !accepted) t.err(`worker ${s.workerId} submit ${claim.taskId}: ${res.status} ${JSON.stringify(res.body).slice(0, 300)}\n`);
     } else {
-      const code = await runCommand(composeAgentCommand(s.command!, claim, clone), clone, agentEnv(s, claim, clone), t.err);
+      const agent = runCommand(composeAgentCommand(s.command!, claim, clone), clone, agentEnv(s, claim, clone), t.err);
+      const finished = await term.race(agent.closed);
+      let code: number;
+      if (finished.ok) code = finished.value;
+      else {
+        // Terminating: SIGTERM to the agent's group, SIGKILL after the limit. After a SIGKILL only the exit is awaited, not the
+        // pipes, which a child in a group of its own may still hold.
+        const stopped = await stopAgent(agent, s.agentStopMs ?? DEFAULT_AGENT_STOP_MS);
+        code = stopped.killed ? stopped.code : await agent.closed;
+      }
       t.err(`worker ${s.workerId} agent ${claim.taskId} exited with ${code}\n`);
     }
     log('agent-exit', claim);
@@ -390,21 +493,58 @@ async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim,
   const relayed = await relayFallback(s, call, claim, clone, t);
   accepted ||= relayed;
   let state: 'reported' | 'held' | 'ended' = 'ended';
+  let read = false;
   try {
     const st = await call('GET', '/v1/status');
-    if (st.status === 200) state = launchState(st.body, s.workerId, claim);
+    if (st.status === 200) {
+      state = launchState(st.body, s.workerId, claim);
+      read = true;
+    } else t.err(`worker ${s.workerId} status: ${st.status} ${JSON.stringify(st.body).slice(0, 200)}\n`);
   } catch (e) {
     t.err(`worker ${s.workerId} status: ${e instanceof Error ? e.message : String(e)}\n`);
   }
   if (accepted || state === 'reported') {
     log('report accepted', claim);
-    return;
+    return ending();
   }
+  // Terminating, a status that could not be read counts as held: the work is pushed, and the release tried.
+  if (term.requested() && (state === 'held' || !read)) return handBackLaunch(s, call, claim, clone, t);
   if (state === 'held') {
     await release(call, s, claim, 'the agent exited without a report', t);
-    return;
+    return ending();
   }
   log('ended', claim);
+  return ending();
+}
+
+/** Hand a held launch back on termination (see src/worker/terminate.ts) and answer the loop's exit code. */
+async function handBackLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, clone: string, t: LaunchTools): Promise<number> {
+  const o = await handBack({ clone, branch: claim.branch, launchId: claim.launchId, workerId: s.workerId, call });
+  if (o.wipError) t.err(`worker ${s.workerId} wip-commit ${claim.taskId}: ${o.wipError}\n`);
+  if (!o.pushed) {
+    t.log('push-failed', claim, o.pushError);
+    return 1;
+  }
+  const r = o.release!;
+  if (r.status === 200) t.log('released', claim, `${POD_TERMINATING} keep -> ${r.status} ${String(r.body['outcome'] ?? '')} kept ${String(r.body['kept'] ?? '')}${r.body['keepError'] ? ` (${String(r.body['keepError'])})` : ''}`);
+  else if (r.status === undefined) t.log('release-failed', claim, r.error);
+  else t.log('release-failed', claim, `${r.status} ${String(r.body['error'] ?? r.body['reason'] ?? JSON.stringify(r.body).slice(0, 200))}`);
+  return handBackExitCode(o);
+}
+
+/** Release a launch whose agent has not started, without keep, with reason `podTerminating`; 0 when answered 200. */
+async function releaseUnstarted(call: ApiCall, s: WorkerSettings, claim: RemoteClaim, t: LaunchTools): Promise<number> {
+  try {
+    const r = await call('POST', `/v1/launches/${claim.launchId}/release`, { workerId: s.workerId, reason: POD_TERMINATING });
+    if (r.status === 200) {
+      t.log('released', claim, `${POD_TERMINATING} -> ${r.status} ${String(r.body['outcome'] ?? '')}`);
+      return 0;
+    }
+    t.log('release-failed', claim, `${r.status} ${String(r.body['error'] ?? r.body['reason'] ?? JSON.stringify(r.body).slice(0, 200))}`);
+  } catch (e) {
+    t.log('release-failed', claim, e instanceof Error ? e.message : String(e));
+  }
+  return 1;
 }
 
 const isAccepted = (r: ApiResult | undefined): boolean => r !== undefined && r.status === 200 && r.body['accepted'] === true;
@@ -442,18 +582,30 @@ async function writeLaunchFiles(s: WorkerSettings, claim: RemoteClaim, clone: st
   await chmod(mcpPath, 0o600);
 }
 
-/** Run the agent command in the clone through `/bin/sh -c`, its output to `err`; answers the exit code (signal: 128+). */
-function runCommand(cmd: string, cwd: string, env: Record<string, string | undefined>, err: (text: string) => void): Promise<number> {
-  return new Promise((resolve) => {
-    const child = spawn('/bin/sh', ['-c', cmd], { cwd, env: env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] });
-    child.stdout.on('data', (d: Buffer) => err(d.toString()));
-    child.stderr.on('data', (d: Buffer) => err(d.toString()));
-    child.on('error', (e) => {
-      err(`agent spawn failed: ${e.message}\n`);
-      resolve(127);
-    });
-    child.on('close', (code, signal) => resolve(code ?? (signal ? 128 : 1)));
+/**
+ * Run the agent command in the clone through `/bin/sh -c`, in a process group of its own (so the loop can signal the
+ * whole group), its output to `err`. The handle answers the exit code (signal: 128+) at the exit and once the pipes close.
+ */
+function runCommand(cmd: string, cwd: string, env: Record<string, string | undefined>, err: (text: string) => void): AgentHandle {
+  const child = spawn('/bin/sh', ['-c', cmd], { cwd, env: env as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  child.stdout.on('data', (d: Buffer) => err(d.toString()));
+  child.stderr.on('data', (d: Buffer) => err(d.toString()));
+  const codeOf = (code: number | null, signal: NodeJS.Signals | null) => code ?? (signal ? 128 : 1);
+  let failed: ((code: number) => void)[] = [];
+  child.on('error', (e) => {
+    err(`agent spawn failed: ${e.message}\n`);
+    for (const f of failed) f(127);
+    failed = [];
   });
+  const exited = new Promise<number>((resolve) => {
+    failed.push(resolve);
+    child.on('exit', (code, signal) => resolve(codeOf(code, signal)));
+  });
+  const closed = new Promise<number>((resolve) => {
+    failed.push(resolve);
+    child.on('close', (code, signal) => resolve(codeOf(code, signal)));
+  });
+  return { pid: child.pid, exited, closed };
 }
 
 /**
@@ -493,10 +645,16 @@ async function postFallback(s: WorkerSettings, call: ApiCall, claim: RemoteClaim
   }
   const body: Record<string, unknown> = { ...(parsed.body && typeof parsed.body === 'object' ? (parsed.body as Record<string, unknown>) : {}), seq: Number(parsed.seq ?? 0) };
   if (kind === 'submit' && typeof body['sealedSha'] !== 'string') {
-    try {
-      await gitOut(clone, ['push', '-q', 'origin', `HEAD:refs/heads/${claim.branch}`]);
-    } catch (e) {
-      t.err(`worker ${s.workerId} relay push ${claim.taskId}: ${e instanceof Error ? e.message : String(e)}\n`);
+    if (t.term.requested()) {
+      // After the termination request the push is bounded as the hand-back's is; it stays unforced.
+      const pushed = await pushHead(clone, claim.branch, { timeoutMs: TERMINATION_PUSH_MS });
+      if (!pushed.ok) t.err(`worker ${s.workerId} relay push ${claim.taskId}: ${pushed.error}\n`);
+    } else {
+      try {
+        await gitOut(clone, ['push', '-q', 'origin', `HEAD:refs/heads/${claim.branch}`]);
+      } catch (e) {
+        t.err(`worker ${s.workerId} relay push ${claim.taskId}: ${e instanceof Error ? e.message : String(e)}\n`);
+      }
     }
     body['sealedSha'] = await gitOut(clone, ['rev-parse', 'HEAD']).catch(() => undefined);
   }
@@ -538,6 +696,9 @@ finished. Environment:
   ORCH_RETRY_WINDOW_MS       how long connection failures are retried (default ${DEFAULT_RETRY_WINDOW_MS})
   ORCH_WORKER_BACKOFF_MS     first poll delay with nothing claimable (default ${DEFAULT_BACKOFF_MS})
   ORCH_WORKER_BACKOFF_MAX_MS the longest poll delay (default ${DEFAULT_BACKOFF_MAX_MS})
+  ORCH_WORKER_AGENT_STOP_MS  on SIGTERM or SIGINT, how long the agent has to exit before SIGKILL
+                             (default ${DEFAULT_AGENT_STOP_MS}); the launch is then committed, pushed and
+                             released with keep and reason podTerminating
 `;
 
 if (isEntrypoint(import.meta.url)) {
@@ -553,7 +714,12 @@ if (isEntrypoint(import.meta.url)) {
     }
     // Exit once stdout has drained: the last lines (`finished`, `report accepted`) are what a reader counts.
     const exit = (code: number) => process.stdout.write('', () => process.exit(code));
-    runWorkerLoop(settings).then(exit, (e) => {
+    // SIGTERM (the kubelet's, on eviction, rollout or scale-down) and SIGINT start the termination; a second signal changes nothing.
+    const termination = new AbortController();
+    const onSignal = () => termination.abort();
+    process.on('SIGTERM', onSignal);
+    process.on('SIGINT', onSignal);
+    runWorkerLoop(settings, { termination: termination.signal }).then(exit, (e) => {
       process.stderr.write(`orchestrator-worker: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`);
       exit(1);
     });
