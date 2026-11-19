@@ -2,7 +2,9 @@
 
 ## Purpose
 What an agent receives and how it reports back: the standalone brief, launch token scoping, deduplicated events, sealed submissions, declared no-ops, acceptance evidence, blocking and resume, the file fallback, the MCP façade, brief validation, the inbox notices of kind `stuck`, `nudge`, and `baseMoved` through which the daemon and the operator reach a running agent, the `payloadChanged` notice that tells a live agent its task's payload changed on reload, the revision context a brief carries after a reopen or a cascade reset so that the agent revises its prior work rather than redoing it, the proposals a submit report may carry for follow-up work, which the orchestrator stores pending and never adds to the graph on its own, and the worker access rules under which a worker holding a claimed launch acts as the agent through the same five operations with the launch token, directly against the loopback API or through the token-scoped operator tools, with no per-launch façade and no fallback file.
+
 ## Requirements
+
 ### Requirement: Standalone brief
 Before launching, the orchestrator SHALL write `<worktree>/.orchestrator/brief.md` and `brief.json`. They SHALL contain:
 - the task payload verbatim and the acceptance criteria;
@@ -12,7 +14,7 @@ Before launching, the orchestrator SHALL write `<worktree>/.orchestrator/brief.m
 - attempt context when present: the prior failure report, verifier output, conflict details naming the files and the sibling that landed, and the human's answer. Under `agent`, the conflict, interruption, and revision texts tell the agent to rebase, merge or cherry-pick the prior branch, squash a work-in-progress commit, and commit the delta. Under `daemon` they tell it instead to inspect the prior branch with `git show`/`git diff` and reapply the changes as file edits;
 - the API base URL, the launch token, the fallback report path, and the instruction to stop immediately on a 401.
 
-A remote launch (`access: remote`) has no worktree: its brief is kept on the launch row (see specs/remote-workspace). The text the orchestrator writes into its workspace and reporting sections SHALL name no path on the daemon's machine (not the run directory, the worktrees root or the daemon's clone) and no loopback address; text carried verbatim (the payload, dependency reports, verifier output) is not rewritten. Its workspace section SHALL instead name the clone (the current directory, a clone of the repository the worker loop made), the branch, the base commit and the integration branch, and SHALL say that work is submitted by committing on the branch and pushing it to `origin` before `report submit`. Its API base URL SHALL be `apiBaseUrl` (without a trailing slash), never the bind address, and its fallback report path SHALL be the relative path `.orchestrator/report.json`, which the brief says is relative to the root of the clone; `brief.json` SHALL carry the same branch, base commit, API base URL and fallback path. For a carry holding `interrupted`, the remote brief SHALL say that the branch starts at `carry.interrupted.headSha` (the worker loop creates it there), not at the base commit, and SHALL NOT tell the agent to merge or cherry-pick the prior branch onto its base. Whether the remote brief carries the OpenSpec change rule SHALL follow whether the daemon's clone has an `openspec/` root. The commit-policy lines of the definition of done SHALL be those of `agent`, since a remote launch never has policy `daemon`, and the prepare-command item SHALL NOT appear, since a remote run has no `prepareCommand`. A local launch's brief SHALL be unchanged by this.
+A remote launch (`access: remote`) has no worktree: its brief is kept on the launch row (see specs/remote-workspace). The text the orchestrator writes into its workspace and reporting sections SHALL name no path on the daemon's machine (not the run directory, the worktrees root or the daemon's clone) and no loopback address; text carried verbatim (the payload, dependency reports, verifier output) is not rewritten. Its workspace section SHALL instead name the clone (the current directory, a clone of the repository the worker loop made), the branch, the base commit and the integration branch, and SHALL say how work is submitted: commit all work on the branch; `report` with kind submit through the `orchestrator` MCP server's tool pushes the branch to `origin` and names the pushed commit; an agent that calls the API itself first runs `git push origin <branch>` and sends the tip's full sha as `sealedSha`; the orchestrator reads the work from `origin`, not from the clone. Its API base URL SHALL be `apiBaseUrl` (without a trailing slash), never the bind address, and its fallback report path SHALL be the relative path `.orchestrator/report.json`, which the brief says is relative to the root of the clone; `brief.json` SHALL carry the same branch, base commit, API base URL and fallback path. For a carry holding `interrupted`, the remote brief SHALL say that the branch starts at `carry.interrupted.headSha` (the worker loop creates it there), not at the base commit, and SHALL NOT tell the agent to merge or cherry-pick the prior branch onto its base. Whether the remote brief carries the OpenSpec change rule SHALL follow whether the daemon's clone has an `openspec/` root. The commit-policy lines of the definition of done SHALL be those of `agent`, since a remote launch never has policy `daemon`, and the prepare-command item SHALL NOT appear, since a remote run has no `prepareCommand`. A local launch's brief SHALL be unchanged by this.
 
 The agent sees the shim's tools under a name that depends on its CLI: `mcp__orchestrator__<tool>` under Claude Code and Codex, `orchestrator_<tool>` under OpenCode. The `claude-code` and `codex` briefs keep their Reporting text (the `codex` one is in "Codex brief reports through the MCP server"). An `opencode` brief's Reporting section SHALL name `orchestrator_heartbeat`, `orchestrator_report`, `orchestrator_block`, `orchestrator_inbox` and `orchestrator_log` and tell the agent to prefer them to calling the API from a command. It SHALL keep the API and the fallback file, because no sandbox blocks loopback. It SHALL NOT name `mcp__orchestrator__` tools.
 
@@ -54,7 +56,7 @@ An `opencode` brief's workspace section SHALL say that OpenCode permission rules
 
 #### Scenario: Remote brief says to push before submitting
 - **WHEN** a brief is composed for a remote launch
-- **THEN** it tells the agent to commit all work on the branch and push it to `origin` before calling `report` with kind submit
+- **THEN** its Submit line tells the agent to commit all work on the branch, names the `orchestrator` MCP server's `report` tool as the one that pushes the branch to `origin` and names the pushed commit, tells an agent that calls the API itself to run `git push origin <branch>` first and send `sealedSha`, and says that the orchestrator reads the work from `origin`
 
 #### Scenario: Remote brief after an interruption
 - **WHEN** a brief is composed for a remote launch whose task's carry holds `interrupted` with `headSha` H
@@ -195,6 +197,13 @@ Started with `--orch-env-file <path>`, the façade SHALL layer the file's `KEY=V
 
 The `report` tool's description SHALL state that a submit requires a committed, clean worktree only when `ORCH_COMMIT_POLICY` is unset or `agent`.
 
+The façade SHALL be in remote mode when `ORCH_ACCESS` is `remote`; the worker loop starts it so for a remote launch (see specs/worker-pool "Clone cache"). It then SHALL need `ORCH_WORKTREE` (the clone's path) and `ORCH_BRANCH` (the launch branch), and without either it SHALL exit 1 with a message naming the missing variable. With any other `ORCH_ACCESS` it SHALL read neither variable and behave as without remote mode, since a spawned agent's environment carries `ORCH_WORKTREE` too. In remote mode a `report` call with kind `submit` SHALL do three things before it calls the daemon, and the daemon's answer SHALL be returned unchanged:
+- the dirty check of the clone by the rule of a local seal (changed and untracked paths outside `.orchestrator/`): a dirty clone is answered `{ status: 409, error: "dirtyWorktree", files }`;
+- `git push --force origin HEAD:refs/heads/<ORCH_BRANCH>`, without a prompt and killed after 60 seconds: a failed push is answered `{ status: 503, error: "pushFailed", message }`. The push is forced because the launch branch belongs to the launch alone and an agent may rebase it after a `baseMoved` notice; `HEAD` is pushed whatever branch the clone has checked out;
+- the full sha of `HEAD`, added to the body as `sealedSha`.
+
+A git command that fails in the dirty check or while reading `HEAD` SHALL be answered `{ status: 500, error: "gitFailed", message }`. After any of these refusals nothing is sent to the daemon, so the same call may be sent again with the same `seq`. The `report` tool's input schema SHALL NOT declare `sealedSha`: the façade always names the tip it pushed. A `report` with kind `fail` and the other four tools SHALL be forwarded as without remote mode. In remote mode the `report` tool's description SHALL say that a submit needs committed work, that the tool pushes the branch to `origin` and names its tip, and that after a 409 or 503 answer the same call may be sent again with the same `seq`. The `--help` text SHALL name `ORCH_ACCESS`, `ORCH_WORKTREE` and `ORCH_BRANCH`.
+
 A runner whose CLI can treat an MCP server as optional or gate its tools behind approvals SHALL register the façade as required and with its tools pre-approved. For Codex this means `required=true`, plus the default and per-tool `approve` keys. OpenCode has no `required` analog (a server that cannot start is a warning and the run continues); its tools are named `orchestrator_<tool>` and are pre-approved by the permission rule `"orchestrator_*": "allow"`.
 
 A runner whose CLI times out MCP calls SHALL size the tool timeout above `maxWaitMs`, so a `block` long-poll is not cut: Codex through `tool_timeout_sec`, OpenCode through `mcp.orchestrator.timeout` (its default is 60 000 ms).
@@ -214,6 +223,22 @@ A runner whose CLI times out MCP calls SHALL size the tool timeout above `maxWai
 #### Scenario: Env file missing
 - **WHEN** the façade starts with `--orch-env-file` naming a file that does not exist
 - **THEN** it exits 1 and stderr names the file
+
+#### Scenario: Remote submit pushed and sealed by the façade
+- **WHEN** the façade runs with `ORCH_ACCESS=remote`, `ORCH_WORKTREE` naming a clean clone whose one commit is not pushed and `ORCH_BRANCH` naming the launch branch, and the agent calls `report` with kind `submit` and no `sealedSha`
+- **THEN** origin's launch branch is the clone's `HEAD`, the daemon records an `agent.report` event whose `sealedSha` is that sha, and the call is answered 200 with `accepted: true`
+
+#### Scenario: Dirty clone refused without a round trip
+- **WHEN** in remote mode the clone has a changed tracked file or an untracked file outside `.orchestrator/`, and the agent calls `report` with kind `submit`
+- **THEN** the call is answered 409 `dirtyWorktree` naming the file, nothing is pushed, and the launch's `lastSignal` is still `claimed`; files under `.orchestrator/` alone leave the clone clean
+
+#### Scenario: Failed push refused without a round trip
+- **WHEN** in remote mode origin cannot be reached while the agent calls `report` with kind `submit`
+- **THEN** the call is answered 503 `pushFailed` and the launch's `lastSignal` is still `claimed`; once origin is back, the same call with the same `seq` is accepted
+
+#### Scenario: Remote mode without its variables
+- **WHEN** the façade starts with `ORCH_ACCESS=remote` and no `ORCH_BRANCH`, or no `ORCH_WORKTREE`
+- **THEN** it exits 1 and stderr names the missing variable
 
 ### Requirement: Brief validation and remediation
 The brief template SHALL declare slots with a source, a `required` flag, and a minimum length, and the orchestrator SHALL validate a task against them when it becomes ready, or at ingest in strict mode. When validation fails, the configured policy SHALL either block the task with reason `insufficientSpec` listing the missing slots, or invoke the remediation hook to produce the missing content stored as a payload overlay keyed by graph revision. In `review` mode (default) the candidate SHALL land as `blocked` with kind `needsDecision` for a human to accept, edit, or reject; in `auto` mode it SHALL launch directly. v1 SHALL ship the hook interface with a default that blocks.
@@ -579,4 +604,3 @@ The brief of a launch prepared while `prepareCommand` is set SHALL carry, in "De
 #### Scenario: Key unset
 - **WHEN** `prepareCommand` is unset
 - **THEN** the brief has no such bullet, `brief.json` has no `prepareCommand`, and the golden briefs are unchanged
-

@@ -2,7 +2,9 @@
 
 ## Purpose
 Mapping normalized tracker issue records into a task graph: the normalized record shape and its validation, the rules that map an epic's children and their blocking relations to tasks, external nodes, and a gated milestone, the extraction of acceptance criteria from issue descriptions, the import outcome returned through the daemon, and the recording of the source tracker at import so that a run can be mirrored back to it.
+
 ## Requirements
+
 ### Requirement: Normalized issue record
 Import SHALL accept records of the form `{ id, title, description?, state, blockedBy[], parent?, labels?, priority?, url? }` with `state` one of `open`, `inProgress`, `done`, or `cancelled`, plus a `root` id naming the epic or parent. Records SHALL be validated before mapping and a malformed record SHALL fail the import naming the field.
 
@@ -11,7 +13,7 @@ Import SHALL accept records of the form `{ id, title, description?, state, block
 - **THEN** the import fails naming that record and `state`, and nothing is written
 
 ### Requirement: Mapping rules
-The import SHALL map: every child of the root with state `open` to a task whose id is the tracker key; every `blockedBy` edge between two tasks to a dependency; every `blockedBy` target outside the child set, and every child with state `done`, `cancelled`, or `inProgress`, to an `external` node whose `done` flag is true for state `done` and for state `cancelled` (work that is finished or will never happen; either way nothing waits on it) and false for `inProgress` and for an outside blocker that is still open; and the root to a gated milestone depending on every child. Node payloads SHALL carry `title`, `description`, `acceptanceCriteria`, `labels`, `priority`, `url`, and `trackerState`. A label `model:<value>` SHALL set the payload's `model` to `<value>`, a label `effort:<value>` SHALL set `effort` to `<value>`, and a label `runner:<value>` SHALL set `runner` to `<value>`, the prefix matched without regard to case, when the value satisfies the model-selection shape rules (for `runner`, one of the runner kinds); the label SHALL stay in `labels` either way, and a label whose value fails the rule SHALL set nothing and SHALL be listed in the import summary under `ignoredLabels` with its issue id. The milestone SHALL carry the root's `description` and `acceptanceCriteria` when the root record has a description, so that a review shows what the milestone must satisfy. The in-progress rule SHALL be configurable to import such issues as tasks instead.
+The import SHALL map: every child of the root with state `open` to a task whose id is the tracker key; every `blockedBy` edge between two tasks to a dependency; and the root to a gated milestone depending on every child.
 
 #### Scenario: Epic with mixed children
 - **WHEN** an epic has children A (open), B (open, blocked by A), C (done), and D (open, blocked by X where X is outside the epic)
@@ -64,7 +66,7 @@ The import SHALL validate the mapped graph with the graph loader, write it throu
 - **THEN** the external node's `done` flag becomes true, the reload is compatible, and dependents become ready
 
 ### Requirement: Tracker record
-`import_issues` SHALL accept an optional `tracker` of `{ kind: linear | atlassian | github, workspace?, inProgressLabel? }` and SHALL pass it to the daemon's `import` route with the mapped graph. For `github`, `workspace` SHALL be the repository as `owner/repo`, and `inProgressLabel` MAY name the label that stands for the in-progress state; the field SHALL be refused for other kinds. When present, the route SHALL record the tracker in the store under the key `tracker` and SHALL append a `tracker.recorded` event; when absent, a previously recorded tracker SHALL remain in force. The mapping SHALL be unchanged by `tracker`. `status` and the outbox policy SHALL report the recorded tracker including `inProgressLabel`.
+`import_issues` SHALL accept an optional `tracker` of `{ kind: linear | atlassian | github, workspace?, inProgressLabel? }` and SHALL pass it to the daemon's `import` route with the mapped graph. The mapping SHALL be unchanged by `tracker`.
 
 #### Scenario: Tracker recorded at import
 - **WHEN** `import_issues` is called with `tracker: { kind: linear, workspace: acme }`
@@ -155,3 +157,73 @@ The test suite SHALL reproduce on demand, without product code changes, an impor
 - **WHEN** an operator MCP slice test imports a graph or issues and the answer is `accepted: false` with no reasons
 - **THEN** the test counts the import as accepted only once the status tool's `graphRev` equals the answer's `rev`, waiting up to 5 seconds
 
+### Requirement: External nodes from the import
+The import SHALL map every `blockedBy` target outside the child set, and every child with state `done`, `cancelled`, or `inProgress`, to an `external` node whose `done` flag is true for state `done` and for state `cancelled` (work that is finished or will never happen; either way nothing waits on it) and false for `inProgress` and for an outside blocker that is still open.
+
+#### Scenario: Open outside blocker
+- **WHEN** an open child ENG-5 is blocked by OPS-7, an open issue outside the epic
+- **THEN** OPS-7 is an `external` node with `done: false` and ENG-5 depends on it
+
+### Requirement: Node payload fields
+Node payloads SHALL carry `title`, `description`, `acceptanceCriteria`, `labels`, `priority`, `url`, and `trackerState`.
+
+#### Scenario: Payload of an open child
+- **WHEN** an open child ENG-5 has the label `backend`, `priority: 2`, and `url: https://x/ENG-5`
+- **THEN** its task payload has `labels: ["backend"]`, `priority: 2`, `url: "https://x/ENG-5"`, and `trackerState: open`
+
+### Requirement: Selector labels set payload keys
+A label `model:<value>` SHALL set the payload's `model` to `<value>`, a label `effort:<value>` SHALL set `effort` to `<value>`, and a label `runner:<value>` SHALL set `runner` to `<value>`, the prefix matched without regard to case, when the value satisfies the model-selection shape rules (for `runner`, one of the runner kinds).
+
+#### Scenario: Effort label with any known effort
+- **WHEN** an open child carries the label `effort:ultra`
+- **THEN** its task payload has `effort: "ultra"`
+
+### Requirement: Selector labels kept and failures listed
+A `model:`, `effort:` or `runner:` label SHALL stay in `labels` whether or not its value satisfies the model-selection shape rules, and a label whose value fails those rules SHALL set nothing and SHALL be listed in the import summary under `ignoredLabels` with its issue id.
+
+#### Scenario: Two failing labels on one issue
+- **WHEN** an open child KNO-7 carries the labels `effort:huge` and `MODEL: opus; rm`
+- **THEN** its task payload has neither `effort` nor `model`, `labels` still lists both labels, and the import summary's `ignoredLabels` is `[{ id: "KNO-7", label: "effort:huge" }, { id: "KNO-7", label: "MODEL: opus; rm" }]`
+
+### Requirement: Milestone carries the root's criteria
+The milestone SHALL carry the root's `description` and `acceptanceCriteria` when the root record has a description, so that a review shows what the milestone must satisfy.
+
+#### Scenario: Root criteria on the milestone
+- **WHEN** the root's description reads "The goal.\n\n## Acceptance criteria\n- demo runs\n- docs updated"
+- **THEN** the milestone has `description` "The goal." and `acceptanceCriteria` ["demo runs", "docs updated"]
+
+#### Scenario: Root without a description
+- **WHEN** the root record has no description
+- **THEN** the milestone has no `description`
+
+### Requirement: Configurable in-progress rule
+The in-progress rule SHALL be configurable to import issues with state `inProgress` as tasks instead.
+
+#### Scenario: In-progress issue imported as a task
+- **WHEN** a child ENG-6 is `inProgress` and the import's `inProgress` option is `task`
+- **THEN** ENG-6 is a task and the import summary's `inProgressAsExternal` is empty
+
+### Requirement: GitHub tracker fields
+For `github`, `workspace` SHALL be the repository as `owner/repo`, and `inProgressLabel` MAY name the label that stands for the in-progress state; the `inProgressLabel` field SHALL be refused for other kinds.
+
+#### Scenario: Label refused by the import route
+- **WHEN** `PUT /v1/graph` is called with `tracker: { kind: linear, inProgressLabel: "x" }`
+- **THEN** the response is 400 and no `tracker.recorded` event is appended
+
+### Requirement: Tracker stored at import
+When `tracker` is present, the `import` route SHALL record the tracker in the store under the key `tracker` and SHALL append a `tracker.recorded` event; when `tracker` is absent, a previously recorded tracker SHALL remain in force.
+
+#### Scenario: Recorded once, kept by a later import
+- **WHEN** `PUT /v1/graph` is called with `tracker: { kind: linear, workspace: acme }` and then again without `tracker`
+- **THEN** `status` reports the tracker with kind `linear` and workspace `acme` after both calls, and exactly one `tracker.recorded` event is appended
+
+#### Scenario: Invalid tracker records nothing
+- **WHEN** `PUT /v1/graph` is called with `tracker: { kind: jira }`
+- **THEN** the response is 400, the recorded tracker is unchanged, and no `tracker.recorded` event is appended
+
+### Requirement: Tracker reported to drainers
+`status` and the outbox policy SHALL report the recorded tracker including `inProgressLabel`.
+
+#### Scenario: In-progress label in status and outbox policy
+- **WHEN** `PUT /v1/graph` records `tracker: { kind: github, workspace: "acme/app", inProgressLabel: "in-progress" }`
+- **THEN** `GET /v1/status` reports `tracker` with all three fields and `GET /v1/outbox` reports `policy.tracker` with kind `github` and `inProgressLabel` `in-progress`

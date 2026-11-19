@@ -2,7 +2,9 @@
 
 ## Purpose
 The remote worker loop `orchestrator-worker`: how a worker in another process or pod claims remote launches over the daemon's API, works each in its own clone, reports, and hands launches back.
+
 ## Requirements
+
 ### Requirement: Worker loop
 The `orchestrator-worker` bin (`dist/src/worker/loop.js`) SHALL run the remote worker loop against the daemon at `ORCH_API`, which is required. Each round SHALL `POST /v1/claims` with `{ workerId, access: 'remote' }`. A 200 SHALL be worked as one launch (see "Clone cache", "Agent command", "Scripted agent" and "Fallback relay") and the loop SHALL claim again. On a 404 (nothing claimable, or paused) or a 409 the loop SHALL read `GET /v1/status` and exit 0 when it says `finished`; otherwise it SHALL exit 0 when nothing has been claimed for `ORCH_WORKER_IDLE_EXIT_MS` (default 0, which never exits for idleness), and else wait before the next claim. The wait SHALL start at `ORCH_WORKER_BACKOFF_MS` (default 1000), double after each wait up to `ORCH_WORKER_BACKOFF_MAX_MS` (default 30000), and reset to the first value after a claim. A 400 on a claim SHALL end the loop with exit 1. A call that gets no answer SHALL be retried for `ORCH_RETRY_WINDOW_MS` (default 60000), with delays from 100 ms doubling to 1 s; past it the loop SHALL exit 1. A 401 on a call made for a launch SHALL end that launch's work, and the loop SHALL claim again. The loop SHALL write one line per step to stdout, `worker <id> <event> <launchId> <taskId>` with `-` for a missing id, and SHALL write `report accepted` once for each launch whose submission the daemon accepted; details and the agent's output SHALL go to stderr. After the agent exits and any fallback report is relayed, the loop SHALL read the status: a task `submitted` or `done` (or a submit answered with `accepted: true`) is `report accepted`; a launch the worker still holds is released without keep with reason `the agent exited without a report`; otherwise the launch has ended. A launch whose clone cannot be prepared SHALL be released without keep. Heartbeats from the loop, pod termination and usage are not part of this requirement.
 
@@ -26,7 +28,7 @@ The worker id sent with every claim SHALL be `POD_NAME` when set and not empty, 
 - **THEN** the worker id is `pod-a`; without `POD_NAME` it is `id-b`; without either it is the host name
 
 ### Requirement: Clone cache
-The loop SHALL keep one clone per `repoUrl` under `ORCH_WORKER_CACHE` (default `/var/cache/orchestrator`), named from the URL and a hash of it, and reuse it across launches; a directory there that is not a clone SHALL be replaced. The clone's `.git/info/exclude` SHALL list `/.orchestrator/`. Before each launch the loop SHALL abort an operation a previous agent left in progress, `git fetch origin`, fetch the start commit by its sha when the fetch did not bring it, `git checkout -f -B <branch> <start>` with start `carry.interrupted.headSha` when the claim carries it and `baseSha` otherwise, `git clean -ffdx` except `.orchestrator/`, and remove a stale `.orchestrator/report.json`. It SHALL then write `.orchestrator/brief.md` (the claim's `briefMarkdown`), `.orchestrator/brief.json` (the claim's `brief`, its `worktree` set to the clone) and `.orchestrator/mcp.json` (the MCP shim with `ORCH_API`, the launch id and token, mode 0600).
+The loop SHALL keep one clone per `repoUrl` under `ORCH_WORKER_CACHE` (default `/var/cache/orchestrator`), named from the URL and a hash of it, and reuse it across launches; a directory there that is not a clone SHALL be replaced. The clone's `.git/info/exclude` SHALL list `/.orchestrator/`. Before each launch the loop SHALL abort an operation a previous agent left in progress, `git fetch origin`, fetch the start commit by its sha when the fetch did not bring it, `git checkout -f -B <branch> <start>` with start `carry.interrupted.headSha` when the claim carries it and `baseSha` otherwise, `git clean -ffdx` except `.orchestrator/`, and remove a stale `.orchestrator/report.json`. It SHALL then write `.orchestrator/brief.md` (the claim's `briefMarkdown`), `.orchestrator/brief.json` (the claim's `brief`, its `worktree` set to the clone) and `.orchestrator/mcp.json` (the MCP shim with `ORCH_API`, the launch id and token, mode 0600). Through `shimEnv` the shim's `env` there SHALL also hold `ORCH_ACCESS=remote`, `ORCH_WORKTREE` (the clone) and `ORCH_BRANCH` (the claim's `branch`), so the shim's `report` tool pushes the branch and names `sealedSha` (see specs/agent-protocol "MCP façade").
 
 #### Scenario: Interrupted head as the start
 - **WHEN** a claim carries `carry.interrupted.headSha` H, a commit on origin
@@ -35,6 +37,10 @@ The loop SHALL keep one clone per `repoUrl` under `ORCH_WORKER_CACHE` (default `
 #### Scenario: Clone reused, tree clean
 - **WHEN** one loop works two launches in a row and the first agent left an untracked file, an untracked directory and an uncommitted change
 - **THEN** both agents run in the same clone directory, and the second sees nothing in `git status --porcelain --ignored` but the ignored `.orchestrator/`
+
+#### Scenario: Remote variables in mcp.json
+- **WHEN** a loop runs a command agent that reads `.orchestrator/mcp.json`, starts the server it names, commits without pushing, and calls its `report` tool with kind `submit`
+- **THEN** the shim's `env` there has `ORCH_ACCESS` `remote`, `ORCH_WORKTREE` the agent's working directory and `ORCH_BRANCH` the launch branch, the task is `submitted`, and the loop prints one `report accepted` line and no `relayed` line
 
 ### Requirement: Agent command
 With `ORCH_WORKER_AGENT=command` the loop SHALL compose `ORCH_WORKER_COMMAND` through the same functions every runner uses, `substitute` and `fixedSlots` in `src/runner/command.ts`: `{brief}`, `{briefJson}` and `{mcpConfig}` under the clone's `.orchestrator/`, `{worktree}` the clone, `{launchId}`, `{taskId}`, `{model}` and `{effort}` from the claim, and `{allowedTools}` the brief's `allowedTools` quoted as for a spawned launch; a slot with no value stays as written. The command SHALL run through `/bin/sh -c` in the clone with the loop's environment plus `ORCH_API`, `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_RETRY_WINDOW_MS`, `ORCH_TASK_ID` and `ORCH_WORKTREE` (the clone), and without the store's connection variables; the loop SHALL wait for it to exit.
@@ -91,3 +97,80 @@ The worker loop SHALL read two optional variables. `ORCH_WORKER_TASK`, when set 
 - **WHEN** `ORCH_WORKER_MAX_LAUNCHES` is `-1` or `one`
 - **THEN** the settings are refused with an error naming `ORCH_WORKER_MAX_LAUNCHES`
 
+### Requirement: Pod termination
+On SIGTERM or SIGINT the worker loop SHALL claim no more and SHALL hand back a launch it holds: it SHALL stop the agent's process group, relay a fallback report, read the status, and, while it still holds the launch, commit the work in progress, push `HEAD` to the launch branch and release with keep and reason `podTerminating`. It SHALL exit 0 when it held nothing, the report was accepted, the launch had ended or the release was answered 200, and 1 otherwise.
+
+#### Scenario: Signals
+- **WHEN** the loop gets SIGTERM or SIGINT
+- **THEN** it prints `worker <id> terminating <launchId> <taskId>` (`-` for a missing id) and claims no more; a second signal during the termination changes nothing and records no second release
+
+#### Scenario: Idle
+- **WHEN** the loop gets the signal with no launch held and no claim in flight
+- **THEN** it ends its wait and exits 0 at once, and releases nothing
+
+#### Scenario: Claim in flight
+- **WHEN** the signal arrives while a claim is in flight
+- **THEN** the claim is awaited; answered 200, its launch is released without keep with reason `podTerminating`, no agent starts and the loop exits 0 when the release is answered 200; with any other answer it exits 0; with no answer within the retry window it exits 1
+
+#### Scenario: Agent not started
+- **WHEN** the signal arrives while the clone is prepared or before the agent starts
+- **THEN** the launch is released without keep with reason `podTerminating` at once, without waiting for the clone
+
+#### Scenario: Stopping the agent
+- **WHEN** the signal arrives while the command agent runs, in its process group of its own
+- **THEN** the loop sends SIGTERM to the group, waits up to `ORCH_WORKER_AGENT_STOP_MS` (default 10000, set in `WorkerSettings` only when the variable is set) for it to exit and close its pipes, and then sends SIGKILL to the group; 0 sends SIGKILL at once; after a SIGKILL it waits for the command's exit, not for its pipes; the scripted agent is awaited
+
+#### Scenario: Steps after the agent
+- **WHEN** the agent has exited after the signal
+- **THEN** the loop stops its heartbeats (waiting at most 5 s for one in flight), relays a fallback report, and reads the status; a task `submitted` or `done` is `report accepted` and nothing is released; a launch that has ended is left alone; a launch still held, or a status read without an answer or answered other than 200, is handed back
+
+#### Scenario: Work in progress
+- **WHEN** a held launch is handed back and the clone has uncommitted or untracked files outside `.orchestrator/`
+- **THEN** they are committed on the launch branch as one commit (`git add -A`, hooks skipped, identity `orchestrator-worker <worker@orchestrator.local>`), `HEAD` is pushed to the launch branch on origin, forced, within 30 s, and release is called with `{ workerId, reason: 'podTerminating', keep: true, headSha, wipCommit }`, `headSha` the pushed `HEAD`
+
+#### Scenario: Nothing uncommitted
+- **WHEN** a held launch is handed back with a clean clone
+- **THEN** nothing is committed, the push and the release still run, and the release body has no `wipCommit`; at the launch's base with no agent API call the daemon answers `kept: false`
+
+#### Scenario: Failed commit
+- **WHEN** the work-in-progress commit fails (an `index.lock` left behind, say)
+- **THEN** the loop logs it, pushes `HEAD` as it is and releases with that `headSha` and no `wipCommit`
+
+#### Scenario: Failed push
+- **WHEN** the push fails
+- **THEN** the loop prints `push-failed` (git's message on stderr), calls no release, and exits 1; the lease expiry then decides from what origin holds
+
+#### Scenario: Failed release
+- **WHEN** the release is answered other than 200 or gets no answer
+- **THEN** the loop prints `release-failed` (the status with the answer's `error` or `reason` on stderr), does not try again, and exits 1; a release answered 200 prints `released` and exits 0 whatever `kept` says
+
+#### Scenario: Bounded calls after the signal
+- **WHEN** the loop starts an API call after the signal (the relay's post, the status read, the release)
+- **THEN** a connection failure is retried for at most the smaller of `ORCH_RETRY_WINDOW_MS` and 5000 ms; a push the relay makes after the signal is limited to 30 s and stays unforced
+
+#### Scenario: Handed back in a slice
+- **WHEN** in `test/slice/worker-termination.test.ts` an agent changes a tracked file, adds an untracked file and waits, and the loop gets SIGTERM
+- **THEN** the loop exits 0, `launch.released` has `reason: podTerminating`, `keep: true`, `kept: true` and `headSha`, origin's branch tip is that commit holding both files and nothing under `.orchestrator/`, the task is `unstarted` with `attempts` 0 and `interruptions` 1, and the next claim answers `carry.interrupted.headSha` equal to it
+
+### Requirement: Usage post
+The worker loop SHALL keep the last 256 KiB of the command agent's standard output, parse it with `parseUsage` once the agent process has exited, and, when the result has token counts, post `{ workerId, usage: { tokens, model, costUsd } }` once to `POST /v1/launches/:id/usage` as the last step of the launch. `model` is the claim's model when it has one; `costUsd` is `total_cost_usd` when above zero. Turns and duration are not posted.
+
+#### Scenario: Recorded cost
+- **WHEN** the agent's standard output ends with a Claude Code result object with `total_cost_usd` 0.25 and a `usage` of 100 input, 40 cache-read and 7 output tokens, and its report is accepted
+- **THEN** after `report accepted` the loop posts the usage, the launch row has `usageSource: "worker"`, `costUsd` 0.25, `costSource: "reported"` and `tokens` `{ input: 140, cachedInput: 40, output: 7 }`, and the loop prints `worker <id> usage <launchId> <taskId>` once
+
+#### Scenario: Tokens priced by the daemon
+- **WHEN** the object has token counts and no `total_cost_usd` (or 0), and `budgets.prices` has the claim's model
+- **THEN** the body has no `costUsd`, and the daemon prices the tokens: the row has `costSource: "priced"` and a cost above zero, which `budgets.maxRunCostUsd` counts
+
+#### Scenario: No object
+- **WHEN** the agent printed no such object, printed a line after it, printed one without `usage`, or the agent is the scripted one
+- **THEN** nothing is posted and the launch has no usage
+
+#### Scenario: Post not recorded
+- **WHEN** the post is answered other than 200 with `recorded: true` (409 for a launch another worker holds, 400) or cannot be sent
+- **THEN** the answer is written to stderr, no `usage` line is printed, and neither the launch's verdict nor the loop's exit code changes
+
+#### Scenario: Terminated launch
+- **WHEN** the loop gets SIGTERM while the agent runs, the agent prints its object as it stops, and the hand-back's release is answered
+- **THEN** the usage is posted after that release, whatever its status, through the short retry window; when the push failed or the release got no answer nothing is posted
