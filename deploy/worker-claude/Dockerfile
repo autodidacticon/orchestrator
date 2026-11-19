@@ -8,8 +8,9 @@
 ARG PROJECT_BASE=orchestrator:dev
 FROM ${PROJECT_BASE}
 
-# The CLI version this image installs; pin it with --build-arg CLAUDE_CODE_VERSION=<version>.
-ARG CLAUDE_CODE_VERSION=latest
+# The CLI version this image installs: an exact version, the one deploy/smoke.sh's pod printed (`claude --version`).
+# Build another with --build-arg CLAUDE_CODE_VERSION=<version>.
+ARG CLAUDE_CODE_VERSION=2.1.328
 USER root
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
   && npm cache clean --force

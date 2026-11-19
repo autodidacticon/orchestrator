@@ -10,11 +10,14 @@ set -euo pipefail
 #                                  claim named data-smoke-break into the daemon pod), claimable (claim the parked
 #                                  launch just before the restart) or restart (stop the daemon with SIGTERM in place of
 #                                  deleting the Postgres pod, so that its container restarts for another reason)
+#   deploy/smoke.sh --real-agent KEY_FILE
+#                                  also run the real-agent step last: Claude workers with the Anthropic key in KEY_FILE
+#                                  (a regular file outside the repository) work SMOKE-REAL on the run's default model
 #
 # Every assertion prints "smoke: pass: <name>" when it holds; the first that does not prints "smoke: FAIL: <name>" and
 # the script exits 1. An assertion or step that does not run prints "smoke: skip: <name> (<why>)".
 
-usage() { echo "usage: $0 [--dry-run] [--fresh] [--break pvc|claimable|restart]" >&2; exit 2; }
+usage() { echo "usage: $0 [--dry-run] [--fresh] [--break pvc|claimable|restart] [--real-agent <key file>]" >&2; exit 2; }
 
 KIND_CLUSTER="${KIND_CLUSTER:-orch}"
 # kind names a cluster's kubeconfig context kind-<name>; every kubectl call is pinned to it. KUBE_CONTEXT may be set,
@@ -69,6 +72,10 @@ RUN_ACCESS="${RUN_ACCESS:-local}"
 DRY_RUN=0
 FRESH=0
 BREAK=''
+# --real-agent: the key file's absolute path. The file is read only by the real-agent step, never under --dry-run.
+REAL_AGENT_KEY=''
+# The repository root as a physical path, for the key file rule: the key must not live inside the repository.
+REPO_PHYS="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 while [ $# -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
@@ -76,6 +83,19 @@ while [ $# -gt 0 ]; do
     --break)
       BREAK="${2:-}"; shift || true
       case "$BREAK" in pvc | claimable | restart) ;; *) usage ;; esac
+      ;;
+    --real-agent)
+      REAL_AGENT_KEY="${2:-}"; shift || true
+      if [ -z "$REAL_AGENT_KEY" ]; then echo "smoke: --real-agent needs the path of a file that holds the Anthropic key" >&2; exit 2; fi
+      # Read against the caller's working directory, before the script changes directory.
+      case "$REAL_AGENT_KEY" in /*) ;; *) REAL_AGENT_KEY="$PWD/$REAL_AGENT_KEY" ;; esac
+      if [ -L "$REAL_AGENT_KEY" ] || [ ! -f "$REAL_AGENT_KEY" ] || [ ! -r "$REAL_AGENT_KEY" ]; then
+        echo "smoke: --real-agent $REAL_AGENT_KEY is not a readable regular file (a symbolic link is refused)" >&2; exit 2
+      fi
+      KEY_DIR_PHYS="$(cd -P "$(dirname "$REAL_AGENT_KEY")" && pwd -P)"
+      case "$KEY_DIR_PHYS/" in
+        "$REPO_PHYS"/*) echo "smoke: --real-agent $REAL_AGENT_KEY is inside the repository $REPO_PHYS; keep the key file outside it" >&2; exit 2 ;;
+      esac
       ;;
     *) usage ;;
   esac
@@ -139,6 +159,16 @@ cleanup() {
   if [ -n "$OUTAGE_WRITE_PID" ]; then kill "$OUTAGE_WRITE_PID" 2>/dev/null || true; fi
   if [ -n "$PF_PID" ]; then kill "$PF_PID" 2>/dev/null || true; fi
   if [ -n "$BREAK_PATCHED" ]; then unmount_break_claim || true; fi
+  # M4: a termination pod this pass started and that still exists would hold SMOKE-M3-A; delete it and wait.
+  if [ -n "${TERM_STARTED:-}" ]; then
+    kc delete pod "$TERM_POD" --ignore-not-found --grace-period=120 --wait=true >/dev/null 2>&1 || true
+    echo "smoke: deleted the pod $TERM_POD" >&2
+  fi
+  # A run with --real-agent leaves no worker running, so no agent keeps spending after the script ends.
+  if [ -n "$REAL_AGENT_KEY" ] && [ "$DRY_RUN" = 0 ]; then
+    kc scale deployment/orchestrator-worker --replicas=0 >/dev/null 2>&1 || true
+    echo "smoke: --real-agent: scaled orchestrator-worker to 0; run the next smoke on this cluster with --fresh" >&2
+  fi
 }
 trap cleanup EXIT
 
@@ -624,6 +654,143 @@ one_accepted_report_per_task() {
   [ "$counts" = "$want" ]
 }
 
+# --- M4: the Claude worker image, a worker pod deleted mid-task, the usage it printed, the launch trailers, and the
+# real-agent step. ---
+
+# The Claude worker image (deploy/worker-claude/Dockerfile), built FROM $IMAGE.
+WORKER_IMAGE="${WORKER_IMAGE:-orchestrator-worker-claude:dev}"
+# The one-shot pod that runs the CLI of that image.
+CLI_POD=smoke-claude-cli
+# The termination step: the pod smoke-term works TERM_TASK with a stand-in agent and is deleted mid-task.
+TERM_POD=smoke-term
+TERM_TASK=SMOKE-M3-A
+# The stand-in agent: append a line to README.md, print a Claude result object (its last standard output, with token
+# counts, so the loop posts it), then the ready marker on standard error, and sleep. It holds no $: Kubernetes expands
+# $(NAME) in an environment value.
+TERM_COMMAND="echo smoke-term >> README.md && echo '{\"type\":\"result\",\"total_cost_usd\":0.01,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}' && echo smoke-term-ready >&2 && sleep 600"
+TERM_SEQ=0
+# The real-agent step: the task it adds to the graph and how long a real agent may take to get it done.
+REAL_TASK=SMOKE-REAL
+REAL_TIMEOUT_S="${REAL_TIMEOUT_S:-900}"
+REAL_NAMES=("M4: the real task is done" "M4: the real task's launch cost is above zero" "M4: the real task's commit carries its Orchestrator-Launch trailer")
+
+pod_exited() {
+  case "$(kc get pod "$1" -o jsonpath='{.status.phase}')" in Succeeded | Failed) return 0 ;; *) return 1 ;; esac
+}
+
+# Run the worker image's CLI in a one-shot pod; succeeds when the pod succeeds with a non-empty log.
+worker_image_runs_claude() {
+  local phase log
+  kc delete pod "$CLI_POD" --ignore-not-found --wait=true >/dev/null
+  kc run "$CLI_POD" --image="$WORKER_IMAGE" --image-pull-policy=IfNotPresent --restart=Never \
+    --command -- sh -c 'claude --version && test -w "$HOME"' >/dev/null
+  retry "$STATUS_TIMEOUT_S" pod_exited "$CLI_POD" || { echo "    $CLI_POD did not exit within ${STATUS_TIMEOUT_S}s"; return 1; }
+  phase="$(kc get pod "$CLI_POD" -o jsonpath='{.status.phase}')"
+  log="$(kc logs "pod/$CLI_POD")" || return 1
+  printf '%s\n' "$log" | sed 's/^/    /'
+  echo "    $CLI_POD: $phase"
+  kc delete pod "$CLI_POD" --ignore-not-found --wait=false >/dev/null
+  [ "$phase" = Succeeded ] && [ -n "$log" ]
+}
+
+# Why the termination step cannot run, or nothing. A leftover smoke-term pod is deleted first (with the grace the
+# worker Deployment gives, so it hands its launch back); TERM_TASK must then have a claimable launch.
+TERM_SKIP=''
+term_precondition() {
+  kc delete pod "$TERM_POD" --ignore-not-found --grace-period=120 --wait=true >/dev/null
+  if ! status_is ".claimable | index(\"$TERM_TASK\")"; then TERM_SKIP="$TERM_TASK is not claimable"; fi
+}
+
+# Start smoke-term as work_one_task starts smoke-worker, with the command agent and the stand-in as its command.
+start_term_pod() {
+  TERM_SEQ="$(status_get .latestSeq)"
+  TERM_STARTED=1
+  kc run "$TERM_POD" --image="$IMAGE" --image-pull-policy=IfNotPresent --restart=Never \
+    --labels=app.kubernetes.io/name=orchestrator-smoke-worker \
+    --env="ORCH_API=$DAEMON_URL" --env=ORCH_WORKER_AGENT=command --env="ORCH_WORKER_COMMAND=$TERM_COMMAND" \
+    --env="ORCH_WORKER_TASK=$TERM_TASK" --env=ORCH_WORKER_MAX_LAUNCHES=1 --env=ORCH_WORKER_CACHE=/tmp/orchestrator-cache \
+    --env="POD_NAME=$TERM_POD" --command -- orchestrator-worker >/dev/null
+}
+term_agent_printed_ready() {
+  local log; log="$(kc logs "pod/$TERM_POD" 2>/dev/null)" || return 1
+  grep -qx 'smoke-term-ready' <<<"$log"
+}
+# Wait until the stand-in agent has printed its marker (so its result object is out); print the pod's log if not.
+term_agent_ready() {
+  retry "$STATUS_TIMEOUT_S" term_agent_printed_ready && return 0
+  echo "    $TERM_POD did not print smoke-term-ready within ${STATUS_TIMEOUT_S}s; its log:"
+  kc logs "pod/$TERM_POD" 2>&1 | sed 's/^/    /' || true
+  return 1
+}
+# Delete smoke-term mid-task with the worker Deployment's grace (120s; a kubectl run pod has 30s) and wait until it is
+# gone. Its log, followed from before the deletion, shows the hand-back.
+delete_term_pod() {
+  local log pid
+  log="$(mktemp -t smoke-term-log.XXXXXX)"
+  kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" logs -f "pod/$TERM_POD" >"$log" 2>&1 &
+  pid=$!
+  kc delete pod "$TERM_POD" --grace-period=120 --wait=true >/dev/null || { kill "$pid" 2>/dev/null; rm -f "$log"; return 1; }
+  TERM_STARTED=''
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  sed 's/^/    /' "$log"
+  rm -f "$log"
+}
+
+# The launch.released event of TERM_TASK by smoke-term after the step started: kept, reason podTerminating, and a
+# headSha that is a commit in git-origin's repository.
+term_released_kept() {
+  local ev sha t
+  ev="$(events_of launch.released "$TERM_SEQ" | jq -c --arg t "$TERM_TASK" --arg w "$TERM_POD" 'select(.taskId == $t and .payload.workerId == $w)' | tail -n 1)" || return 1
+  [ -n "$ev" ] || return 1
+  echo "    $ev"
+  jq -e '.payload.kept == true and .payload.reason == "podTerminating" and (.payload.headSha | type == "string")' <<<"$ev" >/dev/null || return 1
+  sha="$(jq -r .payload.headSha <<<"$ev")"
+  t="$(kc exec deploy/git-origin -c git-daemon -- git --git-dir=/srv/git/fixture.git cat-file -t "$sha")" || return 1
+  echo "    git cat-file -t $sha in git-origin: $t"
+  [ "$t" = commit ]
+}
+
+# Succeeds when /v1/status cost.byTask[$1] is above zero.
+task_cost_above_zero() {
+  local v; v="$(status_get ".cost.byTask[\"$1\"] // 0")" || return 1
+  jq -e '. > 0' <<<"$v" >/dev/null || return 1
+  echo "    cost.byTask[\"$1\"]: $v"
+}
+
+# Every first-parent commit of origin's main with an Orchestrator-Task trailer (only task $1's, when given) also has
+# an Orchestrator-Launch trailer whose value is the launchId of an agent.report event of that task.
+trailers_name_reported_launches() {
+  local lines reports task launch seen=0 ok=1
+  lines="$(kc exec deploy/git-origin -c git-daemon -- git --git-dir=/srv/git/fixture.git log --first-parent \
+    --format='%(trailers:key=Orchestrator-Task,valueonly,separator=%x20) %(trailers:key=Orchestrator-Launch,valueonly,separator=%x20)' refs/heads/main)" || return 1
+  reports="$(events_of agent.report | jq -r '"\(.taskId) \(.launchId)"')" || return 1
+  while read -r task launch; do
+    [ -n "$task" ] || continue
+    if [ -n "${1:-}" ] && [ "$task" != "$1" ]; then continue; fi
+    seen=1
+    echo "    $task ${launch:-(no Orchestrator-Launch trailer)}"
+    if [ -z "$launch" ] || ! grep -qxF "$task $launch" <<<"$reports"; then echo "    no agent.report of $task names launch ${launch:-(none)}"; ok=0; fi
+  done <<<"$lines"
+  [ "$seen" = 1 ] || { echo "    no commit with an Orchestrator-Task trailer${1:+ for $1}"; return 1; }
+  [ "$ok" = 1 ]
+}
+
+# The Secret anthropic-api-key with the key file's content, line ends removed. The key reaches kubectl on standard input
+# only; this function's name and the file's path are all that is printed.
+create_key_secret() {
+  tr -d '\r\n' <"$1" \
+    | kc create secret generic anthropic-api-key --from-file=ANTHROPIC_API_KEY=/dev/stdin --dry-run=client -o yaml \
+    | kc apply -f - >/dev/null
+}
+no_worker_pods() { [ -z "$(kc get pod -l app.kubernetes.io/name=orchestrator-worker -o name)" ]; }
+# Send the overlay's graph followed by graph fragments ($@) with PUT /v1/graph and require it accepted.
+put_graph_with() {
+  cat deploy/overlays/kind/graph.yaml "$@" | jq -Rs '{content: .}' \
+    | curl -fsS -X PUT -H 'content-type: application/json' --data-binary @- "$API/v1/graph" \
+    | jq -e '.accepted == true' >/dev/null
+}
+
 if [ "$FRESH" = 1 ]; then
   # 0. Start from an empty kind cluster; kind switches the current context, so put the previous one back.
   step save_context
@@ -800,6 +967,25 @@ check 'pg-restart: task states unchanged (psql)' same "$PG_STATES1" pg_states
 # Across both restarts a claim of the parked task hands out the launch id and token recorded before the first one.
 check "final: a claim of $PARKED_TASK returns the recorded launch id and token" claim_returns_recorded_launch
 
+# M4 block A: the Claude worker image runs its CLI; then a worker pod is deleted mid-task. It hands its launch of
+# SMOKE-M3-A back with keep, and the usage its stand-in agent printed is recorded. The M3 step then works SMOKE-M3-A
+# from the kept head.
+step docker build -f deploy/worker-claude/Dockerfile --build-arg "PROJECT_BASE=$IMAGE" -t "$WORKER_IMAGE" deploy/worker-claude
+step kind load docker-image "$WORKER_IMAGE" --name "$KIND_CLUSTER"
+check 'M4: the Claude worker image runs the claude CLI' worker_image_runs_claude
+step term_precondition
+if [ -n "$TERM_SKIP" ]; then
+  skip 'M4: deleting the worker pod mid-task releases its launch with kept true' "$TERM_SKIP"
+  skip 'M4: usage printed by the terminated agent is recorded' "$TERM_SKIP"
+else
+  step start_term_pod
+  step term_agent_ready
+  step delete_term_pod
+  check 'M4: deleting the worker pod mid-task releases its launch with kept true' retry "$STATUS_TIMEOUT_S" term_released_kept
+  check 'M4: usage printed by the terminated agent is recorded' retry "$STATUS_TIMEOUT_S" task_cost_above_zero "$TERM_TASK"
+  step retry "$STATUS_TIMEOUT_S" status_is ".claimable | index(\"$TERM_TASK\")"
+fi
+
 # M3: the worker Deployment, scaled to 2, works the parked launches: $PARKED_TASK and the M3 tasks. Each pod claims with
 # access remote, clones git-origin, runs the scripted agent, pushes the launch branch and submits; the verifier publishes.
 step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" scale deployment/orchestrator-worker --replicas=2
@@ -808,5 +994,25 @@ step follow_worker_logs
 check 'M3: the run is finished' retry "$FINISH_TIMEOUT_S" status_is '.finished == true'
 check "M3: every smoke task is on origin's integration branch" origin_carries_all_tasks
 check 'M3: worker logs show one accepted report per task' one_accepted_report_per_task
+
+# M4 block B: every integration commit names the launch that reported it.
+check 'M4: every integration commit carries its Orchestrator-Launch trailer' trailers_name_reported_launches
+
+# The real-agent step, only with --real-agent: Claude workers on the key work SMOKE-REAL with the run's default model.
+# It is the last step and changes the worker pool (scaled to 0, then Claude workers): add later steps above it.
+if [ -z "$REAL_AGENT_KEY" ]; then
+  for name in "${REAL_NAMES[@]}"; do skip "$name" 'needs --real-agent'; done
+else
+  step create_key_secret "$REAL_AGENT_KEY"
+  step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" scale deployment/orchestrator-worker --replicas=0
+  step retry "$FINISH_TIMEOUT_S" no_worker_pods
+  step kubectl --context "$KUBE_CONTEXT" apply -k deploy/overlays/kind-claude
+  step retry 30 put_graph_with deploy/overlays/kind-claude/real-task.yaml
+  step retry "$STATUS_TIMEOUT_S" status_is ".claimable | index(\"$REAL_TASK\")"
+  step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" scale deployment/orchestrator-worker --replicas=1
+  check "${REAL_NAMES[0]}" retry "$REAL_TIMEOUT_S" status_is ".byStatus.done | index(\"$REAL_TASK\")"
+  check "${REAL_NAMES[1]}" retry "$STATUS_TIMEOUT_S" task_cost_above_zero "$REAL_TASK"
+  check "${REAL_NAMES[2]}" trailers_name_reported_launches "$REAL_TASK"
+fi
 
 if [ "$DRY_RUN" = 1 ]; then echo "smoke: dry run, nothing executed"; else echo "smoke: ok"; fi

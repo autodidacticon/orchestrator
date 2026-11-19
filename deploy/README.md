@@ -51,6 +51,7 @@ Kustomize, rendered with `kubectl kustomize` (no cluster is contacted):
 ```sh
 kubectl kustomize deploy/base
 kubectl kustomize deploy/overlays/kind
+kubectl kustomize deploy/overlays/kind-claude
 ```
 
 ```
@@ -71,6 +72,9 @@ deploy/
     git-origin.yaml     PVC, Deployment and Service git-origin
     graph.yaml          the graph deploy/smoke.sh sends with PUT /v1/graph
     fixture/            the files seeded into the origin's repository
+  overlays/kind-claude/ the kind overlay with Claude workers (see "The kind overlay")
+    kustomization.yaml  the kind overlay plus orchestrator-worker on orchestrator-worker-claude:dev with the key's Secret
+    real-task.yaml      graph fragment: the node SMOKE-REAL, sent by deploy/smoke.sh --real-agent after graph.yaml
 ```
 
 ### The daemon
@@ -188,7 +192,7 @@ docker build -f deploy/worker-claude/Dockerfile -t orchestrator-worker-claude:de
 ```
 
 - **Base.** The Dockerfile has one stage, `FROM ${PROJECT_BASE}`, with `ARG PROJECT_BASE=orchestrator:dev`. A project layers its toolchain by building an image `FROM orchestrator:dev` that installs it (as root, returning to `node`), then passing that image with `--build-arg PROJECT_BASE=<image>`. The daemon image stays toolchain-free.
-- **CLI version.** The build argument `CLAUDE_CODE_VERSION` fixes the version of the Claude Code CLI the image installs; the Dockerfile sets its default. `DISABLE_AUTOUPDATER=1` keeps the installed CLI from replacing itself.
+- **CLI version.** The build argument `CLAUDE_CODE_VERSION` fixes the version of the Claude Code CLI the image installs; the Dockerfile sets its default to an exact version, `2.1.328`, the one `claude --version` printed in the smoke test's pod. Pass `--build-arg CLAUDE_CODE_VERSION=<version>` for another, and move the default when the smoke test has passed with it. `DISABLE_AUTOUPDATER=1` keeps the installed CLI from replacing itself.
 - **Command.** The image sets `ORCH_WORKER_COMMAND` to the Claude template the loop composes for each launch: `claude -p --output-format json --mcp-config {mcpConfig} --strict-mcp-config --dangerously-skip-permissions --model {model} --effort {effort} --no-session-persistence < {brief}`. It has no `{allowedTools}` slot, because a remote brief carries no allow list: the agent runs with every tool call allowed, and the container is the boundary. A deployment that wants an allow list sets its own `ORCH_WORKER_COMMAND`, for instance with `--permission-mode acceptEdits` and `--allowedTools`. The agent reports through the `orchestrator` MCP server named in `--mcp-config`, whose `report` tool pushes the branch (see "The workers").
 - **Git identity.** `GIT_AUTHOR_NAME` and `GIT_COMMITTER_NAME` are `orchestrator-worker`, `GIT_AUTHOR_EMAIL` and `GIT_COMMITTER_EMAIL` are `worker@orchestrator.local` (the scripted agent's identity), so the agent's `git commit` works.
 - **No key.** The image holds no credential for the model and no variable for one. The deployment supplies the key to the worker pod at run time, from a Secret; it is never built into the image.
@@ -212,7 +216,9 @@ The overlay runs a remote run. Its own `orchestrator.yaml` replaces the base fil
 
 The overlay's `graph.yaml` holds one ready task, `SMOKE`, and three that depend on it: `SMOKE-PARKED`, `SMOKE-M3-A` and `SMOKE-M3-B`. It is not mounted: the smoke test sends it with `PUT /v1/graph`, and the daemon, in pull mode, prepares a launch for `SMOKE` and parks it as claimable, which is what the smoke test looks for.
 
-Both Deployments use `orchestrator:dev`, so a kind cluster needs only that image and the CloudNativePG operator:
+`deploy/overlays/kind-claude` is the kind overlay with Claude workers. It takes `deploy/overlays/kind` whole and adds one strategic merge patch on `orchestrator-worker`: the image `orchestrator-worker-claude:dev` (see "Claude worker image", which sets `ORCH_WORKER_COMMAND`), `ORCH_WORKER_AGENT=command` in place of `scripted`, and `ANTHROPIC_API_KEY` from the Secret `anthropic-api-key`, key `ANTHROPIC_API_KEY`. It renders no Secret and sets no `ORCH_WORKER_COMMAND`; `replicas` stays 0, and every other resource is the kind overlay's, so applying it over the kind overlay restarts no daemon. Its `real-task.yaml` is not a resource but a graph fragment: one node, `SMOKE-REAL`, which depends on `SMOKE`, asks for one given line at the end of `README.md`, has one acceptance criterion and names no `model`, so its launch runs on the run's default (`runner.claude.model` and `effort`, by default `claude-opus-5-5` at `medium`). The smoke test's real-agent step creates the Secret, applies this overlay and sends `graph.yaml` followed by `real-task.yaml`.
+
+Both Deployments of the kind overlay use `orchestrator:dev`, so a kind cluster needs only that image and the CloudNativePG operator:
 
 ```sh
 docker build -t orchestrator:dev .
@@ -232,9 +238,10 @@ KIND_CLUSTER=dev deploy/smoke.sh    # another cluster
 deploy/smoke.sh --dry-run           # print each step's command, execute nothing
 deploy/smoke.sh --fresh             # delete and recreate the kind cluster first
 deploy/smoke.sh --break pvc         # falsify one drill assertion on purpose (pvc, claimable or restart); exits 1
+deploy/smoke.sh --fresh --real-agent ~/keys/anthropic   # also run the real-agent step, with the key in that file
 ```
 
-These are the only arguments: `--dry-run`, `--fresh` and `--break pvc|claimable|restart`. Anything else, or another `--break` value, prints usage and exits 2.
+These are the only arguments: `--dry-run`, `--fresh`, `--break pvc|claimable|restart` and `--real-agent <key file>`. Anything else, or another `--break` value, prints usage and exits 2. `--real-agent` takes the path of a file that holds the Anthropic key and nothing else. The path is read against the caller's working directory. The file must be a readable regular file, not a symbolic link, and must not lie inside the repository (its directory's physical path, `cd -P`, is not the repository root or below it). Without a value, or with a path that breaks that rule, the script prints one line on stderr and exits 2 before any step and before any tool is called. With `--dry-run` it checks the path and does not read the file.
 
 The steps run in this order:
 
@@ -276,6 +283,18 @@ It asserts:
   - `M3: the run is finished`: `/v1/status` `finished` is `true`;
   - `M3: every smoke task is on origin's integration branch`: the first-parent history of origin's `main` carries an `Orchestrator-Task` trailer for each of `SMOKE`, `SMOKE-PARKED`, `SMOKE-M3-A` and `SMOKE-M3-B`;
   - `M3: worker logs show one accepted report per task`: the logs of `smoke-worker` and of the followed worker pods hold exactly one `worker <id> report accepted <launchId> <taskId>` line for each of those four tasks, and none for another.
+- M4 step, block A, between the final claim and the M3 scale-up. The script builds the Claude worker image from `deploy/worker-claude/Dockerfile` as `WORKER_IMAGE` (default `orchestrator-worker-claude:dev`), with `PROJECT_BASE` set to `IMAGE`, and loads it into the kind cluster. `M4: the Claude worker image runs the claude CLI` runs `sh -c 'claude --version && test -w "$HOME"'` in a one-shot pod of that image, prints the pod's log, and holds when the pod succeeds with a non-empty log. Then the termination step works `SMOKE-M3-A` with a one-shot pod, `smoke-term`, made as `smoke-worker` is, with `ORCH_WORKER_TASK=SMOKE-M3-A`, `ORCH_WORKER_MAX_LAUNCHES=1`, `ORCH_WORKER_AGENT=command` and a stand-in agent as `ORCH_WORKER_COMMAND`. The stand-in appends a line to `README.md`, prints one Claude result object with token counts and `total_cost_usd` 0.01 on standard output, prints `smoke-term-ready` on standard error, and sleeps; no model runs. When the pod's log shows the marker, the script deletes the pod with `--grace-period=120` (the worker Deployment's grace; a `kubectl run` pod has 30 seconds), waits until it is gone, and prints its log. It asserts:
+  - `M4: deleting the worker pod mid-task releases its launch with kept true`: the `launch.released` event of `SMOKE-M3-A` with `workerId` `smoke-term` has `kept: true`, `reason` `podTerminating`, and a `headSha` that is a commit in git-origin's repository;
+  - `M4: usage printed by the terminated agent is recorded`: `/v1/status` `cost.byTask["SMOKE-M3-A"]` is above zero within `STATUS_TIMEOUT_S`. The figure is the stand-in's, not a model's.
+
+  The block ends when `SMOKE-M3-A` is claimable again, and the M3 step works it from the kept head. A leftover `smoke-term` pod is deleted first. When `SMOKE-M3-A` then has no claimable launch (a rerun on a kept cluster where it was already worked), the termination step is skipped and its two assertions print `smoke: skip:` with the reason `SMOKE-M3-A is not claimable`. On exit the script deletes a `smoke-term` pod it started that still exists, and waits until it is gone. One cluster allows three kept releases of `SMOKE-M3-A` (`daemon.maxKeptReleases`); use `--fresh` after that.
+- M4 step, block B, after the M3 assertions: `M4: every integration commit carries its Orchestrator-Launch trailer`. Every first-parent commit of origin's `main` with an `Orchestrator-Task` trailer also has an `Orchestrator-Launch` trailer, and its value is the `launchId` of an `agent.report` event of that task.
+- The real-agent step, last, only with `--real-agent <key file>`. It creates or replaces the Secret `anthropic-api-key` in namespace `orch` with the one key `ANTHROPIC_API_KEY`, the file's content with its line ends removed; the key reaches `kubectl` on standard input only, and the script prints the path, never the key. It scales `orchestrator-worker` to 0 and waits until no worker pod is left (a scripted worker could otherwise claim the new task), applies `deploy/overlays/kind-claude`, sends `graph.yaml` followed by `real-task.yaml` with `PUT /v1/graph`, waits until `SMOKE-REAL` is claimable, and scales `orchestrator-worker` to 1. One Claude worker then works `SMOKE-REAL` on the run's default model. It asserts:
+  - `M4: the real task is done`, within `REAL_TIMEOUT_S` (default 900) seconds;
+  - `M4: the real task's launch cost is above zero`: `cost.byTask["SMOKE-REAL"]` within `STATUS_TIMEOUT_S`, since the worker posts the usage after the agent has exited;
+  - `M4: the real task's commit carries its Orchestrator-Launch trailer`, the block B rule for `SMOKE-REAL`'s commit.
+
+  The model's cost is the caller's: the step spends one launch of the run's default model on a one-line task, bounded by `REAL_TIMEOUT_S`. On exit a run with `--real-agent` scales `orchestrator-worker` to 0, so no agent keeps spending after the script ends; the worker Deployment then runs the Claude image, so run the next smoke on that cluster with `--fresh`. On a cluster whose run is finished from an earlier pass, use `--fresh` with `--real-agent` too. The step changes the worker pool, so a later milestone adds its steps above it. Without `--real-agent` its three assertions print `smoke: skip: <name> (needs --real-agent)`, also in a dry run.
 
 `--break` falsifies one assertion on purpose. The script must then fail at that assertion, with every earlier one passing:
 
@@ -283,7 +302,7 @@ It asserts:
 - `--break claimable` claims `SMOKE-PARKED`'s launch (with `access: remote`) after the snapshot and before the restart. Under remote access recovery keeps that claim live, and under local access it ends the launch and parks a new one for the same task; either way the recorded launch is no longer claimable, so the run fails with `smoke: FAIL: drill: claimable set unchanged (API)`.
 - `--break restart` stops the daemon with SIGTERM (`kill -TERM 1` in its container) in place of deleting the Postgres pod. The daemon shuts down and exits 0, since every batch is durable at that point of the drill; with unflushed batches it would exit 1. Its container restarts, so the restart count rises as in a real drill. The run fails with `smoke: FAIL: pg-restart: the daemon exited because its Postgres session was lost`.
 
-Each assertion prints `smoke: pass: <name>`. The first one that does not hold prints `smoke: FAIL: <name>`, and the script exits 1. A full pass ends with `smoke: ok`. Nothing is skipped without a line: a check or step that does not run prints `smoke: skip: <name> (<why>)`. Under `--dry-run` every assertion prints one such line after its command, on a kept cluster a rerun prints one for the worker step when `SMOKE` is already submitted or done, and `--break restart` prints one for the Postgres pod deletion it replaces. The script reads no `TEST_DATABASE_URL` (that variable belongs to `npm test`), and no environment variable turns a check off. `PUBLISH_TIMEOUT_S` (default 300) bounds the wait for the publish.
+Each assertion prints `smoke: pass: <name>`. The first one that does not hold prints `smoke: FAIL: <name>`, and the script exits 1. A full pass ends with `smoke: ok`. Nothing is skipped without a line: a check or step that does not run prints `smoke: skip: <name> (<why>)`. Under `--dry-run` every assertion prints one such line after its command, except the three real-agent assertions: without `--real-agent` they print `smoke: skip: <name> (needs --real-agent)` with no command, in a dry run or not. On a kept cluster a rerun prints one for the worker step when `SMOKE` is already submitted or done, and `--break restart` prints one for the Postgres pod deletion it replaces. The script reads no `TEST_DATABASE_URL` (that variable belongs to `npm test`), and no environment variable turns a check off. `PUBLISH_TIMEOUT_S` (default 300) bounds the wait for the publish.
 
 Every `kubectl` call that talks to a cluster passes `--context "$KUBE_CONTEXT"`. Its only accepted value is `kind-$KIND_CLUSTER`, the default. Any other value exits 2 before the first step, so the image always goes to the cluster being tested. The script leaves the current kubectl context as it found it. The exception is `kind create cluster` under `--fresh`, which makes the new cluster current. So `--fresh` reads `kubectl config current-context` first, and afterwards runs `kubectl config use-context` with that value, or `kubectl config unset current-context` if none was set. These three `kubectl config` calls are the only ones without `--context`.
 

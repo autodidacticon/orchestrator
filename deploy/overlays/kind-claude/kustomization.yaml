@@ -1,0 +1,35 @@
+# The kind overlay with Claude workers: every resource of deploy/overlays/kind as it is, and orchestrator-worker
+# running the Claude worker image (deploy/worker-claude/Dockerfile, orchestrator-worker-claude:dev) with the command
+# agent. The image sets ORCH_WORKER_COMMAND; the key comes from the Secret anthropic-api-key, which this overlay does
+# not render: deploy/smoke.sh --real-agent <key file> creates it. Applying this overlay changes only the worker
+# Deployment, so the daemon is not restarted. See deploy/README.md "The kind overlay".
+# real-task.yaml here is a graph fragment, not a resource: deploy/smoke.sh sends it after the kind overlay's graph.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../kind
+patches:
+  # A strategic merge patch: env entries merge by name, so ORCH_WORKER_AGENT replaces the kind overlay's value and
+  # ANTHROPIC_API_KEY is added, whatever the other variables of deploy/base/worker.yaml are.
+  - target:
+      kind: Deployment
+      name: orchestrator-worker
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: orchestrator-worker
+      spec:
+        template:
+          spec:
+            containers:
+              - name: worker
+                image: orchestrator-worker-claude:dev
+                env:
+                  - name: ORCH_WORKER_AGENT
+                    value: command
+                  - name: ANTHROPIC_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: anthropic-api-key
+                        key: ANTHROPIC_API_KEY

@@ -48,6 +48,14 @@ describe('Claude worker image', () => {
     expect(indexOf((i) => i === 'USER node')).toBeGreaterThan(install);
   });
 
+  it('pins CLAUDE_CODE_VERSION to an exact version, not latest', () => {
+    const arg = instructions.find((i) => /^ARG CLAUDE_CODE_VERSION=/.test(i));
+    expect(arg).toBeDefined();
+    const version = arg!.slice('ARG CLAUDE_CODE_VERSION='.length);
+    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(version).not.toBe('latest');
+  });
+
   it('runs orchestrator-worker in exec form, with no ENTRYPOINT', () => {
     expect(instructions.filter((i) => keyword(i) === 'CMD')).toEqual(['CMD ["orchestrator-worker"]']);
     expect(instructions.some((i) => keyword(i) === 'ENTRYPOINT')).toBe(false);

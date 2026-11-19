@@ -1,0 +1,11 @@
+# The real-agent task: a fragment of the graph, one node indented as the items of deploy/overlays/kind/graph.yaml.
+# deploy/smoke.sh --real-agent <key file> sends graph.yaml followed by this file with PUT /v1/graph, after the run
+# is finished. The node names no model: the launch runs on the run's default (runner.claude.model and effort).
+  - id: SMOKE-REAL
+    title: Real-agent smoke task
+    deps: [SMOKE]
+    description: >-
+      Append this exact line at the end of README.md in the fixture repository, keeping every existing line:
+      "Written by a Claude worker in the real-agent smoke." Commit the change on the launch branch, then submit.
+    acceptanceCriteria:
+      - The last line of README.md is "Written by a Claude worker in the real-agent smoke." and no other line changed.
