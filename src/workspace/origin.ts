@@ -105,6 +105,8 @@ export class OriginConfigError extends Error {
 
 interface TipRead {
   done: Promise<string | undefined>;
+  /** The lease expiry the read was started for (`lease.expiresAt`); a read for another one is not used. */
+  tag?: number;
   outcome?: { tip: string | undefined } | { error: unknown };
 }
 
@@ -247,15 +249,22 @@ export class Origin {
   /**
    * `branchTip` from the tick, which never waits for origin: a read the tick starts while origin is idle is awaited at
    * most `tickWaitMs`; one queued behind another remote command is not awaited. `pending` while the read runs on; a
-   * later call answers its outcome (a failed read throws its error) and forgets it. See specs/integration-pipeline
-   * "The tick never waits for origin" and specs/pull-runner "Lease expiry".
+   * later call answers its outcome (a failed read throws its error) and forgets it. A read is tagged with `tag` (the
+   * lease's `expiresAt`): a read started under another tag is dropped and a new one started, so a read from before a
+   * lease renewal never decides a later expiry. See specs/integration-pipeline "The tick never waits for origin" and
+   * specs/pull-runner "Lease expiry".
    */
-  async branchTipFromTick(branch: string): Promise<{ pending: true } | { pending: false; tip: string | undefined }> {
+  async branchTipFromTick(branch: string, tag?: number): Promise<{ pending: true } | { pending: false; tip: string | undefined }> {
     let read = this.tipReads.get(branch);
+    if (read && read.tag !== tag) {
+      // Started for an earlier lease expiry: the worker renewed its lease since and may have pushed more.
+      this.tipReads.delete(branch);
+      read = undefined;
+    }
     let wait = false;
     if (!read) {
       wait = !this.busy;
-      const started: TipRead = { done: this.branchTip(branch) };
+      const started: TipRead = { done: this.branchTip(branch), ...(tag !== undefined ? { tag } : {}) };
       started.done.then(
         (tip) => (started.outcome = { tip }),
         (error: unknown) => (started.outcome = { error }),
@@ -273,7 +282,7 @@ export class Origin {
     return { pending: false, tip: outcome.tip };
   }
 
-  /** Drop a tick's read of a branch tip (the launch ended); a running read runs on and is ignored. */
+  /** Drop a tick's read of a branch tip (the launch ended, or its expiry gave up); a running read runs on and is ignored. */
   forgetBranchTip(branch: string): void {
     this.tipReads.delete(branch);
   }

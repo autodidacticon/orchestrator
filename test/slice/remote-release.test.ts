@@ -308,6 +308,114 @@ describe('the tick never waits for origin on a remote expiry', () => {
   }, 30_000);
 });
 
+type QueuedOrigin = { serial: (fn: () => Promise<void>) => Promise<void>; tipReads: Map<string, unknown> };
+const originOf = (h: SliceHarness) => h.orch.origin as unknown as QueuedOrigin;
+const heartbeat = (h: SliceHarness, launch: Launch) => http(h, `/v1/launches/${launch.launchId}/heartbeat`, { progress: 'still here' }, launch.token);
+const submit = (h: SliceHarness, launch: Launch, extra: Record<string, unknown>, seq = 1) =>
+  http(h, `/v1/launches/${launch.launchId}/report`, { kind: 'submit', seq, summary: 'did it', acceptance: [{ criterion: 'a', evidence: 'e' }], ...extra }, launch.token);
+
+/**
+ * With origin's queue held, an expiry starts a read of the branch tip and is skipped; the worker then renews its lease
+ * by a heartbeat; the queue is released and a no-op queued behind the read is awaited, so the read has settled with
+ * what origin held then. The read stays cached in `tipReads`.
+ */
+async function expiryLeavesRead(h: SliceHarness, launch: Launch): Promise<void> {
+  const origin = originOf(h);
+  let releaseQueue!: () => void;
+  const held = origin.serial(() => new Promise<void>((r) => (releaseQueue = r)));
+  expireLease(h, 1);
+  expect(await h.orch.expireClaim(h.store.getLaunch(launch.launchId)!)).toBe('skipped');
+  expect(origin.tipReads.has(launch.branch)).toBe(true);
+  expect((await heartbeat(h, launch)).status).toBe(200);
+  expect(h.orch.entry('T1').lease!.expiresAt).toBeGreaterThan(h.orch.now());
+  releaseQueue();
+  await held;
+  await origin.serial(async () => undefined);
+  expect(h.store.getLaunch(launch.launchId)?.status).toBe('live');
+}
+
+describe('a read of the branch tip belongs to one lease expiry', () => {
+  it('an old "no tip" read from before a renewed lease does not fail the next expiry: it is kept at the pushed tip', async () => {
+    const f = fixture();
+    const h = await start(f);
+    const { launch } = await claim(h);
+    const clone = workerClone(f, launch);
+    await expiryLeavesRead(h, launch);
+    // The first read found no branch at origin; the worker pushes only now.
+    const tip = commit(clone, 'T1.txt');
+    push(clone, launch.branch);
+    expireLease(h, 1);
+    expect(await settleExpiry(h, launch)).toBe('kept');
+    expect(h.store.listEvents({ kind: 'launch.released', launchId: launch.launchId }).map((e) => e.payload)).toEqual([
+      expect.objectContaining({ kept: true, reasonCode: 'leaseExpired', headSha: tip }),
+    ]);
+    expect(h.orch.entry('T1')).toMatchObject({ status: { kind: 'unstarted' }, attempts: 0 });
+    expect(h.orch.entry('T1').carry?.interrupted).toMatchObject({ headSha: tip, reason: 'leaseExpired' });
+  }, 30_000);
+
+  it('an old sha from before a renewed lease is not kept: the release is kept at the commit pushed after it', async () => {
+    const f = fixture();
+    const h = await start(f);
+    const { launch } = await claim(h);
+    const clone = workerClone(f, launch);
+    const first = commit(clone, 'one.txt');
+    push(clone, launch.branch);
+    await expiryLeavesRead(h, launch);
+    // The first read saw `first`; the worker pushes a second commit after it.
+    const second = commit(clone, 'two.txt');
+    expect(second).not.toBe(first);
+    push(clone, launch.branch);
+    expireLease(h, 1);
+    expect(await settleExpiry(h, launch)).toBe('kept');
+    expect(h.orch.entry('T1').carry?.interrupted?.headSha, `the first commit is ${first}`).toBe(second);
+    expect(h.orch.entry('T1').carry?.interrupted).toMatchObject({ headSha: second, reason: 'leaseExpired' });
+    expect(h.store.listEvents({ kind: 'launch.released', launchId: launch.launchId }).map((e) => e.payload)).toEqual([
+      expect.objectContaining({ kept: true, reasonCode: 'leaseExpired', headSha: second }),
+    ]);
+  }, 30_000);
+
+  it('a launch that ends by an accepted submit drops its read', async () => {
+    const f = fixture();
+    const h = await start(f);
+    const { launch } = await claim(h);
+    const clone = workerClone(f, launch);
+    await expiryLeavesRead(h, launch);
+    const tip = commit(clone, 'T1.txt');
+    push(clone, launch.branch);
+    expect(originOf(h).tipReads.has(launch.branch)).toBe(true);
+    expect(await submit(h, launch, { sealedSha: tip })).toMatchObject({ status: 200 });
+    await h.orch.tick();
+    expect(h.store.getLaunch(launch.launchId)?.status).toBe('ended');
+    expect(originOf(h).tipReads.has(launch.branch)).toBe(false);
+  }, 30_000);
+
+  it('a launch that ends by a release drops its read', async () => {
+    const f = fixture();
+    const h = await start(f);
+    const { launch } = await claim(h);
+    const clone = workerClone(f, launch);
+    await expiryLeavesRead(h, launch);
+    const tip = commit(clone, 'T1.txt');
+    push(clone, launch.branch);
+    expect(originOf(h).tipReads.has(launch.branch)).toBe(true);
+    expect(await release(h, launch, { keep: true, headSha: tip })).toMatchObject({ status: 200, body: { kept: true } });
+    expect(h.store.getLaunch(launch.launchId)?.status).toBe('ended');
+    expect(originOf(h).tipReads.has(launch.branch)).toBe(false);
+  }, 30_000);
+
+  it('a launch that ends by an operator cancel drops its read', async () => {
+    const f = fixture();
+    const h = await start(f);
+    const { launch } = await claim(h);
+    await expiryLeavesRead(h, launch);
+    expect(originOf(h).tipReads.has(launch.branch)).toBe(true);
+    expect(h.orch.cancel('T1', 'not needed')).toEqual({ ok: true });
+    await h.orch.tick();
+    expect(h.store.getLaunch(launch.launchId)).toMatchObject({ status: 'ended', endReason: 'cancelled' });
+    expect(originOf(h).tipReads.has(launch.branch)).toBe(false);
+  }, 30_000);
+});
+
 describe('release on the operator MCP server', () => {
   it('declares headSha and wipCommit, so they reach the daemon', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'orch-remote-release-mcp-'));

@@ -1090,6 +1090,8 @@ export class Orchestrator implements OrchestratorCore {
     this.store.updateLaunch(launch.launchId, { status: 'ended', endedAt: this.now(), endReason });
     this.store.appendEvent({ kind: 'launch.ended', taskId: launch.taskId, launchId: launch.launchId, payload: { endReason, ...extra } }, this.now());
     this.resolveWaiters(launch.launchId, { status: 200, body: { timeout: true, reason: endReason } });
+    // A tick's read of the launch branch tip is never used again: the branch is this launch's own.
+    this.origin?.forgetBranchTip(launch.branch);
   }
 
   // ---- graph ----
@@ -1298,7 +1300,8 @@ export class Orchestrator implements OrchestratorCore {
         if (!this.origin) throw new OriginConfigError('git.pushIntegration is off: no origin to read the launch branch from');
         if (awaitOrigin) tip = await this.origin.branchTip(launch.branch);
         else {
-          const read = await this.origin.branchTipFromTick(launch.branch);
+          // Tagged with the expiry it decides: a read started before a lease renewal is dropped and read again.
+          const read = await this.origin.branchTipFromTick(launch.branch, this.entry(launch.taskId).lease?.expiresAt);
           if (read.pending) unreadable = 'the read of the branch tip at origin is still running';
           else tip = read.tip;
         }
