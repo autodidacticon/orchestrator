@@ -6,7 +6,7 @@ How the daemon tells a working agent from a dead or stuck one and keeps a run in
 ## Requirements
 
 ### Requirement: Process liveness
-On every tick, in the reconcile phase, the daemon SHALL ask the runner for the liveness of each live launch as `alive`, `dead`, or `unknown`. `alive` SHALL renew the task's lease and feed the progress, stuck, and time-budget checks. `dead` SHALL be handled as before: a fallback file is applied, otherwise the task fails with reason `exitedWithoutReport`. When the runner implements `readFailure` and returns a diagnosis `{ reason, detail? }` for the dead launch, the dead-launch record SHALL carry it: the failure's message SHALL name the reason and the detail, its `detail.runnerFailure` SHALL hold the diagnosis, and the `launch.ended` event SHALL carry `runnerFailure`. A runner without `readFailure`, or one that returns nothing, SHALL leave the record as before. The same SHALL hold for a launch found dead at recovery. `unknown` SHALL leave lease expiry as the only bound on silence. Runners that spawn processes SHALL derive liveness from the recorded pid; a runner that cannot observe its launches SHALL report `unknown`. For the OpenCode runner the recorded pid leads the `sh` process group that holds `opencode` and its MCP child (the shim): liveness follows the `sh`, which lives as long as `opencode`, and reaping signals the whole group, so the shim does not outlive its launch. A dead launch's diagnosis also decides whether its failure is charged: see task-lifecycle "Retry and exhaustion" for `startupContended`.
+On every tick, in the reconcile phase, the daemon SHALL ask the runner for the liveness of each live launch as `alive`, `dead`, or `unknown`. `alive` SHALL renew the task's lease and feed the progress, stuck, and time-budget checks. `dead` SHALL be handled as before: a fallback file is applied, otherwise the task fails with reason `exitedWithoutReport`. A dead launch's diagnosis also decides whether its failure is charged: see task-lifecycle "Retry and exhaustion" for `startupContended`.
 
 #### Scenario: Alive process renews the lease
 - **WHEN** a running launch's process is alive and the agent has made no API call since the last tick
@@ -25,7 +25,7 @@ On every tick, in the reconcile phase, the daemon SHALL ask the runner for the l
 - **THEN** the task becomes `failed` with reason `leaseExpired` and `attempts` increases
 
 ### Requirement: Progress signals
-For every live launch whose task is `running` and whose process is alive, the daemon SHALL compute a progress fingerprint each tick: the branch head sha plus a hash of `git status --porcelain` and `git diff-index -p HEAD` for the worktree, both excluding `.orchestrator/`, so that a further edit to an already dirty file still registers. A touch that leaves a tracked file's content unchanged SHALL NOT change the fingerprint. The daemon SHALL record `progressAt` and `lastSignal` on the launch row when the fingerprint changes (`commit` when the head moved, otherwise `worktree`), when the agent makes any API call (`heartbeat`, `report`, `block`, `inbox`, `log`), when a heartbeat carries a `progress` text different from the previous one (`heartbeatText`, with the text kept as `progressText`), and when a `waiting` task resumes (`resumed`). A launch SHALL start with `progressAt` equal to `spawnedAt`, and its first fingerprint SHALL be a baseline that does not count as progress. A remote launch (`access: remote`) has no worktree on the daemon's host: the daemon SHALL NOT compute its fingerprint (no `Workspace.fingerprint` call at reconcile), and its fingerprint SHALL instead come from its worker's heartbeats. A heartbeat body MAY carry `fingerprint`, the clone's fingerprint computed as above (the head sha, a colon, the hash). For a remote launch a malformed `fingerprint` SHALL be answered 400 naming the field before anything is written; a well-formed one SHALL be compared with the stored fingerprint exactly as a daemon-read one is: the first is a baseline, a changed value SHALL be stored on the row and recorded as `commit` when the head part changed and otherwise `worktree`, and the same value again SHALL record nothing. A remote heartbeat that carries `fingerprint` SHALL count as progress only through its fingerprint or a new `progress` text, not as a `heartbeat` signal, so that a worker loop's periodic heartbeats renew the lease without hiding an agent that makes no progress; stuck detection SHALL then work unchanged on the stored remote fingerprint. For a local launch a heartbeat's `fingerprint` SHALL be ignored.
+For every live launch whose task is `running` and whose process is alive, the daemon SHALL compute a progress fingerprint each tick: the branch head sha plus a hash of `git status --porcelain` and `git diff-index -p HEAD` for the worktree, both excluding `.orchestrator/`, so that a further edit to an already dirty file still registers. A touch that leaves a tracked file's content unchanged SHALL NOT change the fingerprint.
 
 #### Scenario: Uncommitted edit is progress
 - **WHEN** an agent modifies a tracked file in its worktree without committing and makes no API call
@@ -64,7 +64,7 @@ For every live launch whose task is `running` and whose process is alive, the da
 - **THEN** it is not failed while the fingerprint changes, and it is failed with reason `stuck` once the fingerprint has not changed for more than 30 s, as a local launch without progress is
 
 ### Requirement: Stuck detection and escalation
-Config `health.stuckAfterMs` (default fifteen minutes) and `health.stuckFailAfterMs` (default forty-five minutes) SHALL each be disabled when 0. A launch's idle time SHALL be the awake time (see "Gap in the daemon's clock") from `progressAt` (or `spawnedAt`, or the launch's creation) to now. When a `running` task's launch has been idle for longer than `stuckAfterMs`, the daemon SHALL flag it: record `stuckSince`, append `launch.stuck` with `idleMs`, queue an inbox notice `{ kind: 'stuck', idleMs, message }`, and invoke the stuck diagnoser once. New progress SHALL clear the flag and append `launch.unstuck`. When idleness exceeds `stuckFailAfterMs`, the daemon SHALL reap the process, end the launch, and transition the task `running -> failed` with reason `stuck`, increasing `attempts`. A `waiting` task SHALL never be flagged or failed as stuck. Status and the digest SHALL list flagged task ids under `stuck`.
+Config `health.stuckAfterMs` (default fifteen minutes) and `health.stuckFailAfterMs` (default forty-five minutes) SHALL each be disabled when 0. When a `running` task's launch has been idle for longer than `stuckAfterMs`, the daemon SHALL flag it: record `stuckSince`, append `launch.stuck` with `idleMs`, queue an inbox notice `{ kind: 'stuck', idleMs, message }`, and invoke the stuck diagnoser once. New progress SHALL clear the flag and append `launch.unstuck`.
 
 #### Scenario: Silent agent is flagged, nudged, then failed
 - **WHEN** `stuckAfterMs` is one second, `stuckFailAfterMs` is three seconds, and a scripted `hang` agent makes no progress
@@ -98,7 +98,7 @@ The orchestrator SHALL accept a `StuckDiagnoser` whose `diagnose({ task, launch,
 - **THEN** the task becomes `failed` with reason `stuck` carrying that message before `stuckFailAfterMs`
 
 ### Requirement: Launch time budget
-Config `budgets.maxLaunchMs` (default two hours) SHALL be disabled when 0. `elapsedMs` for a launch SHALL be the awake time (see "Gap in the daemon's clock") since `spawnedAt` (or the launch's creation), excluding time its task spent `waiting`: `waitedMs`, which a resume grows by the awake time of the wait, and the awake time of a wait in progress. When a `running` task's launch exceeds the budget, the daemon SHALL reap the process, end the launch, and transition the task to `failed` with reason `timeBudget`, increasing `attempts`.
+Config `budgets.maxLaunchMs` (default two hours) SHALL be disabled when 0. When a `running` task's launch exceeds the budget, the daemon SHALL reap the process, end the launch, and transition the task to `failed` with reason `timeBudget`, increasing `attempts`.
 
 #### Scenario: Launch past the budget is killed
 - **WHEN** `maxLaunchMs` is two hours and a running launch reaches two hours of elapsed time
@@ -113,36 +113,7 @@ Config `budgets.maxLaunchMs` (default two hours) SHALL be disabled when 0. `elap
 - **THEN** the launch is live with `elapsedMs` below the budget, and it is failed with reason `timeBudget` only once its awake elapsed time reaches the budget
 
 ### Requirement: Usage accounting
-Usage SHALL have two sources, and the launch row and `launch.usage` SHALL name the source as `source`/`usageSource`. When a spawned launch is observed dead or is ended, the daemon SHALL ask the runner named on the launch row for the launch's usage. Each runner SHALL read its own log format:
-- The Claude Code runner SHALL parse the last JSON object in the launch log for `total_cost_usd`, `duration_ms`, `num_turns`, and the `usage` object's `input_tokens`, `output_tokens`, `cache_read_input_tokens`, and `cache_creation_input_tokens`. It SHALL find that object whatever it holds when it starts a line within the last 256 KiB of the log: it SHALL try every `{` that starts a line before any other `{`, last first, and SHALL then try every `{`, last first, each pass at most 200 times. The object SHALL run to the end of the log; an object followed by another line SHALL yield no usage.
-- The Codex runner SHALL sum the `usage` of every `turn.completed` line, as worker-runners "Codex usage parsing" states, and SHALL report no cost, turns, or duration.
-- The OpenCode runner SHALL sum every `step_finish` line, as worker-runners "OpenCode usage parsing" states: cache reads folded into `input` as for Claude, the cost read from the stream as `costUsd`, `turns` the steps that ended with `reason: "stop"`, and no duration.
-- The scripted and in-process runners SHALL yield no usage unless scripted.
-
-A log without usage SHALL yield no usage.
-
-A claimed launch has no pid and no log, so it SHALL yield no runner usage, and the daemon SHALL NOT ask the runner for it. Its usage SHALL come only from its worker through `POST /v1/launches/:id/usage` (pull-runner "Worker usage"), stored with `source: 'worker'` through the same path, guard, and pricing as runner usage. Because launches with a pid are refused there, the two sources never apply to the same launch. Self-reported usage is not authoritative.
-
-Usage SHALL carry `tokens` as `{ input, cachedInput?, cacheWriteInput?, output, reasoningOutput? }` in the same shape for every runner, and `source` naming the reader. `cachedInput` is counted inside `input`, so Claude's cache reads are added to its `input_tokens`, and OpenCode's `cache.read` to its `tokens.input`. The sources are `claude-code`, `codex`, `opencode`, `scripted`, and `worker`.
-
-A usage with any of a cost, turns, a duration, or tokens SHALL be recorded, so a usage with only tokens is recorded. A usage with tokens and no cost SHALL be priced as "Run cost budget" states, per million tokens and rounded to 1e-6:
-- billable input `input - cachedInput` at `inputPerMTok`;
-- `cachedInput` at `cachedInputPerMTok` (fallback `inputPerMTok`);
-- `cacheWriteInput` at `cacheWriteInputPerMTok` (fallback `inputPerMTok`);
-- `output` at `outputPerMTok`;
-- `reasoningOutput` at `reasoningOutputPerMTok` (fallback `outputPerMTok`).
-
-The pricing rests on two assumptions, both unverified: Codex's `cached_input_tokens` is a subset of `input_tokens`, and `reasoning_output_tokens` is NOT included in `output_tokens`.
-
-Usage found SHALL be stored on the launch row as `costUsd`, `turns`, `durationMs`, `tokens`, `usageSource`, and `costSource` (see "Run cost budget"), and appended as `launch.usage`, whose payload carries the whole usage. `durationMs` SHALL stay unset when the runner reports none; `status.liveLaunches[].elapsedMs` gives wall time.
-
-The cost and tokens of a task SHALL be the sums over its launches, and those of the run the sums over all launches. All of them SHALL be derived from launch rows, so that a restart cannot double count.
-
-A headless agent writes its usage only when it exits. The daemon SHALL therefore record `reportedAt` on the launch when a submit is accepted. It SHALL leave a live launch whose task is `submitted` or `done` running while its process is alive and the report is younger than `health.reportGraceMs` (default 120000; 0 disables the grace). `health.reportGraceMs` SHALL be a config-file key read at start and SHALL NOT be a runtime override. When the process exits or the grace elapses, the daemon SHALL reap what remains, wait until the launch's process group is gone, then record usage, end the launch with reason `reported`, and remove its worktree. A process that does not exit after its report SHALL be reaped, and its launch ended, on the first tick at or after `health.reportGraceMs` from the report.
-
-A reap SHALL send SIGTERM to the launch's process group and wait until the group is empty, polling, for at most the runner's kill grace (default 2000 ms); it SHALL then send SIGKILL to the group and wait at most 1000 ms more. So a usage line the agent writes while it is terminated is read. A pid that leads no group SHALL be waited for alone.
-
-Token accounting does not change these grace mechanics: in every observed run, Codex wrote `turn.completed` with its usage after its final `agent_message`. Cancelled and superseded launches SHALL be reaped at once as before. A lingering launch delays the idle exit by at most the grace.
+Usage SHALL have two sources, and the launch row and `launch.usage` SHALL name the source as `source`/`usageSource`. When a spawned launch is observed dead or is ended, the daemon SHALL ask the runner named on the launch row for the launch's usage. A log without usage SHALL yield no usage.
 
 #### Scenario: Claude log tail parsed
 - **WHEN** a launch log ends with the JSON object `claude -p --output-format json` prints, preceded by stderr lines
@@ -202,14 +173,7 @@ Token accounting does not change these grace mechanics: in every observed run, C
 - **THEN** the launch ends with no usage and no `launch.usage`, and a later post by `w1` records it with `usageSource` `worker`
 
 ### Requirement: Run cost budget
-Config `budgets.maxRunCostUsd` (default 0) SHALL mean unlimited when 0. Config `budgets.prices` (default `{}`) SHALL map a model name (checked by the model-name pattern) to rates in USD per million tokens: `inputPerMTok`, `outputPerMTok`, and optional `cachedInputPerMTok`, `cacheWriteInputPerMTok`, and `reasoningOutputPerMTok`, each non-negative. When a runner reports a cost, the launch SHALL record it with `costSource: 'reported'` and SHALL NOT re-price it. When a runner reports tokens without a cost and `budgets.prices` has the launch's model, the daemon SHALL compute `costUsd` at record time with `costSource: 'priced'` as the sum of:
-- `input - cachedInput` at `inputPerMTok`;
-- `cachedInput` at `cachedInputPerMTok`, falling back to `inputPerMTok`;
-- `cacheWriteInput` at `cacheWriteInputPerMTok`, falling back to `inputPerMTok`;
-- `output` at `outputPerMTok`;
-- `reasoningOutput` at `reasoningOutputPerMTok`, falling back to `outputPerMTok`;
-
-each count divided by one million and the total rounded to 1e-6. Two assumptions about Codex's counts are assumed, unverified: `cached_input_tokens` is a subset of `input_tokens` (an observed 40361 input with 32128 cached is consistent), and `reasoning_output_tokens` is NOT included in `output_tokens`. When tokens are reported without a cost and the model has no price, the launch's cost SHALL stay unknown: it SHALL be excluded from the run cost and counted in `status.cost.unpricedLaunches` (launches whose row has `tokens` and no `costUsd`; a launch that ended with no usage at all is not counted), and the daemon SHALL log one warning per such model. The run cost, and so the ceiling, SHALL count priced and reported launches only; unpriced launches SHALL NOT pause admission. The ceiling SHALL be `maxRunCostUsd` times one plus the number of overrides recorded. When the run cost reaches the ceiling, admission SHALL pause with `pausedReason: 'costBudget'` and `budget.exceeded`, while running work and verification continue. `resume` SHALL be refused while the run cost is at or above the ceiling unless called with `overrideBudget`, which SHALL record `budget.overridden`, raise the ceiling by one budget, and lift the pause.
+Config `budgets.maxRunCostUsd` (default 0) SHALL mean unlimited when 0. The ceiling SHALL be `maxRunCostUsd` times one plus the number of overrides recorded. When the run cost reaches the ceiling, admission SHALL pause with `pausedReason: 'costBudget'` and `budget.exceeded`, while running work and verification continue.
 
 #### Scenario: Budget crossed pauses admission
 - **WHEN** the budget is 5 USD, two finished launches cost 3 USD each, and three tasks are ready
@@ -243,7 +207,7 @@ When a verified task is published and `health.baseMovedNotice` is true (default)
 - **THEN** T5's inbox stays empty
 
 ### Requirement: Worktree observation takes no index lock
-The daemon's git commands SHALL run with `GIT_OPTIONAL_LOCKS=0`. Its read-only git commands against a launch worktree SHALL never write the worktree's index or create its `index.lock`, so they never make the agent's own concurrent git command fail. The progress fingerprint SHALL therefore use `git status --porcelain`, which under `GIT_OPTIONAL_LOCKS=0` skips its index refresh, and the plumbing `git diff-index -p HEAD`, which never refreshes the index; it SHALL NOT use porcelain `git diff`, which refreshes the index and takes `index.lock` regardless of `GIT_OPTIONAL_LOCKS`. Commands that write SHALL take their locks as before.
+The daemon's git commands SHALL run with `GIT_OPTIONAL_LOCKS=0`. Its read-only git commands against a launch worktree SHALL never write the worktree's index or create its `index.lock`, so they never make the agent's own concurrent git command fail. Commands that write SHALL take their locks as before.
 
 #### Scenario: Agent commits while the daemon fingerprints
 - **WHEN** an agent runs `git commit` in its worktree during the same tick in which the daemon computes that launch's progress fingerprint
@@ -272,17 +236,7 @@ The scripted test agent SHALL stay alive `ORCH_TEST_AGENT_EXIT_DELAY_MS` millise
 - **THEN** every test in them passes, the crash invariant `liveLaunches == 0` included
 
 ### Requirement: Gap in the daemon's clock
-A *note* SHALL be one reading of the daemon's clock that the daemon remembers. A *gap* SHALL be two consecutive notes more than `health.gapAfterMs` apart, running from the earlier note to the later one. *Awake time* between two instants SHALL be their difference less the parts inside gaps, never below 0. The configuration SHALL accept `health.gapAfterMs` and `health.gapHoldMs`, non-negative integers in milliseconds, each optional with a default of 60000 and read at start; `gapAfterMs: 0` SHALL turn the whole rule off, so that no note is taken, no gap is noted, no timer runs and every limit counts wall time.
-
-The daemon SHALL take a note from a timer that `start()` arms and `stop()` clears, every second or every quarter of `gapAfterMs` when that is shorter; at the start of every tick; where the reconcile phase reads the clock; inside the lease-expiry test of a claimed launch; and immediately before each use of idle time, elapsed time or the hold. The first note of a process SHALL NOT be a gap. A note earlier than the one before it SHALL NOT be a gap and SHALL become the reference for the next one. A timer note that finds a gap SHALL wake the loop. A note SHALL change memory only.
-
-The tick SHALL write the gaps noted since the last write at its start and again where the reconcile phase reads the clock, and the lease-expiry test SHALL write them before it tests a lease. Each write SHALL be one transaction that appends one `daemon.gap` event per gap, with payload `{ from, to, gapMs, holdUntil }` (`holdUntil` is `to` plus `health.gapHoldMs`) and event time `to`, and renews the leases as pull-runner "Lease renewal after a gap" states. Awake time SHALL leave out every noted gap, written or not. A gap SHALL NOT be a progress signal.
-
-A new orchestrator SHALL read the gaps of the run's earlier `daemon.gap` events when it is constructed. They SHALL count towards awake time and SHALL NOT start a hold. Time during which no daemon process ran SHALL NOT be a gap.
-
-Writing a gap SHALL be activity for idle exit: the time of the last activity becomes the gap's end, with or without a hold. This excepts operator-control "Idle exit", whose list of what counts as activity does not name it. `status().liveLaunches[].idleMs` and `elapsedMs` SHALL be awake time; this excepts the sentence of health-monitoring "Usage accounting" that says `elapsedMs` gives wall time. No status field reports gaps or the hold.
-
-`maxWaitMs`, the report grace, the claim window, push retry backoff, remote git timeouts, the check command's timer and the journal's flush deadline SHALL keep counting wall time. With no gap every value SHALL equal what wall time gives.
+A *note* SHALL be one reading of the daemon's clock that the daemon remembers. A *gap* SHALL be two consecutive notes more than `health.gapAfterMs` apart, running from the earlier note to the later one. *Awake time* between two instants SHALL be their difference less the parts inside gaps, never below 0.
 
 #### Scenario: A sleep is a gap written once
 - **WHEN** a live launch is silent and the clock moves in one step from `t0` to `t1`, more than `health.gapAfterMs`, and a tick runs
@@ -309,7 +263,7 @@ Writing a gap SHALL be activity for idle exit: the time of the last activity bec
 - **THEN** no `daemon.gap` event is appended and the launch is failed with reason `stuck`
 
 ### Requirement: Hold after a gap
-The hold SHALL run from the end of the latest gap the process noted until `health.gapHoldMs` later; `gapHoldMs: 0` SHALL turn it off, and a gap inside a hold SHALL start it again from its own end. During the hold nothing SHALL start: no admission, no resume of a waiting task, no spawn of a parked launch, no verifier job and no deferred-job pass. The admission phase SHALL test the hold after the pause test, and again (noting the clock first) before each resume, each new launch and each spawn of a parked launch, so a sleep in the middle of the pass stops the rest of it. A hold SHALL NOT stop claims, SHALL NOT change how a dead process or a cancelled task is handled, and SHALL NOT pause the run or count as a stall. While the hold is on the daemon's idle time SHALL be 0; this excepts operator-control "Idle exit", whose idle time is otherwise the time since the last activity. The `daemon.gap` event SHALL be the only trace of a hold.
+The hold SHALL run from the end of the latest gap the process noted until `health.gapHoldMs` later; `gapHoldMs: 0` SHALL turn it off, and a gap inside a hold SHALL start it again from its own end. During the hold nothing SHALL start: no admission, no resume of a waiting task, no spawn of a parked launch, no verifier job and no deferred-job pass. The `daemon.gap` event SHALL be the only trace of a hold.
 
 #### Scenario: Nothing starts during the hold
 - **WHEN** after a gap there is a ready task with free capacity, an answered waiting task, a queued verifier job and, in `mixed` mode, a parked launch past its claim window
@@ -328,7 +282,7 @@ The hold SHALL run from the end of the latest gap the process noted until `healt
 - **THEN** the tick after a gap admits it, and the daemon does not exit on that tick for idleness
 
 ### Requirement: Limits read at every check
-The stuck check and the launch time budget check SHALL read `health.stuckAfterMs`, `health.stuckFailAfterMs` and `budgets.maxLaunchMs` from the effective configuration (the boot resolution with the stored override document applied) each time they test a launch, so a change applies on the next tick to every live launch, spawned or claimed. Idle and elapsed time are measured as "Stuck detection and escalation", "Launch time budget" and "Gap in the daemon's clock" state; only the limit they are compared with follows the override. A raised limit SHALL keep a launch that has not yet crossed it; a lowered or cleared limit SHALL apply at once. A launch already flagged stuck SHALL stay flagged until progress clears it, also after `health.stuckAfterMs` is raised. A change that lands while the tick is already ending a launch does not save it.
+The stuck check and the launch time budget check SHALL read `health.stuckAfterMs`, `health.stuckFailAfterMs` and `budgets.maxLaunchMs` from the effective configuration (the boot resolution with the stored override document applied) each time they test a launch, so a change applies on the next tick to every live launch, spawned or claimed. A launch already flagged stuck SHALL stay flagged until progress clears it, also after `health.stuckAfterMs` is raised.
 
 #### Scenario: A raised time budget saves a spawned launch
 - **WHEN** a spawned launch has run 9500 ms under a `budgets.maxLaunchMs` of 10000, the override `budgets: { maxLaunchMs: 20000 }` is applied, and a tick runs 1000 ms later
@@ -364,3 +318,352 @@ For "Launch time budget", the elapsed time of a launch SHALL start at `spawnedAt
 #### Scenario: Row without claimableAt
 - **WHEN** a live launch has neither `spawnedAt` nor `claimableAt`
 - **THEN** its elapsed time starts at `createdAt`
+
+### Requirement: Run cost budget: model prices
+Config `budgets.prices` (default `{}`) SHALL map a model name (checked by the model-name pattern) to rates in USD per million tokens: `inputPerMTok`, `outputPerMTok`, and optional `cachedInputPerMTok`, `cacheWriteInputPerMTok`, and `reasoningOutputPerMTok`, each non-negative.
+
+#### Scenario: Price table checked at load
+- **WHEN** the configuration gives a model in `budgets.prices` a negative rate, leaves out `outputPerMTok`, names a rate such as `perCall` that is not in the list, or uses a model key such as `bad model` or `-flag`
+- **THEN** the configuration is refused, and a configuration without `budgets.prices` has the table `{}`
+
+### Requirement: Run cost budget: reported cost
+When a runner reports a cost, the launch SHALL record it with `costSource: 'reported'` and SHALL NOT re-price it.
+
+#### Scenario: Worker's posted cost is kept
+- **WHEN** a worker holding a claimed launch posts a usage of `costUsd` 0.25 with 140 input, 40 cached input and 7 output tokens
+- **THEN** the launch row has `costUsd` 0.25 with `costSource` `reported` and those tokens, and `status.cost.byTask` gives the task 0.25
+
+### Requirement: Run cost budget: priced cost
+When a runner reports tokens without a cost and `budgets.prices` has the launch's model, the daemon SHALL compute `costUsd` at record time with `costSource: 'priced'` as the sum of:
+- `input - cachedInput` at `inputPerMTok`;
+- `cachedInput` at `cachedInputPerMTok`, falling back to `inputPerMTok`;
+- `cacheWriteInput` at `cacheWriteInputPerMTok`, falling back to `inputPerMTok`;
+- `output` at `outputPerMTok`;
+- `reasoningOutput` at `reasoningOutputPerMTok`, falling back to `outputPerMTok`.
+
+#### Scenario: Cached input billed at its own rate
+- **WHEN** tokens of 40361 input, 32128 of them cached, and no output are priced at `inputPerMTok` 2 and `outputPerMTok` 10, once with `cachedInputPerMTok` 0.5 and once without it
+- **THEN** the cost is 0.03253 USD with the cached rate and 0.080722 USD without it, the cached input then billed at the input rate
+
+### Requirement: Run cost budget: priced cost units and Codex counts
+In the priced cost of "Run cost budget: priced cost", each count SHALL be divided by one million and the total rounded to 1e-6. Two assumptions about Codex's counts are assumed, unverified: `cached_input_tokens` is a subset of `input_tokens` (an observed 40361 input with 32128 cached is consistent), and `reasoning_output_tokens` is NOT included in `output_tokens`.
+
+#### Scenario: Total rounded to 1e-6
+- **WHEN** 7 input tokens are priced at `inputPerMTok` 0.3, and 1 input token at the same rate
+- **THEN** the first cost is 0.000002 USD and the second 0 USD
+
+#### Scenario: Reasoning output billed on top of output
+- **WHEN** 1000 output tokens with 500 reasoning output tokens are priced at `outputPerMTok` 10, once with `reasoningOutputPerMTok` 4 and once without it
+- **THEN** the cost is 0.012 USD with the reasoning rate and 0.015 USD without it
+
+### Requirement: Run cost budget: unpriced launches
+When tokens are reported without a cost and the model has no price, the launch's cost SHALL stay unknown: it SHALL be excluded from the run cost and counted in `status.cost.unpricedLaunches` (launches whose row has `tokens` and no `costUsd`; a launch that ended with no usage at all is not counted), and the daemon SHALL log one warning per such model. The run cost, and so the ceiling, SHALL count priced and reported launches only; unpriced launches SHALL NOT pause admission.
+
+#### Scenario: Tokens without a price under a budget
+- **WHEN** the budget is 5 USD and a finished launch reported 40361 input and 260 output tokens and no cost for a model with no price
+- **THEN** its row keeps the tokens with no `costUsd` and no `costSource`, `status.cost` has `runUsd` 0 and `unpricedLaunches` 1, the run is not paused, the next ready task is running, and the daemon has logged the warning naming the model once
+
+### Requirement: Run cost budget: resume over the ceiling
+`resume` SHALL be refused while the run cost is at or above the ceiling unless called with `overrideBudget`, which SHALL record `budget.overridden`, raise the ceiling by one budget, and lift the pause.
+
+#### Scenario: Override raises the ceiling by one budget
+- **WHEN** the budget is 5 USD, the run is paused for `costBudget` at a run cost of 6 USD, and `resume` is called without and then with `overrideBudget`
+- **THEN** the first call is refused naming `costBudget` with `runUsd` 6 and `ceilingUsd` 5 and the run stays paused; the second records one `budget.overridden` event, `status.cost` has `ceilingUsd` 10 and `overrides` 1, the run is not paused, and the next tick starts a launch
+
+### Requirement: Worktree observation takes no index lock: fingerprint commands
+So that the daemon's read-only git commands never write a launch worktree's index, the progress fingerprint SHALL use `git status --porcelain`, which under `GIT_OPTIONAL_LOCKS=0` skips its index refresh, and the plumbing `git diff-index -p HEAD`, which never refreshes the index; it SHALL NOT use porcelain `git diff`, which refreshes the index and takes `index.lock` regardless of `GIT_OPTIONAL_LOCKS`.
+
+#### Scenario: Edits change the fingerprint without an index write
+- **WHEN** in a launch worktree a tracked file is edited, then an untracked file is added, and between them files under `.orchestrator/` are edited or added
+- **THEN** the fingerprint changes on the tracked edit and on the untracked file, stays the same on the `.orchestrator/` changes, and `.git/index` keeps its inode and mtime throughout
+
+### Requirement: Gap in the daemon's clock: configuration
+The configuration SHALL accept `health.gapAfterMs` and `health.gapHoldMs`, non-negative integers in milliseconds, each optional with a default of 60000 and read at start; `gapAfterMs: 0` SHALL turn the whole rule off, so that no note is taken, no gap is noted, no timer runs and every limit counts wall time.
+
+#### Scenario: Rule off at zero
+- **WHEN** `health.gapAfterMs` is 0 and two readings of the clock are ten million milliseconds apart
+- **THEN** no gap is noted, no hold is on, the awake time between them is their whole difference, and arming the note timer leaves no timer
+
+### Requirement: Gap in the daemon's clock: when notes are taken
+The daemon SHALL take a note from a timer that `start()` arms and `stop()` clears, every second or every quarter of `gapAfterMs` when that is shorter; at the start of every tick; where the reconcile phase reads the clock; inside the lease-expiry test of a claimed launch; and immediately before each use of idle time, elapsed time or the hold.
+
+#### Scenario: Note timer interval
+- **WHEN** `health.gapAfterMs` is 60000, 2000 or 3
+- **THEN** the note timer fires every 1000 ms, 500 ms or 1 ms
+
+### Requirement: Gap in the daemon's clock: notes that are not gaps
+The first note of a process SHALL NOT be a gap. A note earlier than the one before it SHALL NOT be a gap and SHALL become the reference for the next one.
+
+#### Scenario: A backwards note becomes the reference
+- **WHEN** a note at 1000000 ms is followed by notes at 10000 ms, at 10000 ms plus `health.gapAfterMs`, and at 10000 ms plus three times `health.gapAfterMs`
+- **THEN** the first two later notes are no gap, and the last is a gap from 10000 ms plus `health.gapAfterMs`
+
+### Requirement: Gap in the daemon's clock: what a note does
+A timer note that finds a gap SHALL wake the loop. A note SHALL change memory only.
+
+#### Scenario: A sleep inside a tick is written by the next tick
+- **WHEN** the clock jumps past `health.stuckFailAfterMs` while a tick awaits a spawned launch's liveness
+- **THEN** that tick neither flags nor fails nor ends the launch and appends no `daemon.gap` event, and the next tick appends one `daemon.gap` event with the launch still live
+
+### Requirement: Gap in the daemon's clock: writing gaps
+The tick SHALL write the gaps noted since the last write at its start and again where the reconcile phase reads the clock, and the lease-expiry test SHALL write them before it tests a lease. Each write SHALL be one transaction that appends one `daemon.gap` event per gap, with payload `{ from, to, gapMs, holdUntil }` (`holdUntil` is `to` plus `health.gapHoldMs`) and event time `to`, and renews the leases as pull-runner "Lease renewal after a gap" states.
+
+#### Scenario: Claimed launch renewed by the write
+- **WHEN** in `pull` mode a claimed launch's worker is silent while the clock sleeps five lease TTLs between two ticks
+- **THEN** the second tick leaves the launch live with `attempts` 0, its lease expiring no sooner than one TTL after the wake and its `progressAt` unchanged, and a tick more than a TTL later ends it with reason `leaseExpired`
+
+### Requirement: Gap in the daemon's clock: awake time and progress
+Awake time SHALL leave out every noted gap, written or not. A gap SHALL NOT be a progress signal.
+
+#### Scenario: Writing a gap does not clear a stuck flag
+- **WHEN** a launch flagged stuck stays silent while the clock sleeps twice `health.stuckFailAfterMs`, and a tick writes the gap
+- **THEN** the launch is still live and flagged with the same `stuckSince`, `progressAt` and `lastSignal`, and no `launch.unstuck` event and no further notice are appended
+
+### Requirement: Gap in the daemon's clock: gaps read at restart
+A new orchestrator SHALL read the gaps of the run's earlier `daemon.gap` events when it is constructed. They SHALL count towards awake time and SHALL NOT start a hold. Time during which no daemon process ran SHALL NOT be a gap.
+
+#### Scenario: Loaded gaps count but do not hold
+- **WHEN** a gap from 1000000 ms to 1500000 ms is read from an earlier `daemon.gap` event
+- **THEN** the awake time from 900000 ms to 1600000 ms is 200000 ms, no hold is on at 1500001 ms, no gap waits to be written, and a later note is not measured from the loaded gap
+
+### Requirement: Gap in the daemon's clock: idle exit
+Writing a gap SHALL be activity for idle exit: the time of the last activity becomes the gap's end, with or without a hold. This excepts operator-control "Idle exit", whose list of what counts as activity does not name it.
+
+#### Scenario: The gap alone is activity
+- **WHEN** `health.gapHoldMs` is 0 and a quiescent daemon with `daemon.idleExitMs` of 2 minutes sleeps 10 minutes, then a tick writes the gap
+- **THEN** idle exit is not due on that tick nor 1 ms short of 2 minutes after the gap's end, and is due at 2 minutes after it
+
+### Requirement: Gap in the daemon's clock: status times
+`status().liveLaunches[].idleMs` and `elapsedMs` SHALL be awake time; this excepts the sentence of health-monitoring "Usage accounting" that says `elapsedMs` gives wall time. No status field reports gaps or the hold.
+
+#### Scenario: Elapsed time leaves out a sleep
+- **WHEN** a live launch's clock sleeps twice `budgets.maxLaunchMs` and a tick runs
+- **THEN** the launch is still live with `attempts` 0 and its `status().liveLaunches[].elapsedMs` is below `budgets.maxLaunchMs`
+
+### Requirement: Gap in the daemon's clock: wall-time clocks
+`maxWaitMs`, the report grace, the claim window, push retry backoff, remote git timeouts, the check command's timer and the journal's flush deadline SHALL keep counting wall time. With no gap every value measured in awake time SHALL equal what wall time gives.
+
+#### Scenario: No gap, wall time
+- **WHEN** a live launch makes no progress for 10 minutes and 17 ms with no gap
+- **THEN** its `idleMs` is the wall time since its `progressAt` or spawn, its `elapsedMs` is 10 minutes and 17 ms, the wall time since its spawn, and no `daemon.gap` event is appended
+
+### Requirement: Hold after a gap: tests in the admission phase
+The admission phase SHALL test the hold after the pause test, and again (noting the clock first) before each resume, each new launch and each spawn of a parked launch, so a sleep in the middle of the pass stops the rest of it.
+
+#### Scenario: A sleep in the middle of the pass
+- **WHEN** an admission pass has a resume of an answered waiting task and new launches to make, and the clock jumps past `health.gapAfterMs` after the pass has begun and before its next start
+- **THEN** the pass starts nothing more, and the remaining starts are made by the first tick after the hold
+
+### Requirement: Hold after a gap: what the hold does not stop
+A hold SHALL NOT stop claims, SHALL NOT change how a dead process or a cancelled task is handled, and SHALL NOT pause the run or count as a stall.
+
+#### Scenario: A hold is neither a pause nor a stall
+- **WHEN** ticks run inside the hold after a gap while ready tasks, an answered waiting task and a queued verifier job wait
+- **THEN** `status()` reports `paused` false and `stalled` false
+
+### Requirement: Hold after a gap: idle time
+While the hold is on the daemon's idle time SHALL be 0; this excepts operator-control "Idle exit", whose idle time is otherwise the time since the last activity.
+
+#### Scenario: Idle time runs from the gap's end after the hold
+- **WHEN** a quiescent daemon sleeps 10 minutes and a tick writes the gap
+- **THEN** its idle time is 0 at 1 ms before `health.gapHoldMs` has passed since the gap's end, and `health.gapHoldMs` once the hold has ended
+
+### Requirement: Limits read at every check: raised and lowered limits
+Idle and elapsed time are measured as "Stuck detection and escalation", "Launch time budget" and "Gap in the daemon's clock" state; only the limit they are compared with follows the override. A raised limit SHALL keep a launch that has not yet crossed it; a lowered or cleared limit SHALL apply at once. A change that lands while the tick is already ending a launch does not save it.
+
+#### Scenario: Elapsed time counts from the launch's start, not from the override
+- **WHEN** a spawned launch has run 9500 ms under a `budgets.maxLaunchMs` of 10000, the override `budgets: { maxLaunchMs: 20000 }` is applied, and ticks run 1000 ms later and then a further 9600 ms later
+- **THEN** the first tick keeps the launch live, and the second, at 20100 ms since the launch began, ends it with reason `timeBudget` and `attempts` 1
+
+### Requirement: Process liveness: runner diagnosis of a dead launch
+When the runner implements `readFailure` and returns a diagnosis `{ reason, detail? }` for the dead launch, the dead-launch record SHALL carry it: the failure's message SHALL name the reason and the detail, its `detail.runnerFailure` SHALL hold the diagnosis, and the `launch.ended` event SHALL carry `runnerFailure`. A runner without `readFailure`, or one that returns nothing, SHALL leave the record as before. The same SHALL hold for a launch found dead at recovery.
+
+#### Scenario: Runner without readFailure
+- **WHEN** a running launch's process is dead, no fallback file exists, and the runner does not implement `readFailure`
+- **THEN** the next launch's brief carries `priorFailure` `{ kind: 'exitedWithoutReport', message: 'process exited without a report' }` with no detail, and the composed brief does not mention the runner's diagnosis
+
+#### Scenario: Dead at recovery with the runner's reason
+- **WHEN** the daemon restarts and finds a running launch's process dead with no fallback file, and the runner diagnoses it as `exitBeforeTurn`
+- **THEN** the `launch.failed` event for the launch carries reason `exitBeforeTurn` with `charged: true`, and the launch ends with reason `recovered-dead`, its `launch.ended` event carrying the diagnosis as `runnerFailure`
+
+### Requirement: Process liveness: liveness by runner
+`unknown` SHALL leave lease expiry as the only bound on silence. Runners that spawn processes SHALL derive liveness from the recorded pid; a runner that cannot observe its launches SHALL report `unknown`. For the OpenCode runner the recorded pid leads the `sh` process group that holds `opencode` and its MCP child (the shim): liveness follows the `sh`, which lives as long as `opencode`, and reaping signals the whole group, so the shim does not outlive its launch.
+
+#### Scenario: Unknown liveness is bounded by the lease alone
+- **WHEN** a running launch makes no API call for longer than the lease TTL while its runner reports it `alive`, and then again for longer than the TTL while its runner reports `unknown`
+- **THEN** after the first it is still running with `attempts` 0 and a lease extended past its earlier expiry, and after the second its lease has expired: `attempts` is 1 and the next launch's brief carries `priorFailure` `leaseExpired`
+
+### Requirement: Progress signals: recorded signals
+The daemon SHALL record `progressAt` and `lastSignal` on the launch row when the progress fingerprint changes (`commit` when the head moved, otherwise `worktree`), when the agent makes any API call (`heartbeat`, `report`, `block`, `inbox`, `log`), when a heartbeat carries a `progress` text different from the previous one (`heartbeatText`, with the text kept as `progressText`), and when a `waiting` task resumes (`resumed`).
+
+#### Scenario: Any API call is progress
+- **WHEN** an agent heartbeats with the same `progress` text as its previous heartbeat, and then calls `log`
+- **THEN** the heartbeat records `lastSignal` `heartbeat` with `progressText` unchanged, and the `log` call records `progressAt` at the call's time with `lastSignal` `log`
+
+### Requirement: Progress signals: baseline at spawn
+A launch SHALL start with `progressAt` equal to `spawnedAt`, and its first fingerprint SHALL be a baseline that does not count as progress.
+
+#### Scenario: First fingerprint is a baseline
+- **WHEN** a launch is spawned and the next tick computes its first fingerprint
+- **THEN** the launch row has `lastSignal` `spawned` and `progressAt` equal to `spawnedAt` after the spawn, and after that tick it stores the fingerprint and `lastSignal` is still `spawned`
+
+### Requirement: Progress signals: remote launch fingerprint source
+A remote launch (`access: remote`) has no worktree on the daemon's host: the daemon SHALL NOT compute its fingerprint (no `Workspace.fingerprint` call at reconcile), and its fingerprint SHALL instead come from its worker's heartbeats. A heartbeat body MAY carry `fingerprint`, the clone's fingerprint computed as the daemon computes a progress fingerprint (the head sha, a colon, the hash).
+
+#### Scenario: Remote launch without fingerprint heartbeats
+- **WHEN** a remote launch whose task is `running` is reconciled on three ticks and no heartbeat has carried `fingerprint`
+- **THEN** its launch row holds no fingerprint and its task is still `running`
+
+### Requirement: Progress signals: remote heartbeat fingerprint check
+For a remote launch a malformed `fingerprint` SHALL be answered 400 naming the field before anything is written; a well-formed one SHALL be compared with the stored fingerprint exactly as a daemon-read one is: the first is a baseline, a changed value SHALL be stored on the row and recorded as `commit` when the head part changed and otherwise `worktree`, and the same value again SHALL record nothing.
+
+#### Scenario: Malformed remote fingerprint
+- **WHEN** a heartbeat of a remote launch carries `fingerprint` `not-a-fingerprint`
+- **THEN** it is answered 400 with `field` `fingerprint`, and the fingerprint stored on the launch row is unchanged
+
+### Requirement: Progress signals: remote heartbeat counting
+A remote heartbeat that carries `fingerprint` SHALL count as progress only through its fingerprint or a new `progress` text, not as a `heartbeat` signal, so that a worker loop's periodic heartbeats renew the lease without hiding an agent that makes no progress; stuck detection SHALL then work unchanged on the stored remote fingerprint. For a local launch a heartbeat's `fingerprint` SHALL be ignored.
+
+#### Scenario: Unchanged remote fingerprint renews the lease only
+- **WHEN** a remote launch heartbeats with the fingerprint already stored on its row and no `progress` text
+- **THEN** its lease now expires one lease TTL after the call, and its `progressAt` and `lastSignal` are unchanged
+
+### Requirement: Stuck detection and escalation: idle time
+A launch's idle time SHALL be the awake time (see "Gap in the daemon's clock") from `progressAt` (or `spawnedAt`, or the launch's creation) to now.
+
+#### Scenario: Idle time since the spawn
+- **WHEN** `stuckAfterMs` is 1000 and a launch has made no progress in the 1500 ms since it was spawned, with no gap
+- **THEN** its `launch.stuck` event carries `idleMs` 1500 and `lastSignal` `spawned`, and its entry in `status.liveLaunches` shows `idleMs` 1500
+
+### Requirement: Stuck detection and escalation: failure
+When idleness exceeds `stuckFailAfterMs`, the daemon SHALL reap the process, end the launch, and transition the task `running -> failed` with reason `stuck`, increasing `attempts`. A `waiting` task SHALL never be flagged or failed as stuck.
+
+#### Scenario: Stuck failure ends the launch
+- **WHEN** a running launch stays silent for longer than `stuckFailAfterMs`
+- **THEN** its process is gone, the launch row is `ended` with `endReason` `stuck`, a `transition` with trigger `stuck` is recorded, `attempts` is 1, and the next launch's brief carries `priorFailure` `stuck`
+
+### Requirement: Stuck detection and escalation: status listing
+Status and the digest SHALL list flagged task ids under `stuck`.
+
+#### Scenario: Flagged tasks listed
+- **WHEN** the launches of T1 and T5 are both flagged, and then both make progress
+- **THEN** `status.stuck` lists `T1` and `T5` and T1's entry in `status.liveLaunches` has `stuck: true`, and once both have made progress `status.stuck` is empty
+
+### Requirement: Launch time budget: elapsed time
+`elapsedMs` for a launch SHALL be the awake time (see "Gap in the daemon's clock") since `spawnedAt` (or the launch's creation), excluding time its task spent `waiting`: `waitedMs`, which a resume grows by the awake time of the wait, and the awake time of a wait in progress.
+
+#### Scenario: A resume grows waitedMs
+- **WHEN** under a `maxLaunchMs` of 10 s a launch's task waits twenty minutes on a question, is answered and resumed, and runs five seconds more
+- **THEN** the task is never failed for its time budget, the launch row has `waitedMs` of twenty minutes, and `status.liveLaunches` shows the launch's `elapsedMs` as 5000
+
+### Requirement: Usage accounting: Claude Code log
+Each runner SHALL read its own log format:
+- The Claude Code runner SHALL parse the last JSON object in the launch log for `total_cost_usd`, `duration_ms`, `num_turns`, and the `usage` object's `input_tokens`, `output_tokens`, `cache_read_input_tokens`, and `cache_creation_input_tokens`.
+
+#### Scenario: Last object after earlier objects
+- **WHEN** a Claude Code launch log holds a stderr line, an earlier JSON object, a line that opens a brace but is not JSON, and then the result object
+- **THEN** the usage read takes its cost, turns, duration, and tokens from the result object, with `source` `claude-code`
+
+### Requirement: Usage accounting: Claude result object search
+The Claude Code runner SHALL find the last JSON object in the launch log whatever it holds when it starts a line within the last 256 KiB of the log: it SHALL try every `{` that starts a line before any other `{`, last first, and SHALL then try every `{`, last first, each pass at most 200 times. The last JSON object in the launch log SHALL run to the end of the log; an object followed by another line SHALL yield no usage.
+
+#### Scenario: Text after the result object
+- **WHEN** a Claude Code launch log ends with the result object followed by a line of text, or holds only 300 lines of `{}`
+- **THEN** no usage is read from it
+
+### Requirement: Usage accounting: Codex log
+The Codex runner SHALL sum the `usage` of every `turn.completed` line, as worker-runners "Codex usage parsing" states, and SHALL report no cost, turns, or duration. The pricing of a usage with tokens and no cost rests on two assumptions, both unverified: Codex's `cached_input_tokens` is a subset of `input_tokens`, and `reasoning_output_tokens` is NOT included in `output_tokens`.
+
+#### Scenario: Codex turns summed
+- **WHEN** a Codex launch log holds two `turn.completed` lines with other lines between them
+- **THEN** the usage read has their tokens summed field by field, `source` `codex`, and no cost, turns, or duration
+
+#### Scenario: Reasoning output priced on top of output
+- **WHEN** tokens `{ input: 0, output: 1000, reasoningOutput: 500 }` are priced at an `outputPerMTok` of 10 with no `reasoningOutputPerMTok`
+- **THEN** the cost is 0.015: the reasoning tokens are billed in addition to `output`
+
+### Requirement: Usage accounting: OpenCode log
+The OpenCode runner SHALL sum every `step_finish` line, as worker-runners "OpenCode usage parsing" states: cache reads folded into `input` as for Claude, the cost read from the stream as `costUsd`, `turns` the steps that ended with `reason: "stop"`, and no duration.
+
+#### Scenario: OpenCode steps summed
+- **WHEN** an OpenCode launch log holds six `step_finish` events, one of which ends with `reason: "stop"`
+- **THEN** the usage read sums their tokens with the cache reads inside `input`, has `turns` 1 and `costUsd` 0, and has no `durationMs`
+
+### Requirement: Usage accounting: scripted and in-process runners
+The scripted and in-process runners SHALL yield no usage unless scripted.
+
+#### Scenario: No usage unless scripted
+- **WHEN** an in-process runner's launch has no usage scripted for its launch id or its task id, and another launch has a usage scripted for its task id
+- **THEN** the runner reads no usage for the first launch, and reads the scripted usage for the second
+
+### Requirement: Usage accounting: claimed launch usage
+A claimed launch has no pid and no log, so it SHALL yield no runner usage, and the daemon SHALL NOT ask the runner for it. The claimed launch's usage SHALL come only from its worker through `POST /v1/launches/:id/usage` (pull-runner "Worker usage"), stored with `source: 'worker'` through the same path, guard, and pricing as runner usage. Because launches with a pid are refused there, the two sources never apply to the same launch. Self-reported usage is not authoritative.
+
+#### Scenario: Worker usage for a spawned launch is refused
+- **WHEN** worker `w1` posts usage for a spawned launch, which has a pid
+- **THEN** the post is answered 409, no `launch.usage` is appended, and the spawned launch takes its usage from its runner when it ends
+
+### Requirement: Usage accounting: token shape
+Usage SHALL carry `tokens` as `{ input, cachedInput?, cacheWriteInput?, output, reasoningOutput? }` in the same shape for every runner, and `source` naming the reader. `cachedInput` is counted inside `input`, so Claude's cache reads are added to its `input_tokens`, and OpenCode's `cache.read` to its `tokens.input`. The sources are `claude-code`, `codex`, `opencode`, `scripted`, and `worker`.
+
+#### Scenario: Claude cache fields in the shared shape
+- **WHEN** a Claude Code result object's `usage` has `input_tokens` 10, `output_tokens` 20, `cache_read_input_tokens` 300, and `cache_creation_input_tokens` 40
+- **THEN** the usage read has `tokens` `{ input: 310, cachedInput: 300, cacheWriteInput: 40, output: 20 }`
+
+### Requirement: Usage accounting: stored usage
+A usage with any of a cost, turns, a duration, or tokens SHALL be recorded, so a usage with only tokens is recorded. Usage found SHALL be stored on the launch row as `costUsd`, `turns`, `durationMs`, `tokens`, `usageSource`, and `costSource` (see "Run cost budget"), and appended as `launch.usage`, whose payload carries the whole usage. `durationMs` SHALL stay unset when the runner reports none; `status.liveLaunches[].elapsedMs` gives wall time.
+
+#### Scenario: Usage stored on the launch row
+- **WHEN** T1's runner reports `{ costUsd: 1.25, turns: 3, durationMs: 1000 }` and T1's launch ends after its submit
+- **THEN** the launch row stores `costUsd` 1.25, `turns` 3, and `durationMs` 1000, and a `launch.usage` event is appended for it
+
+### Requirement: Usage accounting: pricing tokens without a cost
+A usage with tokens and no cost SHALL be priced as "Run cost budget" states, per million tokens and rounded to 1e-6:
+- billable input `input - cachedInput` at `inputPerMTok`;
+- `cachedInput` at `cachedInputPerMTok` (fallback `inputPerMTok`);
+- `cacheWriteInput` at `cacheWriteInputPerMTok` (fallback `inputPerMTok`);
+- `output` at `outputPerMTok`;
+- `reasoningOutput` at `reasoningOutputPerMTok` (fallback `outputPerMTok`).
+
+#### Scenario: Cached input priced apart
+- **WHEN** tokens `{ input: 40361, cachedInput: 32128, output: 0 }` are priced at an `inputPerMTok` of 2, once with a `cachedInputPerMTok` of 0.5 and once without one
+- **THEN** the cost is 0.03253 with the cached rate and 0.080722 without it
+
+### Requirement: Usage accounting: task and run sums
+The cost and tokens of a task SHALL be the sums over its launches, and those of the run the sums over all launches. All of these costs and tokens SHALL be derived from launch rows, so that a restart cannot double count.
+
+#### Scenario: Run cost summed from launch rows
+- **WHEN** T1's launch records a cost of 1.25 and T5's a cost of 0.75, and a new orchestrator is started on the same store
+- **THEN** `status.cost` has `runUsd` 2 and `byTask` `{ T1: 1.25, T5: 0.75 }`, and the new orchestrator reports the same cost
+
+### Requirement: Usage accounting: report grace
+A headless agent writes its usage only when it exits. The daemon SHALL therefore record `reportedAt` on the launch when a submit is accepted. The daemon SHALL leave a live launch whose task is `submitted` or `done` running while its process is alive and the report is younger than `health.reportGraceMs` (default 120000; 0 disables the grace). `health.reportGraceMs` SHALL be a config-file key read at start and SHALL NOT be a runtime override.
+
+#### Scenario: Reported launch left running
+- **WHEN** T1 submits under a `health.reportGraceMs` of 30 s and its process stays alive
+- **THEN** on the next tick its launch is `live` with `reportedAt` the time of the submit, its process is alive, and no `launch.usage` is appended
+
+#### Scenario: Grace refused at runtime
+- **WHEN** a runtime config patch sets `health.reportGraceMs`
+- **THEN** it is refused with 400 naming the key `health.reportGraceMs`, and nothing is applied
+
+### Requirement: Usage accounting: end after the grace
+When a reported launch's process exits or the report grace elapses, the daemon SHALL reap what remains, wait until the launch's process group is gone, then record usage, end the launch with reason `reported`, and remove its worktree. A process that does not exit after its report SHALL be reaped, and its launch ended, on the first tick at or after `health.reportGraceMs` from the report.
+
+#### Scenario: Exit and linger under one grace
+- **WHEN** T1 and T5 submit under a `health.reportGraceMs` of 30 s, T1's process then exits, and T5's process is still alive 31 s after its report
+- **THEN** the tick after T1's exit ends T1's launch with reason `reported` and the usage its runner reports, and the tick 31 s after the reports reaps T5's process and ends its launch with reason `reported`
+
+### Requirement: Usage accounting: reap waits for the process group
+A reap SHALL send SIGTERM to the launch's process group and wait until the group is empty, polling, for at most the runner's kill grace (default 2000 ms); it SHALL then send SIGKILL to the group and wait at most 1000 ms more. So a usage line the agent writes while it is terminated is read. A pid that leads no group SHALL be waited for alone.
+
+#### Scenario: Group member that ignores SIGTERM
+- **WHEN** a launch's `/bin/sh` leads a group whose child ignores SIGTERM, and the launch is reaped with a kill grace of 300 ms
+- **THEN** the reap returns no sooner than 300 ms, and no process of the group is left
+
+### Requirement: Usage accounting: launches outside the report grace
+Token accounting does not change the report grace mechanics: in every observed run, Codex wrote `turn.completed` with its usage after its final `agent_message`. Cancelled and superseded launches SHALL be reaped at once as before. A lingering launch delays the idle exit by at most the report grace.
+
+#### Scenario: Cancelled launch reaped at once
+- **WHEN** a running task is cancelled while the report grace is 30 s
+- **THEN** the next tick ends its launch with reason `cancelled` and its process is gone

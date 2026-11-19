@@ -8,19 +8,10 @@ What an agent receives and how it reports back: the standalone brief, launch tok
 ### Requirement: Standalone brief
 Before launching, the orchestrator SHALL write `<worktree>/.orchestrator/brief.md` and `brief.json`. They SHALL contain:
 - the task payload verbatim and the acceptance criteria;
-- the definition of done: under the `agent` commit policy, commit all work on the launch branch (a dirty worktree is refused with the file list; commit and resubmit); under `daemon`, leave the changes in the worktree, committed or not, because the orchestrator commits what is uncommitted when it accepts the report. In both cases: never merge or touch the integration branch, declare a no-op explicitly, and terminate after the report is accepted. When the repository has an `openspec/` root (the launch worktree contains `openspec/`), for every runner kind and commit policy it SHALL also say to record any spec change as an OpenSpec change directory `openspec/changes/<name>/` named after the task, with `proposal.md`, `tasks.md` and `specs/<capability>/spec.md` delta files holding `## ADDED|MODIFIED|REMOVED Requirements` sections with full `### Requirement:` blocks, validated with `openspec validate <name>`, and not to edit `openspec/specs/` directly. Without an `openspec/` root the brief SHALL NOT carry that item;
 - workspace facts: worktree path, branch, `baseSha`, integration branch;
 - the completion report of each direct dependency, and any released cancellation with its reason;
-- attempt context when present: the prior failure report, verifier output, conflict details naming the files and the sibling that landed, and the human's answer. Under `agent`, the conflict, interruption, and revision texts tell the agent to rebase, merge or cherry-pick the prior branch, squash a work-in-progress commit, and commit the delta. Under `daemon` they tell it instead to inspect the prior branch with `git show`/`git diff` and reapply the changes as file edits;
-- the API base URL, the launch token, the fallback report path, and the instruction to stop immediately on a 401.
 
-A remote launch (`access: remote`) has no worktree: its brief is kept on the launch row (see specs/remote-workspace). The text the orchestrator writes into its workspace and reporting sections SHALL name no path on the daemon's machine (not the run directory, the worktrees root or the daemon's clone) and no loopback address; text carried verbatim (the payload, dependency reports, verifier output) is not rewritten. Its workspace section SHALL instead name the clone (the current directory, a clone of the repository the worker loop made), the branch, the base commit and the integration branch, and SHALL say how work is submitted: commit all work on the branch; `report` with kind submit through the `orchestrator` MCP server's tool pushes the branch to `origin` and names the pushed commit; an agent that calls the API itself first runs `git push origin <branch>` and sends the tip's full sha as `sealedSha`; the orchestrator reads the work from `origin`, not from the clone. Its API base URL SHALL be `apiBaseUrl` (without a trailing slash), never the bind address, and its fallback report path SHALL be the relative path `.orchestrator/report.json`, which the brief says is relative to the root of the clone; `brief.json` SHALL carry the same branch, base commit, API base URL and fallback path. For a carry holding `interrupted`, the remote brief SHALL say that the branch starts at `carry.interrupted.headSha` (the worker loop creates it there), not at the base commit, and SHALL NOT tell the agent to merge or cherry-pick the prior branch onto its base. Whether the remote brief carries the OpenSpec change rule SHALL follow whether the daemon's clone has an `openspec/` root. The commit-policy lines of the definition of done SHALL be those of `agent`, since a remote launch never has policy `daemon`, and the prepare-command item SHALL NOT appear, since a remote run has no `prepareCommand`. A local launch's brief SHALL be unchanged by this.
-
-The agent sees the shim's tools under a name that depends on its CLI: `mcp__orchestrator__<tool>` under Claude Code and Codex, `orchestrator_<tool>` under OpenCode. The `claude-code` and `codex` briefs keep their Reporting text (the `codex` one is in "Codex brief reports through the MCP server"). An `opencode` brief's Reporting section SHALL name `orchestrator_heartbeat`, `orchestrator_report`, `orchestrator_block`, `orchestrator_inbox` and `orchestrator_log` and tell the agent to prefer them to calling the API from a command. It SHALL keep the API and the fallback file, because no sandbox blocks loopback. It SHALL NOT name `mcp__orchestrator__` tools.
-
-An `opencode` brief's workspace section SHALL say that OpenCode permission rules are in force with nothing else confining the agent's commands. It SHALL say that a command a rule does not allow fails with "The user has specified a rule which prevents you from using this specific tool call." and is not approved at runtime. That is the `deny` error, which the model sees and continues past. It SHALL tell the agent not to retry it but to ask with a `needsAccess` question naming the command and continue with what it can, and say that the operator can run it or set `runner.opencode.permission` to `allow` for the next launch. Under `derived` it SHALL list the file tools (read, glob, grep, list, edit, write), then the `bashPatterns` followed by the check command's patterns. It SHALL say that every other command is denied and that each command of a chain (`&&`, `;`, `|`) must match one of them on its own. It SHALL NOT mention a sandbox.
-
-`brief.json` SHALL carry the launch's `runner` (`kind`, `commitPolicy`, `sandbox` for a `codex` launch, and `permission` for an `opencode` launch). The `permission` holds `mode` (`derived` or `allow`) and, under `derived`, the `bashPatterns` the runner's ruleset allows, `git *` first. A brief composed without a runner SHALL be the `claude-code` text under the `agent` policy. The brief MUST be sufficient for a person to perform the task without any other channel.
+The brief MUST be sufficient for a person to perform the task without any other channel.
 
 #### Scenario: Brief carries direct dependency reports
 - **WHEN** T2 is launched after T1 is done
@@ -106,7 +97,7 @@ Every mutating call (`report`, `block`, `log`) SHALL carry `seq`, a per-launch m
 - **THEN** the retry returns the stored response and the task transitions exactly once
 
 ### Requirement: Submission sealing
-On `report submit` the orchestrator SHALL inspect the worktree, ignoring `.orchestrator/`. Under the launch's `agent` commit policy, a worktree with uncommitted or untracked changes SHALL be rejected with 409 and the list of files, and the task SHALL remain `running`. Under `daemon`, the orchestrator SHALL commit those changes on the launch branch: author and committer `orchestrator`, hooks skipped, the report summary as the message. It SHALL then seal the new head, and the `agent.report` event SHALL carry `committedByOrchestrator: true`. Under either policy, a clean worktree SHALL NOT be committed. Once the worktree is clean or committed, the branch head SHALL be recorded as `sealedSha` and the task SHALL become `submitted`. Commits made after sealing SHALL be ignored by verification. On a remote launch the daemon holds no worktree: the submit report SHALL carry `sealedSha`, the full object name of the launch branch tip the worker pushed to origin, and the orchestrator SHALL seal it as the `remote-workspace` capability's "Seal" requires instead of inspecting a tree; the commit policy does not apply. A remote submit without `sealedSha`, or with a value that is not a full hex object name, SHALL answer 400 naming `sealedSha` and record nothing. On a local launch `sealedSha` in the report SHALL be ignored. A refused seal, local or remote, SHALL record no `agent.report` event and no deduplicated response, so the same `seq` may be sent again.
+On `report submit` the orchestrator SHALL inspect the worktree, ignoring `.orchestrator/`. Under the launch's `agent` commit policy, a worktree with uncommitted or untracked changes SHALL be rejected with 409 and the list of files, and the task SHALL remain `running`. Once the worktree is clean or committed, the branch head SHALL be recorded as `sealedSha` and the task SHALL become `submitted`. Commits made after sealing SHALL be ignored by verification.
 
 #### Scenario: Dirty worktree rejected
 - **WHEN** an agent of a launch with the `agent` policy submits with an unstaged modification to `src/a.ts`
@@ -144,7 +135,7 @@ If `sealedSha` equals `baseSha`, the submit report MUST carry `noChanges` with a
 - **THEN** the task is `submitted` and verification passes without publishing a commit
 
 ### Requirement: Acceptance evidence
-When the brief contains acceptance criteria, the submit report MUST include an `acceptance` entry with evidence for each criterion; otherwise the submission SHALL fail with reason `missingAcceptanceEvidence`. An entry covers a criterion when its `criterion` matches the criterion's text after markdown code spans and emphasis, a leading list marker, and trailing punctuation are dropped, whitespace is collapsed, and case is ignored, or when it is the criterion's 1-based position in the brief's list. The check is structural; the orchestrator does not judge the evidence.
+When the brief contains acceptance criteria, the submit report MUST include an `acceptance` entry with evidence for each criterion; otherwise the submission SHALL fail with reason `missingAcceptanceEvidence`. The check is structural; the orchestrator does not judge the evidence.
 
 #### Scenario: Missing evidence
 - **WHEN** the brief lists two criteria and the report covers one
@@ -159,9 +150,7 @@ When the brief contains acceptance criteria, the submit report MUST include an `
 - **THEN** both criteria are covered
 
 ### Requirement: Block and wait
-`block` SHALL persist the question, move the task to `waiting`, release its run slot, and hold the connection open until an answer is delivered or `maxWait` elapses. An operator answer SHALL be persisted before any resume. The task SHALL return to `running`, and the long-poll SHALL complete only after the scheduler admits it. A dropped connection SHALL be recoverable by re-issuing `block` with the same `seq`, which returns the stored answer once admitted. When `maxWait` elapses, the task SHALL become `blocked` with the question preserved, and a later answer SHALL act as unblock-with-answer.
-
-A runner whose CLI times out MCP tool calls SHALL size that timeout above `maxWait`. The Codex runner's default is `ceil(maxWaitMs/1000)+60` seconds.
+`block` SHALL persist the question, move the task to `waiting`, release its run slot, and hold the connection open until an answer is delivered or `maxWait` elapses. An operator answer SHALL be persisted before any resume. The task SHALL return to `running`, and the long-poll SHALL complete only after the scheduler admits it. When `maxWait` elapses, the task SHALL become `blocked` with the question preserved, and a later answer SHALL act as unblock-with-answer.
 
 #### Scenario: Answer then admission then resume
 - **WHEN** an agent blocks, a human answers, and a slot is free
@@ -176,7 +165,7 @@ A runner whose CLI times out MCP tool calls SHALL size that timeout above `maxWa
 - **THEN** the long-poll returns a timeout, the task is `blocked` with the question, and an answer given later produces a new launch whose brief carries it
 
 ### Requirement: Fallback file
-The brief and the MCP façade SHALL instruct the agent to retry the API with backoff for the retry window, and then to write `.orchestrator/report.json` and exit. The file SHALL carry `launchId`, `seq`, a kind of `submit`, `fail`, or `block`, and the body. Recovery SHALL apply the file when it finds the process dead. A fallback `submit` SHALL be sealed the way a posted one is under the launch's commit policy; under `daemon`, the `agent.fallback` event SHALL carry `committedByOrchestrator: true` when a commit was made. A fallback `block` SHALL be treated as a transition to `blocked` with the question.
+The brief and the MCP façade SHALL instruct the agent to retry the API with backoff for the retry window, and then to write `.orchestrator/report.json` and exit. The file SHALL carry `launchId`, `seq`, a kind of `submit`, `fail`, or `block`, and the body. Recovery SHALL apply the file when it finds the process dead. A fallback `block` SHALL be treated as a transition to `blocked` with the question.
 
 #### Scenario: Offline submission applied
 - **WHEN** the API is unreachable, the agent writes a `submit` fallback file and exits, and the daemon later finds the process dead
@@ -193,20 +182,7 @@ The brief and the MCP façade SHALL instruct the agent to retry the API with bac
 ### Requirement: MCP façade
 A stdio MCP server launched per agent SHALL expose the five operations as tools, forward them to the HTTP API with the token from its environment, and retry through daemon restarts for the retry window before surfacing an error.
 
-Started with `--orch-env-file <path>`, the façade SHALL layer the file's `KEY=VALUE` lines over its environment. When the file is missing or unreadable, it SHALL exit 1 with a message naming the path. The flag is not `--env-file`, because Node takes that flag from anywhere in argv.
-
 The `report` tool's description SHALL state that a submit requires a committed, clean worktree only when `ORCH_COMMIT_POLICY` is unset or `agent`.
-
-The façade SHALL be in remote mode when `ORCH_ACCESS` is `remote`; the worker loop starts it so for a remote launch (see specs/worker-pool "Clone cache"). It then SHALL need `ORCH_WORKTREE` (the clone's path) and `ORCH_BRANCH` (the launch branch), and without either it SHALL exit 1 with a message naming the missing variable. With any other `ORCH_ACCESS` it SHALL read neither variable and behave as without remote mode, since a spawned agent's environment carries `ORCH_WORKTREE` too. In remote mode a `report` call with kind `submit` SHALL do three things before it calls the daemon, and the daemon's answer SHALL be returned unchanged:
-- the dirty check of the clone by the rule of a local seal (changed and untracked paths outside `.orchestrator/`): a dirty clone is answered `{ status: 409, error: "dirtyWorktree", files }`;
-- `git push --force origin HEAD:refs/heads/<ORCH_BRANCH>`, without a prompt and killed after 60 seconds: a failed push is answered `{ status: 503, error: "pushFailed", message }`. The push is forced because the launch branch belongs to the launch alone and an agent may rebase it after a `baseMoved` notice; `HEAD` is pushed whatever branch the clone has checked out;
-- the full sha of `HEAD`, added to the body as `sealedSha`.
-
-A git command that fails in the dirty check or while reading `HEAD` SHALL be answered `{ status: 500, error: "gitFailed", message }`. After any of these refusals nothing is sent to the daemon, so the same call may be sent again with the same `seq`. The `report` tool's input schema SHALL NOT declare `sealedSha`: the façade always names the tip it pushed. A `report` with kind `fail` and the other four tools SHALL be forwarded as without remote mode. In remote mode the `report` tool's description SHALL say that a submit needs committed work, that the tool pushes the branch to `origin` and names its tip, and that after a 409 or 503 answer the same call may be sent again with the same `seq`. The `--help` text SHALL name `ORCH_ACCESS`, `ORCH_WORKTREE` and `ORCH_BRANCH`.
-
-A runner whose CLI can treat an MCP server as optional or gate its tools behind approvals SHALL register the façade as required and with its tools pre-approved. For Codex this means `required=true`, plus the default and per-tool `approve` keys. OpenCode has no `required` analog (a server that cannot start is a warning and the run continues); its tools are named `orchestrator_<tool>` and are pre-approved by the permission rule `"orchestrator_*": "allow"`.
-
-A runner whose CLI times out MCP calls SHALL size the tool timeout above `maxWaitMs`, so a `block` long-poll is not cut: Codex through `tool_timeout_sec`, OpenCode through `mcp.orchestrator.timeout` (its default is 60 000 ms).
 
 #### Scenario: Daemon restart during a call
 - **WHEN** the daemon is restarting while an agent calls the `report` tool
@@ -241,7 +217,7 @@ A runner whose CLI times out MCP calls SHALL size the tool timeout above `maxWai
 - **THEN** it exits 1 and stderr names the missing variable
 
 ### Requirement: Brief validation and remediation
-The brief template SHALL declare slots with a source, a `required` flag, and a minimum length, and the orchestrator SHALL validate a task against them when it becomes ready, or at ingest in strict mode. When validation fails, the configured policy SHALL either block the task with reason `insufficientSpec` listing the missing slots, or invoke the remediation hook to produce the missing content stored as a payload overlay keyed by graph revision. In `review` mode (default) the candidate SHALL land as `blocked` with kind `needsDecision` for a human to accept, edit, or reject; in `auto` mode it SHALL launch directly. v1 SHALL ship the hook interface with a default that blocks.
+The brief template SHALL declare slots with a source, a `required` flag, and a minimum length, and the orchestrator SHALL validate a task against them when it becomes ready, or at ingest in strict mode. When validation fails, the configured policy SHALL either block the task with reason `insufficientSpec` listing the missing slots, or invoke the remediation hook to produce the missing content stored as a payload overlay keyed by graph revision.
 
 #### Scenario: Missing acceptance criteria blocks
 - **WHEN** a ready task's payload has no acceptance criteria and the policy is `block`
@@ -252,7 +228,7 @@ The brief template SHALL declare slots with a source, a `required` flag, and a m
 - **THEN** the task is `blocked` with kind `needsDecision` carrying the candidate, and unblock applies it to the payload overlay
 
 ### Requirement: Inbox notices for health
-The inbox SHALL deliver notices of kind `stuck` with `idleMs` and a `message`, `nudge` with the operator's `message`, `baseMoved` with the new integration `head` and the `files` its commit touched, and `payloadChanged` with the new graph `rev`. The brief's workspace section SHALL state that such notices may arrive in the inbox, name the four kinds, and tell the agent to check `inbox` after long steps. The brief SHALL state that merging into, pushing to, or checking out the integration branch is not allowed. Under the `agent` commit policy it SHALL state that rebasing the launch branch onto the integration head is allowed. Under `daemon` it SHALL instead state that the orchestrator rebases the branch onto the integration head at verification.
+The inbox SHALL deliver notices of kind `stuck` with `idleMs` and a `message`, `nudge` with the operator's `message`, `baseMoved` with the new integration `head` and the `files` its commit touched, and `payloadChanged` with the new graph `rev`. The brief's workspace section SHALL state that such notices may arrive in the inbox, name the four kinds, and tell the agent to check `inbox` after long steps.
 
 #### Scenario: Nudge reaches the agent on its next inbox call
 - **WHEN** an operator nudges a running task with "commit what you have"
@@ -267,7 +243,7 @@ The inbox SHALL deliver notices of kind `stuck` with `idleMs` and a `message`, `
 - **THEN** it names the four notice kinds, forbids merging into, pushing to, or checking out the integration branch, does not say "You may rebase", and says the orchestrator rebases the branch at verification
 
 ### Requirement: Revision context in the brief
-When a task is relaunched after reopen, uncancel, or a cascade reset, its brief SHALL carry a `revision` context with `cause` of `reopened` or `upstreamReopened`, `upstream` naming the reopened task when the cause is `upstreamReopened`, `priorLaunchId`, `priorBranch`, and, when they exist, `priorPublishedSha` and `priorReportSummary`. The brief SHALL state that the prior published commit remains on the integration branch and is contained in `baseSha`, and SHALL instruct the agent to revise the prior work rather than redo it. The context SHALL be stored on the overlay entry at reset and cleared when the launch goes live, like other attempt context.
+When a task is relaunched after reopen, uncancel, or a cascade reset, its brief SHALL carry a `revision` context with `cause` of `reopened` or `upstreamReopened`, `upstream` naming the reopened task when the cause is `upstreamReopened`, `priorLaunchId`, `priorBranch`, and, when they exist, `priorPublishedSha` and `priorReportSummary`.
 
 #### Scenario: Cascade dependent is briefed to revise
 - **WHEN** T2 was published at sha P with summary S and is reset by a cascade reopen of T1
@@ -278,7 +254,7 @@ When a task is relaunched after reopen, uncancel, or a cascade reset, its brief 
 - **THEN** T2's next brief carries `revision` with `priorBranch` `task/T2/l1` and no `priorPublishedSha`
 
 ### Requirement: Proposals in the report
-The submit report MAY carry `proposals`, a list of `{ title, description, acceptanceCriteria, deps?, scope?, labels? }` where `title`, `description`, and at least one acceptance criterion are required and every id in `deps` MUST name a node in the launch's graph revision. A report that violates this SHALL be answered 400 as malformed and the task SHALL stay `running`. `followUps` SHALL remain free text. When the report is accepted each proposal SHALL be stored as pending with id `<taskId>-p<n>`, where `n` counts the task's proposals from one, and the orchestrator SHALL NOT add any node to the graph on its own.
+The submit report MAY carry `proposals`, a list of `{ title, description, acceptanceCriteria, deps?, scope?, labels? }` where `title`, `description`, and at least one acceptance criterion are required and every id in `deps` MUST name a node in the launch's graph revision. A report that violates this SHALL be answered 400 as malformed and the task SHALL stay `running`. `followUps` SHALL remain free text.
 
 #### Scenario: Proposals stored pending
 - **WHEN** T2's submit report carries two valid proposals
@@ -304,7 +280,7 @@ When a compatible reload changes the `payload` of a task whose status is `runnin
 - **THEN** the new brief carries the edited description
 
 ### Requirement: Worker access
-A worker that holds a claimed launch SHALL use the same five operations with the launch token, either directly against the loopback API or through the token-scoped operator tools, and SHALL be subject to the same scoping, deduplication, sealing, and fencing rules as a spawned agent. The daemon SHALL NOT spawn the per-launch MCP façade for a claimed launch. A worker loop that runs the agent as its own process, such as the Codex work loop, MAY register the façade for that process the way the runner of that kind registers it for a spawned launch, with the launch's identity in the same env file, so that the agent sees the same tool names. The fallback file SHALL NOT be available to workers: the orchestrator reads `.orchestrator/report.json` only when it finds a launch's process dead, and a claimed launch has no process the daemon watches, so a worker that cannot reach the API SHALL keep retrying until the daemon answers or its lease expires. The brief SHALL be the same document for spawned and claimed launches, and the worker instructions SHALL override its fallback-file guidance.
+A worker that holds a claimed launch SHALL use the same five operations with the launch token, either directly against the loopback API or through the token-scoped operator tools, and SHALL be subject to the same scoping, deduplication, sealing, and fencing rules as a spawned agent.
 
 #### Scenario: Worker submits through the operator server
 - **WHEN** a worker commits in the worktree and calls `launch_report` with kind `submit` and its token
@@ -323,7 +299,7 @@ A worker that holds a claimed launch SHALL use the same five operations with the
 - **THEN** the response is 401 and nothing changes
 
 ### Requirement: Interrupted context in the brief
-When a task is relaunched after a release with `keep`, its brief SHALL carry an `interrupted` context with `priorLaunchId`, `priorBranch`, `headSha`, `reason`, and `wipCommit` when uncommitted changes were preserved. The brief SHALL state that the previous launch was interrupted for that reason, that the branch holds its work so far at that head and that the work-in-progress commit, when present, holds changes the previous worker had not committed, and SHALL instruct the agent to continue from that branch by merging or cherry-picking it onto the new base, or to inspect it and start over, and to squash the work-in-progress commit before submitting. The context SHALL be stored on the overlay entry at the release and cleared when the next launch goes live, like other attempt context, and SHALL coexist with a question and answer when the release happened while `waiting`.
+When a task is relaunched after a release with `keep`, its brief SHALL carry an `interrupted` context with `priorLaunchId`, `priorBranch`, `headSha`, `reason`, and `wipCommit` when uncommitted changes were preserved.
 
 #### Scenario: Brief names the kept branch
 - **WHEN** T2's launch `L1` on branch `task/T2/l1` was released with `keep` at head H with a work-in-progress commit W and T2 is relaunched
@@ -338,7 +314,7 @@ When a task is relaunched after a release with `keep`, its brief SHALL carry an 
 - **THEN** its brief carries the question, the answer, and `interrupted`
 
 ### Requirement: Check command and tool rules in the brief
-The brief's definition of done SHALL name the effective check command at the time the brief is composed. When `checkCommand` is unresolved the brief SHALL say that no check command is configured for the repository yet, that the operator is being asked, and that the agent must run the project's documented test suite before submitting. For spawned launches whose runner carries an allow list (the Claude Code runner), the brief's workspace section SHALL list the Bash rules in force, stating that a worker holding a claimed launch runs under its own permissions instead. It SHALL tell the agent to run commands from the worktree root without `cd`, because every part of a compound command must match a rule on its own. It SHALL tell the agent to ask with a `needsAccess` question naming the command when it needs one the rules do not cover, rather than retrying it. For a `codex` launch the workspace section SHALL carry no Bash rules. It SHALL instead name the Codex sandbox mode and say that approvals are disabled, so a command the sandbox refuses fails with `Operation not permitted` and is not approved at runtime. It SHALL tell the agent not to retry such a command but to ask with a `needsAccess` question naming it. It SHALL also say that the operator can run the command or change `runner.codex.sandbox` for the next launch. For an `opencode` launch the workspace section SHALL carry no Bash rules either. Under `runner.opencode.permission: derived` it SHALL list the bash patterns the runner's ruleset allows (`git *` and the patterns derived from the same rules the OpenCode runner is given: `Bash(x:*)` as `x *`, `Bash(x)` as `x`), next to the file tools and the orchestrator tools, and say every other command is rejected. Under `allow` it SHALL say every command and tool is allowed and list no patterns. Both forms SHALL state that a worker holding a claimed launch runs under its own permissions instead. A retry brief's runner diagnosis line SHALL name permission rules rather than a sandbox among the causes outside the worktree.
+The brief's definition of done SHALL name the effective check command at the time the brief is composed. When `checkCommand` is unresolved the brief SHALL say that no check command is configured for the repository yet, that the operator is being asked, and that the agent must run the project's documented test suite before submitting.
 
 #### Scenario: Detected command in the brief
 - **WHEN** a brief is composed for a spawned claude-code launch in a repository whose detected check command is `npm test`
@@ -368,14 +344,7 @@ The brief's definition of done SHALL name the effective check command at the tim
 A launch the daemon spawns SHALL inherit the daemon's environment with these changes:
 - `ORCH_HOME` replaced by a directory inside the run's data directory;
 - `ORCH_URL`, `ORCH_REPO`, `ORCH_DATA_DIR` and `ORCH_RUN_ID` removed on every store kind;
-- while the daemon withholds (specs/state-backend "Withholding follows the store": always on a Postgres store), `DATABASE_URL`, `DATABASE_URL_FILE`, every libpq connection variable named in `LIBPQ_VARS`, and every variable whose value is the resolved store URL removed (specs/state-backend "No store URL in child environments"), for every runner kind. While it does not withhold (a SQLite store with no Postgres input), they are passed unchanged;
 - the agent variables `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_API`, `ORCH_RETRY_WINDOW_MS`, `ORCH_TASK_ID`, and `ORCH_WORKTREE` added.
-
-The `env` block of a codex or opencode claim SHALL carry the same changes. A removed name appears there as an empty value, which the work loop deletes. A name that is passed does not appear there at all, so the worker's own value stays.
-
-An orchestrator client the agent runs therefore SHALL find no run under its `ORCH_HOME` and SHALL NOT be able to start, stop, or list a daemon of the user's. `ORCH_API` SHALL remain set so the shim reaches the agent's own daemon. What a spawned agent running as the daemon's user can still reach of the store's credentials is stated in specs/state-backend "Store credentials a child can still reach".
-
-An MCP server that the agent's CLI spawns SHALL be assumed to receive only what the runner forwards to it explicitly, unless the CLI is known to pass its whole environment on. Codex passes the server a fixed set of variables plus its `env` entries. OpenCode passes the MCP child its whole environment plus the server's `environment`, so the OpenCode runner SHALL forward nothing: it puts the shim's variables in the agent environment, registers the server with no `environment` block, and keeps the token off argv and out of every file. The runners SHALL build the shim's variables through one `shimEnv` helper.
 
 #### Scenario: Agent sees an isolated home
 - **WHEN** a spawned agent's command writes `$ORCH_HOME` to a file
@@ -473,7 +442,7 @@ A parked launch that the daemon spawns once its claim window elapses SHALL leave
 - **THEN** the read does not answer until its own writes are durable
 
 ### Requirement: Inbox notices handed out once
-An inbox read SHALL take the notices the launch holds, wait until everything committed so far is durable, remove only the notices it took, and wait for that removal to be durable. A notice queued during the wait SHALL stay for the next read. Inbox reads of one launch SHALL run one at a time, so each notice is handed out once. A notice SHALL be removed from the launch only when its answer goes to a caller whose connection is still open. When the caller is gone after the first wait, the read SHALL remove nothing. When the caller is gone after the removal's wait, the read SHALL put the removed notices back at the front of the launch's notices, ahead of any queued meanwhile. Either way the next read SHALL hand them out.
+An inbox read SHALL take the notices the launch holds, wait until everything committed so far is durable, remove only the notices it took, and wait for that removal to be durable. A notice queued during the wait SHALL stay for the next read. Inbox reads of one launch SHALL run one at a time, so each notice is handed out once.
 
 #### Scenario: Notice queued during the wait
 - **WHEN** a second nudge is queued while an inbox read waits for durability
@@ -560,7 +529,7 @@ As an exception to the `needsAccess` rule of "Check command and tool rules in th
 - **THEN** the worker gets the brief composed when the launch was prepared, with its bullet unchanged
 
 ### Requirement: Limit change notice
-When an accepted configuration patch changes the value in force of `budgets.maxLaunchMs`, `health.stuckAfterMs` or `health.stuckFailAfterMs`, the daemon SHALL queue one inbox notice to each affected launch: `{ kind: 'nudge', source: 'config', message, changed, limits }`. `changed` SHALL list the dotted names of the limits whose value in force changed. `limits` SHALL hold the three values now in force, nested like the config file: `{ budgets: { maxLaunchMs }, health: { stuckAfterMs, stuckFailAfterMs } }`. `message` SHALL state, for each changed limit, the old and the new value in milliseconds, SHALL say that 0 means the limit is off, and for the time budget SHALL give the launch's elapsed time, with time the daemon did not run left out as at the time budget check. The affected launches SHALL be every launch with status `live` or `launching` that holds the lease of a `running` or `waiting` task, and every launch with status `claimable`. The notices SHALL be queued in the store transaction that writes the override document, each with its `launch.notice` event; no other operator event SHALL be appended. A patch that changes no value in force of the three limits, a patch of any other key, and a refused patch SHALL queue nothing. The notice SHALL be delivered once, like any notice, and nothing in the daemon SHALL depend on it being read.
+When an accepted configuration patch changes the value in force of `budgets.maxLaunchMs`, `health.stuckAfterMs` or `health.stuckFailAfterMs`, the daemon SHALL queue one inbox notice to each affected launch: `{ kind: 'nudge', source: 'config', message, changed, limits }`. `changed` SHALL list the dotted names of the limits whose value in force changed.
 
 #### Scenario: A raised time budget reaches each live launch
 - **WHEN** the operator sets `budgets.maxLaunchMs` from 10000 to 20000 while launches run
@@ -604,3 +573,528 @@ The brief of a launch prepared while `prepareCommand` is set SHALL carry, in "De
 #### Scenario: Key unset
 - **WHEN** `prepareCommand` is unset
 - **THEN** the brief has no such bullet, `brief.json` has no `prepareCommand`, and the golden briefs are unchanged
+
+### Requirement: Brief validation and remediation: review and auto modes
+In `review` mode (default) the remediation hook's candidate SHALL land as `blocked` with kind `needsDecision` for a human to accept, edit, or reject; in `auto` mode it SHALL launch directly.
+
+#### Scenario: Auto-mode candidate launches
+- **WHEN** the policy is `remediate` in `auto` mode and the hook returns a candidate for the missing `acceptanceCriteria`
+- **THEN** the task is `running` without being blocked, and its brief's payload carries the candidate's `acceptanceCriteria"
+
+### Requirement: Brief validation and remediation: default hook
+v1 SHALL ship the remediation hook interface with a default that blocks.
+
+#### Scenario: Default hook blocks
+- **WHEN** the policy is `remediate`, no remediator is configured, and a ready task's payload has no acceptance criteria
+- **THEN** the default hook returns no candidate and the task is `blocked` with reason `insufficientSpec` listing `acceptanceCriteria`
+
+### Requirement: Inbox notices for health: integration branch rules
+The brief SHALL state that merging into, pushing to, or checking out the integration branch is not allowed. Under the `agent` commit policy the brief SHALL state that rebasing the launch branch onto the integration head is allowed. Under `daemon` the brief SHALL instead state that the orchestrator rebases the branch onto the integration head at verification.
+
+#### Scenario: Codex brief under agent commits allows rebasing
+- **WHEN** a brief is composed for a `codex` launch with `commitPolicy: agent`
+- **THEN** it forbids merging into, pushing to, or checking out the integration branch and says "You may rebase your launch branch onto it"
+
+### Requirement: Revision context in the brief: revise the prior work
+The brief that carries a `revision` context SHALL state that the prior published commit remains on the integration branch and is contained in `baseSha`, and SHALL instruct the agent to revise the prior work rather than redo it.
+
+#### Scenario: Reopened task told to revise
+- **WHEN** a brief is composed with a `revision` context of cause `upstreamReopened`, upstream T1 and `priorPublishedSha` P1, for a launch whose `baseSha` is B
+- **THEN** it says that upstream task T1 was reopened, that P1 remains on the integration branch and is contained in B, and "Revise the prior work rather than redoing it"
+
+### Requirement: Revision context in the brief: stored with the attempt context
+The `revision` context SHALL be stored on the overlay entry at reset and cleared when the launch goes live, like other attempt context.
+
+#### Scenario: Revision context kept until the launch goes live
+- **WHEN** a cascade reopen of T1 resets T1 and T2, and T1 is relaunched
+- **THEN** the reset stores `revision` on each task's entry, T1's new launch is briefed with it, and the entry carries no `revision` once that launch is live
+
+### Requirement: Proposals in the report: stored pending
+When the submit report is accepted each proposal SHALL be stored as pending with id `<taskId>-p<n>`, where `n` counts the task's proposals from one, and the orchestrator SHALL NOT add any node to the graph on its own.
+
+#### Scenario: Proposal ids and an unchanged graph file
+- **WHEN** a task T2 run from a graph file submits a report with two valid proposals and the report is accepted
+- **THEN** the pending proposals are `T2-p1` and `T2-p2`, two `proposal.created` events are recorded, and the graph file is byte for byte as before
+
+### Requirement: Worker access: no façade spawned for a claimed launch
+The daemon SHALL NOT spawn the per-launch MCP façade for a claimed launch. A worker loop that runs the agent as its own process, such as the Codex work loop, MAY register the façade for that process the way the runner of that kind registers it for a spawned launch, with the launch's identity in the same env file, so that the agent sees the same tool names.
+
+#### Scenario: Claimed launch has no process of the daemon's
+- **WHEN** a pull-mode launch is parked and a worker claims it
+- **THEN** the claim answers with the launch's token, worktree and brief, the launch is `live` with the worker and no pid, and the worker's `heartbeat` with the token is answered 200
+
+### Requirement: Worker access: no fallback file for workers
+The fallback file SHALL NOT be available to workers: the orchestrator reads `.orchestrator/report.json` only when it finds a launch's process dead, and a claimed launch has no process the daemon watches, so a worker that cannot reach the API SHALL keep retrying until the daemon answers or its lease expires.
+
+#### Scenario: Claimed launch survives a daemon restart
+- **WHEN** the daemon restarts while a worker holds a claimed launch
+- **THEN** the launch is still `live` with no pid and the worker's next call with its token is answered 200; a launch whose worker stops calling expires with reason `leaseExpired`
+
+### Requirement: Worker access: one brief for spawned and claimed launches
+The brief SHALL be the same document for spawned and claimed launches, and the worker instructions SHALL override the brief's fallback-file guidance.
+
+#### Scenario: Worker preamble overrides the fallback file
+- **WHEN** the Codex work loop composes its preamble for a claimed launch
+- **THEN** the preamble names the launch and task, the 401 rule, and says "Never write a fallback report file"
+
+### Requirement: Interrupted context in the brief: continue from the kept branch
+A brief carrying an `interrupted` context SHALL state that the previous launch was interrupted for its `reason`, that the branch holds its work so far at `headSha` and that the work-in-progress commit, when present, holds changes the previous worker had not committed, and SHALL instruct the agent to continue from that branch by merging or cherry-picking it onto the new base, or to inspect it and start over, and to squash the work-in-progress commit before submitting.
+
+#### Scenario: Brief tells the agent to continue or start over
+- **WHEN** a brief is composed with an `interrupted` context naming launch L1, branch `task/T2/l1`, head H1, work-in-progress commit W1 and reason `sessionEnded`
+- **THEN** it says that launch L1 was interrupted (`sessionEnded`), that `task/T2/l1` holds the work so far at H1, that W1 is a work-in-progress commit, and to squash the work-in-progress commit before submitting
+
+### Requirement: Interrupted context in the brief: stored with the attempt context
+The `interrupted` context SHALL be stored on the overlay entry at the release and cleared when the next launch goes live, like other attempt context, and SHALL coexist with a question and answer when the release happened while `waiting`.
+
+#### Scenario: Kept release stores the context until the next claim
+- **WHEN** a claimed launch of T1 that made progress is released with `keep` and T1's next launch is claimed
+- **THEN** T1's entry carries `interrupted` with the prior launch, branch, head, work-in-progress commit and reason after the release, the parked launch's brief carries it, and the entry carries no context once the next launch is claimed
+
+### Requirement: Check command and tool rules in the brief: Claude Code Bash rules
+For spawned launches whose runner carries an allow list (the Claude Code runner), the brief's workspace section SHALL list the Bash rules in force, stating that a worker holding a claimed launch runs under its own permissions instead.
+
+#### Scenario: Bash rules and the worker's own permissions
+- **WHEN** a brief is composed for a spawned launch whose allow list holds `Bash(git:*)`, `Bash(npm test:*)` and `Bash(node:*)`
+- **THEN** its workspace section says these Bash rules are in force, names the three rules, and says a worker holding a claimed launch runs under its own permissions
+
+### Requirement: Check command and tool rules in the brief: Claude Code command guidance
+The brief's workspace section for a spawned launch whose runner carries an allow list SHALL tell the agent to run commands from the worktree root without `cd`, because every part of a compound command must match a rule on its own. The brief's workspace section for a spawned launch whose runner carries an allow list SHALL tell the agent to ask with a `needsAccess` question naming the command when it needs one the rules do not cover, rather than retrying it.
+
+#### Scenario: Commands without cd and a needsAccess question
+- **WHEN** a brief is composed for a spawned launch whose allow list holds `Bash(npm test:*)`
+- **THEN** its workspace section tells the agent to run commands without `cd` and to ask with a `needsAccess` question naming the command
+
+### Requirement: Check command and tool rules in the brief: Codex sandbox
+For a `codex` launch the workspace section SHALL carry no Bash rules. The workspace section of a `codex` launch SHALL instead name the Codex sandbox mode and say that approvals are disabled, so a command the sandbox refuses fails with `Operation not permitted` and is not approved at runtime.
+
+#### Scenario: Codex brief names its sandbox and carries no Bash rules
+- **WHEN** a brief is composed for a `codex` launch whose sandbox is `danger-full-access`
+- **THEN** its workspace section says the agent runs under the Codex sandbox `danger-full-access` with approvals disabled, and `brief.json` carries no `allowedTools`
+
+### Requirement: Check command and tool rules in the brief: Codex refused command
+The workspace section of a `codex` launch SHALL tell the agent not to retry a command the sandbox refuses but to ask with a `needsAccess` question naming it. The workspace section of a `codex` launch SHALL also say that the operator can run the command or change `runner.codex.sandbox` for the next launch.
+
+#### Scenario: Codex brief names the way out of a refusal
+- **WHEN** a brief is composed for a `codex` launch whose sandbox is `workspace-write`
+- **THEN** its workspace section says "Do not retry it; ask with a `needsAccess` question naming the command." and that the operator can run it for you, or change `runner.codex.sandbox` for your next launch
+
+### Requirement: Check command and tool rules in the brief: OpenCode derived patterns
+For an `opencode` launch the workspace section SHALL carry no Bash rules either. Under `runner.opencode.permission: derived` the workspace section of an `opencode` launch SHALL list the bash patterns the runner's ruleset allows (`git *` and the patterns derived from the same rules the OpenCode runner is given: `Bash(x:*)` as `x *`, `Bash(x)` as `x`), next to the file tools and the orchestrator tools, and say every other command is rejected.
+
+#### Scenario: OpenCode derived brief lists the patterns and the tools
+- **WHEN** a brief is composed for an `opencode` launch under `permission: derived` with the bash patterns `npm test *` and `git status` and the check command `npm test`
+- **THEN** its workspace section says the rules allow the file tools (read, glob, grep, list, edit, write), the orchestrator tools, and the bash commands `npm test *`, `git status` and `npm test`, says every other command is denied, and does not mention a sandbox
+
+### Requirement: Check command and tool rules in the brief: OpenCode allow and claimed launches
+Under `allow` the workspace section of an `opencode` launch SHALL say every command and tool is allowed and list no patterns. Both forms of the `opencode` workspace section SHALL state that a worker holding a claimed launch runs under its own permissions instead.
+
+#### Scenario: OpenCode brief under allow
+- **WHEN** a brief is composed for an `opencode` launch under `permission: allow`
+- **THEN** its workspace section says the rules allow every command and every tool, lists no bash commands, and says a worker holding a claimed launch runs under its own permissions instead
+
+### Requirement: Check command and tool rules in the brief: OpenCode retry diagnosis
+An `opencode` launch's retry brief's runner diagnosis line SHALL name permission rules rather than a sandbox among the causes outside the worktree.
+
+#### Scenario: OpenCode retry brief names permission rules
+- **WHEN** an `opencode` launch's brief is composed after a runner failure with a diagnosis
+- **THEN** its diagnosis line lists "(model, login, MCP setup, permission rules)" among the causes outside the worktree, where the brief of another runner kind names a sandbox
+
+### Requirement: Agent environment: withheld store variables
+A launch the daemon spawns SHALL inherit the daemon's environment with these changes:
+- while the daemon withholds (specs/state-backend "Withholding follows the store": always on a Postgres store), `DATABASE_URL`, `DATABASE_URL_FILE`, every libpq connection variable named in `LIBPQ_VARS`, and every variable whose value is the resolved store URL removed (specs/state-backend "No store URL in child environments"), for every runner kind.
+
+#### Scenario: Codex claim env blanks the store variables
+- **WHEN** a daemon that withholds has `DATABASE_URL`, `DATABASE_URL_FILE` and `PGHOST` set, and a codex or opencode worker claims a launch
+- **THEN** the claim's `env` block and the daemon's agent environment for that launch give each of them an empty value
+
+### Requirement: Agent environment: store variables passed without withholding
+A launch the daemon spawns SHALL inherit the daemon's environment with these changes:
+- while the daemon does not withhold (a SQLite store with no Postgres input), `DATABASE_URL`, `DATABASE_URL_FILE`, every libpq connection variable named in `LIBPQ_VARS`, and every variable whose value is the resolved store URL are passed unchanged.
+
+#### Scenario: Claim env without withholding
+- **WHEN** withholding is off and a codex or opencode worker claims a launch
+- **THEN** the claim's `env` block and the daemon's agent environment have no key `DATABASE_URL`, `DATABASE_URL_FILE` or any name in `LIBPQ_VARS`, and still give `ORCH_RUN_ID` and `ORCH_URL` an empty value
+
+### Requirement: Agent environment: claim env block
+The `env` block of a codex or opencode claim SHALL carry the same changes as the environment a launch the daemon spawns inherits. A removed name appears there as an empty value, which the work loop deletes. A name that is passed does not appear there at all, so the worker's own value stays.
+
+#### Scenario: Codex claim carries the agent environment
+- **WHEN** a codex worker claims a launch under `commitPolicy: daemon`
+- **THEN** the claim's `codex.env` holds `ORCH_TOKEN` equal to the claim's token and `ORCH_COMMIT_POLICY` `daemon`, and the work loop deletes every name whose value there is empty before it starts the agent
+
+### Requirement: Agent environment: no run of the user's
+An orchestrator client the agent runs therefore SHALL find no run under its `ORCH_HOME` and SHALL NOT be able to start, stop, or list a daemon of the user's. What a spawned agent running as the daemon's user can still reach of the store's credentials is stated in specs/state-backend "Store credentials a child can still reach".
+
+#### Scenario: Agent environment points at an isolated home
+- **WHEN** the daemon composes the agent environment of a launch
+- **THEN** `ORCH_HOME` names a directory inside the run's data directory and `ORCH_URL`, `ORCH_REPO`, `ORCH_DATA_DIR` and `ORCH_RUN_ID` are empty values, which the runner deletes
+
+### Requirement: Agent environment: ORCH_API kept
+`ORCH_API` SHALL remain set so the shim reaches the agent's own daemon.
+
+#### Scenario: Agent environment names the daemon's API
+- **WHEN** the daemon composes the agent environment of launch L
+- **THEN** `ORCH_API` is the daemon's API base URL, beside `ORCH_LAUNCH_ID` L, `ORCH_TOKEN`, `ORCH_RETRY_WINDOW_MS`, `ORCH_TASK_ID` and `ORCH_WORKTREE`
+
+### Requirement: Agent environment: MCP server environment
+An MCP server that the agent's CLI spawns SHALL be assumed to receive only what the runner forwards to it explicitly, unless the CLI is known to pass its whole environment on. Codex passes the server a fixed set of variables plus its `env` entries.
+
+#### Scenario: Codex shim reads its variables from the env file
+- **WHEN** the Codex runner prepares a launch
+- **THEN** it writes the shim's variables to the launch's env file with mode 0600 and registers the shim with `--orch-env-file` naming that file, and the shim started that way forwards calls with the token from the file
+
+### Requirement: Agent environment: OpenCode runner forwards nothing
+OpenCode passes the MCP child its whole environment plus the server's `environment`, so the OpenCode runner SHALL forward nothing: it puts the shim's variables in the agent environment, registers the server with no `environment` block, and keeps the token off argv and out of every file.
+
+#### Scenario: OpenCode token only in the environment
+- **WHEN** the OpenCode runner spawns a launch
+- **THEN** the per-launch config registers the `orchestrator` server with no `environment` block, the config and argv do not hold the token, and the agent's environment does
+
+### Requirement: Agent environment: one shimEnv helper
+The runners SHALL build the shim's variables through one `shimEnv` helper.
+
+#### Scenario: Runners import shimEnv
+- **WHEN** the sources of the Claude Code, Codex and OpenCode runners are read
+- **THEN** each imports `shimEnv` from `./shim-command.js` and builds the shim's variables with it
+
+### Requirement: Inbox notices handed out once: caller gone
+A notice SHALL be removed from the launch only when its answer goes to a caller whose connection is still open. When the caller is gone after the first wait, the read SHALL remove nothing. When the caller is gone after the removal's wait, the read SHALL put the removed notices back at the front of the launch's notices, ahead of any queued meanwhile. Either way the next read SHALL hand them out.
+
+#### Scenario: Abandoned read hands out nothing
+- **WHEN** an inbox read is waiting for durability and its caller closes the connection
+- **THEN** the launch still holds the notice, and the next read answers with it and a read after that answers with none
+
+### Requirement: Limit change notice: limits field
+`limits` SHALL hold the three values now in force, nested like the config file: `{ budgets: { maxLaunchMs }, health: { stuckAfterMs, stuckFailAfterMs } }`.
+
+#### Scenario: Values in force under limits
+- **WHEN** the operator sets `budgets.maxLaunchMs` to 0 while `health.stuckAfterMs` is 1000 and `health.stuckFailAfterMs` is 3000
+- **THEN** the notice's `limits` is `{ budgets: { maxLaunchMs: 0 }, health: { stuckAfterMs: 1000, stuckFailAfterMs: 3000 } }`
+
+### Requirement: Limit change notice: message
+`message` SHALL state, for each changed limit, the old and the new value in milliseconds, SHALL say that 0 means the limit is off, and for the time budget SHALL give the launch's elapsed time, with time the daemon did not run left out as at the time budget check.
+
+#### Scenario: Message with old and new values
+- **WHEN** the operator changes `budgets.maxLaunchMs` from 10000 to 20000 for a live launch that has run 2000ms
+- **THEN** the notice's message holds `budgets.maxLaunchMs 10000ms -> 20000ms (this launch has run 2000ms of it)` and `0 means the limit is off`, and names no `health.` limit
+
+### Requirement: Limit change notice: affected launches
+The affected launches SHALL be every launch with status `live` or `launching` that holds the lease of a `running` or `waiting` task, and every launch with status `claimable`.
+
+#### Scenario: Ended launch gets no notice
+- **WHEN** T1's launch has ended after its submit, T5's task is `waiting`, and the operator changes `health.stuckAfterMs`
+- **THEN** T5's launch holds one notice naming `health.stuckAfterMs`, and T1's launch holds none and has no `launch.notice` event
+
+### Requirement: Limit change notice: queued with the override document
+The notices SHALL be queued in the store transaction that writes the override document, each with its `launch.notice` event; no other operator event SHALL be appended.
+
+#### Scenario: One launch.notice event per notice
+- **WHEN** a patch changes `budgets.maxLaunchMs` while several launches are live
+- **THEN** each live launch has exactly one `launch.notice` event with payload `{ kind: 'nudge' }`, and no other operator event than `operator.config` is appended for the patch
+
+### Requirement: Limit change notice: patches that queue nothing
+A patch that changes no value in force of the three limits, a patch of any other key, and a refused patch SHALL queue nothing.
+
+#### Scenario: An empty patch and values already in force
+- **WHEN** the operator sends an empty patch, or a patch that restates the three values already in force
+- **THEN** no launch gets a notice and no `launch.notice` event is appended
+
+### Requirement: Limit change notice: delivered once
+The notice SHALL be delivered once, like any notice, and nothing in the daemon SHALL depend on it being read.
+
+#### Scenario: A lowered limit applies whether or not the notice is read
+- **WHEN** the operator lowers `budgets.maxLaunchMs` below a live launch's elapsed time with `endLive` and the launch never calls `inbox`
+- **THEN** the next tick ends the launch for its time budget; a launch that does read its inbox gets the notice once and none on the next read
+
+### Requirement: Standalone brief: definition of done
+`brief.md` and `brief.json` SHALL contain:
+- the definition of done: under the `agent` commit policy, commit all work on the launch branch (a dirty worktree is refused with the file list; commit and resubmit); under `daemon`, leave the changes in the worktree, committed or not, because the orchestrator commits what is uncommitted when it accepts the report. In both cases: never merge or touch the integration branch, declare a no-op explicitly, and terminate after the report is accepted.
+
+#### Scenario: Definition of done by commit policy
+- **WHEN** a `claude-code` launch is briefed once under the `agent` commit policy and once under `daemon`
+- **THEN** the `agent` brief tells the agent to commit all work on its branch and says uncommitted or untracked files are rejected with 409 and the file list, the `daemon` brief instead says the orchestrator commits what is uncommitted when it accepts the report, and both say never to merge into the integration branch, to declare a no-op with `noChanges`, and to terminate once the report is accepted
+
+### Requirement: Standalone brief: OpenSpec change rule
+When the repository has an `openspec/` root (the launch worktree contains `openspec/`), for every runner kind and commit policy the brief's definition of done SHALL also say to record any spec change as an OpenSpec change directory `openspec/changes/<name>/` named after the task, with `proposal.md`, `tasks.md` and `specs/<capability>/spec.md` delta files holding `## ADDED|MODIFIED|REMOVED Requirements` sections with full `### Requirement:` blocks, validated with `openspec validate <name>`.
+
+#### Scenario: OpenSpec root detected in the worktree
+- **WHEN** a brief is composed for a launch whose worktree has no `openspec/` directory, and again after `openspec/` is created in that worktree
+- **THEN** the first brief has no change-directory rule and the second carries it in its Definition of done
+
+### Requirement: Standalone brief: OpenSpec specs not edited directly
+When the repository has an `openspec/` root (the launch worktree contains `openspec/`), for every runner kind and commit policy the brief's definition of done SHALL also say not to edit `openspec/specs/` directly.
+
+#### Scenario: Rule against direct spec edits for every kind
+- **WHEN** a `claude-code` brief under `agent`, a `codex` brief under `daemon` and an `opencode` brief under `allow` are composed for a repository with an `openspec/` root
+- **THEN** each carries the change-directory rule, whose text says "Do not edit `openspec/specs/` directly"
+
+### Requirement: Standalone brief: no OpenSpec rule without a root
+Without an `openspec/` root the brief SHALL NOT carry the OpenSpec change-directory item of the definition of done.
+
+#### Scenario: Golden briefs carry no OpenSpec rule
+- **WHEN** a `claude-code`, `codex` or `opencode` brief is composed for a worktree without an `openspec/` root
+- **THEN** the brief does not mention `openspec`
+
+### Requirement: Standalone brief: attempt context
+`brief.md` and `brief.json` SHALL contain:
+- attempt context when present: the prior failure report, verifier output, conflict details naming the files and the sibling that landed, and the human's answer.
+
+#### Scenario: Answer carried into the next launch
+- **WHEN** a task's question times out after `maxWait`, the task is `blocked`, and a human answers it
+- **THEN** a new launch is made whose brief carries the question asked earlier and the human's answer
+
+### Requirement: Standalone brief: attempt context by commit policy
+Under `agent`, the conflict, interruption, and revision texts of the brief SHALL tell the agent to rebase, merge or cherry-pick the prior branch, squash a work-in-progress commit, and commit the delta. Under `daemon` they tell it instead to inspect the prior branch with `git show`/`git diff` and reapply the changes as file edits.
+
+#### Scenario: Conflict, interruption and revision under each policy
+- **WHEN** a launch is briefed with a carry holding a conflict on its previous branch, an interruption with a work-in-progress commit and a revision, once under the `agent` commit policy and once under `daemon`
+- **THEN** the `agent` brief says to rebase that branch or start over, to squash the work-in-progress commit and to commit the delta, and the `daemon` brief says none of these and tells the agent to reapply the prior branch's changes as file edits
+
+### Requirement: Standalone brief: reporting facts
+`brief.md` and `brief.json` SHALL contain:
+- the API base URL, the launch token, the fallback report path, and the instruction to stop immediately on a 401.
+
+#### Scenario: Reporting section and brief.json
+- **WHEN** a local launch is briefed
+- **THEN** the Reporting section names the API at the launch's `/v1/launches/<launchId>/...` path, says to write the report to the fallback path when the API fails and to stop immediately when a call returns 401, and `brief.json` carries `apiBaseUrl`, `token` and `fallbackPath`
+
+### Requirement: Standalone brief: remote brief names no daemon path
+A remote launch (`access: remote`) has no worktree: its brief is kept on the launch row (see specs/remote-workspace). The text the orchestrator writes into a remote brief's workspace and reporting sections SHALL name no path on the daemon's machine (not the run directory, the worktrees root or the daemon's clone) and no loopback address; text carried verbatim (the payload, dependency reports, verifier output) is not rewritten.
+
+#### Scenario: Remote brief kept on the launch row
+- **WHEN** a remote launch is admitted
+- **THEN** its row has `access` `remote`, an empty `worktree` and the brief's markdown and JSON, and neither the markdown nor the JSON contains the run directory or `127.0.0.1`
+
+### Requirement: Standalone brief: remote workspace section
+A remote brief's workspace section SHALL instead name the clone (the current directory, a clone of the repository the worker loop made), the branch, the base commit and the integration branch.
+
+#### Scenario: Remote workspace lines
+- **WHEN** a remote launch without an interrupted carry is briefed
+- **THEN** its Workspace section has a `Clone:` line naming the current directory, a `Branch:` line saying the worker loop creates the branch at the base commit, `Base commit:` and `Integration branch:` lines and a `Submit:` line, and no `Worktree:` line
+
+### Requirement: Standalone brief: remote submit line
+A remote brief's workspace section SHALL say how work is submitted: commit all work on the branch; `report` with kind submit through the `orchestrator` MCP server's tool pushes the branch to `origin` and names the pushed commit; an agent that calls the API itself first runs `git push origin <branch>` and sends the tip's full sha as `sealedSha`; the orchestrator reads the work from `origin`, not from the clone.
+
+#### Scenario: Remote submit line
+- **WHEN** a remote launch is briefed
+- **THEN** its `Submit:` line says to commit all work on the launch branch, that the `report` tool of the `orchestrator` MCP server called with kind submit pushes the branch to `origin` and names the pushed commit, that an agent calling the API itself first runs `git push origin <branch>` and sends the tip's full sha as `sealedSha`, and that the orchestrator reads the work from `origin`, not from the clone
+
+### Requirement: Standalone brief: remote API base URL and fallback path
+A remote brief's API base URL SHALL be `apiBaseUrl` (without a trailing slash), never the bind address, and its fallback report path SHALL be the relative path `.orchestrator/report.json`, which the brief says is relative to the root of the clone; `brief.json` SHALL carry the same branch, base commit, API base URL and fallback path.
+
+#### Scenario: Trailing slash dropped
+- **WHEN** a remote run's `apiBaseUrl` ends with `/` and a remote launch is briefed
+- **THEN** the brief names the API as `apiBaseUrl` without the trailing slash followed by `/v1/launches/<launchId>/...`, says to write the report to `.orchestrator/report.json`, relative to the root of the clone, and `brief.json` has `apiBaseUrl` without the slash and `fallbackPath` `.orchestrator/report.json`
+
+### Requirement: Standalone brief: remote brief after an interruption
+For a carry holding `interrupted`, the remote brief SHALL say that the branch starts at `carry.interrupted.headSha` (the worker loop creates it there), not at the base commit, and SHALL NOT tell the agent to merge or cherry-pick the prior branch onto its base.
+
+#### Scenario: Interrupted remote brief without the merge text
+- **WHEN** a remote launch whose task's carry holds `interrupted` with a head sha and a work-in-progress commit is briefed
+- **THEN** the `Branch:` line says the worker loop creates the branch at that head sha, the context says to squash the work-in-progress commit before submitting, the brief does not say to merge or cherry-pick the prior branch onto the base, and `brief.json`'s `context` carries the interrupted head sha
+
+### Requirement: Standalone brief: remote definition of done
+Whether the remote brief carries the OpenSpec change rule SHALL follow whether the daemon's clone has an `openspec/` root. The commit-policy lines of the definition of done SHALL be those of `agent`, since a remote launch never has policy `daemon`, and the prepare-command item SHALL NOT appear, since a remote run has no `prepareCommand`. A local launch's brief SHALL be unchanged by the rules of a remote brief.
+
+#### Scenario: Remote run with a prepare command refused
+- **WHEN** a configuration with `runner.access: remote` sets `prepareCommand`, or gives the default runner kind the `daemon` commit policy
+- **THEN** the remote run is refused naming `prepareCommand must be unset` or the commit policy, so a remote brief never carries the prepare-command bullet or the `daemon` lines
+
+#### Scenario: Local brief keeps the worktree text
+- **WHEN** a launch without `access: remote` is briefed
+- **THEN** the brief names the worktree and the absolute fallback path and has no `git push origin` line
+
+### Requirement: Standalone brief: OpenCode reporting tools
+The agent sees the shim's tools under a name that depends on its CLI: `mcp__orchestrator__<tool>` under Claude Code and Codex, `orchestrator_<tool>` under OpenCode. An `opencode` brief's Reporting section SHALL name `orchestrator_heartbeat`, `orchestrator_report`, `orchestrator_block`, `orchestrator_inbox` and `orchestrator_log` and tell the agent to prefer them to calling the API from a command.
+
+#### Scenario: OpenCode Reporting section names its tools
+- **WHEN** an `opencode` launch is briefed
+- **THEN** its Reporting section names `orchestrator_heartbeat`, `orchestrator_report`, `orchestrator_block`, `orchestrator_inbox` and `orchestrator_log` and says to prefer them to calling the API from a command
+
+### Requirement: Standalone brief: Reporting text by kind
+The `claude-code` and `codex` briefs keep their Reporting text (the `codex` one is in "Codex brief reports through the MCP server"). An `opencode` brief's Reporting section SHALL keep the API and the fallback file, because no sandbox blocks loopback. An `opencode` brief's Reporting section SHALL NOT name `mcp__orchestrator__` tools.
+
+#### Scenario: OpenCode brief keeps the API
+- **WHEN** an `opencode` launch under `derived` is briefed
+- **THEN** its Reporting section has the `API:` line and the fallback file line, it does not say "Do not call the API from a command", and the brief does not contain `mcp__orchestrator__`
+
+### Requirement: Standalone brief: OpenCode permission rules
+An `opencode` brief's workspace section SHALL say that OpenCode permission rules are in force with nothing else confining the agent's commands. An `opencode` brief's workspace section SHALL NOT mention a sandbox.
+
+#### Scenario: Permission rules without a sandbox
+- **WHEN** an `opencode` launch is briefed under `derived` or under `allow`
+- **THEN** its Workspace section says it runs with OpenCode permission rules in force and nothing else confining its commands, and the brief does not contain the word sandbox
+
+### Requirement: Standalone brief: OpenCode deny error
+An `opencode` brief's workspace section SHALL say that a command a rule does not allow fails with "The user has specified a rule which prevents you from using this specific tool call." and is not approved at runtime. That is the `deny` error, which the model sees and continues past.
+
+#### Scenario: Deny wording in the brief
+- **WHEN** an `opencode` launch is briefed
+- **THEN** its Workspace section says that a command a rule does not allow fails with 'The user has specified a rule which prevents you from using this specific tool call.' and will not be approved at runtime
+
+### Requirement: Standalone brief: OpenCode needsAccess question
+An `opencode` brief's workspace section SHALL tell the agent not to retry a command a rule does not allow but to ask with a `needsAccess` question naming the command and continue with what it can, and say that the operator can run it or set `runner.opencode.permission` to `allow` for the next launch.
+
+#### Scenario: Ask instead of retrying
+- **WHEN** an `opencode` launch is briefed
+- **THEN** its Workspace section says not to retry a denied command, to ask with a `needsAccess` question naming the command and then continue with what it can, and that the operator can run it or set `runner.opencode.permission` to `allow` for the next launch
+
+### Requirement: Standalone brief: OpenCode derived patterns
+Under `derived` an `opencode` brief's workspace section SHALL list the file tools (read, glob, grep, list, edit, write), then the `bashPatterns` followed by the check command's patterns. An `opencode` brief's workspace section SHALL say that every other command is denied and that each command of a chain (`&&`, `;`, `|`) must match one of them on its own.
+
+#### Scenario: Patterns in order
+- **WHEN** an `opencode` launch under `derived` with `bashPatterns` `npm test *` and `git status` and the check command `npm test` is briefed
+- **THEN** the brief lists the file tools (read, glob, grep, list, edit, write) and the bash commands `npm test *`, `git status`, `npm test` in that order, then says every other command is denied and each command of a chain must match one of them on its own
+
+### Requirement: Standalone brief: runner in brief.json
+`brief.json` SHALL carry the launch's `runner` (`kind`, `commitPolicy`, `sandbox` for a `codex` launch, and `permission` for an `opencode` launch). The `permission` holds `mode` (`derived` or `allow`) and, under `derived`, the `bashPatterns` the runner's ruleset allows, `git *` first.
+
+#### Scenario: OpenCode runner in the brief input
+- **WHEN** an `opencode` task is admitted under the default permission `derived`, and another under `runner.opencode.permission: allow`
+- **THEN** the first brief's `runner` is `{ kind: opencode, commitPolicy: agent, permission: { mode: derived, bashPatterns } }` with `git *` first and no duplicate pattern, and the second's `permission` is `{ mode: allow }` with no patterns
+
+### Requirement: Standalone brief: brief without a runner
+A brief composed without a runner SHALL be the `claude-code` text under the `agent` policy.
+
+#### Scenario: Same text as claude-code
+- **WHEN** a brief is composed with the same input once with runner `{ kind: claude-code, commitPolicy: agent }` and once without a runner
+- **THEN** the two markdown texts are equal
+
+### Requirement: Submission sealing: daemon commit
+Under `daemon`, the orchestrator SHALL commit a worktree's uncommitted or untracked changes on the launch branch: author and committer `orchestrator`, hooks skipped, the report summary as the message. The orchestrator SHALL then seal the new head, and the `agent.report` event SHALL carry `committedByOrchestrator: true`. Under either policy, a clean worktree SHALL NOT be committed.
+
+#### Scenario: Daemon commit of an OpenCode submit
+- **WHEN** an agent of an `opencode` launch under `runner.opencode.commit: daemon` leaves a file uncommitted and submits
+- **THEN** the launch branch head is a commit authored and committed by `orchestrator` whose message is the report summary and which holds the file, the submission is sealed at that commit, the one `agent.report` event carries `committedByOrchestrator: true`, and the task reaches `done`
+
+### Requirement: Submission sealing: remote launch
+On a remote launch the daemon holds no worktree: the submit report SHALL carry `sealedSha`, the full object name of the launch branch tip the worker pushed to origin, and the orchestrator SHALL seal it as the `remote-workspace` capability's "Seal" requires instead of inspecting a tree; the commit policy does not apply. A remote submit without `sealedSha`, or with a value that is not a full hex object name, SHALL answer 400 naming `sealedSha` and record nothing.
+
+#### Scenario: Malformed sealedSha
+- **WHEN** the worker of a remote launch submits with a `sealedSha` that is not a full hex object name
+- **THEN** the response is 400 naming `sealedSha`, no `agent.report` event is appended, and the task is still `running`
+
+### Requirement: Submission sealing: local sealedSha ignored
+On a local launch `sealedSha` in the report SHALL be ignored.
+
+#### Scenario: Local seal reads the worktree
+- **WHEN** the worker of a local launch commits on the launch branch and submits with `sealedSha` set to `not a sha`
+- **THEN** the submit is not refused: it is accepted with outcome `submitted` and `sealedSha` the branch head read from the worktree
+
+### Requirement: Submission sealing: refused seal records nothing
+A refused seal, local or remote, SHALL record no `agent.report` event and no deduplicated response, so the same `seq` may be sent again.
+
+#### Scenario: Same seq after a dirty refusal
+- **WHEN** an agent submits a dirty worktree under the `agent` policy, is answered 409, commits, and submits again with the same `seq`
+- **THEN** the task reaches `done` and one `agent.report` event is recorded
+
+### Requirement: Acceptance evidence: criterion matching
+An entry SHALL cover a criterion when its `criterion` matches the criterion's text after markdown code spans and emphasis, a leading list marker, and trailing punctuation are dropped, whitespace is collapsed, and case is ignored, or when it is the criterion's 1-based position in the brief's list.
+
+#### Scenario: Numbered and loosely quoted entries
+- **WHEN** the brief lists the criteria "works" and "documented" and the report's entries read "1. `Works`." and "2"
+- **THEN** both criteria are covered and the submission is not failed for missing evidence
+
+### Requirement: Block and wait: replay after a dropped connection
+A dropped connection SHALL be recoverable by re-issuing `block` with the same `seq`, which returns the stored answer once admitted.
+
+#### Scenario: Same seq after the answer
+- **WHEN** an agent's `block` has been answered and the task admitted, and the agent calls `block` again with the same `seq`
+- **THEN** the call returns the stored answer and one `agent.block` event is recorded
+
+### Requirement: Block and wait: tool timeout above maxWait
+A runner whose CLI times out MCP tool calls SHALL size that timeout above `maxWait`. The Codex runner's default is `ceil(maxWaitMs/1000)+60` seconds.
+
+#### Scenario: Codex default tool timeout
+- **WHEN** a Codex launch is composed with `maxWaitMs` 90 500 and no `runner.codex.toolTimeoutSec`
+- **THEN** its command carries `tool_timeout_sec=151`
+
+### Requirement: Fallback file: fallback submit sealed by commit policy
+A fallback `submit` SHALL be sealed the way a posted one is under the launch's commit policy; under `daemon`, the `agent.fallback` event SHALL carry `committedByOrchestrator: true` when a commit was made.
+
+#### Scenario: Daemon fallback submit records the commit
+- **WHEN** an agent of a launch with the `daemon` policy leaves uncommitted changes, writes a `submit` fallback file with the summary `offline`, and its process dies
+- **THEN** the orchestrator commits the changes with the message `offline`, the task reaches `done`, and the `agent.fallback` event carries `committedByOrchestrator: true`
+
+### Requirement: MCP façade: env file
+Started with `--orch-env-file <path>`, the façade SHALL layer the file's `KEY=VALUE` lines over its environment. When the file is missing or unreadable, the façade SHALL exit 1 with a message naming the path. The flag is not `--env-file`, because Node takes that flag from anywhere in argv.
+
+#### Scenario: Codex registers the façade with its env file
+- **WHEN** the Codex runner composes a launch's command
+- **THEN** the `orchestrator` MCP server's args are the shim script, `--orch-env-file` and the launch's `.orchestrator/shim.env`, and the command line carries no launch token
+
+### Requirement: MCP façade: remote mode
+The façade SHALL be in remote mode when `ORCH_ACCESS` is `remote`; the worker loop starts it so for a remote launch (see specs/worker-pool "Clone cache"). The façade in remote mode then SHALL need `ORCH_WORKTREE` (the clone's path) and `ORCH_BRANCH` (the launch branch), and without either it SHALL exit 1 with a message naming the missing variable.
+
+#### Scenario: Remote mode needs both variables
+- **WHEN** the façade starts with `ORCH_ACCESS=remote` and `ORCH_WORKTREE` but no `ORCH_BRANCH`, and again with `ORCH_BRANCH` but no `ORCH_WORKTREE`
+- **THEN** each start exits 1 and stderr names the variable that is missing
+
+### Requirement: MCP façade: other access values
+With any other `ORCH_ACCESS` the façade SHALL read neither variable and behave as without remote mode, since a spawned agent's environment carries `ORCH_WORKTREE` too.
+
+#### Scenario: ORCH_WORKTREE alone changes nothing
+- **WHEN** the façade starts with no `ORCH_ACCESS`, with `ORCH_WORKTREE` alone, or with `ORCH_ACCESS=local` and `ORCH_WORKTREE`
+- **THEN** its `report` tool has the description of a local façade
+
+### Requirement: MCP façade: remote submit dirty check
+In remote mode a `report` call with kind `submit` SHALL do three things before it calls the daemon, and the daemon's answer SHALL be returned unchanged; the first SHALL be:
+- the dirty check of the clone by the rule of a local seal (changed and untracked paths outside `.orchestrator/`): a dirty clone is answered `{ status: 409, error: "dirtyWorktree", files }`;
+
+#### Scenario: Untracked file refused
+- **WHEN** in remote mode the clone has an untracked file outside `.orchestrator/` and the agent calls `report` with kind `submit`
+- **THEN** the call is answered 409 `dirtyWorktree` with that file in `files`, and no `agent.report` event is recorded
+
+### Requirement: MCP façade: remote submit push
+In remote mode a `report` call with kind `submit` SHALL do three things before it calls the daemon; the second SHALL be:
+- `git push --force origin HEAD:refs/heads/<ORCH_BRANCH>`, without a prompt and killed after 60 seconds: a failed push is answered `{ status: 503, error: "pushFailed", message }`. The push is forced because the launch branch belongs to the launch alone and an agent may rebase it after a `baseMoved` notice; `HEAD` is pushed whatever branch the clone has checked out;
+
+#### Scenario: Rewritten branch pushed with force
+- **WHEN** in remote mode origin's launch branch holds commit A, the agent amends A into A2 in its clone, and calls `report` with kind `submit`
+- **THEN** the façade's forced push makes A2 origin's launch branch tip, and the submit is accepted with one `agent.report` event whose `sealedSha` is A2
+
+### Requirement: MCP façade: remote submit names the pushed tip
+In remote mode a `report` call with kind `submit` SHALL do three things before it calls the daemon; the third SHALL be:
+- the full sha of `HEAD`, added to the body as `sealedSha`.
+
+The `report` tool's input schema SHALL NOT declare `sealedSha`: the façade always names the tip it pushed.
+
+#### Scenario: Pushed HEAD forwarded as sealedSha
+- **WHEN** in remote mode the agent calls `report` with kind `submit` on a clean clone whose push succeeds
+- **THEN** the daemon's `agent.report` event carries `sealedSha` equal to the clone's `HEAD`, though the tool's input had no such field
+
+### Requirement: MCP façade: remote refusals
+A git command that fails in the dirty check or while reading `HEAD` SHALL be answered `{ status: 500, error: "gitFailed", message }`. After any of the `dirtyWorktree`, `pushFailed` and `gitFailed` refusals nothing is sent to the daemon, so the same call may be sent again with the same `seq`.
+
+#### Scenario: Git failure without a round trip
+- **WHEN** in remote mode `ORCH_WORKTREE` names a directory that is not a git repository and the agent calls `report` with kind `submit`
+- **THEN** the call is answered 500 `gitFailed` with a message naming git, the launch's `lastSignal` is still `claimed`, and the daemon records no `agent.report` event
+
+### Requirement: MCP façade: remote mode forwards other calls
+A `report` with kind `fail` and the other four tools SHALL be forwarded as without remote mode.
+
+#### Scenario: Fail report in remote mode
+- **WHEN** in remote mode the agent calls `report` with kind `fail`
+- **THEN** nothing is pushed to origin and the daemon's `agent.report` event has no `sealedSha`
+
+### Requirement: MCP façade: remote report description and help
+In remote mode the `report` tool's description SHALL say that a submit needs committed work, that the tool pushes the branch to `origin` and names its tip, and that after a 409 or 503 answer the same call may be sent again with the same `seq`. The `--help` text SHALL name `ORCH_ACCESS`, `ORCH_WORKTREE` and `ORCH_BRANCH`.
+
+#### Scenario: Remote description and help text
+- **WHEN** the façade starts in remote mode and is listed, and is run with `--help`
+- **THEN** the `report` tool's description mentions `origin` and the same `seq`, and the help text names `ORCH_ACCESS`, `ORCH_WORKTREE` and `ORCH_BRANCH`
+
+### Requirement: MCP façade: required and pre-approved registration
+A runner whose CLI can treat an MCP server as optional or gate its tools behind approvals SHALL register the façade as required and with its tools pre-approved. For Codex this means `required=true`, plus the default and per-tool `approve` keys. OpenCode has no `required` analog (a server that cannot start is a warning and the run continues); its tools are named `orchestrator_<tool>` and are pre-approved by the permission rule `"orchestrator_*": "allow"`.
+
+#### Scenario: Codex and OpenCode registrations
+- **WHEN** the Codex runner composes a launch's command and the OpenCode runner builds a launch's config
+- **THEN** the Codex command carries `mcp_servers.orchestrator.required=true`, the default tools approval mode `approve` and an `approve` approval mode for each of the five tools, and the OpenCode permission rules carry `"orchestrator_*": "allow"`
+
+### Requirement: MCP façade: tool timeout above maxWaitMs
+A runner whose CLI times out MCP calls SHALL size the tool timeout above `maxWaitMs`, so a `block` long-poll is not cut: Codex through `tool_timeout_sec`, OpenCode through `mcp.orchestrator.timeout` (its default is 60 000 ms).
+
+#### Scenario: OpenCode timeout above maxWaitMs
+- **WHEN** the OpenCode runner builds a launch's config with `maxWaitMs` 90 500 and no `toolTimeoutMs`
+- **THEN** `mcp.orchestrator.timeout` is 150 500, and with `toolTimeoutMs` 120 000 it is 120 000
