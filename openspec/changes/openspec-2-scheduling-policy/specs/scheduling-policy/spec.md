@@ -1,0 +1,77 @@
+## MODIFIED Requirements
+
+### Requirement: Ordering chain
+The orchestrator SHALL order ready candidates for admission by a configurable chain of stages, `scheduling.order`, applied as one stable lexicographic sort: the first stage decides, each later stage breaks ties left by the stages before it, and candidates still tied after the last stage keep graph file order. The default chain SHALL be `criticalPath`, `priority`, `fifo`.
+
+#### Scenario: Default chain on the standard fixture
+- **WHEN** the standard fixture is loaded with the default chain and nothing has run
+- **THEN** T1 is admitted before T5, and once T1 is done T2 is admitted before T3
+
+#### Scenario: Ties fall through
+- **WHEN** two ready tasks have the same critical path length and no priority
+- **THEN** they are admitted in graph file order
+
+#### Scenario: Resumables first
+- **WHEN** capacity is one, a waiting task has an answer persisted, and a ready task has a longer critical path
+- **THEN** the waiting task is resumed and the ready task waits for the next free slot
+
+#### Scenario: Unknown stage rejected
+- **WHEN** the configuration lists a stage named `nope`
+- **THEN** loading the configuration fails naming `nope`
+
+### Requirement: Scope filter at admission
+When `scheduling.scopes` is enabled, which is the default, the orchestrator SHALL walk the ordered candidates and SHALL skip for this tick any candidate whose scope overlaps the scope of a task that holds its scope or of a candidate admitted earlier in the same pass.
+
+#### Scenario: Deferred while the blocker runs
+- **WHEN** T2 with scope `src/api/**` is running and T3 with scope `src/api/users/**` becomes ready
+- **THEN** T3 is not launched, it is recorded as deferred with reason `scopeOverlap` and `with` containing T2, and it is launched on the first tick after T2's work is published
+
+#### Scenario: Overlapping siblings launch one at a time
+- **WHEN** T2 and T3 are both ready with the same scope, capacity is two, and nothing is running
+- **THEN** only the first in chain order is launched and the other is deferred with it
+
+#### Scenario: Waiting, submitted, and claimable tasks hold their scope
+- **WHEN** the only task overlapping a ready candidate is `waiting` on a question, is `submitted` and awaiting verification, or has a claimable launch
+- **THEN** the candidate is deferred
+
+#### Scenario: Scopes disabled
+- **WHEN** `scheduling.scopes` is false and two overlapping tasks are ready with free capacity
+- **THEN** both are launched and nothing is deferred
+
+## ADDED Requirements
+
+### Requirement: Resumable tasks ahead of the ordering chain
+Resumable waiting tasks SHALL be admitted before any ordered candidate and SHALL NOT be ordered by the chain.
+
+#### Scenario: Resumed task takes a slot before ordered candidates
+- **WHEN** capacity is two, waiting task T4 has an answer persisted, and T2 and T3 are ready
+- **THEN** T4 is resumed and takes the first free slot, T2 is launched in the second, and T3 waits
+
+### Requirement: Unregistered ordering stage
+A stage name that is not registered SHALL fail configuration validation naming the stage.
+
+#### Scenario: Unregistered stage after a registered one
+- **WHEN** `scheduling.order` is `['criticalPath', 'nope']`
+- **THEN** configuration validation fails with an error that names `nope`
+
+### Requirement: Held scopes and deferral record
+A task holds its scope while it is `running`, `waiting`, or `submitted`, and while it has a claimable launch; it releases it when its work is published or when it leaves those states for `failed`, `blocked`, `cancelled`, or `unstarted`. A skipped candidate SHALL be recorded as deferred with reason `scopeOverlap` and the ids it overlaps.
+
+#### Scenario: Blocked blocker releases its scope
+- **WHEN** A with scope `src/api/**` is running, B with scope `src/api/users/**` is deferred behind it, and A fails its last attempt and becomes `blocked`
+- **THEN** on the next tick B is launched and nothing is deferred
+
+#### Scenario: Released claimable launch releases its scope
+- **WHEN** in pull mode A's claimable launch is claimed and then released, so A returns to `unstarted`
+- **THEN** on the next tick A, first in file order, is admitted again with a claimable launch, and B stays deferred with `with` containing A
+
+#### Scenario: Every overlapping id listed
+- **WHEN** A with scope `src/api/**` is running, C with scope `src/ui/**` is submitted, capacity is full, and E with scope `src/**` is ready
+- **THEN** E is recorded as deferred with reason `scopeOverlap` and `with` `['A', 'C']`
+
+### Requirement: Scope filter disabled
+When `scheduling.scopes` is disabled, nothing SHALL be deferred.
+
+#### Scenario: Overlapping tasks admitted together
+- **WHEN** `scheduling.scopes` is false, capacity is free for all three, and A, B and E with overlapping scopes are ready
+- **THEN** A, B and E are all launched and the deferred list is empty
