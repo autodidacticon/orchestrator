@@ -202,7 +202,7 @@ export function composeBrief(input: BriefInput, opts: ComposeOptions): { markdow
         : `- Branch: \`${launch.branch}\`, which the worker loop creates at the base commit`,
       `- Base commit: \`${launch.baseSha}\``,
       `- Integration branch: \`${input.integrationBranch}\``,
-      `- Submit: commit all work on branch \`${launch.branch}\` and push it to \`origin\` (\`git push origin ${launch.branch}\`) before you call \`report\` with kind submit. The orchestrator reads your work from \`origin\`, not from your clone.`,
+      `- Submit: commit all work on branch \`${launch.branch}\`. The \`report\` tool of the \`orchestrator\` MCP server, called with kind submit, pushes the branch to \`origin\` and names the pushed commit. If you call the API yourself instead, first run \`git push origin ${launch.branch}\` and send the tip's full sha as \`sealedSha\`. The orchestrator reads your work from \`origin\`, not from your clone.`,
     );
   else lines.push(`- Worktree: \`${launch.worktree}\``, `- Branch: \`${launch.branch}\``, `- Base commit: \`${launch.baseSha}\``, `- Integration branch: \`${input.integrationBranch}\``);
   if (kind === 'claude-code' && input.allowedTools?.length) {

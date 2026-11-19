@@ -5,7 +5,8 @@
  * environment. Retries through daemon restarts for the retry window.
  *
  * Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN, ORCH_RETRY_WINDOW_MS (default 120000),
- * ORCH_COMMIT_POLICY (agent | daemon, default agent). `--orch-env-file <path>` reads them
+ * ORCH_COMMIT_POLICY (agent | daemon, default agent). With ORCH_ACCESS=remote (a worker loop's clone) also
+ * ORCH_WORKTREE and ORCH_BRANCH: a submit is checked, pushed and sealed by the shim (src/agent/remote-submit.ts). `--orch-env-file <path>` reads them
  * from a KEY=VALUE file over the process environment, so they need not be on argv. (Not
  * `--env-file`: Node 22 takes that flag from anywhere in argv, after the script too, and
  * loads or rejects the file itself.)
@@ -14,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { isEntrypoint } from '../entry.js';
 import { parseEnvFile } from '../runner/shim-command.js';
+import { prepareRemoteSubmit } from './remote-submit.js';
 
 export interface ShimEnv {
   api: string;
@@ -22,6 +24,8 @@ export interface ShimEnv {
   retryWindowMs: number;
   /** The launch's commit policy; absent means `agent`. See specs/worker-runners "Sandbox and commit policy". */
   commitPolicy?: 'agent' | 'daemon';
+  /** Set when `ORCH_ACCESS=remote`: the clone (`ORCH_WORKTREE`) and the launch branch (`ORCH_BRANCH`) a submit pushes. */
+  remote?: { worktree: string; branch: string };
 }
 
 export function envFromProcess(env = process.env): ShimEnv {
@@ -29,7 +33,11 @@ export function envFromProcess(env = process.env): ShimEnv {
   const launchId = env['ORCH_LAUNCH_ID'];
   const token = env['ORCH_TOKEN'];
   if (!api || !launchId || !token) throw new Error('ORCH_API, ORCH_LAUNCH_ID and ORCH_TOKEN are required');
-  return { api, launchId, token, retryWindowMs: Number(env['ORCH_RETRY_WINDOW_MS'] ?? 120_000), commitPolicy: env['ORCH_COMMIT_POLICY'] === 'daemon' ? 'daemon' : 'agent' };
+  const base: ShimEnv = { api, launchId, token, retryWindowMs: Number(env['ORCH_RETRY_WINDOW_MS'] ?? 120_000), commitPolicy: env['ORCH_COMMIT_POLICY'] === 'daemon' ? 'daemon' : 'agent' };
+  // ORCH_WORKTREE and ORCH_BRANCH are read only in remote mode: a spawned agent's environment carries ORCH_WORKTREE too.
+  if (env['ORCH_ACCESS'] !== 'remote') return base;
+  for (const name of ['ORCH_WORKTREE', 'ORCH_BRANCH']) if (!env[name]) throw new Error(`ORCH_ACCESS=remote needs ${name}`);
+  return { ...base, remote: { worktree: env['ORCH_WORKTREE']!, branch: env['ORCH_BRANCH']! } };
 }
 
 /**
@@ -50,8 +58,13 @@ export function envWithFile(argv: readonly string[], env: NodeJS.ProcessEnv = pr
   return { ...env, ...parseEnvFile(text) };
 }
 
+/** The report tool's description in remote mode: the tool pushes the branch and names its tip. */
+export const REMOTE_REPORT_DESCRIPTION =
+  'Final report. kind=submit requires committed work and a clean clone: the tool pushes HEAD to the launch branch on origin (forced) and names the pushed commit as sealedSha. kind=fail gives up. seq must increase per call. After a 409 or 503 answer, fix the cause and send the same call again with the same seq.';
+
 /** The report tool's description; the clean-worktree requirement holds only when the agent commits. */
-export function reportDescription(commitPolicy: ShimEnv['commitPolicy']): string {
+export function reportDescription(commitPolicy: ShimEnv['commitPolicy'], remote?: ShimEnv['remote']): string {
+  if (remote) return REMOTE_REPORT_DESCRIPTION;
   return commitPolicy === 'daemon'
     ? 'Final report. kind=submit hands in the worktree as it stands; the orchestrator commits uncommitted changes. kind=fail gives up. seq must increase per call.'
     : 'Final report. kind=submit requires a committed, clean worktree; kind=fail gives up. seq must increase per call.';
@@ -80,6 +93,20 @@ export async function forward(env: ShimEnv, op: string, body: Record<string, unk
 
 export const TOOL_NAMES = ['heartbeat', 'report', 'block', 'inbox', 'log'] as const;
 
+/**
+ * The report tool: forwarded as it is, except a remote submit, which is checked, pushed and sealed here first. A
+ * refusal here sends nothing to the daemon; the daemon's answer is returned unchanged.
+ */
+export async function report(env: ShimEnv, args: Record<string, unknown>): Promise<{ status: number; body: unknown }> {
+  if (!env.remote || args['kind'] !== 'submit') return forward(env, 'report', args);
+  const prepared = await prepareRemoteSubmit(env.remote.worktree, env.remote.branch);
+  if (!prepared.ok) {
+    const { ok: _ok, status, ...body } = prepared;
+    return { status, body };
+  }
+  return forward(env, 'report', { ...args, sealedSha: prepared.sealedSha });
+}
+
 export async function startShim(env: ShimEnv): Promise<void> {
   const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
@@ -93,7 +120,7 @@ export async function startShim(env: ShimEnv): Promise<void> {
   server.registerTool(
     'report',
     {
-      description: reportDescription(env.commitPolicy),
+      description: reportDescription(env.commitPolicy, env.remote),
       inputSchema: {
         seq: z.number().int().nonnegative(),
         kind: z.enum(['submit', 'fail']),
@@ -114,7 +141,7 @@ export async function startShim(env: ShimEnv): Promise<void> {
         whatWouldUnblock: z.string().optional(),
       },
     },
-    async (args) => text(await forward(env, 'report', args)),
+    async (args) => text(await report(env, args)),
   );
   server.registerTool(
     'block',
@@ -143,6 +170,11 @@ A stdio MCP server exposing heartbeat, report, block, inbox, and log, forwarded
 to the daemon with the launch token. Env: ORCH_API, ORCH_LAUNCH_ID, ORCH_TOKEN,
 ORCH_RETRY_WINDOW_MS, read from --orch-env-file (KEY=VALUE lines) when given. The
 orchestrator writes this into each launch's mcp.json (Claude Code) or shim.env (Codex).
+
+Remote mode (the worker loop's mcp.json): ORCH_ACCESS=remote with ORCH_WORKTREE (the
+clone) and ORCH_BRANCH (the launch branch). A report with kind submit then checks the
+clone is clean (409 dirtyWorktree), pushes HEAD to the branch on origin (503
+pushFailed), and adds the pushed commit as sealedSha before it is forwarded.
 `;
 
 const isEntry = isEntrypoint(import.meta.url);

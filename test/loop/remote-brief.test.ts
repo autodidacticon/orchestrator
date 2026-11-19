@@ -73,11 +73,16 @@ describe('remote brief', () => {
     expect(JSON.stringify(l.briefJson)).not.toContain(h!.config.dataDir);
   }, 30_000);
 
-  it('tells the agent to commit on the branch and push it to origin before submitting', async () => {
+  it('names the orchestrator MCP server\'s report tool as the one that pushes, and sealedSha for an agent that calls the API itself', async () => {
     const l = await remoteLaunch();
-    expect(l.briefMarkdown).toContain(
-      `- Submit: commit all work on branch \`${l.branch}\` and push it to \`origin\` (\`git push origin ${l.branch}\`) before you call \`report\` with kind submit.`,
+    const submit = l.briefMarkdown!.split('\n').find((line) => line.startsWith('- Submit:'));
+    expect(submit).toBe(
+      `- Submit: commit all work on branch \`${l.branch}\`. The \`report\` tool of the \`orchestrator\` MCP server, called with kind submit, pushes the branch to \`origin\` and names the pushed commit. If you call the API yourself instead, first run \`git push origin ${l.branch}\` and send the tip's full sha as \`sealedSha\`. The orchestrator reads your work from \`origin\`, not from your clone.`,
     );
+    expect(submit).toContain('`report` tool of the `orchestrator` MCP server');
+    expect(submit).toContain('pushes the branch to `origin`');
+    expect(submit).toContain('`sealedSha`');
+    expect(submit).toContain('reads your work from `origin`');
   }, 30_000);
 
   it('briefJson carries the same branch, base commit, API URL and fallback path as the markdown', async () => {

@@ -63,6 +63,8 @@ deploy/
     deployment.yaml     Deployment orchestrator (Recreate, emptyDir, no volume claim)
     service.yaml        Service orchestrator, ClusterIP, port 8080
     worker.yaml         Deployment orchestrator-worker (replicas 0, emptyDir clone cache)
+  worker-claude/
+    Dockerfile          the Claude worker image, orchestrator-worker-claude:dev (see "Claude worker image")
   overlays/kind/        base plus an in-cluster git origin, a remote run, and scripted workers
     kustomization.yaml  sets REPO_URL to the origin, replaces orchestrator.yaml, sets ORCH_WORKER_AGENT=scripted
     orchestrator.yaml   the base file plus runner.access: remote, git.workerOriginUrl and capacity: 3
@@ -82,7 +84,7 @@ The run's state (tasks, launches, events, outbox, the accepted and proposed grap
 
 ### The workers
 
-The `orchestrator-worker` Deployment (`deploy/base/worker.yaml`) is the remote worker pool. Each pod runs `orchestrator-worker` (specs/worker-pool), which claims a launch with `access: remote` over the daemon's API, clones the repository into its clone cache, checks out the launch branch, runs the agent, and claims again. The agent commits on the branch and pushes it to origin; the daemon seals the submission by fetching that branch, and its verifier publishes as for any launch. A worker exits 0 when `/v1/status` says the run is finished, and the Deployment then restarts it.
+The `orchestrator-worker` Deployment (`deploy/base/worker.yaml`) is the remote worker pool. Each pod runs `orchestrator-worker` (specs/worker-pool), which claims a launch with `access: remote` over the daemon's API, clones the repository into its clone cache, checks out the launch branch, runs the agent, and claims again. The agent commits on the branch and submits; the daemon seals the submission by fetching that branch from origin and comparing its tip with the report's `sealedSha`, and its verifier publishes as for any launch. An agent that reports through the shim's `report` tool (the `orchestrator` MCP server the loop names in `.orchestrator/mcp.json`) needs to push nothing: the loop writes `ORCH_ACCESS=remote`, `ORCH_WORKTREE` (the clone) and `ORCH_BRANCH` (the launch branch) into the shim's `env`, and on a submit the tool checks that the clone is clean (409 `dirtyWorktree`), force-pushes `HEAD` to the launch branch on origin within 60 seconds (503 `pushFailed`), and names the pushed commit as `sealedSha`. An agent that calls the API itself pushes the branch and sends `sealedSha` itself, and the loop's fallback relay pushes and names it for a report left in `.orchestrator/report.json`. A worker exits 0 when `/v1/status` says the run is finished, and the Deployment then restarts it.
 
 - `POD_NAME`, from the pod's `metadata.name` through the Downward API, is the worker id the daemon records for each claim.
 - `ORCH_API` is the daemon Service, `http://orchestrator.orch.svc:8080`.
@@ -173,6 +175,22 @@ The database URL carries a password. Every surface that prints resolved config (
 The daemon container sets `ORCH_LOG_FORMAT=json`, so every stderr line is one JSON object with `ts`, `level`, `msg`, and the line's data fields. On SIGTERM (a rollout or `kubectl delete pod`) the daemon stops its tick loop, finishes the in-flight tick and verifier job, closes the API server, writes the exit record to `daemon.json`, and exits 0 when every committed batch reached Postgres. When batches are left unflushed it logs their count and exits 1. After 8 seconds it exits anyway, with 1 when batches are still pending and 0 otherwise, and an abandoned check restarts from `queued` on the next start. `daemon.pid` and `daemon.json` are still written in the run directory, but nothing in the cluster reads them. A client outside the pod reaches the daemon with `ORCH_URL`; when that names a non-loopback host, `orchestrator-ctl` and the operator MCP server never start a local daemon and report the URL as unreachable instead.
 
 The graph is not mounted. Send it with `PUT /v1/graph` (import, or `deploy/smoke.sh`): under a Postgres store the document goes to the store's proposed-graph slot and is reloaded at once. An accepted document becomes the active graph; a rejected one stays in the proposed slot with its reasons, and the active graph is unchanged, across restarts too. Accepting a proposal edits the proposed document the same way.
+
+### Claude worker image
+
+`deploy/worker-claude/Dockerfile` builds a worker image whose agent is Claude Code. It is named `orchestrator-worker-claude:dev` when built locally:
+
+```sh
+docker build -t orchestrator:dev .
+docker build -f deploy/worker-claude/Dockerfile -t orchestrator-worker-claude:dev deploy/worker-claude
+```
+
+- **Base.** The Dockerfile has one stage, `FROM ${PROJECT_BASE}`, with `ARG PROJECT_BASE=orchestrator:dev`. A project layers its toolchain by building an image `FROM orchestrator:dev` that installs it (as root, returning to `node`), then passing that image with `--build-arg PROJECT_BASE=<image>`. The daemon image stays toolchain-free.
+- **CLI version.** The build argument `CLAUDE_CODE_VERSION` fixes the version of the Claude Code CLI the image installs; the Dockerfile sets its default. `DISABLE_AUTOUPDATER=1` keeps the installed CLI from replacing itself.
+- **Command.** The image sets `ORCH_WORKER_COMMAND` to the Claude template the loop composes for each launch: `claude -p --output-format json --mcp-config {mcpConfig} --strict-mcp-config --dangerously-skip-permissions --model {model} --effort {effort} --no-session-persistence < {brief}`. It has no `{allowedTools}` slot, because a remote brief carries no allow list: the agent runs with every tool call allowed, and the container is the boundary. A deployment that wants an allow list sets its own `ORCH_WORKER_COMMAND`, for instance with `--permission-mode acceptEdits` and `--allowedTools`. The agent reports through the `orchestrator` MCP server named in `--mcp-config`, whose `report` tool pushes the branch (see "The workers").
+- **Git identity.** `GIT_AUTHOR_NAME` and `GIT_COMMITTER_NAME` are `orchestrator-worker`, `GIT_AUTHOR_EMAIL` and `GIT_COMMITTER_EMAIL` are `worker@orchestrator.local` (the scripted agent's identity), so the agent's `git commit` works.
+- **No key.** The image holds no credential for the model and no variable for one. The deployment supplies the key to the worker pod at run time, from a Secret; it is never built into the image.
+- The image runs as `node` and its command is `orchestrator-worker`, as in the base worker Deployment. Point the worker Deployment's image at it to run Claude workers.
 
 ### The `REPO_URL` contract
 

@@ -576,7 +576,9 @@ async function writeLaunchFiles(s: WorkerSettings, claim: RemoteClaim, clone: st
   await writeFile(path.join(dir, 'brief.md'), claim.briefMarkdown ?? '', 'utf8');
   await writeFile(path.join(dir, 'brief.json'), `${JSON.stringify({ ...(claim.brief ?? {}), worktree: clone }, null, 2)}\n`, 'utf8');
   const shim = shimCommand();
-  const mcp = { mcpServers: { orchestrator: { command: shim.command, args: shim.args, env: shimEnv(claim, { ORCH_API: s.api }, s.retryWindowMs) } } };
+  // Remote mode: the shim's report tool checks the clone, pushes the launch branch and names its tip as sealedSha.
+  const remote = { ORCH_ACCESS: 'remote', ORCH_WORKTREE: clone, ORCH_BRANCH: claim.branch };
+  const mcp = { mcpServers: { orchestrator: { command: shim.command, args: shim.args, env: shimEnv(claim, { ORCH_API: s.api }, s.retryWindowMs, remote) } } };
   const mcpPath = path.join(dir, 'mcp.json');
   await writeFile(mcpPath, JSON.stringify(mcp, null, 2), { encoding: 'utf8', mode: 0o600 });
   await chmod(mcpPath, 0o600);
