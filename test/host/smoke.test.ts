@@ -296,4 +296,92 @@ describe('deploy/smoke.sh', () => {
     expect(r.stderr).toMatch(/^usage: .*--real-agent <key file>/);
     expect(existsSync(calls)).toBe(false);
   });
+
+  // --- finished-run check (ORC-145) ---
+
+  const STATUS_PATH = '/api/v1/namespaces/orch/services/orchestrator:api/proxy/v1/status';
+
+  it('--dry-run prints + finished_run_check as its first step, before docker build, and calls no tool', () => {
+    const r = dryRun();
+    expect(r.status).toBe(0);
+    const steps = stepsOf(r.stdout);
+    expect(steps[0]).toBe('+ finished_run_check');
+    expect(steps[1]).toBe('+ docker build -t orchestrator:dev .');
+    expect(r.stdout).not.toContain('smoke: skip: finished-run check');
+    expect(existsSync(calls)).toBe(false);
+  });
+
+  it('--dry-run --fresh prints the finished-run skip line and no step for the check', () => {
+    const r = dryRun({}, ['--fresh']);
+    expect(r.status).toBe(0);
+    const out = r.stdout.split('\n');
+    expect(out).toContain('smoke: skip: finished-run check (--fresh starts a new cluster)');
+    expect(out.indexOf('smoke: skip: finished-run check (--fresh starts a new cluster)')).toBeLessThan(out.indexOf('+ save_context'));
+    expect(stepsOf(r.stdout).some((s) => s.includes('finished_run_check'))).toBe(false);
+    expect(existsSync(calls)).toBe(false);
+  });
+
+  // Not a dry run: kubectl logs its arguments and answers the status read with `status` (or fails when it is
+  // undefined), kind succeeds, docker fails, so a run that passes the check stops at the build. jq is the real one.
+  function keptRun(status: string | undefined, args: string[] = []) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-kept-'));
+    const log = path.join(dir, 'log');
+    const body = path.join(dir, 'body');
+    if (status !== undefined) writeFileSync(body, status);
+    const answer = status === undefined ? 'exit 1' : `cat '${body}'; exit 0`;
+    const tools: Record<string, string> = {
+      kubectl: `echo "kubectl $*" >> '${log}'\ncase "$*" in *"get --raw"*) ${answer} ;; esac\nexit 0`,
+      kind: `echo "kind $*" >> '${log}'\nexit 0`,
+      docker: `echo "docker $*" >> '${log}'\nexit 1`,
+    };
+    for (const [tool, text] of Object.entries(tools)) {
+      writeFileSync(path.join(dir, tool), `#!/bin/sh\n${text}\n`);
+      chmodSync(path.join(dir, tool), 0o755);
+    }
+    try {
+      const r = spawnSync(bash, [script, ...args], { encoding: 'utf8', env: { PATH: `${dir}:/usr/bin:/bin`, LOCAL_PORT: '18999' } });
+      return { status: r.status, stdout: r.stdout, stderr: r.stderr, calls: readFileSync(log, 'utf8').trim().split('\n') };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('a finished run on the kept cluster exits 2 after the one status read, with one stderr line that names --fresh', () => {
+    const r = keptRun('{"finished":true}');
+    expect(r.status).toBe(2);
+    const err = r.stderr.trimEnd().split('\n');
+    expect(err).toHaveLength(1);
+    expect(err[0]).toContain('--fresh');
+    expect(r.calls).toHaveLength(1);
+    expect(r.calls[0]).toMatch(/^kubectl --context kind-orch .*get --raw /);
+    expect(r.calls[0].endsWith(STATUS_PATH)).toBe(true);
+    expect(r.calls.some((c) => /^(docker|kind) /.test(c) || c.includes(' apply'))).toBe(false);
+    expect(r.stdout.split('\n').filter((l) => l.startsWith('+ '))).toEqual(['+ finished_run_check']);
+  });
+
+  it('with --real-agent a finished run still exits 2 with one line and scales nothing on exit', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-key-'));
+    const key = path.join(dir, 'key');
+    writeFileSync(key, 'not-a-key\n');
+    try {
+      const r = keptRun('{"finished":true}', ['--real-agent', key]);
+      expect(r.status).toBe(2);
+      expect(r.stderr.trimEnd().split('\n')).toHaveLength(1);
+      expect(r.calls).toHaveLength(1);
+      expect(r.calls[0].endsWith(STATUS_PATH)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('an unfinished run, or no answer from the status read, goes on to docker build', () => {
+    for (const status of ['{"finished":false}', undefined, 'not json']) {
+      const r = keptRun(status);
+      expect(r.status, String(status)).not.toBe(0);
+      expect(r.status, String(status)).not.toBe(2);
+      expect(r.calls[0].endsWith(STATUS_PATH), String(status)).toBe(true);
+      expect(r.calls.at(-1), String(status)).toBe('docker build -t orchestrator:dev .');
+      expect(r.stderr, String(status)).not.toContain('finished');
+    }
+  });
 });

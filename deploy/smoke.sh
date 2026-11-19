@@ -3,7 +3,8 @@ set -euo pipefail
 # The cluster-level acceptance test: build, load into kind, install CloudNativePG, apply the kind overlay, load the
 # graph, and assert over the API. Each milestone adds its assertions below the M1 ones. See deploy/README.md "Smoke test".
 #
-#   deploy/smoke.sh                run against the kind cluster $KIND_CLUSTER (default orch)
+#   deploy/smoke.sh                run against the kind cluster $KIND_CLUSTER (default orch); a kept cluster whose run
+#                                  is finished is refused with exit 2 before any step (finished_run_check)
 #   deploy/smoke.sh --fresh        delete and recreate the kind cluster first, then restore the current kubectl context
 #   deploy/smoke.sh --dry-run      print each step's command and execute nothing
 #   deploy/smoke.sh --break NAME   falsify one drill assertion on purpose, to show the script fails: pvc (mount a
@@ -104,17 +105,6 @@ done
 
 # Succeeds when something already listens on 127.0.0.1:$1.
 port_busy() { (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null; }
-
-# Without an explicit LOCAL_PORT, step past a default port another process holds (a local proxy answering /healthz
-# with 404 would otherwise look like the daemon). A dry run probes nothing.
-if [ -z "${LOCAL_PORT_SET:-}" ] && [ "$DRY_RUN" = 0 ]; then
-  while port_busy "$LOCAL_PORT"; do
-    echo "smoke: port $LOCAL_PORT is in use, trying $((LOCAL_PORT + 1))" >&2
-    LOCAL_PORT=$((LOCAL_PORT + 1))
-    if [ "$LOCAL_PORT" -gt 18180 ]; then echo "smoke: no free local port in 18080..18180; set LOCAL_PORT" >&2; exit 1; fi
-  done
-  API="http://127.0.0.1:${LOCAL_PORT}"
-fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -784,12 +774,47 @@ create_key_secret() {
     | kc apply -f - >/dev/null
 }
 no_worker_pods() { [ -z "$(kc get pod -l app.kubernetes.io/name=orchestrator-worker -o name)" ]; }
+# Ask the kept cluster's daemon, through the API server's Service proxy (no port-forward), whether its run is finished.
+# When /v1/status answers finished: true, print one line on stderr and exit 2 with the cluster unchanged: the EXIT trap
+# is removed first, so no cleanup runs (--real-agent would otherwise scale the workers to 0). No answer, or a finished
+# that is not true, lets the script go on.
+finished_run_check() {
+  local body
+  body="$(kubectl --context "$KUBE_CONTEXT" --request-timeout=10s get --raw \
+    "/api/v1/namespaces/$NAMESPACE/services/orchestrator:api/proxy/v1/status" 2>/dev/null)" || return 0
+  if jq -e '.finished == true' >/dev/null 2>&1 <<<"$body"; then
+    trap - EXIT
+    echo "smoke: the run on the kept cluster $KIND_CLUSTER is finished (/v1/status finished: true), so a rerun cannot pass; run deploy/smoke.sh --fresh to start over" >&2
+    exit 2
+  fi
+  return 0
+}
 # Send the overlay's graph followed by graph fragments ($@) with PUT /v1/graph and require it accepted.
 put_graph_with() {
   cat deploy/overlays/kind/graph.yaml "$@" | jq -Rs '{content: .}' \
     | curl -fsS -X PUT -H 'content-type: application/json' --data-binary @- "$API/v1/graph" \
     | jq -e '.accepted == true' >/dev/null
 }
+
+# A kept cluster whose run is finished from an earlier pass has no claimable launch left, so a rerun could not pass;
+# refuse it before any step changes the cluster. --fresh starts a new cluster and skips the check.
+if [ "$FRESH" = 1 ]; then
+  skip 'finished-run check' '--fresh starts a new cluster'
+else
+  step finished_run_check
+fi
+
+# Without an explicit LOCAL_PORT, step past a default port another process holds (a local proxy answering /healthz
+# with 404 would otherwise look like the daemon). A dry run probes nothing. This runs after the finished-run check, so a
+# refused rerun prints only its own line.
+if [ -z "${LOCAL_PORT_SET:-}" ] && [ "$DRY_RUN" = 0 ]; then
+  while port_busy "$LOCAL_PORT"; do
+    echo "smoke: port $LOCAL_PORT is in use, trying $((LOCAL_PORT + 1))" >&2
+    LOCAL_PORT=$((LOCAL_PORT + 1))
+    if [ "$LOCAL_PORT" -gt 18180 ]; then echo "smoke: no free local port in 18080..18180; set LOCAL_PORT" >&2; exit 1; fi
+  done
+  API="http://127.0.0.1:${LOCAL_PORT}"
+fi
 
 if [ "$FRESH" = 1 ]; then
   # 0. Start from an empty kind cluster; kind switches the current context, so put the previous one back.
