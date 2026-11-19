@@ -1,0 +1,198 @@
+## MODIFIED Requirements
+
+### Requirement: Worker loop
+The `orchestrator-worker` bin (`dist/src/worker/loop.js`) SHALL run the remote worker loop against the daemon at `ORCH_API`, which is required. Each round SHALL `POST /v1/claims` with `{ workerId, access: 'remote' }`. A 200 SHALL be worked as one launch (see "Clone cache", "Agent command", "Scripted agent" and "Fallback relay") and the loop SHALL claim again. Heartbeats from the loop, pod termination and usage are not part of this requirement.
+
+#### Scenario: Two loops work a chain
+- **WHEN** a remote run with a bare origin has the chain T1 -> T2 -> T3 and two loops with ids `w-1` and `w-2` run the scripted agent with separate caches
+- **THEN** all three tasks become `done`, origin's integration branch carries one `Orchestrator-Task` trailer per task, `/v1/status` reports `finished`, both loops exit 0, and each loop's stdout has one `report accepted` line per task it claimed, three in all
+
+#### Scenario: Backoff with nothing claimable
+- **WHEN** every claim answers 404 and the status is not finished, with `ORCH_WORKER_IDLE_EXIT_MS` 120000
+- **THEN** the loop waits 1, 2, 4, 8, 16, 30, 30 and 30 s and then exits 0 with an `idle-exit` line
+
+#### Scenario: Finished run
+- **WHEN** a claim answers 404 and `/v1/status` says `finished: true`
+- **THEN** the loop prints a `finished` line and exits 0
+
+### Requirement: Clone cache
+The clone's `.git/info/exclude` SHALL list `/.orchestrator/`. Before each launch the loop SHALL abort an operation a previous agent left in progress, `git fetch origin`, fetch the start commit by its sha when the fetch did not bring it, `git checkout -f -B <branch> <start>` with start `carry.interrupted.headSha` when the claim carries it and `baseSha` otherwise, `git clean -ffdx` except `.orchestrator/`, and remove a stale `.orchestrator/report.json`.
+
+#### Scenario: Interrupted head as the start
+- **WHEN** a claim carries `carry.interrupted.headSha` H, a commit on origin
+- **THEN** the launch branch is created at H, and the scripted agent's commit on it has H as its parent
+
+#### Scenario: Clone reused, tree clean
+- **WHEN** one loop works two launches in a row and the first agent left an untracked file, an untracked directory and an uncommitted change
+- **THEN** both agents run in the same clone directory, and the second sees nothing in `git status --porcelain --ignored` but the ignored `.orchestrator/`
+
+#### Scenario: Remote variables in mcp.json
+- **WHEN** a loop runs a command agent that reads `.orchestrator/mcp.json`, starts the server it names, commits without pushing, and calls its `report` tool with kind `submit`
+- **THEN** the shim's `env` there has `ORCH_ACCESS` `remote`, `ORCH_WORKTREE` the agent's working directory and `ORCH_BRANCH` the launch branch, the task is `submitted`, and the loop prints one `report accepted` line and no `relayed` line
+
+### Requirement: Agent command
+With `ORCH_WORKER_AGENT=command` the loop SHALL compose `ORCH_WORKER_COMMAND` through the same functions every runner uses, `substitute` and `fixedSlots` in `src/runner/command.ts`: `{brief}`, `{briefJson}` and `{mcpConfig}` under the clone's `.orchestrator/`, `{worktree}` the clone, `{launchId}`, `{taskId}`, `{model}` and `{effort}` from the claim, and `{allowedTools}` the brief's `allowedTools` quoted as for a spawned launch; a slot with no value stays as written.
+
+#### Scenario: Placeholders filled by the shared function
+- **WHEN** the template holds every placeholder
+- **THEN** the command is the result of `substitute` called with the template and `fixedSlots` of the launch with the clone as the worktree, and the default Claude Code template composes with no slot left
+
+### Requirement: Scripted agent
+With `ORCH_WORKER_AGENT=scripted` the loop SHALL run the scripted agent in `src/worker/` (shipped with the package, not a test file): it SHALL append one line naming the task id and the worker id to `README.md`, commit it on the launch branch, push the branch to origin (forced, since the launch branch belongs to the launch alone), and submit with `seq` 1, `sealedSha` the pushed commit and one `acceptance` entry per criterion of the brief, named by its position.
+
+#### Scenario: Deterministic submission
+- **WHEN** the scripted agent works a remote launch whose task has one criterion
+- **THEN** origin's launch branch holds one new commit adding the README line, and the submit carries `sealedSha` that commit and an `acceptance` entry with criterion `1`
+
+### Requirement: Loop heartbeat
+From the claim until the agent exits, the worker loop SHALL send `POST /v1/launches/:id/heartbeat` with the launch token every `lease.renewEveryMs` of the claim (a third of `leaseTtlMs`; a third of `lease.ttlMs` when `renewEveryMs` is absent), whether or not the agent calls the API itself, so that a healthy worker never loses its lease during a long silent step. A heartbeat answered 401 SHALL end the heartbeats for that launch.
+
+#### Scenario: Silent agent keeps its lease
+- **WHEN** a remote run with `leaseTtlMs` 60000 runs the scripted agent, which sleeps for three lease TTLs without calling the API before it commits and submits, and the daemon ticks on the same fake clock throughout
+- **THEN** the loop sends nine heartbeats, one every 20 s from the claim, each with the clone's fingerprint and no text; the lease never expires; and the task ends `submitted`
+
+#### Scenario: Without heartbeats the lease lapses
+- **WHEN** the same run's loop sends no heartbeat
+- **THEN** the launch ends with reason `leaseExpired`
+
+#### Scenario: Revoked launch
+- **WHEN** a loop heartbeat is answered 401
+- **THEN** the loop sends no further heartbeat for that launch
+
+#### Scenario: One fingerprint function
+- **WHEN** the loop fingerprints its clone and `GitWorkspace.fingerprint` reads the same directory, clean, edited, with an untracked file and after a commit
+- **THEN** both give the same string each time
+
+### Requirement: Task filter and launch limit
+The worker loop SHALL read two optional variables. `ORCH_WORKER_TASK`, when set to a non-empty value, SHALL be sent as `taskId` in every claim, so the worker claims only that task's launch; a claim answered 404 or 409 is waited on as any other. A malformed `ORCH_WORKER_MAX_LAUNCHES` SHALL be refused at start, naming the variable, with exit 2.
+
+#### Scenario: One task, one launch
+- **WHEN** the loop runs with `ORCH_WORKER_TASK=SMOKE` and `ORCH_WORKER_MAX_LAUNCHES=1`
+- **THEN** its claim is `{ workerId, access: 'remote', taskId: 'SMOKE' }`, and after that launch it prints `max-launches` and exits 0 without a second claim
+
+#### Scenario: No filter
+- **WHEN** neither variable is set
+- **THEN** the claim names no `taskId` and the loop claims again after each launch
+
+#### Scenario: Malformed limit
+- **WHEN** `ORCH_WORKER_MAX_LAUNCHES` is `-1` or `one`
+- **THEN** the settings are refused with an error naming `ORCH_WORKER_MAX_LAUNCHES`
+
+## ADDED Requirements
+
+### Requirement: Worker loop: nothing claimable
+On a 404 (nothing claimable, or paused) or a 409 the loop SHALL read `GET /v1/status` and exit 0 when it says `finished`; otherwise it SHALL exit 0 when nothing has been claimed for `ORCH_WORKER_IDLE_EXIT_MS` (default 0, which never exits for idleness), and else wait before the next claim. The wait between claims SHALL start at `ORCH_WORKER_BACKOFF_MS` (default 1000), double after each wait up to `ORCH_WORKER_BACKOFF_MAX_MS` (default 30000), and reset to the first value after a claim.
+
+#### Scenario: No idle exit by default
+- **WHEN** every claim answers 404, the status is not finished, and `ORCH_WORKER_IDLE_EXIT_MS` is unset
+- **THEN** the loop does not exit for idleness: it keeps claiming, and every wait after the fifth is 30 s
+
+#### Scenario: Backoff reset after a claim
+- **WHEN** the loop has waited 1, 2 and 4 s and then claims a launch
+- **THEN** the next wait with nothing claimable is 1 s again
+
+### Requirement: Worker loop: refused claim and unanswered calls
+A 400 on a claim SHALL end the loop with exit 1. A call that gets no answer SHALL be retried for `ORCH_RETRY_WINDOW_MS` (default 60000), with delays from 100 ms doubling to 1 s; past it the loop SHALL exit 1.
+
+#### Scenario: Daemon unreachable
+- **WHEN** no call gets an answer and `ORCH_RETRY_WINDOW_MS` is 2000
+- **THEN** the claim is retried after 100, 200, 400 and 800 ms, and then the loop gives up with the connection error, which the bin turns into exit 1
+
+#### Scenario: Claim refused with 400
+- **WHEN** a claim is answered 400
+- **THEN** the loop prints a `claim-refused` line, the answer on stderr, and exits 1
+
+### Requirement: Worker loop: revoked launch
+A 401 on a call made for a launch SHALL end that launch's work, and the loop SHALL claim again.
+
+#### Scenario: Scripted submit answered 401
+- **WHEN** the scripted agent's submit for a launch is answered 401 and the status no longer shows the worker holding that launch
+- **THEN** the agent ends without retrying, the loop prints `ended` for the launch, releases nothing, and claims again
+
+### Requirement: Worker loop: step lines
+The loop SHALL write one line per step to stdout, `worker <id> <event> <launchId> <taskId>` with `-` for a missing id, and SHALL write `report accepted` once for each launch whose submission the daemon accepted; details and the agent's output SHALL go to stderr.
+
+#### Scenario: Lines of an idle loop
+- **WHEN** a loop with worker id `w-1` finds nothing claimable until its idle limit passes
+- **THEN** its first stdout line is `worker w-1 start - -` and its last is `worker w-1 idle-exit - -`
+
+### Requirement: Worker loop: verdict after the agent
+After the agent exits and any fallback report is relayed, the loop SHALL read the status: a task `submitted` or `done` (or a submit answered with `accepted: true`) is `report accepted`; a launch the worker still holds is released without keep with reason `the agent exited without a report`; otherwise the launch has ended.
+
+#### Scenario: Agent exits without a report
+- **WHEN** a command agent exits without reporting and the status shows the worker still holding the launch with its task `running`
+- **THEN** the loop releases the launch with reason `the agent exited without a report` and no keep, and prints `released`
+
+### Requirement: Worker loop: clone not prepared
+A launch whose clone cannot be prepared SHALL be released without keep.
+
+#### Scenario: Claim without a repository URL
+- **WHEN** a claim answers a launch that carries no `repoUrl`
+- **THEN** the loop prints `checkout-failed`, releases the launch with a reason saying the worker could not prepare its clone and no keep, starts no agent, and claims again
+
+### Requirement: Clone cache: one clone per repository
+The loop SHALL keep one clone per `repoUrl` under `ORCH_WORKER_CACHE` (default `/var/cache/orchestrator`), named from the URL and a hash of it, and reuse it across launches; a directory there that is not a clone SHALL be replaced.
+
+#### Scenario: Directory that is not a clone
+- **WHEN** the cache directory for a `repoUrl` exists but holds no git clone
+- **THEN** the loop removes it and clones `repoUrl` into it before the launch
+
+### Requirement: Clone cache: launch files
+After preparing the clone, the loop SHALL write `.orchestrator/brief.md` (the claim's `briefMarkdown`), `.orchestrator/brief.json` (the claim's `brief`, its `worktree` set to the clone) and `.orchestrator/mcp.json` (the MCP shim with `ORCH_API`, the launch id and token, mode 0600).
+
+#### Scenario: Brief points at the clone
+- **WHEN** a command agent reads the `.orchestrator/brief.json` its `{briefJson}` slot names
+- **THEN** the brief's `worktree` is the clone and its `launchId` is the launch the agent works
+
+### Requirement: Clone cache: remote shim variables
+Through `shimEnv` the shim's `env` in `.orchestrator/mcp.json` SHALL also hold `ORCH_ACCESS=remote`, `ORCH_WORKTREE` (the clone) and `ORCH_BRANCH` (the claim's `branch`), so the shim's `report` tool pushes the branch and names `sealedSha` (see specs/agent-protocol "MCP façade").
+
+#### Scenario: Shim pushes and seals
+- **WHEN** a command agent commits without pushing and submits through the shim's `report` tool
+- **THEN** origin's launch branch is the agent's commit, and the one `agent.report` event of the launch is a `submit` with `seq` 1 and `sealedSha` that commit
+
+### Requirement: Agent command: environment and wait
+The agent command SHALL run through `/bin/sh -c` in the clone with the loop's environment plus `ORCH_API`, `ORCH_LAUNCH_ID`, `ORCH_TOKEN`, `ORCH_RETRY_WINDOW_MS`, `ORCH_TASK_ID` and `ORCH_WORKTREE` (the clone), and without the store's connection variables; the loop SHALL wait for the agent command to exit.
+
+#### Scenario: Agent sees its launch
+- **WHEN** a command agent records its working directory and its `ORCH_LAUNCH_ID` and `ORCH_WORKTREE`
+- **THEN** the working directory and `ORCH_WORKTREE` are the clone, and `ORCH_LAUNCH_ID` is the launch it was started for
+
+### Requirement: Scripted agent: submit retries
+A 503 on the scripted agent's submit SHALL be retried with the same seq; a 401 ends the agent.
+
+#### Scenario: Origin briefly unreachable
+- **WHEN** the scripted agent's submit is answered 503 and the next one 200
+- **THEN** the second submit carries `seq` 1 again, with the same `sealedSha`
+
+### Requirement: Loop heartbeat: fingerprint
+Once the clone is prepared, each heartbeat SHALL carry `fingerprint`, the clone's fingerprint computed by the same function the daemon's `GitWorkspace.fingerprint` uses (specs/health-monitoring "Progress signals"), so the same tree gives the same string; it SHALL carry no `progress` text, so it is never a `heartbeatText` signal. A loop heartbeat renews the lease, as every agent call does, and counts as progress only when its fingerprint changed.
+
+#### Scenario: Heartbeat before the clone
+- **WHEN** a loop heartbeat falls due before the launch's clone is prepared
+- **THEN** its body carries neither `fingerprint` nor `progress`
+
+### Requirement: Loop heartbeat: no overlap
+The next loop heartbeat SHALL be timed from the answer to the previous one, so two never overlap.
+
+#### Scenario: Slow answer
+- **WHEN** the answer to a loop heartbeat takes longer than `lease.renewEveryMs`
+- **THEN** no second heartbeat is sent while it is in flight, and the next one is sent `lease.renewEveryMs` after that answer
+
+### Requirement: Loop heartbeat: stop
+The loop heartbeats of a launch SHALL stop when the agent exits, before any fallback report is relayed, and when the clone cannot be prepared.
+
+#### Scenario: Clone fails
+- **WHEN** the clone of a claimed launch cannot be prepared
+- **THEN** the loop heartbeats of that launch stop before the launch is released, and none is sent after the release
+
+### Requirement: Task filter and launch limit: launch limit
+`ORCH_WORKER_MAX_LAUNCHES`, a non-negative integer, SHALL make the loop exit 0 once it has worked that many claimed launches to their end (a report accepted, a release, or an ended launch), without claiming again; unset or 0 SHALL mean no limit. After the limit the loop SHALL print `worker <id> max-launches - -`.
+
+#### Scenario: Three launches
+- **WHEN** the loop runs with `ORCH_WORKER_MAX_LAUNCHES=3` and each claimed launch is released
+- **THEN** it claims three times, releases the three launches in turn, prints `worker <id> max-launches - -` last and exits 0
+
+#### Scenario: Zero is no limit
+- **WHEN** `ORCH_WORKER_MAX_LAUNCHES` is `0`
+- **THEN** the settings hold no launch limit, as when it is unset
