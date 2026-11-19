@@ -1,0 +1,278 @@
+## MODIFIED Requirements
+
+### Requirement: Run default model and effort
+The run default SHALL be the model and effort of the kind in force, resolved through the configuration layers as the flat keys `model` and `effort`: an argument (a `start` argument, a `--set` flag, or a runtime override) beats the file, which beats the default, and the resolved record SHALL carry the source of each. Neither key SHALL be detected or pinned, and neither SHALL be start-only.
+
+#### Scenario: Defaults without a file
+- **WHEN** the daemon starts in a repository with no `orchestrator.yaml` and no overrides
+- **THEN** `config.model` is `{ value: "claude-opus-5-5", source: "default" }` and `config.effort` is `{ value: "medium", source: "default" }`
+
+#### Scenario: File sets the model and an argument sets the effort
+- **WHEN** `orchestrator.yaml` sets `runner.claude.model: opus` and the daemon starts with `--set effort=high`
+- **THEN** `config.model` is `{ value: "opus", source: "file" }` and `config.effort` is `{ value: "high", source: "argument" }`
+
+#### Scenario: Codex default model
+- **WHEN** the file sets `runner.kind: codex` and no model
+- **THEN** `config.model` is `{ value: "gpt-6-astra", source: "default" }`, not a Claude model
+
+#### Scenario: OpenCode model shape
+- **WHEN** the kind in force is `opencode` and `PUT /v1/config` carries `model: "opencode/big-pickle"`, then the kind in force is `claude-code` and a patch carries the same model
+- **THEN** the first is 200 and `config.model` is `{ value: "opencode/big-pickle", source: "argument" }`; the second is 400 naming `model`; `opencode/a/b`, `/x`, `x/`, and `a b/c` are refused for `opencode`
+
+#### Scenario: Stored flat override read as Claude Code's
+- **WHEN** a run's stored override document, written before runner kinds, holds `{ model: "opus" }`
+- **THEN** it is read as `claude.model`, and under `claude-code` `config.model` is `{ value: "opus", source: "argument" }`
+
+### Requirement: Task selectors
+A task MAY carry `runner`, `model`, and `effort` in its payload. A present `runner` SHALL be one of the runner kinds (`claude-code`, `codex`, `opencode`). A present value of any other shape SHALL fail graph validation naming the node and the key. A task without a selector SHALL use the run default for that key; for `model` and `effort` that is the default of the kind the launch runs under.
+
+#### Scenario: Selectors load from the graph file
+- **WHEN** a node declares `model: claude-sonnet-5-5` and `effort: low`
+- **THEN** the loaded node's payload carries both values
+
+#### Scenario: Runner selector loads from the graph file
+- **WHEN** a node declares `runner: codex`
+- **THEN** the loaded node's payload carries `runner: codex`
+
+#### Scenario: Codex-only level loads
+- **WHEN** a node declares `effort: ultra`
+- **THEN** the loaded node's payload carries `effort: ultra`
+
+#### Scenario: Invalid effort refused at load
+- **WHEN** a node declares `effort: huge`
+- **THEN** loading fails and the error names the node and `effort`
+
+#### Scenario: Unknown runner refused at load
+- **WHEN** a node declares `runner: bogus`
+- **THEN** loading fails and the error names the node and `runner`
+
+#### Scenario: Provider/model selector
+- **WHEN** node A declares `model: opencode/big-pickle`, node O declares it with `runner: opencode`, and node C declares it with `runner: codex`, on a run whose kind is `claude-code`
+- **THEN** loading fails naming C and `model`; without C, A's launch runs `claude-code` with `claude-opus-5-5` and O's runs `opencode` with `opencode/big-pickle`
+
+#### Scenario: Unsafe model refused at load
+- **WHEN** a node declares `model: "opus; rm -rf /"`
+- **THEN** loading fails and the error names the node and `model`
+
+### Requirement: Resolution fixed at preparation
+When a launch is prepared the daemon SHALL set the launch's `runner` to the task's `runner` when present, else the runner kind in force, its `model` to the task's `model` when present and of that kind's shape, else the default model of that kind (never another kind's), and its `effort` to the task's `effort` when present, else the default effort of that kind. The daemon SHALL record `runner`, `model`, and `effort`, and `effortRequested` when present, in the `launch.created` event payload.
+
+#### Scenario: Task selector wins over the run default
+- **WHEN** the run default effort is `medium` and T2 declares `effort: high`
+- **THEN** T2's launch has `effort: high` and T1's launch, with no selector, has `effort: medium`
+
+#### Scenario: Override applies to later launches only
+- **WHEN** T1's launch was prepared under model `claude-opus-5-5`, the operator sets `model` to `claude-sonnet-5-5`, and T2 is prepared afterwards
+- **THEN** T1's launch still has `claude-opus-5-5` and T2's launch has `claude-sonnet-5-5`
+
+#### Scenario: Retry resolves again
+- **WHEN** T1's first launch failed under effort `medium` and the operator set `effort` to `high` before the retry was prepared
+- **THEN** the retry launch has `effort: high`
+
+#### Scenario: Kind recorded on the launch
+- **WHEN** a launch is prepared under the default configuration
+- **THEN** the launch row and its `launch.created` payload carry `runner: "claude-code"`, and under run kind `codex` they carry `runner: "codex"`
+
+#### Scenario: Kind override applies to later launches only
+- **WHEN** T1's launch was prepared under `claude-code`, the operator sets `runnerKind` to `codex`, and T3 is prepared afterwards
+- **THEN** T1's launch still has `runner: "claude-code"` and T3's launch has `runner: "codex"`
+
+#### Scenario: Codex defaults for a task without selectors
+- **WHEN** the run kind is `codex` and a task declares neither `model` nor `effort`
+- **THEN** its launch has `model: "gpt-6-astra"` and `effort: "medium"`
+
+#### Scenario: Task runner selector wins over the run kind
+- **WHEN** the run kind is `claude-code` and a task declares `runner: codex` and no `model` or `effort`
+- **THEN** its launch, its `launch.created` payload, its `status.liveLaunches[]` entry, and its claim response carry `runner: "codex"`, `model: "gpt-6-astra"`, and `effort: "medium"`, while a task without a selector in the same run gets `runner: "claude-code"` and `model: "claude-opus-5-5"`
+
+#### Scenario: Ultra falls back under Claude Code
+- **WHEN** a task declares `effort: ultra` and the run kind is `claude-code`
+- **THEN** its launch has `effort: "max"` and `launch.created` carries `effortRequested: "ultra"`; under `codex` the launch keeps `effort: "ultra"` and no `effortRequested` is recorded
+
+#### Scenario: Effort checked against the task's kind
+- **WHEN** the run kind is `claude-code`, task CU declares `runner: codex` and `effort: ultra`, and task K declares `effort: ultra` and no runner
+- **THEN** CU's launch keeps `effort: "ultra"` with no `effortRequested`, and K's launch has `effort: "max"` with `effortRequested: "ultra"`
+
+### Requirement: Profile hold at admission
+When the profile hold is on (see operator-control "Profile hold key"), a task SHALL have a held profile when its status is `unstarted` and at least one of its keys, `model` or `effort`, is missing. A key SHALL be missing when all three hold: its value would come from the leaf of the task's runner kind and not from the task's payload; that leaf's source is `default`; and it is not the case that the runner mode in force is `spawn` and the kind's command template has no slot for the key.
+
+#### Scenario: A task on built-in defaults is held
+
+- **WHEN** the profile hold is on, the run's `claude-code` model and effort come from built-in defaults, and two tasks are ready: A with no selector and B with `model` and `effort` in its payload
+- **THEN** after a tick B has a launch, and A is `unstarted` with no launch row, no `launch.created` event and no transition
+- **AND** `status.paused` and `status.stalled` are false and `status.deferred` is empty
+
+#### Scenario: A held task takes no capacity
+
+- **WHEN** the profile hold is on, `capacity` is 1, a held task sorts first and a second ready task has both selectors
+- **THEN** one tick launches the second task
+
+#### Scenario: Setting the built-in values confirms them
+
+- **WHEN** a held task's run sets `model: claude-opus-5-5` and `effort: medium` through `configure`
+- **THEN** on the next tick the task has a launch with that model and effort, and the configuration reports source `argument` for both
+
+#### Scenario: One key set is not enough
+
+- **WHEN** only the model is set
+- **THEN** the task stays `unstarted` and its missing keys are `["effort"]`
+
+#### Scenario: The hold is per kind
+
+- **WHEN** a `claude-code` run has set its model and effort, and a task with `runner: codex` and no other selector is ready while the `codex` leaves are defaults
+- **THEN** the task is held with runner `codex` and missing keys `["model", "effort"]`
+- **AND** after `codex.model` and `codex.effort` are set it is launched on the next tick
+
+#### Scenario: A value the kind does not take does not confirm
+
+- **WHEN** a task with `model: opencode/big-pickle` and `effort: high` is ready on a `claude-code` run whose leaves are defaults
+- **THEN** the model is not bound, its source is the leaf's `default`, and the task is held with missing keys `["model"]`
+
+#### Scenario: A slot the template lacks does not hold in spawn mode
+
+- **WHEN** the profile hold is on, the mode is `spawn`, and the kind's command template has neither `{model}` nor `{effort}`
+- **THEN** a task with no selector has no missing key and is launched
+- **AND** with the mode `pull` or `mixed` the same task is held with missing keys `["model", "effort"]`, and after the mode is set to `spawn` it is launched on the next tick
+
+#### Scenario: Only admission is held
+
+- **WHEN** the profile hold is on, two tasks were launched after the model and effort were set, one of them is waiting on a question, and both keys are then cleared
+- **THEN** the waiting task is resumed when its answer arrives, and the other launch stays live
+- **AND** when the other task's attempt fails it returns to `unstarted` and gets no further launch until both keys are set again
+
+### Requirement: Profile sources of a task
+The profile of a task SHALL be the `runner`, `model` and `effort` that `selectionFor` returns for it, each key with a source: `task` exactly when `selectionFor` takes the payload's value (for the effort, the requested value or its fallback for the kind), else the source of the leaf of the task's runner kind, `argument`, `file` or `default`, as resolved for that kind with the stored overrides.
+
+#### Scenario: An effort fallback comes from the task
+
+- **WHEN** a task with `effort: ultra` runs under `claude-code`
+- **THEN** its profile has `effort` `max` and `effortSource` `task`
+
+#### Scenario: A file value is a file source
+
+- **WHEN** `orchestrator.yaml` sets `runner.claude.model` and `runner.claude.effort`, also to the built-in values, and a task has no selector
+- **THEN** its profile has `modelSource` and `effortSource` `file`, and the profile hold does not hold it
+
+#### Scenario: An unbound model takes the leaf's source
+
+- **WHEN** a task with a `provider/model` selector runs under `claude-code` or `codex`
+- **THEN** its model is the kind's leaf value and `modelSource` is that leaf's source
+
+## ADDED Requirements
+
+### Requirement: Per-kind model and effort keys
+The configuration SHALL carry a model and an effort per runner kind (see worker-runners "Runner kinds and defaults"): `runner.claude.model`, defaulting to `claude-opus-5-5`, and `runner.claude.effort` for `claude-code`; `runner.codex.model`, defaulting to `gpt-6-astra`, and `runner.codex.effort` for `codex`; `runner.opencode.model`, defaulting to `anthropic/claude-opus-5-5`, and `runner.opencode.effort` for `opencode`; each effort defaulting to `medium`.
+
+#### Scenario: Each kind has its own defaults
+- **WHEN** the configuration is parsed with no `runner` block
+- **THEN** `runner.claude` has model `claude-opus-5-5` and effort `medium`, `runner.codex` has model `gpt-6-astra` and effort `medium`, and `runner.opencode` has model `anthropic/claude-opus-5-5` and effort `medium`
+
+### Requirement: Model shape per kind
+A model SHALL have its kind's shape: for `claude-code` and `codex` it SHALL match `^[A-Za-z0-9][A-Za-z0-9._:-]*$`; for `opencode` it SHALL be `provider/model`, two names of that shape joined by exactly one `/`, so nothing else reaches the shell template.
+
+#### Scenario: One slash for opencode and none for the other kinds
+- **WHEN** model names are checked against each kind's shape
+- **THEN** `opencode/big-pickle` and `ollama/qwen3.6:35b-mlx` have the `opencode` shape, `big-pickle`, `opencode/a/b` and `a/-b` do not, and `opencode/big-pickle` has neither the `claude-code` nor the `codex` shape while `gpt-6-astra` has the `codex` shape
+
+### Requirement: Model shape enforced on configuration values
+A file value, a namespaced argument, or a flat argument bound to a kind SHALL be refused naming the key when it lacks the kind's shape; a flat `model` not yet bound to a kind SHALL take either shape and apply only to a kind whose shape it has.
+
+#### Scenario: A value without the kind's shape is refused naming the key
+- **WHEN** the file sets `runner.opencode.model: big-pickle`, or `--set opencode.model=big-pickle` is given, or `--set model=opencode/big-pickle` is given while the kind in force is `claude-code`
+- **THEN** the file is refused with a message naming `provider/model`, and each flag is refused with an error that begins `--set opencode.model` or `--set model`
+
+#### Scenario: An unbound flat model applies only to a kind of its shape
+- **WHEN** the overrides hold a flat `model: opencode/big-pickle` not bound to a kind and the kind in force is `claude-code`
+- **THEN** `config.model` is `{ value: "claude-opus-5-5", source: "default", applied: true }`
+
+### Requirement: Kind keys and flat argument binding
+An argument MAY name a kind's key directly (`claude.model`, `codex.effort`); a flat `model` or `effort` argument SHALL bind to the kind in force when it is written, or to a `runnerKind` in the same patch, so changing the kind later does not carry one kind's model to another.
+
+#### Scenario: A flat model binds to the kind in the same patch
+- **WHEN** `--set runnerKind=codex` and `--set model=gpt-6-astra` are given together, and the `runnerKind` override is later cleared
+- **THEN** the overrides are `{ runnerKind: "codex", codex: { model: "gpt-6-astra" } }`; after the clearing `config.model` is `{ value: "claude-opus-5-5", source: "default" }` and `config.codex.model` is still `{ value: "gpt-6-astra", source: "argument" }`
+
+#### Scenario: Dotted keys name a kind directly
+- **WHEN** `--set codex.model=gpt-6-pro` and `--set claude.effort=high` are given
+- **THEN** the overrides are `{ codex: { model: "gpt-6-pro" }, claude: { effort: "high" } }`
+
+### Requirement: Task effort selector levels
+A present `effort` SHALL be one of the levels some runner kind accepts (`low`, `medium`, `high`, `xhigh`, `max`, and `ultra` for `codex`; see worker-runners "Per-kind effort sets"); whether the chosen kind accepts it is checked when the launch is prepared, not at load.
+
+#### Scenario: A level the task's kind lacks loads
+- **WHEN** a node declares `runner: claude-code` and `effort: ultra`
+- **THEN** loading succeeds and the node's payload carries both values; the level is checked against `claude-code` only when the launch is prepared
+
+### Requirement: Task model selector shape
+A present `model` SHALL have the shape of the task's own `runner` when it declares one, and otherwise the shape of some kind (see "Run default model and effort"): a `provider/model` id is accepted at load and bound when the launch is prepared, where a kind other than `opencode` does not take it and the launch runs that kind's default model. An import `model:` label follows the same rule, and a label refused beside a `runner:` label of another kind is listed as ignored.
+
+#### Scenario: Import model label beside a runner label of another kind
+- **WHEN** an import maps issue A labelled `model:opencode/big-pickle`, issue B labelled `runner:codex` and `model:opencode/big-pickle`, and issue C labelled `runner:opencode` and `model:opencode/big-pickle`
+- **THEN** A's payload carries `model: opencode/big-pickle`, B's carries `runner: codex` and no `model`, C's carries both, and the import summary lists `{ id: "B", label: "model:opencode/big-pickle" }` under `ignoredLabels`
+
+### Requirement: Effort checked against the chosen kind
+The effort SHALL be checked against the chosen kind's effort set before the kind's fallback applies: a level the kind accepts is kept, a level it lacks is replaced by the kind's fallback (`ultra` as `max` for `claude-code` and `opencode`), and the level asked for SHALL then be recorded as `effortRequested`.
+
+#### Scenario: Ultra falls back under OpenCode
+- **WHEN** the run kind is `opencode` and a task declares `effort: ultra`
+- **THEN** its launch has `runner: "opencode"`, `model: "anthropic/claude-opus-5-5"` and `effort: "max"`, and its `launch.created` payload carries `effortRequested: "ultra"`
+
+### Requirement: Launch selection fixed after preparation
+The `runner`, `model`, `effort` and, when present, `effortRequested` values set when a launch is prepared SHALL NOT change for that launch afterwards: a later override (of the kind, the model, or the effort) applies to launches prepared after it, and a retry is a new launch that resolves again from the task and the run default in force at that time.
+
+#### Scenario: Stored launch row unchanged by an override
+- **WHEN** T1's live launch was prepared with `model: claude-opus-5-5` and `effort: medium`, and the operator then sets `model` to `claude-haiku-5-5` and `effort` to `low`
+- **THEN** the configuration reports `claude-haiku-5-5` with source `argument`, and T1's stored launch row still has `model: claude-opus-5-5` and `effort: medium`
+
+### Requirement: Profile hold and the runner mode
+In `pull` and `mixed` mode the kind's command template slot for a key SHALL NOT be consulted, and the mode SHALL be read every time the missing-key rule of "Profile hold at admission" is evaluated. The runner kind SHALL never be a reason to hold.
+
+#### Scenario: A mode change is read at once
+- **WHEN** the profile hold is on, the mode is `pull`, the kind's command template has neither `{model}` nor `{effort}`, a task with no selector is held, and the mode is set to `spawn`
+- **THEN** the task's profile shows `held: false` and no missing key before any tick, and the next tick launches it
+
+#### Scenario: A runner selector alone does not hold
+- **WHEN** the profile hold is on and a task declares `runner: codex`, `model: gpt-6-astra` and `effort: medium` on a `claude-code` run
+- **THEN** the task has no missing key and its launch has `runner: "codex"`
+
+### Requirement: Held task removed before admission
+The profile hold SHALL narrow task-lifecycle "Admission" as the scope filter (scheduling-policy "Scope filter at admission") does: a ready task with a held profile SHALL be removed from the `ready` list before admission. A task with a held profile SHALL take no capacity, defer no other task and not be listed in `status.deferred`. A task with a held profile SHALL stay `unstarted` and SHALL NOT be transitioned, and no launch row and no event SHALL be written for it.
+
+#### Scenario: No transition and no deferral for a held task
+- **WHEN** the profile hold is on, task A on built-in defaults and task B with both selectors are ready, and a tick runs
+- **THEN** B has a launch, A is `unstarted` with no launch row, no `launch.created` event and no `transition` event, and `status.deferred` is empty
+
+### Requirement: Confirming a held profile by setting
+Confirming SHALL be setting: any value of the kind's model or effort from `start`, `configure`, `--set` or `orchestrator.yaml` SHALL end the hold for that key, also when it equals the built-in value. There SHALL be no confirm call and no new stored state for confirming.
+
+#### Scenario: A file value equal to the built-in one confirms
+- **WHEN** the profile hold is on in a pull-mode run whose `orchestrator.yaml` sets `runner.claude.model: claude-opus-5-5` and `runner.claude.effort: medium`, and a graph with task T1 and task T2 depending on T1 is loaded
+- **THEN** T1 is claimable, and T2's profile has `modelSource` and `effortSource` `file`, `held: false` and no missing key
+
+### Requirement: Profile hold applies to admission only
+Only admission SHALL be held. A waiting task that is resumed, a parked launch, a live launch and a recovery launch of the same attempt SHALL NOT be held. A retry, and a launch after a release, an unblock or a reopen, come from admission and SHALL be held like a first launch.
+
+#### Scenario: A retry waits for both keys
+- **WHEN** the profile hold is on, task F's launch was prepared after the model and effort were set, both keys are then cleared, and F's attempt fails
+- **THEN** F returns to `unstarted` and gets no new launch while only the model is set again, and gets its second launch, with attempt 2, once the effort is set too
+
+### Requirement: Profile hold is not a pause
+The profile hold SHALL NOT be a pause and SHALL NOT be the hold after a gap: `paused` and `stalled` SHALL stay false, and the idle exit SHALL work as for a quiet run. The hold SHALL NOT change any built-in model or effort.
+
+#### Scenario: Held run reports no pause and keeps the built-in values
+- **WHEN** the profile hold is on and a task on built-in defaults is held after a tick
+- **THEN** `status.paused` and `status.stalled` are false, and the held profile still shows model `claude-opus-5-5` and effort `medium` with source `default`
+
+### Requirement: In-memory configuration as the file source
+An in-memory configuration with no file SHALL count as the file for a value that differs from the default.
+
+#### Scenario: In-memory values are file values
+- **WHEN** the daemon runs on an in-memory configuration with no file that sets `runner.claude.model: claude-sonnet-5-5` and `runner.claude.effort: high`, and a task has no selector
+- **THEN** the task's profile has `modelSource` and `effortSource` `file`, and the profile hold does not hold it
+
+### Requirement: Profile sources for every runner kind
+The sources SHALL be read for every runner kind, the kind in force included, by one rule. `selectionFor`'s return value, the launch row and `launch.created` SHALL keep their shape.
+
+#### Scenario: Sources of a kind not in force
+- **WHEN** a `claude-code` run has set its model and effort, and a task declares `runner: codex` and no other selector while the `codex` leaves are defaults
+- **THEN** the task's profile has runner `codex`, model `gpt-6-astra`, and `modelSource` and `effortSource` `default`, and `selectionFor` for a task returns only `runner`, `model`, `effort` and, when present, `effortRequested`
