@@ -169,8 +169,9 @@ so that they are found whenever Codex works in that repository.
 already discovered, for example `enabled = false` to hide one, and a `path` outside the
 discovery directories loads nothing.
 
-The skills differ from the Claude Code plugin's. A Codex session has no subagents, so there
-is no work workflow and no `work` skill. A fresh run is started with `mode: "spawn"` (unless
+The skills differ from the Claude Code plugin's. A Codex session can start subagents
+("Workers in a Codex session"), but no orchestrator work loop uses them yet, so there is no
+work workflow and no `work` skill. A fresh run is started with `mode: "spawn"` (unless
 `orchestrator.yaml` sets `runner.mode`), and the daemon runs the agents headless while the
 session monitors. To work a `pull` or `mixed` run, start the Codex work loop from a shell
 (section 4). The test command is looked up in
@@ -227,10 +228,127 @@ node /path/to/orchestrator/hosts/codex/bin/work.mjs --workers 2 --run-tag cx --c
 - Ctrl-C terminates the codex processes and releases their launches with `keep`.
 - Progress lines go to stderr. A summary JSON goes to stdout on exit. Each launch's codex
   output is in `<worktree>/.orchestrator/codex-work.log`.
+- When codex starts, the loop prints the session's thread id once per launch:
+  `cx-1: T3 codex session <thread_id> (kept: codex exec resume <thread_id>)`, or
+  `(ephemeral: not kept)` under the default `runner.codex.ephemeral: true`.
 
 The shell is the primary path because nobody has verified that a background process started
-from a Codex session outlives the turn. Codex's `features.multi_agent` subagents are an
-unverified alternative.
+from a Codex session outlives the turn. A Codex session can start subagents (next section),
+but no orchestrator work loop uses them yet; the OpenSpec change `codex-visible-workers` holds
+the design for one.
+
+## Workers in a Codex session
+
+What a Codex user can see of the loop's workers. Every fact below was shown with codex-cli
+0.170.0 on 2026-11-18 (`codex --version` prints `codex-cli 0.170.0`; the task that asked for
+it named 0.169.0, which this machine had since updated from). Each probe was a one-line prompt
+in a scratch git repository `<dir>` with `-s read-only`; the ids are the probes' own.
+
+**A worker's session is kept only without `--ephemeral`.** The loop runs the Codex runner's
+command, which passes `--ephemeral` while `runner.codex.ephemeral` is `true` (the default).
+
+```sh
+codex exec --json -s read-only -C <dir> 'Call the spawn_agent tool once to start a subagent whose task is: reply with the word pong. Wait for it with wait_agent, then reply with its answer only.' < /dev/null
+# {"type":"thread.started","thread_id":"01a1f189-1873-7350-8677-4072d2c7582e"}   <- the first event
+find ~/.codex/sessions -name '*01a1f189-1873*'
+# ~/.codex/sessions/2026/11/18/rollout-2026-11-18T20-00-56-01a1f189-1873-7350-8677-4072d2c7582e.jsonl
+head -1 <that rollout>    # session_meta: "cwd":"<dir>", "source":"exec", "originator":"codex_exec"
+sqlite3 ~/.codex/state_5.sqlite "select id, source, git_branch, title, name from threads where id='01a1f189-1873-7350-8677-4072d2c7582e'"
+# 01a1f189-1873-...|exec|main|Call the spawn_agent tool once to start ...|        (name is empty)
+codex exec --json --ephemeral -s read-only -C <dir> 'Reply with the single word ok.' < /dev/null
+# {"type":"thread.started","thread_id":"01a1f18c-d64e-71a1-a4c3-5aede570bda8"}
+find ~/.codex/sessions -name '*01a1f18c-d64e*' | wc -l                                                         # 0
+sqlite3 ~/.codex/state_5.sqlite "select count(*) from threads where id='01a1f18c-d64e-71a1-a4c3-5aede570bda8'"  # 0
+```
+
+**`codex resume` lists exec sessions only with `--include-non-interactive`.** The picker is a
+TUI; it was read through a pty in `<dir>`, which then held three kept exec sessions, one
+interactive session and the ephemeral run:
+
+```sh
+codex resume                              # 1 / 1: only the interactive session
+codex resume --include-non-interactive    # 1 / 4: the interactive session and the three exec
+                                          # sessions, each titled by its first prompt
+                                          # ("● Use the pingworker skill."); no ephemeral run
+codex resume --help                       # --all: "disables cwd filtering and shows CWD column"
+```
+
+The picker filters by the cwd it is started in, so a worker's session shows when the picker is
+started in the launch's worktree (the worker ran with `-C <worktree>`), or with `--all`, which
+still lists a session after its directory is gone: in a scratch `CODEX_HOME` whose probe
+directory had been moved away, `codex resume --all --include-non-interactive`, started
+elsewhere, showed all five of its exec sessions (`1 / 5`) and no subagent.
+
+A worker's title is its first prompt, which for the loop is its preamble on stdin ("You are a
+Codex worker started by the orchestrator's Codex work loop (worker cx-1). ..."). A prompt given
+on stdin is the title as well:
+
+```sh
+codex exec --json -s read-only -C <dir> - < prompt.md   # prompt.md: "You are a Codex worker started by the orchestrator probe (worker cx-1).\nReply with the single word ok."
+sqlite3 $CODEX_HOME/state_5.sqlite "select source, title from threads where id='01a1f1a2-5346-78b0-b3ac-504997a3159a'"
+# exec|You are a Codex worker started by the orchestrator probe (worker cx-1).
+#      Reply with the single word ok.
+```
+
+**A session has no name of its own; it is found by its cwd or its thread id.** `codex exec
+--help` has no option that names a session (`--thread-source` only classifies it). Codex knows
+session names (`codex archive --help`: "Session id (UUID) or session name"), but an exec
+session's `name` in `threads` is empty. `codex exec resume <thread_id>` resumes one by id
+(`codex exec resume --help`: "Conversation/session id (UUID) or thread name").
+
+**`codex agents` lists exec sessions.** Read through a pty (`codex agents --no-daemon`, after
+"Continue without trusting" at its hook review): the "Agent command center" groups sessions by
+project cwd. After all the probes it showed `<dir> 3`: the interactive session (○ "Use
+pingworker skill") and the two exec sessions of that day (● "Use the pingworker skill.", ● "Call
+the spawn_agent tool once ..."), each "Inactive". It showed neither the ephemeral run nor any
+subagent. It is a recent view, not the whole history: an exec session from the day before in
+the same `<dir>` was not in it.
+
+**A session can start subagents, and a plugin's skill can ask it to.** The collaboration tools
+are `spawn_agent`, `wait_agent`, `send_message`, `followup_task`, `list_agents` and
+`interrupt_agent`. In the first probe above:
+
+```sh
+grep -o '"multi_agent_version":"[^"]*"' <its rollout>     # "v2"
+sqlite3 ~/.codex/state_5.sqlite "select * from thread_spawn_edges where parent_thread_id='01a1f189-1873-7350-8677-4072d2c7582e'"
+# 01a1f189-1873-...|01a1f189-2b9f-7f90-a955-62af1b9fb0c8|open
+sqlite3 ~/.codex/state_5.sqlite "select source, agent_nickname, agent_path from threads where id='01a1f189-2b9f-7f90-a955-62af1b9fb0c8'"
+# {"subagent":{"thread_spawn":{"parent_thread_id":"01a1f189-1873-...","depth":1,...}}}|Volta|/root/pong_reply
+```
+
+- The child has its own rollout file and `threads` row, linked in `thread_spawn_edges`. It is
+  not a row of its own in either resume picker (the four rows above include no child) nor in
+  `codex agents` (`<dir> 3` above holds three subagents' parents and none of the three).
+- The exec `--json` stream does not carry the spawn: it shows a `collab_tool_call` item with
+  `"tool":"wait"` and empty `receiver_thread_ids`, then the agent's answer "pong".
+- A skill asks for one as a prompt does. A plugin `pingplug` (`.codex-plugin/plugin.json` with
+  `"skills": "./skills/"`, holding `skills/pingworker/SKILL.md`, which says to call
+  `spawn_agent` once), installed in a scratch `CODEX_HOME` with `codex plugin marketplace add`
+  and `codex plugin add pingplug@probe-market`: `codex exec ... 'Use the pingworker skill.'`
+  read `.../plugins/cache/probe-market/pingplug/0.0.1/skills/pingworker/SKILL.md`, answered
+  "pong", and its thread has a `thread_spawn_edges` row. A repository skill
+  (`.agents/skills/pingworker/SKILL.md`) does the same.
+- Subagents are visible in the interactive TUI. `codex -s read-only -C <dir> 'Use the
+  pingworker skill.'` (read through a pty, the folder trusted by a `-c projects=...` override)
+  showed "• Started `/root/pingworker`", "• Waiting for agents", "• Completed
+  `/root/pingworker`" and the footer hint "← agents"; the child is a `threads` row whose
+  `source` is `{subagent: ...}`.
+
+**What the feature flags change.** `codex features list` shows `multi_agent` deprecated and
+`true`, `multi_agent_v2` stable and `false`, and `subagent_thread_environments` and
+`runtime_agent_instances` under development and `false`. Those flags do not decide whether a
+session has the tools; `agents.enabled` does. Each run below asked for one subagent, and to
+answer "none" when it had no `spawn_agent`:
+
+```sh
+codex exec ... --disable multi_agent "<prompt>"     # "pong"; spawn_agent and the five others; "multi_agent_version":"v2"
+codex exec ... --enable multi_agent_v2 "<prompt>"   # "pong"; the same six tools; "v2"
+codex exec ... -c agents.enabled=false "<prompt>"   # "none"; no collaboration tool; "multi_agent_version":"disabled"
+```
+
+Not shown: whether a subagent can call the orchestrator's MCP tools, and whether it can work in
+a cwd other than its parent's (`subagent_thread_environments` is off). The design in
+`openspec/changes/codex-visible-workers` lists them as open questions.
 
 ## Approvals
 

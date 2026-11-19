@@ -316,10 +316,21 @@ export function workerPreamble(c, workerId, kind = DEFAULT_RUNNER) {
 }
 
 /**
+ * The thread id of a codex session: the first `--json` event is `{"type":"thread.started","thread_id":...}`.
+ * `codex exec resume <id>` resumes the session when it was not run with `--ephemeral`. See
+ * hosts/codex/README.md "Workers in a Codex session".
+ */
+export function codexThreadId(text) {
+  const m = /"type"\s*:\s*"thread\.started"\s*,\s*"thread_id"\s*:\s*"([^"]+)"/.exec(text);
+  return m ? m[1] : undefined;
+}
+
+/**
  * The per-kind adapter: `block(claim)` is the claim's settings block (undefined from an older daemon);
  * `prepare(launch, block)` writes what the shim needs and returns the env additions for the CLI;
  * `compose(launch, block, promptFile)` is the shell command; `started(text, failure)` says whether a
- * turn began; `parseUsage` and `classifyFailure` read the combined output. Built from the kind's module.
+ * turn began; `parseUsage` and `classifyFailure` read the combined output; codex's `session(text, block)`
+ * is the line naming the session's thread id, once it is in the output. Built from the kind's module.
  */
 export function makeAdapter(kind, mod) {
   if (kind === 'opencode') {
@@ -351,6 +362,10 @@ export function makeAdapter(kind, mod) {
     },
     compose: (launch, cx, brief) => composeCodexCommand(launch, { template: cx.settings.command, settings: cx.settings, maxWaitMs: cx.maxWaitMs, brief }),
     started: (text) => text.includes('"turn.started"'),
+    session: (text, cx) => {
+      const id = codexThreadId(text);
+      return id && `codex session ${id} (${cx.settings?.ephemeral === false ? `kept: codex exec resume ${id}` : 'ephemeral: not kept'})`;
+    },
     parseUsage: parseCodexUsage,
     classifyFailure: classifyCodexFailure,
   };
@@ -474,9 +489,18 @@ export async function runWork(opts, mods) {
       const noter = gapAfterMs > 0 ? setInterval(() => note(Date.now()), noteEveryMs(gapAfterMs)) : undefined;
       noter?.unref?.();
       let reportedAt;
+      let sessionNamed = false;
       const take = (chunk) => {
         clock.output(Date.now());
         text += chunk.toString('utf8');
+        // Once per launch, before the trim below can drop the first event.
+        if (!sessionNamed && adapter.session && text.length < 65536) {
+          const line = adapter.session(text, blk);
+          if (line) {
+            sessionNamed = true;
+            log(`${workerId}: ${c.taskId} ${line}`);
+          }
+        }
         if (text.length > 1024 * 1024) text = text.slice(text.length - 512 * 1024);
         out.write(chunk);
       };

@@ -447,6 +447,39 @@ describe('codex host', () => {
     for (const word of ['[mcp_servers.orchestrator_operator]', 'tool_timeout_sec', 'codex mcp add orchestrator_operator --env ORCH_WAIT_CAP_MS=', 'codex mcp get orchestrator_operator', '~/.codex/skills', 'approval_policy = "never"']) expect(readme, word).toContain(word);
   });
 
+  // See specs/host-integration "Run skill: where a Codex worker's session is" and hosts/codex/README.md "Workers in a Codex session".
+  it('the run skill states what the README found about subagents and tells the user how to keep and find a worker session', () => {
+    const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');
+    const flat = run.replace(/\s+/g, ' ');
+    expect(flat).not.toMatch(/(has|have) no subagents/);
+    expect(flat).toContain('A Codex session can start subagents (hosts/codex/README.md, "Workers in a Codex session"), but no orchestrator work loop uses them yet');
+    const blocks = run.split(/\n\s*\n/).map((b) => b.replace(/\s+/g, ' ').trim());
+    const keep = blocks.filter((b) => b.includes('runner.codex.ephemeral: false'));
+    expect(keep).toHaveLength(1);
+    // It is in the pull-mode part of section 1, after the work loop paragraph.
+    expect(run.indexOf('runner.codex.ephemeral: false')).toBeGreaterThan(run.indexOf('node <hosts/codex>/bin/work.mjs'));
+    expect(run.indexOf('runner.codex.ephemeral: false')).toBeLessThan(run.indexOf('## 1b.'));
+    for (const word of [
+      'keeps each worker\'s session',
+      'codex resume --include-non-interactive',
+      'codex agents',
+      'plain `codex resume` lists no `codex exec` session',
+      '`configure` has no key for it',
+      'config.codex.ephemeral',
+      'The default stays `true`',
+      "in the launch's worktree",
+      '<run directory>/worktrees/<launchId>',
+      '`--all`',
+      'codex session <thread_id>',
+      'codex exec resume <thread_id>',
+      'A session has no name to search by',
+    ]) expect(keep[0], word).toContain(word);
+    const readme = readFileSync(path.join(host, 'README.md'), 'utf8');
+    const section = readme.slice(readme.indexOf('## Workers in a Codex session'), readme.indexOf('## Approvals'));
+    expect(section.startsWith('## Workers in a Codex session')).toBe(true);
+    for (const word of ['codex-cli 0.170.0', 'codex resume --include-non-interactive', 'codex agents', 'thread_spawn_edges', 'spawn_agent', 'agents.enabled=false', 'multi_agent_v2', 'codex plugin add pingplug@probe-market', 'Started `/root/pingworker`', 'codex exec resume <thread_id>']) expect(section, word).toContain(word);
+  });
+
   // See specs/host-integration "Run skill asks for a held profile" and "Import skill reports held tasks".
   it('the run and import skills ask the user for a held worker profile', () => {
     const run = readFileSync(path.join(host, 'skills/run/SKILL.md'), 'utf8');

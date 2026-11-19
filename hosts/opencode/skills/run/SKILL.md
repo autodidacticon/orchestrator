@@ -65,6 +65,22 @@ nobody has verified that such a process outlives the turn. `claude-code` launche
 runs, monitor as usual; its workers show in `status.workers` as `<tag>-<n>`. After you answer
 a question, the user restarts the loop if it stopped.
 
+Each codex worker is one `codex exec` outside this session, so it does not show here. By default
+it runs with `--ephemeral` and leaves no Codex session behind. Tell the user that
+`runner.codex.ephemeral: false` in `orchestrator.yaml` keeps each worker's session, so that
+`codex resume --include-non-interactive` and `codex agents` list it (plain `codex resume`
+lists no `codex exec` session). The key is read when the daemon process starts (`configure`
+has no key for it), so a running daemon needs `stop` and `start` to apply it;
+`config.codex.ephemeral` in the `start` result shows the value in force. The default stays
+`true`. To find the session of a launch: run
+`codex resume --include-non-interactive` in the launch's worktree
+(`<run directory>/worktrees/<launchId>`; the loop's log line for the launch names it), since
+the picker shows the sessions of its own directory (`--all` lifts that and shows each
+session's directory, which still works once the worktree is removed), and pick the row
+titled "You are a Codex worker started by the orchestrator's Codex work loop"; or take the thread id that `orchestrator-work` prints for the launch
+(`codex session <thread_id>`) and run `codex exec resume <thread_id>`. A session has no name
+to search by.
+
 The runner kind (`config.runnerKind`, from `runner.kind` in `orchestrator.yaml`, `start` or
 `configure` with `runnerKind`, or `--set runnerKind=opencode`) is `claude-code` by default,
 `codex`, or `opencode`. All three kinds run headless under `spawn`. A task can also choose its kind (`runner` in

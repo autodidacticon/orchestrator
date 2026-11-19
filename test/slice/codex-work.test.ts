@@ -74,6 +74,8 @@ describe('codex work loop (work.mjs, fake codex on PATH)', () => {
     const out = await loop.done.finally(() => clearInterval(timer));
     expect(out.code, out.stderr).toBe(0);
     expect(out.stderr).toMatch(/stops: the run is finished/);
+    // Each launch names its codex session (the fake's fixture thread), ephemeral under the default.
+    expect(out.stderr.match(/cx-[12]: T\d codex session 01a14df7-5114-7be1-9457-3bac087cab0c \(ephemeral: not kept\)/g)?.length).toBe(3);
 
     const launches = h.store.listLaunches();
     expect(launches.length).toBe(3);

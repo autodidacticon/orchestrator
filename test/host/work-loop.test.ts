@@ -9,7 +9,7 @@ import { DEFAULT_OPENCODE_COMMAND } from '../../src/runner/command.js';
 import type { Launch } from '../../src/state/store.js';
 import { makeSlice, type SliceHarness, tsxLoader } from '../slice/harness.js';
 // @ts-expect-error a plain .mjs host script without type declarations
-import { DEFAULT_GAP_AFTER_MS, DEFAULT_MAX_SILENCE_MS, launchState, noteEveryMs, packageModules, parseWorkArgs, renewEveryMs, silenceClock, silenceLimitMs, startRenewal, stopVerdict, watchVerdict, workerPreamble } from '../../hosts/codex/bin/work.mjs';
+import { codexThreadId, DEFAULT_GAP_AFTER_MS, DEFAULT_MAX_SILENCE_MS, launchState, makeAdapter, noteEveryMs, packageModules, parseWorkArgs, renewEveryMs, silenceClock, silenceLimitMs, startRenewal, stopVerdict, watchVerdict, workerPreamble } from '../../hosts/codex/bin/work.mjs';
 
 /**
  * The work loop by runner kind (hosts/codex/bin/work.mjs) with `--runner opencode` against a
@@ -767,6 +767,19 @@ describe('work.mjs by kind', () => {
     expect(oc.runner).toMatch(/runner[/\\]opencode\.(ts|js)$/);
     expect(oc.codex).toBeUndefined();
     expect((packageModules() as { codex: string }).codex).toMatch(/runner[/\\]codex\.(ts|js)$/);
+  });
+
+  // See hosts/codex/README.md "Workers in a Codex session": the first --json event names the thread.
+  it('the codex adapter names the session thread id once it is in the output, and says whether it is kept', () => {
+    const id = '01a1f189-1873-7350-8677-4072d2c7582e';
+    const out = `Reading prompt from stdin...\n{"type":"thread.started","thread_id":"${id}"}\n{"type":"turn.started"}\n`;
+    expect(codexThreadId(out)).toBe(id);
+    expect(codexThreadId('{"type":"turn.started"}\n')).toBeUndefined();
+    const codex = makeAdapter('codex', {}) as { session?: (text: string, block: unknown) => string | undefined };
+    expect(codex.session!('', { settings: { ephemeral: true } })).toBeUndefined();
+    expect(codex.session!(out, { settings: { ephemeral: true } })).toBe(`codex session ${id} (ephemeral: not kept)`);
+    expect(codex.session!(out, { settings: { ephemeral: false } })).toBe(`codex session ${id} (kept: codex exec resume ${id})`);
+    expect((makeAdapter('opencode', {}) as { session?: unknown }).session).toBeUndefined();
   });
 });
 
