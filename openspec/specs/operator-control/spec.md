@@ -427,11 +427,15 @@ When an operator operation other than `start`, `stop`, or `runs` finds no health
 - **THEN** the call fails naming the stop time and suggesting `start`, and no daemon is spawned
 
 ### Requirement: Container mode
-The daemon SHALL run as a long-lived foreground process. On SIGTERM or SIGINT it SHALL stop the tick loop, finish the in-flight tick and verifier job, close the API server and its open connections, write the exit record with reason `signal`, and exit 0. `daemon.idleExitMs: 0` keeps the daemon running however long it is idle (see "Idle exit").
+The daemon SHALL run as a long-lived foreground process. On SIGTERM or SIGINT it SHALL stop the tick loop, finish the in-flight tick and verifier job, close the API server and its open connections, write the exit record with reason `signal`, and exit 0. Under `verifier.mode: remote` the stop SHALL NOT wait for a job that waits for a verifier's result, and that job's row SHALL stay for the next start. `daemon.idleExitMs: 0` keeps the daemon running however long it is idle (see "Idle exit").
 
 #### Scenario: SIGTERM mid-check
-- **WHEN** the daemon receives SIGTERM while a verifier job is `checking`
+- **WHEN** the daemon under `verifier.mode: local` receives SIGTERM while a verifier job is `checking`
 - **THEN** the job is published, the server closes, `daemon.json` carries `exit` with reason `signal`, and the process exits 0 within ten seconds
+
+#### Scenario: SIGTERM while a remote job waits
+- **WHEN** the daemon under `verifier.mode: remote` receives SIGTERM while an offered job claimed by a verifier waits for its result
+- **THEN** the process exits 0 within eight seconds without `shutdown grace elapsed`, and its store holds the job `checking` with its `offer`, `verifier` and `token`
 
 #### Scenario: Never idle when disabled
 - **WHEN** `daemon.idleExitMs` is 0 and the daemon is quiescent past a short window
@@ -1720,3 +1724,21 @@ Pending tracker effects, an unfinished graph, blocked tasks, and a milestone awa
 #### Scenario: Idle facts reported
 - **WHEN** `idleExitMs` is 1000 and a quiescent daemon has been idle for 1000 ms
 - **THEN** `status` reports `idle: { quiescent: true, idleMs: 1000, exitAfterMs: 1000 }`
+
+### Requirement: Shutdown: launches reaped together
+A reaping shutdown SHALL reap the live launches that no worker holds in one call to the runner, so its wait for their processes does not grow with their number. After that call it SHALL take each launch in turn and record its usage, move its task as "Shutdown" states, and end the launch with reason `reaped`, in that order.
+
+#### Scenario: Three launches whose agents ignore SIGTERM
+- **WHEN** T1, T2 and T3 run agents that ignore SIGTERM and the daemon stops with reap under a kill grace of 500 ms
+- **THEN** the three agents receive SIGTERM less than 500 ms apart, no process of their groups is left, and each launch is `ended` with reason `reaped` and the usage its agent printed after the signal
+
+#### Scenario: Five launches before the deadline
+- **WHEN** a daemon started with `--reap-on-exit` has five live launches whose agents ignore SIGTERM and receives SIGTERM
+- **THEN** it exits 0 within its 8 s shutdown deadline, with an exit record of `reason: "signal"` and `reap: true`, and all five launches are `ended` with reason `reaped`
+
+### Requirement: Shutdown: reap before the verifier wait
+A reaping shutdown SHALL reap the live launches as soon as the tick in flight has ended, before it waits for the prepare commands it aborts and for the verifier job in flight. The verifier job in flight SHALL still run to its end, or until the shutdown deadline.
+
+#### Scenario: A verifier job in flight
+- **WHEN** T4's verifier job is in flight while T1, T2 and T3 run and the daemon stops with reap
+- **THEN** the three launches are reaped and ended with reason `reaped` while the job is still running, and the stop completes only after the job ends
