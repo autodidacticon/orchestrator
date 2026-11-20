@@ -13,7 +13,7 @@ vi.mock('../../src/runner/command.js', async (importOriginal) => {
 });
 
 const command = await import('../../src/runner/command.js');
-const { Backoff, composeAgentCommand, DEFAULT_WORKER_CACHE, launchState, runWorkerLoop, startOf, workerSettings } = await import('../../src/worker/loop.js');
+const { Backoff, composeAgentCommand, DEFAULT_WORKER_CACHE, launchState, runWorkerLoop, startOf, USAGE, workerSettings } = await import('../../src/worker/loop.js');
 
 const settings = (over: Partial<import('../../src/worker/loop.js').WorkerSettings> = {}) => ({
   api: 'http://daemon.test',
@@ -270,5 +270,52 @@ describe('bounded shutdown', () => {
     expect(ended!.at - signalAt).toBeLessThanOrEqual(TERMINATION_CALL_MS + 1000);
     expect(claims.every((u) => u.endsWith('/v1/claims'))).toBe(true);
     expect(out).toContain('worker w-1 terminating - -');
+  });
+});
+
+describe('runner filter (ORCH_WORKER_RUNNER)', () => {
+  const base = { ORCH_API: 'http://d', ORCH_WORKER_AGENT: 'scripted' };
+
+  it('parses one kind or a comma-separated list, refuses a value outside the kinds, and is absent when unset', () => {
+    expect(workerSettings({ ...base, ORCH_WORKER_RUNNER: 'claude-code' }, () => 'h').runnerKinds).toEqual(['claude-code']);
+    expect(workerSettings({ ...base, ORCH_WORKER_RUNNER: ' codex , opencode ' }, () => 'h').runnerKinds).toEqual(['codex', 'opencode']);
+    expect(() => workerSettings({ ...base, ORCH_WORKER_RUNNER: 'gemini' })).toThrow(/ORCH_WORKER_RUNNER/);
+    expect(() => workerSettings({ ...base, ORCH_WORKER_RUNNER: 'codex,' })).toThrow(/ORCH_WORKER_RUNNER/);
+    expect(workerSettings(base, () => 'h')).not.toHaveProperty('runnerKinds');
+    expect(workerSettings({ ...base, ORCH_WORKER_RUNNER: '' }, () => 'h')).not.toHaveProperty('runnerKinds');
+    expect(USAGE).toContain('ORCH_WORKER_RUNNER');
+  });
+
+  it('one kind is sent as a string, several as a list, beside the task filter', async () => {
+    const clock = fakeClock();
+    const one = grantingDaemon();
+    await runWorkerLoop(settings({ runnerKinds: ['claude-code'], maxLaunches: 2 }), { fetch: one.fetchFn, sleep: clock.sleep, now: clock.now, out: () => undefined, err: () => undefined });
+    expect(one.claims).toEqual([
+      { workerId: 'w-1', access: 'remote', runner: 'claude-code' },
+      { workerId: 'w-1', access: 'remote', runner: 'claude-code' },
+    ]);
+    const two = grantingDaemon();
+    await runWorkerLoop(settings({ runnerKinds: ['codex', 'opencode'], maxLaunches: 1 }), { fetch: two.fetchFn, sleep: clock.sleep, now: clock.now, out: () => undefined, err: () => undefined });
+    expect(two.claims).toEqual([{ workerId: 'w-1', access: 'remote', runner: ['codex', 'opencode'] }]);
+    const task = grantingDaemon();
+    await runWorkerLoop(settings({ runnerKinds: ['claude-code'], task: 'SMOKE', maxLaunches: 1 }), { fetch: task.fetchFn, sleep: clock.sleep, now: clock.now, out: () => undefined, err: () => undefined });
+    expect(task.claims).toEqual([{ workerId: 'w-1', access: 'remote', taskId: 'SMOKE', runner: 'claude-code' }]);
+  });
+
+  it('a command loop without ORCH_WORKER_RUNNER writes one warning line; with it, or with the scripted agent, none', async () => {
+    const warnings = async (over: Partial<import('../../src/worker/loop.js').WorkerSettings>) => {
+      const clock = fakeClock();
+      const errs: string[] = [];
+      await runWorkerLoop(settings(over), { fetch: idleDaemon(() => true).fetchFn, sleep: clock.sleep, now: clock.now, out: () => undefined, err: (t) => errs.push(t) });
+      return errs
+        .join('')
+        .split('\n')
+        .filter((l) => l.includes('ORCH_WORKER_RUNNER'));
+    };
+    const unset = await warnings({ agent: 'command', command: 'true' });
+    expect(unset).toHaveLength(1);
+    expect(unset[0]).toContain('every runner kind');
+    expect(await warnings({ agent: 'command', command: 'true', runnerKinds: ['claude-code'] })).toEqual([]);
+    expect(await warnings({ agent: 'scripted' })).toEqual([]);
   });
 });

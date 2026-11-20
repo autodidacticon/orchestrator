@@ -86,6 +86,16 @@ describe('Claude worker image', () => {
     expect(composed).toContain('< /var/cache/orchestrator/repo/.orchestrator/brief.md');
   });
 
+  it('sets ORCH_WORKER_RUNNER to claude-code, the kind its command runs', () => {
+    expect(envVars).toMatchObject({ ORCH_WORKER_RUNNER: 'claude-code' });
+    const readme = read('deploy/README.md');
+    const section = readme.slice(readme.indexOf('### Claude worker image'), readme.indexOf('### The `REPO_URL` contract'));
+    expect(section).toContain('ORCH_WORKER_RUNNER');
+    const workers = readme.slice(readme.indexOf('### The workers'), readme.indexOf('### The verifiers'));
+    expect(workers).toContain('401');
+    expect(workers).toContain('ORCH_WORKER_RUNNER');
+  });
+
   it('deploy/README.md describes the image and says the shim pushes and names sealedSha', () => {
     const readme = read('deploy/README.md');
     const section = readme.slice(readme.indexOf('### Claude worker image'));

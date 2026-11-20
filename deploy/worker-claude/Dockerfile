@@ -27,5 +27,7 @@ ENV GIT_AUTHOR_NAME=orchestrator-worker \
 # and every tool call is allowed, with the container as the boundary. A deployment that wants an allow list sets its
 # own ORCH_WORKER_COMMAND (for instance with --permission-mode acceptEdits and --allowedTools).
 ENV ORCH_WORKER_COMMAND="claude -p --output-format json --mcp-config {mcpConfig} --strict-mcp-config --dangerously-skip-permissions --model {model} --effort {effort} --no-session-persistence < {brief}"
+# The runner kind this image runs, set where the command is: the loop claims only claude-code launches.
+ENV ORCH_WORKER_RUNNER=claude-code
 
 CMD ["orchestrator-worker"]

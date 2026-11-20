@@ -13,6 +13,7 @@ import path from 'node:path';
 import { isEntrypoint } from '../entry.js';
 import { withoutStore } from '../runs/childEnv.js';
 import type { Launch } from '../state/store.js';
+import { isRunnerKind, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
 import { fixedSlots, quoteRules, substitute } from '../runner/command.js';
 import { shimCommand, shimEnv } from '../runner/shim-command.js';
 import { treeFingerprint } from '../workspace/fingerprint.js';
@@ -26,6 +27,8 @@ export const DEFAULT_WORKER_CACHE = '/var/cache/orchestrator';
 export const DEFAULT_RETRY_WINDOW_MS = 60_000;
 export const DEFAULT_BACKOFF_MS = 1000;
 export const DEFAULT_BACKOFF_MAX_MS = 30_000;
+/** How long a command agent whose launch reported has to exit by itself after a heartbeat was answered 401. */
+export const DEFAULT_REPORT_GRACE_MS = 30_000;
 
 export type WorkerAgent = 'scripted' | 'command';
 
@@ -52,6 +55,17 @@ export interface WorkerSettings {
   maxLaunches?: number;
   /** On termination, how long the agent's process group has after SIGTERM before SIGKILL (`ORCH_WORKER_AGENT_STOP_MS`); unset is 10000. */
   agentStopMs?: number;
+  /** The runner kinds this loop claims (`ORCH_WORKER_RUNNER`, one kind or a comma-separated list); absent claims any kind. */
+  runnerKinds?: RunnerKind[];
+}
+
+/** `ORCH_WORKER_RUNNER` parsed: undefined when unset or blank; throws naming the variable on a value outside the kinds. */
+export function runnerKindsOf(raw: string | undefined): RunnerKind[] | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const parts = raw.split(',').map((p) => p.trim());
+  const bad = parts.find((p) => !isRunnerKind(p));
+  if (bad !== undefined) throw new Error(`ORCH_WORKER_RUNNER must be one of ${RUNNER_KINDS.join(', ')} or a comma-separated list of them; got ${JSON.stringify(raw)}`);
+  return [...new Set(parts as RunnerKind[])];
 }
 
 function nonNegative(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -81,6 +95,7 @@ export function workerSettings(env: NodeJS.ProcessEnv, host: () => string = host
   }
   const stopRaw = env['ORCH_WORKER_AGENT_STOP_MS'];
   const agentStopMs = stopRaw !== undefined && stopRaw.trim() !== '' ? nonNegative(env, 'ORCH_WORKER_AGENT_STOP_MS', DEFAULT_AGENT_STOP_MS) : undefined;
+  const runnerKinds = runnerKindsOf(env['ORCH_WORKER_RUNNER']);
   return {
     api: api.replace(/\/+$/, ''),
     workerId,
@@ -94,6 +109,18 @@ export function workerSettings(env: NodeJS.ProcessEnv, host: () => string = host
     ...(task ? { task } : {}),
     ...(maxLaunches ? { maxLaunches } : {}),
     ...(agentStopMs !== undefined ? { agentStopMs } : {}),
+    ...(runnerKinds ? { runnerKinds } : {}),
+  };
+}
+
+/** The claim body: the worker, access remote, the task filter, and the runner filter (a string for one kind, a list for several). */
+export function claimBody(s: Pick<WorkerSettings, 'workerId' | 'task' | 'runnerKinds'>): Record<string, unknown> {
+  const kinds = s.runnerKinds;
+  return {
+    workerId: s.workerId,
+    access: 'remote',
+    ...(s.task ? { taskId: s.task } : {}),
+    ...(kinds && kinds.length > 0 ? { runner: kinds.length === 1 ? kinds[0] : [...kinds] } : {}),
   };
 }
 
@@ -184,10 +211,11 @@ export interface LoopHeartbeat {
  * The loop's heartbeat for one launch: every `everyMs` from the claim until `stop`, `POST /v1/launches/:id/heartbeat`
  * with the launch token, carrying the clone's fingerprint once the clone exists (`clone()`). It carries no text, so
  * the daemon renews the lease and counts only a changed fingerprint as progress. A 401 ends the heartbeats for the
- * launch. The next heartbeat is scheduled after the previous one is answered, so two never overlap.
- * See specs/worker-pool "Loop heartbeat".
+ * launch and calls `onRevoked` once (synchronously; it must not block the heartbeat). The next heartbeat is scheduled
+ * after the previous one is answered, so two never overlap.
+ * See specs/worker-pool "Loop heartbeat" and "Worker loop: revoked launch".
  */
-export function startLoopHeartbeat(o: { call: ApiCall; claim: Pick<RemoteClaim, 'launchId' | 'token'>; everyMs: number; clone: () => string | undefined; schedule?: Schedule; err?: (text: string) => void; fingerprint?: (dir: string) => Promise<string> }): LoopHeartbeat {
+export function startLoopHeartbeat(o: { call: ApiCall; claim: Pick<RemoteClaim, 'launchId' | 'token'>; everyMs: number; clone: () => string | undefined; schedule?: Schedule; err?: (text: string) => void; fingerprint?: (dir: string) => Promise<string>; onRevoked?: () => void }): LoopHeartbeat {
   const schedule = o.schedule ?? realSchedule;
   const fingerprintOf = o.fingerprint ?? cloneFingerprint;
   let stopped = false;
@@ -209,7 +237,14 @@ export function startLoopHeartbeat(o: { call: ApiCall; claim: Pick<RemoteClaim, 
     sent++;
     try {
       const r = await o.call('POST', `/v1/launches/${o.claim.launchId}/heartbeat`, body, o.claim.token);
-      if (r.status === 401) revoked = true;
+      if (r.status === 401) {
+        revoked = true;
+        try {
+          o.onRevoked?.();
+        } catch (e) {
+          o.err?.(`heartbeat ${o.claim.launchId}: ${e instanceof Error ? e.message : String(e)}\n`);
+        }
+      }
       else if (r.status !== 200) o.err?.(`heartbeat ${o.claim.launchId}: ${r.status} ${JSON.stringify(r.body).slice(0, 200)}\n`);
     } catch (e) {
       o.err?.(`heartbeat ${o.claim.launchId}: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -274,6 +309,11 @@ export interface WorkerDeps {
    * entry point aborts it on SIGTERM and SIGINT. See specs/worker-pool "Pod termination".
    */
   termination?: AbortSignal;
+  /**
+   * After a heartbeat answered 401, how long a command agent whose task is submitted or done has to exit by itself
+   * before it is stopped (default 30000). See specs/worker-pool "Worker loop: revoked launch: report grace".
+   */
+  reportGraceMs?: number;
 }
 
 /** The termination request as the loop reads it: whether it was made, and a race against it. */
@@ -344,6 +384,9 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
   let launches = 0;
   let current: Pick<RemoteClaim, 'launchId' | 'taskId'> | undefined;
   log('start');
+  if (s.agent === 'command' && !s.runnerKinds) {
+    err(`worker ${s.workerId} warning: ORCH_WORKER_RUNNER is unset, so this loop claims launches of every runner kind, not only the kind its agent command runs\n`);
+  }
   void term.wait.then(() => log('terminating', current));
   for (;;) {
     if (term.requested()) return 0;
@@ -351,7 +394,7 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
     // without keep, and no answer exits 0.
     let c: ApiResult;
     try {
-      c = await call('POST', '/v1/claims', { workerId: s.workerId, access: 'remote', ...(s.task ? { taskId: s.task } : {}) });
+      c = await call('POST', '/v1/claims', claimBody(s));
     } catch (e) {
       if (term.requested()) {
         err(`worker ${s.workerId} claim: no answer: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -361,7 +404,7 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
     }
     if (c.status === 200) {
       const claim = claimOf(c.body);
-      const tools: LaunchTools = { log, err, sleep, schedule: deps.schedule, scriptedIdleMs: deps.scriptedIdleMs, term };
+      const tools: LaunchTools = { log, err, sleep, schedule: deps.schedule, scriptedIdleMs: deps.scriptedIdleMs, term, reportGraceMs: deps.reportGraceMs ?? DEFAULT_REPORT_GRACE_MS };
       if (term.requested()) {
         log('claimed', claim);
         return releaseUnstarted(call, s, claim, tools);
@@ -412,6 +455,7 @@ interface LaunchTools {
   schedule?: Schedule;
   scriptedIdleMs?: number;
   term: Termination;
+  reportGraceMs: number;
 }
 
 /**
@@ -424,7 +468,10 @@ async function workLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, 
   let clone: string | undefined;
   // Heartbeats run from the claim until the agent exits, whether or not the agent calls the API itself.
   const every = heartbeatEveryMs(claim);
-  const heartbeat = every !== undefined ? startLoopHeartbeat({ call, claim, everyMs: every, clone: () => clone, schedule: t.schedule, err: t.err }) : undefined;
+  // Resolves when a heartbeat is answered 401: the daemon has ended the launch. Only the command agent acts on it.
+  let onRevoked: () => void = () => undefined;
+  const revoked = new Promise<void>((resolve) => (onRevoked = resolve));
+  const heartbeat = every !== undefined ? startLoopHeartbeat({ call, claim, everyMs: every, clone: () => clone, schedule: t.schedule, err: t.err, onRevoked }) : undefined;
   // On termination a heartbeat in flight is awaited for at most TERMINATION_CALL_MS.
   const stopHeartbeat = async () => {
     if (!heartbeat) return;
@@ -432,7 +479,7 @@ async function workLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, 
     else await heartbeat.stop();
   };
   try {
-    return await workClaimed(s, call, claim, t, (dir) => (clone = dir), stopHeartbeat);
+    return await workClaimed(s, call, claim, t, (dir) => (clone = dir), stopHeartbeat, revoked);
   } finally {
     await stopHeartbeat();
   }
@@ -442,7 +489,7 @@ async function workLaunch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, 
  * The launch's work after the claim: clone, agent, relay, verdict. Stops the heartbeat once the agent has exited.
  * Answers the loop's exit code when the termination was requested, else nothing.
  */
-async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools, setClone: (dir: string) => void, stopHeartbeat: () => Promise<void>): Promise<number | undefined> {
+async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools, setClone: (dir: string) => void, stopHeartbeat: () => Promise<void>, revoked: Promise<void>): Promise<number | undefined> {
   const { log, term } = t;
   const ending = () => (term.requested() ? 0 : undefined);
   let accepted = false;
@@ -487,12 +534,22 @@ async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim,
     } else {
       const kept = new TailKeeper();
       const agent = runCommand(composeAgentCommand(s.command!, claim, clone), clone, agentEnv(s, claim, clone), t.err, (d) => kept.push(d));
-      const finished = await term.race(agent.closed);
+      // The agent runs until it exits, the termination is requested, or the daemon ended the launch (a heartbeat answered
+      // 401, see revokedWatch). The daemon owns silence: the loop has no clock of its own.
+      let agentDone = false;
+      void agent.closed.then(() => (agentDone = true));
+      const watch = revoked.then(() => revokedWatch(s, call, claim, t, agent.closed, () => agentDone));
+      const first = await Promise.race([
+        agent.closed.then((code) => ({ why: 'exit' as const, code })),
+        term.wait.then(() => ({ why: 'term' as const })),
+        watch.then((stop) => (stop ? { why: 'revoked' as const } : new Promise<never>(() => undefined))),
+      ]);
       let code: number;
-      if (finished.ok) code = finished.value;
+      if (first.why === 'exit') code = first.code;
       else {
-        // Terminating: SIGTERM to the agent's group, SIGKILL after the limit. After a SIGKILL only the exit is awaited, not the
-        // pipes, which a child in a group of its own may still hold.
+        if (first.why === 'revoked') log('agent-ended', claim, 'the daemon ended the launch (a heartbeat was answered 401)');
+        // One stop whichever fired first: SIGTERM to the agent's group, SIGKILL after the limit. After a SIGKILL only the exit
+        // is awaited, not the pipes, which a child in a group of its own may still hold.
         const stopped = await stopAgent(agent, s.agentStopMs ?? DEFAULT_AGENT_STOP_MS);
         code = stopped.killed ? stopped.code : await agent.closed;
       }
@@ -535,6 +592,33 @@ async function workClaimed(s: WorkerSettings, call: ApiCall, claim: RemoteClaim,
   else log('ended', claim);
   await postUsage(call, claim, usage, t);
   return ending();
+}
+
+/**
+ * What the loop does once a heartbeat of a command agent's launch was answered 401: it reads `GET /v1/status` once.
+ * When the task is submitted or done the agent keeps `reportGraceMs` to exit by itself (so its usage object is
+ * printed); in any other state, or when the status cannot be read, it is stopped at once. Answers true when the agent
+ * should be stopped, false when it exited first or the termination was requested (the loop stops it then).
+ * See specs/worker-pool "Worker loop: revoked launch: command agent".
+ */
+async function revokedWatch(s: WorkerSettings, call: ApiCall, claim: RemoteClaim, t: LaunchTools, closed: Promise<number>, exited: () => boolean): Promise<boolean> {
+  if (exited() || t.term.requested()) return false;
+  let state: 'reported' | 'held' | 'ended' | 'unread' = 'unread';
+  try {
+    const st = await call('GET', '/v1/status');
+    if (st.status === 200) state = launchState(st.body, s.workerId, claim);
+    else t.err(`worker ${s.workerId} revoked ${claim.launchId}: status ${st.status} ${JSON.stringify(st.body).slice(0, 200)}\n`);
+  } catch (e) {
+    t.err(`worker ${s.workerId} revoked ${claim.launchId}: status ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+  t.err(`worker ${s.workerId} revoked ${claim.launchId}: a heartbeat was answered 401; the launch is ${state}\n`);
+  if (exited() || t.term.requested()) return false;
+  if (state === 'reported') {
+    // The report grace: the agent prints its usage object as it exits; termination during the grace stops it at once.
+    const gone = await withLimit(Promise.race([closed.then(() => true), t.term.wait.then(() => true)]), t.reportGraceMs);
+    if (gone || exited() || t.term.requested()) return false;
+  }
+  return true;
 }
 
 /**
@@ -736,13 +820,17 @@ finished. Environment:
                              {model} and {effort} are substituted
   ORCH_WORKER_IDLE_EXIT_MS   exit 0 after this long with nothing claimable (default 0, never)
   ORCH_WORKER_TASK           claim only this task id (default: any task)
+  ORCH_WORKER_RUNNER         claim only launches of this runner kind, or of a comma-separated list
+                             of kinds (claude-code, codex, opencode); default: every runner kind
   ORCH_WORKER_MAX_LAUNCHES   exit 0 after this many launches (default 0, never)
   ORCH_RETRY_WINDOW_MS       how long connection failures are retried (default ${DEFAULT_RETRY_WINDOW_MS})
   ORCH_WORKER_BACKOFF_MS     first poll delay with nothing claimable (default ${DEFAULT_BACKOFF_MS})
   ORCH_WORKER_BACKOFF_MAX_MS the longest poll delay (default ${DEFAULT_BACKOFF_MAX_MS})
   ORCH_WORKER_AGENT_STOP_MS  on SIGTERM or SIGINT, how long the agent has to exit before SIGKILL
                              (default ${DEFAULT_AGENT_STOP_MS}); the launch is then committed, pushed and
-                             released with keep and reason podTerminating
+                             released with keep and reason podTerminating; the same limit applies
+                             when a heartbeat is answered 401 (the daemon ended the launch) and the
+                             command agent is stopped, at once or after a 30 s grace when it reported
 `;
 
 if (isEntrypoint(import.meta.url)) {
