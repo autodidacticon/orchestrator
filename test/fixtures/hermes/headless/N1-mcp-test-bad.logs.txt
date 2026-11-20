@@ -1,0 +1,19 @@
+==> logs/agent.log <==
+2026-11-20 15:35:41,609 WARNING tools.mcp_tool: MCP server 'orchestrator' failed initial connection after 3 attempts, parking until a reconnect is requested (state: connecting → parked): MCPError: Connection closed
+
+==> logs/errors.log <==
+2026-11-20 15:35:41,609 WARNING tools.mcp_tool: MCP server 'orchestrator' failed initial connection after 3 attempts, parking until a reconnect is requested (state: connecting → parked): MCPError: Connection closed
+
+==> logs/mcp-stderr.log <==
+
+2026-11-20 15:35:33,690 ===== starting MCP server 'orchestrator' =====
+2026-11-20 15:35:33,779 --orch-env-file <scratch>/home/missing.env: cannot read the shim env file (ENOENT)
+
+2026-11-20 15:35:34,895 ===== starting MCP server 'orchestrator' =====
+2026-11-20 15:35:34,994 --orch-env-file <scratch>/home/missing.env: cannot read the shim env file (ENOENT)
+
+2026-11-20 15:35:36,939 ===== starting MCP server 'orchestrator' =====
+2026-11-20 15:35:37,022 --orch-env-file <scratch>/home/missing.env: cannot read the shim env file (ENOENT)
+
+2026-11-20 15:35:41,529 ===== starting MCP server 'orchestrator' =====
+2026-11-20 15:35:41,602 --orch-env-file <scratch>/home/missing.env: cannot read the shim env file (ENOENT)

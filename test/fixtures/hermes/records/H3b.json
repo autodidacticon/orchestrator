@@ -1,0 +1,177 @@
+{
+  "id": "H3b",
+  "kind": "headless",
+  "questions": [
+    "Q3",
+    "Q15"
+  ],
+  "at": "2026-11-20T23:00:38.933Z",
+  "command": [
+    "/opt/homebrew/bin/hermes",
+    "chat",
+    "-q",
+    "Run these three shell commands one at a time, each as its own terminal call: pwd, then ls, then date. Then reply with the single word done.",
+    "--oneshot",
+    "--format",
+    "stream-json",
+    "--max-turns",
+    "1",
+    "--provider",
+    "nous",
+    "-m",
+    "qwen/qwen4-max:free"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-da560b4f",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env"
+  },
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 7685,
+  "killed": null,
+  "modelCalls": 1,
+  "observedApiCalls": 1,
+  "plannedModelCalls": 1,
+  "apiCalls": null,
+  "orphans": [
+    {
+      "pid": 34580,
+      "ppid": 33837,
+      "pgid": 34580,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    }
+  ],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    ".clean_shutdown",
+    ".env",
+    ".install_id.lock",
+    ".skills_prompt_snapshot.json",
+    "SOUL.md",
+    "auth.json",
+    "auth.lock",
+    "backups/config/config.yaml.good.20261120-170027",
+    "cache/endpoint_model_metadata.json",
+    "cache/nous_recommended_cache.json",
+    "cache/plugin_toolset_keys.json",
+    "cache/reasoning_caps.json",
+    "cache/schema_columns.json",
+    "cache/scratch/.last_prune",
+    "cache/tool_discovery_cache.json",
+    "channel_directory.json",
+    "config.yaml",
+    "context_length_cache.yaml",
+    "context_length_cache.yaml.lock",
+    "cron/.jobs.lock",
+    "cron/.tick.lock",
+    "cron/executions.db",
+    "cron/ticker_heartbeat",
+    "cron/ticker_last_success",
+    "gateway-starts.log",
+    "gateway.lock",
+    "gateway_state.json",
+    "install_id",
+    "kanban.db",
+    "kanban.db.dispatch.lock",
+    "kanban.db.init.lock",
+    "kanban/.dispatcher.lock",
+    "logs/agent.log",
+    "logs/errors.log",
+    "logs/gateway-exit-diag.log",
+    "logs/gateway-shutdown-diag.log",
+    "logs/gateway-stdio.log",
+    "logs/gateway.log",
+    "logs/gateway_faulthandler.log",
+    "logs/update_receipts/.pm-write.lock",
+    "logs/update_receipts/latest.json",
+    "logs/update_receipts/pm_20261120T230029Z-plugin-check-34580-6fcba7253f894cb19ff0643563013711.json",
+    "plugin-update-checks/last-run",
+    "plugin-update-checks/results.json",
+    "projects.db",
+    "runtime/active_sessions.json",
+    "runtime/active_sessions.lock",
+    "runtime/bot_live_delivery/.lock",
+    "shared/nous_auth.lock",
+    "source-checks/4e245f1fb3feac96.json",
+    "spawn-ledger.json",
+    "state.db",
+    "state.db.fts_rebuild.lock",
+    "state.db.quarantine.lock",
+    "state/dashboard_clients.heartbeat",
+    "state/gateway.heartbeat",
+    "state/gateway.lifecycle.json",
+    "skills/ (328 files)"
+  ],
+  "homeConfig": "{\n  \"model\": {\n    \"default\": \"qwen/qwen4-max:free\",\n    \"provider\": \"nous\"\n  }\n}\n",
+  "tokenFoundIn": [],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "1bd1977 initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "1bd1977 initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "76642bb9a161f72c65e6ad394efc3a2198ecef57e34042878bdb935629978391",
+      "env": "32d2148d97e8f3a8d90124b916c5fe8e415cf3333a0235aaf61a69693d1d29d3"
+    },
+    "after": {
+      "home": "present",
+      "config": "76642bb9a161f72c65e6ad394efc3a2198ecef57e34042878bdb935629978391",
+      "env": "32d2148d97e8f3a8d90124b916c5fe8e415cf3333a0235aaf61a69693d1d29d3"
+    },
+    "changed": false
+  },
+  "result": {
+    "type": "result",
+    "session_id": "local-efe118b44fd500822773b4dfc428f2421f064da19da3e40ab1f984bf4cab0682",
+    "exit_code": 1,
+    "text": "I ran out of steps for this turn (1 tool calls) before finishing, and couldn't produce a summary. Send `continue` to keep going, or raise `max_iterations` in your config.",
+    "tokens": {
+      "input": 13138,
+      "output": 67,
+      "total": 13205,
+      "cache_read": 0,
+      "cache_write": 13132
+    },
+    "duration_ms": 7077,
+    "timestamp": 1795215635251
+  },
+  "evidence": [
+    "headless/H3b.ps.json",
+    "headless/H3b.out",
+    "headless/H3b.err",
+    "headless/H3b.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 4,
+    "firstMs": 546,
+    "maxGapMs": 6720,
+    "maxGapBeforeLine": 2,
+    "times": [
+      546,
+      7266,
+      7394,
+      7623
+    ]
+  }
+}

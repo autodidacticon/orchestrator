@@ -1,0 +1,2 @@
+{"type": "system", "subtype": "init", "model": "", "session_id": "", "timestamp": 1795210573761}
+{"type": "result", "session_id": "", "exit_code": 1, "text": "", "tokens": {"input": 0, "output": 0, "total": 0, "cache_read": 0, "cache_write": 0}, "duration_ms": 180, "error": "credentials or agent init failed", "timestamp": 1795210573942}

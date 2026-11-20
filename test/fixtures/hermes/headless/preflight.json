@@ -1,0 +1,49 @@
+{
+  "bin": "/opt/homebrew/bin/hermes",
+  "at": "2026-11-20T22:50:55.229Z",
+  "version": "Hermes Agent vunknown (2026.9.24)",
+  "versionExit": {
+    "code": 0,
+    "signal": null
+  },
+  "acpCheck": {
+    "exit": {
+      "code": 0,
+      "signal": null
+    },
+    "stdout": "Hermes ACP check OK\n",
+    "stderr": ""
+  },
+  "provider": "nous",
+  "model": "qwen/qwen4-max:free",
+  "copied": [
+    ".env",
+    "auth.json"
+  ],
+  "keyInEnv": [],
+  "okRun": {
+    "exit": {
+      "code": 0,
+      "signal": null
+    },
+    "stdout": "ok\n",
+    "stderr": "",
+    "orphans": [
+      {
+        "pid": 268,
+        "ppid": 227,
+        "pgid": 268,
+        "comm": "Python"
+      }
+    ]
+  },
+  "lines": [
+    "ok: hermes binary /opt/homebrew/bin/hermes",
+    "ok: version Hermes Agent vunknown (2026.9.24)",
+    "ok: hermes acp --check exit 0 Hermes ACP check OK",
+    "ok: user Hermes home ~/.hermes",
+    "ok: probe provider and model nous qwen/qwen4-max:free (from --provider/--model)",
+    "ok: credential works under a scratch HERMES_HOME exit 0, reply \"ok\" (copied .env, auth.json)"
+  ],
+  "homePids": []
+}

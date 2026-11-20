@@ -1,0 +1,113 @@
+usage: hermes chat [-h] [-q QUERY | --query-file PATH] [--oneshot]
+                   [--image IMAGE] [-m MODEL] [-t TOOLSETS]
+                   [--reasoning LEVEL] [-s SKILLS] [--provider PROVIDER]
+                   [--base-url URL] [--api-key KEY] [-v] [-Q]
+                   [--format {text,stream-json}] [--resume SESSION_ID]
+                   [--no-restore-cwd] [--in DIR] [--continue [SESSION_NAME]]
+                   [--create-if-missing] [--worktree] [--accept-hooks]
+                   [--checkpoints] [--max-turns N] [--run-budget SECONDS]
+                   [--yolo] [--pass-session-id] [--ignore-user-config]
+                   [--ignore-rules] [--safe-mode] [--source SOURCE] [--tui]
+                   [--native] [--cli] [--dev]
+
+Start an interactive chat session with Hermes Agent
+
+options:
+  -h, --help            show this help message and exit
+  -q, --query QUERY     Query to run. On a real TTY the prompt seeds an
+                        interactive session (submitted literally as the first
+                        turn); combined with --oneshot or -Q, or on a non-TTY,
+                        it answers and exits.
+  --query-file PATH     Read the single query from a file instead of the
+                        command line ('-' reads stdin). Safe for arbitrary
+                        text: nothing is shell-interpreted, so quotes, $(...),
+                        and backticks are preserved verbatim. Mutually
+                        exclusive with -q.
+  --oneshot             With -q/--query-file: answer the query and exit
+                        (legacy single-query behavior) instead of seeding an
+                        interactive session. Implied on non-TTY stdio and by
+                        -Q/--quiet.
+  --image IMAGE         Optional local image path to attach to a single query
+  -m, --model MODEL     Model to use (e.g., anthropic/claude-sonnet-4)
+  -t, --toolsets TOOLSETS
+                        Comma-separated toolsets to enable
+  --reasoning LEVEL     Reasoning effort for this session: none, minimal, low,
+                        medium, high, xhigh, max, or ultra. Overrides
+                        agent.reasoning_effort for this run only (same levels
+                        as the /reasoning slash command).
+  -s, --skills SKILLS   Preload one or more skills for the session (repeat
+                        flag or comma-separate)
+  --provider PROVIDER   Inference provider (default: auto). Built-in or a
+                        user-defined name from `providers:` in config.yaml.
+  --base-url URL        OpenAI-compatible endpoint for --provider custom (e.g.
+                        http://127.0.0.1:8000/v1).
+  --api-key KEY         API key for this launch only; not persisted.
+  -v, --verbose         Verbose output
+  -Q, --quiet           Quiet mode for programmatic use: suppress banner,
+                        spinner, and tool previews. Only output the final
+                        response and session info.
+  --format {text,stream-json}
+                        Output format for single-query mode (-q). 'text'
+                        prints the final response as plain text (default).
+                        'stream-json' emits newline-delimited JSON events
+                        (JSONL), implies --quiet, and cannot be combined with
+                        --tui.
+  --resume, -r SESSION_ID
+                        Resume a previous session by ID (shown on exit), or
+                        'latest' for the most recent session
+  --no-restore-cwd      Don't cd into a resumed session's recorded working
+                        directory.
+  --in DIR              Change into DIR before starting or resuming (scopes '
+                        --resume latest' / -c lookups to DIR's workspace).
+  --continue, -c [SESSION_NAME]
+                        Resume a session by name, or the most recent if no
+                        name given
+  --create-if-missing   With -c/--continue <name>: if no session matches the
+                        name, create a new session with that title and proceed
+                        (instead of failing with a not-found error).
+                        Programmatic callers that want 'send to this named
+                        thread, making it if needed'.
+  --worktree, -w        Run in an isolated git worktree (for parallel agents
+                        on the same repo)
+  --accept-hooks        Auto-approve any unseen shell hooks declared in
+                        config.yaml without a TTY prompt (see also
+                        HERMES_ACCEPT_HOOKS env var and hooks_auto_accept: in
+                        config.yaml).
+  --checkpoints         Enable filesystem checkpoints before destructive file
+                        operations (use /rollback to restore)
+  --max-turns N         Maximum tool-calling iterations per conversation turn
+                        (default: 500, or agent.max_turns in config)
+  --run-budget SECONDS  Optional wall-clock budget in seconds for each
+                        conversation run. At 80% elapsed the agent gets a one-
+                        time wrap-up notice, and implicit provider stale
+                        timeouts are capped to the remaining budget so one
+                        hung call can't consume the run. Unset = off. Also
+                        configurable as agent.run_budget_seconds in
+                        config.yaml. Intended for one-shot/eval invocations
+                        with a hard ceiling.
+  --yolo                Bypass all dangerous command approval prompts (use at
+                        your own risk)
+  --pass-session-id     Include the session ID in the agent's system prompt
+  --ignore-user-config  Ignore ~/.hermes/config.yaml and fall back to built-in
+                        defaults (credentials in .env are still loaded).
+                        Useful for isolated CI runs, reproduction, and third-
+                        party integrations.
+  --ignore-rules        Skip auto-injection of AGENTS.md, SOUL.md,
+                        .cursorrules, memory, and preloaded skills. Combine
+                        with --ignore-user-config for a fully isolated run.
+  --safe-mode           Troubleshooting mode: disable ALL customizations —
+                        user config, AGENTS.md/memory injection, plugins, and
+                        MCP servers (implies --ignore-user-config and
+                        --ignore-rules). Use to isolate whether a problem
+                        comes from your setup or from Hermes itself.
+  --source SOURCE       Session source tag for filtering (default: cli). Use
+                        'tool' for third-party integrations that should not
+                        appear in user session lists.
+  --tui                 Launch the modern TUI instead of the classic REPL
+  --native, --tui-native
+                        Use native terminal scrollback and disable mouse
+                        tracking
+  --cli                 Force the classic prompt_toolkit REPL (overrides
+                        display.interface=tui)
+  --dev                 With --tui: run TypeScript sources via tsx (skip dist
+                        build)

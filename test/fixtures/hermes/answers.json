@@ -1,0 +1,330 @@
+{
+  "meta": {
+    "bin": "/opt/homebrew/bin/hermes",
+    "version": "Hermes Agent vunknown (2026.9.24)",
+    "versionNote": "the Homebrew keg is hermes-agent 0.22.4_1 and its launcher sets HERMES_REVISION=v0.22.4; `hermes --version` printed the line above",
+    "provider": "nous",
+    "model": "qwen/qwen4-max:free",
+    "providerNote": "named by the owner in the answer to the preflight question (`ready nous qwen/qwen4-max:free`), and also the default of the owner's ~/.hermes/config.yaml (model.provider nous, model.default qwen/qwen4-max:free); passed as --provider/--model because the issue line still reads `Probe provider and model: (not named yet)`",
+    "probedAt": "2026-11-20"
+  },
+  "questions": {
+    "Q1": {
+      "answer": "yes",
+      "summary": "`hermes --version` printed `Hermes Agent vunknown (2026.9.24)` (Homebrew hermes-agent 0.22.4_1), `hermes acp --check` exited 0 with `Hermes ACP check OK`, and the probe used provider `nous` with model `qwen/qwen4-max:free`, which the owner named and which is also the default in ~/.hermes/config.yaml; the preflight prompt under a scratch HERMES_HOME holding the copied `.env` and `auth.json` answered `ok` (exit 0, 1 API call plus 1 auxiliary title call).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --preflight --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/preflight.txt",
+        "headless/preflight.json",
+        "headless/preflight-first.txt",
+        "headless/P0-preflight.out",
+        "headless/P0-preflight.usage.json",
+        "records/P0-preflight.json"
+      ]
+    },
+    "Q2": {
+      "answer": "yes",
+      "summary": "Neither form runs the work under the process the caller starts: the started `hermes -z`/`hermes chat`/`hermes acp` starts a gateway daemon (`hermes_cli.main --profile default gateway run --quiet --idle-exit`) in a process group of its own, and the gateway starts the shim, an `mcp_death_supervisor` and every shell command (`bash -c ...` with `sleep`), each in a group of its own again; after the started process exits the gateway (ppid 1, 600 s idle exit) and, headless, the shim and the supervisor are left, a second run on the same home attaches to the running gateway, and SIGTERM to the started group stopped neither the shell command nor the shim (H2k, A2k).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2k --provider nous --model qwen/qwen4-max:free  (SIGTERM to the started group once `sleep` is seen)",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2k --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A0",
+        "node test/fixtures/hermes/probe.mjs --run D16"
+      ],
+      "evidence": [
+        "headless/H2.ps.json",
+        "shim/H2.jsonl",
+        "records/H2.json",
+        "headless/H2k.ps.json",
+        "records/H2k.json",
+        "acp/A2.ps.json",
+        "acp/A2.frames.jsonl",
+        "shim/A2.jsonl",
+        "records/A2.json",
+        "acp/A2k.ps.json",
+        "records/A2k.json",
+        "acp/A0-1.ps.json",
+        "acp/A0-2.ps.json",
+        "shim/A0-2.jsonl",
+        "headless/D16-2.ps.json"
+      ]
+    },
+    "Q3": {
+      "answer": "partly",
+      "summary": "`hermes chat --query-file <file> --oneshot --format stream-json --max-turns 12` took a 30,079-byte brief from a file, worked in the worktree it was started in (commands ran in `<scratch>/wt`) and committed there, but that run was still writing its final reply when the probe's 300 s limit ended it; shorter `chat -q` and `-z` runs ended on their own; `-z` takes the prompt only as an argument; exit codes: success 0 (`-z` H2, `chat` H7), failure 2 from `-z` (unknown model H13, provider error D2) and 1 from `chat` (D3, no provider C0-chat), reached iteration limit 1 from `chat` with the text `I ran out of steps for this turn` (H3b).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H7 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H13 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run D3",
+        "node test/fixtures/hermes/probe.mjs --run C0",
+        "node test/fixtures/hermes/probe.mjs --run N0"
+      ],
+      "evidence": [
+        "records/H3.json",
+        "headless/H3.out",
+        "records/H3b.json",
+        "headless/H3b.out",
+        "records/H2.json",
+        "headless/H7.out",
+        "headless/H13.out",
+        "records/H13.json",
+        "headless/D3.out",
+        "headless/C0-chat.out",
+        "headless/N0-help.out"
+      ]
+    },
+    "Q4": {
+      "answer": "yes",
+      "summary": "A scratch HERMES_HOME (under `<scratch>/home`) whose `config.yaml` holds `mcp_servers.orchestrator` gave each run its own shim (started by that home's gateway), the run found its credential in the copied `.env` and `auth.json` there, and ~/.hermes/config.yaml kept its hash across every run; hermes copies the scratch `config.yaml`, fake token included, to `backups/config/config.yaml.good.<time>` in the same scratch home.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run N1"
+      ],
+      "evidence": [
+        "records/H2.json",
+        "shim/H2.jsonl",
+        "headless/H2.usage.json",
+        "records/H3.json",
+        "headless/N1-mcp-test.out",
+        "shim/N1-mcp-test.jsonl"
+      ]
+    },
+    "Q5": {
+      "answer": "yes",
+      "summary": "initialize answers protocolVersion 1, agentInfo hermes-agent 0.0.0, loadSession, promptCapabilities.image and session fork/list/resume, with one auth method `hermes-setup` (terminal); a stdio server named on session/new is started per session by the gateway daemon, not by `hermes acp`, with `session/new.cwd` as its cwd, registered as `editor_orchestrator_<8 hex>`, and a second session/new got a shim process of its own; during a turn the shim is started again for the turn (A2: discovery shim, then the turn's shim).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run A0",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "acp/A0-1.client.jsonl",
+        "acp/A0-1.frames.jsonl",
+        "shim/A0-1.jsonl",
+        "shim/A0-1-second.jsonl",
+        "acp/A0-1.logs.txt",
+        "shim/A2.jsonl",
+        "acp/A2.ps.json"
+      ]
+    },
+    "Q6": {
+      "answer": "yes",
+      "summary": "The shim gets only the entry's env plus HOME, LANG, PATH, TMPDIR, USER and __CF_USER_TEXT_ENCODING (no HERMES_HOME, no PROBE_MARKER=from-client-env), so ORCH_* must be listed in env or read with --orch-env-file (both worked); the model sees `mcp__orchestrator__heartbeat|report|block|inbox|log` headless and `mcp__editor_orchestrator_<8 hex>__<tool>` over ACP, not the documented `mcp_<server>_<tool>`, and reaches them through Hermes's deferred `tool_search`/`tool_describe` tools before calling them.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run N1"
+      ],
+      "evidence": [
+        "shim/H2.jsonl",
+        "shim/A2.jsonl",
+        "headless/H3.out",
+        "acp/A2.frames.jsonl",
+        "shim/N1-mcp-test.jsonl",
+        "shim/N1-mcp-test-envfile.jsonl"
+      ]
+    },
+    "Q7": {
+      "answer": "yes",
+      "summary": "A shim command that exits 1 does not stop the run: the gateway tried it four times and logged `registered 0 tool(s) ... 1 failed: orchestrator`, the model answered `done` without the heartbeat it was asked for, stream-json says nothing about it and `chat` exited 0 (H7); over ACP session/new succeeds and only the gateway log says the server failed discovery (A0-bad).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H7 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A0",
+        "node test/fixtures/hermes/probe.mjs --run D7"
+      ],
+      "evidence": [
+        "headless/H7.out",
+        "headless/H7.logs.txt",
+        "shim/H7.jsonl",
+        "records/H7.json",
+        "acp/A0-bad.client.jsonl",
+        "acp/A0-bad.logs.txt"
+      ]
+    },
+    "Q8": {
+      "answer": "partly",
+      "summary": "The default limit of an MCP tool call is 300 s, both headless and over ACP: a `block` answered after 310 s was cut at 300.0 s (`MCP call timed out after 300.0s (configured timeout: 300.0s)`), so a 200 s block is not cut; `timeout: 430` on the `mcp_servers.orchestrator` entry lifted it and the 310 s answer came through (H8x); a server named over ACP has no timeout field and was cut at 300 s, and the installed source resolves its limit from `timeouts.mcp.tool_call` in the home's config.yaml, which was not run (A8b dropped at the run cap).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H8a --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H8x --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A8a --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/H8a.out",
+        "headless/H8a.logs.txt",
+        "shim/H8a.jsonl",
+        "headless/H8x.out",
+        "shim/H8x.jsonl",
+        "records/H8x.json",
+        "acp/A8a.frames.jsonl",
+        "acp/A8a.logs.txt",
+        "shim/A8a.jsonl"
+      ],
+      "reason": "the ACP lift (`timeouts.mcp.tool_call`, scenario A8b) was not run: run cap"
+    },
+    "Q9": {
+      "answer": "partly",
+      "summary": "The shim's tools were called without any approval under the default trust (H2, H3, H8a); under `chat -q` a dangerous command (`rm -r <abs path in the worktree>`) is refused at once with `BLOCKED: Command flagged as dangerous (delete in root path) but single-query mode (-q) runs without a user present ... set approvals.single_query_mode: approve`, the model gets that text, the run goes on and exits 0 (H9c); any relative `rm -r ./x` is hardline-blocked as a delete of the runtime's own virtualenv, even under approvals.mode off, because the guard resolves it against the gateway's cwd, which is in the hermes install (H9a, H9b, H10a); `-z` with an absolute path and the smart-mode auxiliary call were not observed (no auxiliary approval call in H9b's usage or H9c's log).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H9c --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H9a --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H9b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H10a --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/H9c.out",
+        "headless/H9c.logs.txt",
+        "records/H9c.json",
+        "headless/H9a.out",
+        "headless/H9b.out",
+        "headless/H9b.usage.json",
+        "headless/H9b.logs.txt",
+        "headless/H10a.out",
+        "headless/gateway-cwd.txt",
+        "shim/H2.jsonl"
+      ],
+      "reason": "`-z` with a dangerous absolute-path command and a smart-mode judgement were not run: run cap"
+    },
+    "Q10": {
+      "answer": "partly",
+      "summary": "`approvals.mode: off` in the scratch config.yaml removed the wait: under `chat -q` the absolute `rm -r` ran (exit_code 0, target removed) and the scratch config.yaml kept its hash, though hermes wrote a copy of it under backups/ (H8x); `--toolsets file,mcp-orchestrator` with `tools.include` on the entry removed the terminal and the `log` tool from the model's tool list, so the model reported them missing rather than getting an error (H10b); the hardline guard applies whatever the mode; `--yolo`, `HERMES_YOLO_MODE=1`, `trust: full`, `approvals.single_query_mode: approve` and `command_allowlist` were not run.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H8x --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H10b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H10a --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/H8x.out",
+        "records/H8x.json",
+        "headless/H10b.out",
+        "records/H10b.json",
+        "shim/H10b.jsonl",
+        "headless/H10a.out",
+        "records/H10a.json"
+      ],
+      "reason": "--yolo, HERMES_YOLO_MODE, trust: full and command_allowlist were not run: run cap"
+    },
+    "Q11": {
+      "answer": "partly",
+      "summary": "Over ACP a dangerous command arrives as session/request_permission with five options (allow_once, allow_session and allow_always of kind allow_always, deny of kind reject_once, deny_always) and names the command in toolCall.rawInput.command, toolCall.title (`delete in root path: rm -r ...`) and the content text; after `deny` the model got `BLOCKED: Command denied by user ... Do NOT retry` and the turn went on to end_turn (A11c); ordinary commands and MCP calls asked nothing (A2, A8a); the 30 s approvals.timeout with no answer was not observed, because A11b's relative path was hardline-blocked before any request.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run A11c --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A11b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "acp/A11c.frames.jsonl",
+        "acp/A11c.client.jsonl",
+        "records/A11c.json",
+        "acp/A11b.frames.jsonl",
+        "acp/A2.frames.jsonl"
+      ],
+      "reason": "the unanswered request with approvals.timeout 30 (scenario A11d) was not run: run cap"
+    },
+    "Q12": {
+      "answer": "yes",
+      "summary": "Headless with the local terminal backend the agent wrote greeting.txt and ran `git add greeting.txt && git commit -m \"probe: greeting\"` in the linked worktree: commit a6b8aa2 on task/PROBE/l1, a clean status, and main unchanged; the commit over ACP was not tried.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "records/H3.json",
+        "headless/H3.out"
+      ]
+    },
+    "Q13": {
+      "answer": "yes",
+      "summary": "`--provider nous -m qwen/qwen4-max:free` took effect (the stream-json `system` line and the usage file name the model and provider); model names have a slash and a colon, so they fail MODEL_PATTERN and fit OPENCODE_MODEL_PATTERN; an unknown model on `-z` exits 2 with `Model 'probe-no-such-model-9' isn't available on Nous Portal` and the provider's 404 on stdout, and a usage file with failed true; the effort option is `--reasoning none..ultra`; over ACP model ids are `<provider>:<model>`, session/set_model refuses an unknown one with -32603 model_resolution_failed and session/set_config_option for model or effort answers an empty configOptions.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H13 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run N0",
+        "node test/fixtures/hermes/probe.mjs --run A0"
+      ],
+      "evidence": [
+        "headless/H13.out",
+        "headless/H13.usage.json",
+        "records/H13.json",
+        "headless/H2.usage.json",
+        "headless/H3.out",
+        "headless/N0-chat-help.out",
+        "acp/A0-1.client.jsonl"
+      ]
+    },
+    "Q14": {
+      "answer": "yes",
+      "summary": "The `--usage-file` holds estimated_cost_usd (0, cost_status `estimated`, cost_source `provider_models_api`), input/output/cache_read/cache_write/reasoning/total tokens, api_calls, model, provider, session_id, completed/partial/interrupted/failed, turn_exit_reason, an `auxiliary` block (title generation) and total_including_auxiliary, so the main totals leave auxiliary calls out; the stream-json `result` holds session_id, exit_code, text, tokens (input, output, total, cache_read, cache_write) and duration_ms, and tokens.input includes the cache reads and writes; ACP's session/prompt result carries usage inputTokens (without the cache), cachedReadTokens, outputTokens, thoughtTokens and totalTokens, with no cost.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --preflight --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H7 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/H2.usage.json",
+        "headless/P0-preflight.usage.json",
+        "headless/H9b.usage.json",
+        "headless/H7.out",
+        "acp/A2.client.jsonl"
+      ]
+    },
+    "Q15": {
+      "answer": "yes",
+      "summary": "No credential: `-z` and `chat` exit 1 with `It looks like Hermes isn't configured yet`, ACP session/new -32603 storage_unavailable or session/prompt -32603 admitted_turn_failed; unknown model: `-z` exit 2 with the provider's 404 text, ACP set_model -32603 model_resolution_failed; a shim that did not start: no output at all, exit 0, only the gateway log; a denied command: the BLOCKED text goes to the model and `chat -q` exits 0, over ACP a tool_call_update `failed` and end_turn; a reached iteration limit: `chat` exit 1 with `I ran out of steps for this turn`.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run C0",
+        "node test/fixtures/hermes/probe.mjs --run H13 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H7 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H9c --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A11c --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A0"
+      ],
+      "evidence": [
+        "headless/C0-z.out",
+        "headless/C0-chat.out",
+        "acp/C0-acp-nomodel.client.jsonl",
+        "acp/C0-acp.client.jsonl",
+        "headless/H13.out",
+        "acp/A0-1.client.jsonl",
+        "headless/H7.out",
+        "headless/H9c.out",
+        "acp/A11c.frames.jsonl",
+        "headless/H3b.out"
+      ]
+    },
+    "Q16": {
+      "answer": "partly",
+      "summary": "A turn writes its HERMES_HOME (SOUL.md, .skills_prompt_snapshot.json, about 330 bundled skills, state.db, kanban.db, projects.db, cron/, caches, logs, plugin-update and source checks, and a backup of config.yaml) and nothing to the worktree but what the task asked; two no-key runs on one home both ended and shared one gateway and one shim; the longest gap between stream-json lines in a working turn was 59 s (H3) and 300 s while a block waited (H8a); SIGTERM to the started process group ended only the started process, leaving the gateway, the shim, the supervisor, the bash and its `sleep 120` (H2k, A2k); what a turn reads from the home and which switch turns each read off, and two model runs on one home, were not run.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2k --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2k --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run D16"
+      ],
+      "evidence": [
+        "records/H2k.json",
+        "headless/H2k.ps.json",
+        "records/A2k.json",
+        "acp/A2k.ps.json",
+        "records/H3.json",
+        "records/H2.json",
+        "records/H8a.json",
+        "records/D16-1.json",
+        "records/D16-2.json",
+        "shim/D16-1.jsonl"
+      ],
+      "reason": "the reads from the home and their switches, and H16 (two model runs on one home), were not run: run cap"
+    }
+  }
+}

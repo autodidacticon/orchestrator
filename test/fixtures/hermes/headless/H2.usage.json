@@ -1,0 +1,47 @@
+{
+  "estimated_cost_usd": 0,
+  "cost_status": "estimated",
+  "cost_source": "provider_models_api",
+  "input_tokens": 58080,
+  "output_tokens": 166,
+  "cache_read_tokens": 43341,
+  "cache_write_tokens": 14712,
+  "reasoning_tokens": 29,
+  "total_tokens": 58246,
+  "api_calls": 4,
+  "model": "qwen/qwen4-max:free",
+  "provider": "nous",
+  "session_id": "local-f0c050d2199349ad2a2641899491b91879a49ec35b27c1a0613a6393c089106c",
+  "completed": true,
+  "partial": false,
+  "interrupted": false,
+  "turn_exit_reason": "text_response(finish_reason=stop)",
+  "failed": false,
+  "service_tier": null,
+  "auxiliary": {
+    "api_calls": 1,
+    "input_tokens": 97,
+    "output_tokens": 146,
+    "cache_read_tokens": 256,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 131,
+    "estimated_cost_usd": 0,
+    "total_tokens": 243,
+    "by_task": {
+      "title_generation": {
+        "api_calls": 1,
+        "cache_read_tokens": 256,
+        "cache_write_tokens": 0,
+        "estimated_cost_usd": 0,
+        "input_tokens": 97,
+        "output_tokens": 146,
+        "reasoning_tokens": 131
+      }
+    }
+  },
+  "total_including_auxiliary": {
+    "estimated_cost_usd": 0,
+    "total_tokens": 58489,
+    "api_calls": 5
+  }
+}

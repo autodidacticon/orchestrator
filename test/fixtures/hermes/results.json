@@ -1,0 +1,2942 @@
+{
+  "cli": "hermes",
+  "bin": "/opt/homebrew/bin/hermes",
+  "version": "Hermes Agent vunknown (2026.9.24)",
+  "provider": "nous",
+  "model": "qwen/qwen4-max:free",
+  "probedAt": "2026-11-20",
+  "preflight": [
+    "ok: hermes binary /opt/homebrew/bin/hermes",
+    "ok: version Hermes Agent vunknown (2026.9.24)",
+    "ok: hermes acp --check exit 0 Hermes ACP check OK",
+    "ok: user Hermes home ~/.hermes",
+    "ok: probe provider and model nous qwen/qwen4-max:free (from --provider/--model)",
+    "ok: credential works under a scratch HERMES_HOME exit 0, reply \"ok\" (copied .env, auth.json)"
+  ],
+  "questions": {
+    "Q1": {
+      "answer": "yes",
+      "summary": "`hermes --version` printed `Hermes Agent vunknown (2026.9.24)` (Homebrew hermes-agent 0.22.4_1), `hermes acp --check` exited 0 with `Hermes ACP check OK`, and the probe used provider `nous` with model `qwen/qwen4-max:free`, which the owner named and which is also the default in ~/.hermes/config.yaml; the preflight prompt under a scratch HERMES_HOME holding the copied `.env` and `auth.json` answered `ok` (exit 0, 1 API call plus 1 auxiliary title call).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --preflight --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/preflight.txt",
+        "headless/preflight.json",
+        "headless/preflight-first.txt",
+        "headless/P0-preflight.out",
+        "headless/P0-preflight.usage.json",
+        "records/P0-preflight.json"
+      ]
+    },
+    "Q2": {
+      "answer": "yes",
+      "summary": "Neither form runs the work under the process the caller starts: the started `hermes -z`/`hermes chat`/`hermes acp` starts a gateway daemon (`hermes_cli.main --profile default gateway run --quiet --idle-exit`) in a process group of its own, and the gateway starts the shim, an `mcp_death_supervisor` and every shell command (`bash -c ...` with `sleep`), each in a group of its own again; after the started process exits the gateway (ppid 1, 600 s idle exit) and, headless, the shim and the supervisor are left, a second run on the same home attaches to the running gateway, and SIGTERM to the started group stopped neither the shell command nor the shim (H2k, A2k).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2k --provider nous --model qwen/qwen4-max:free  (SIGTERM to the started group once `sleep` is seen)",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2k --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A0",
+        "node test/fixtures/hermes/probe.mjs --run D16"
+      ],
+      "evidence": [
+        "headless/H2.ps.json",
+        "shim/H2.jsonl",
+        "records/H2.json",
+        "headless/H2k.ps.json",
+        "records/H2k.json",
+        "acp/A2.ps.json",
+        "acp/A2.frames.jsonl",
+        "shim/A2.jsonl",
+        "records/A2.json",
+        "acp/A2k.ps.json",
+        "records/A2k.json",
+        "acp/A0-1.ps.json",
+        "acp/A0-2.ps.json",
+        "shim/A0-2.jsonl",
+        "headless/D16-2.ps.json"
+      ]
+    },
+    "Q3": {
+      "answer": "partly",
+      "summary": "`hermes chat --query-file <file> --oneshot --format stream-json --max-turns 12` took a 30,079-byte brief from a file, worked in the worktree it was started in (commands ran in `<scratch>/wt`) and committed there, but that run was still writing its final reply when the probe's 300 s limit ended it; shorter `chat -q` and `-z` runs ended on their own; `-z` takes the prompt only as an argument; exit codes: success 0 (`-z` H2, `chat` H7), failure 2 from `-z` (unknown model H13, provider error D2) and 1 from `chat` (D3, no provider C0-chat), reached iteration limit 1 from `chat` with the text `I ran out of steps for this turn` (H3b).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H7 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H13 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run D3",
+        "node test/fixtures/hermes/probe.mjs --run C0",
+        "node test/fixtures/hermes/probe.mjs --run N0"
+      ],
+      "evidence": [
+        "records/H3.json",
+        "headless/H3.out",
+        "records/H3b.json",
+        "headless/H3b.out",
+        "records/H2.json",
+        "headless/H7.out",
+        "headless/H13.out",
+        "records/H13.json",
+        "headless/D3.out",
+        "headless/C0-chat.out",
+        "headless/N0-help.out"
+      ]
+    },
+    "Q4": {
+      "answer": "yes",
+      "summary": "A scratch HERMES_HOME (under `<scratch>/home`) whose `config.yaml` holds `mcp_servers.orchestrator` gave each run its own shim (started by that home's gateway), the run found its credential in the copied `.env` and `auth.json` there, and ~/.hermes/config.yaml kept its hash across every run; hermes copies the scratch `config.yaml`, fake token included, to `backups/config/config.yaml.good.<time>` in the same scratch home.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run N1"
+      ],
+      "evidence": [
+        "records/H2.json",
+        "shim/H2.jsonl",
+        "headless/H2.usage.json",
+        "records/H3.json",
+        "headless/N1-mcp-test.out",
+        "shim/N1-mcp-test.jsonl"
+      ]
+    },
+    "Q5": {
+      "answer": "yes",
+      "summary": "initialize answers protocolVersion 1, agentInfo hermes-agent 0.0.0, loadSession, promptCapabilities.image and session fork/list/resume, with one auth method `hermes-setup` (terminal); a stdio server named on session/new is started per session by the gateway daemon, not by `hermes acp`, with `session/new.cwd` as its cwd, registered as `editor_orchestrator_<8 hex>`, and a second session/new got a shim process of its own; during a turn the shim is started again for the turn (A2: discovery shim, then the turn's shim).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run A0",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "acp/A0-1.client.jsonl",
+        "acp/A0-1.frames.jsonl",
+        "shim/A0-1.jsonl",
+        "shim/A0-1-second.jsonl",
+        "acp/A0-1.logs.txt",
+        "shim/A2.jsonl",
+        "acp/A2.ps.json"
+      ]
+    },
+    "Q6": {
+      "answer": "yes",
+      "summary": "The shim gets only the entry's env plus HOME, LANG, PATH, TMPDIR, USER and __CF_USER_TEXT_ENCODING (no HERMES_HOME, no PROBE_MARKER=from-client-env), so ORCH_* must be listed in env or read with --orch-env-file (both worked); the model sees `mcp__orchestrator__heartbeat|report|block|inbox|log` headless and `mcp__editor_orchestrator_<8 hex>__<tool>` over ACP, not the documented `mcp_<server>_<tool>`, and reaches them through Hermes's deferred `tool_search`/`tool_describe` tools before calling them.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run N1"
+      ],
+      "evidence": [
+        "shim/H2.jsonl",
+        "shim/A2.jsonl",
+        "headless/H3.out",
+        "acp/A2.frames.jsonl",
+        "shim/N1-mcp-test.jsonl",
+        "shim/N1-mcp-test-envfile.jsonl"
+      ]
+    },
+    "Q7": {
+      "answer": "yes",
+      "summary": "A shim command that exits 1 does not stop the run: the gateway tried it four times and logged `registered 0 tool(s) ... 1 failed: orchestrator`, the model answered `done` without the heartbeat it was asked for, stream-json says nothing about it and `chat` exited 0 (H7); over ACP session/new succeeds and only the gateway log says the server failed discovery (A0-bad).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H7 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A0",
+        "node test/fixtures/hermes/probe.mjs --run D7"
+      ],
+      "evidence": [
+        "headless/H7.out",
+        "headless/H7.logs.txt",
+        "shim/H7.jsonl",
+        "records/H7.json",
+        "acp/A0-bad.client.jsonl",
+        "acp/A0-bad.logs.txt"
+      ]
+    },
+    "Q8": {
+      "answer": "partly",
+      "summary": "The default limit of an MCP tool call is 300 s, both headless and over ACP: a `block` answered after 310 s was cut at 300.0 s (`MCP call timed out after 300.0s (configured timeout: 300.0s)`), so a 200 s block is not cut; `timeout: 430` on the `mcp_servers.orchestrator` entry lifted it and the 310 s answer came through (H8x); a server named over ACP has no timeout field and was cut at 300 s, and the installed source resolves its limit from `timeouts.mcp.tool_call` in the home's config.yaml, which was not run (A8b dropped at the run cap).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H8a --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H8x --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A8a --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/H8a.out",
+        "headless/H8a.logs.txt",
+        "shim/H8a.jsonl",
+        "headless/H8x.out",
+        "shim/H8x.jsonl",
+        "records/H8x.json",
+        "acp/A8a.frames.jsonl",
+        "acp/A8a.logs.txt",
+        "shim/A8a.jsonl"
+      ],
+      "reason": "the ACP lift (`timeouts.mcp.tool_call`, scenario A8b) was not run: run cap"
+    },
+    "Q9": {
+      "answer": "partly",
+      "summary": "The shim's tools were called without any approval under the default trust (H2, H3, H8a); under `chat -q` a dangerous command (`rm -r <abs path in the worktree>`) is refused at once with `BLOCKED: Command flagged as dangerous (delete in root path) but single-query mode (-q) runs without a user present ... set approvals.single_query_mode: approve`, the model gets that text, the run goes on and exits 0 (H9c); any relative `rm -r ./x` is hardline-blocked as a delete of the runtime's own virtualenv, even under approvals.mode off, because the guard resolves it against the gateway's cwd, which is in the hermes install (H9a, H9b, H10a); `-z` with an absolute path and the smart-mode auxiliary call were not observed (no auxiliary approval call in H9b's usage or H9c's log).",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H9c --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H9a --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H9b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H10a --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/H9c.out",
+        "headless/H9c.logs.txt",
+        "records/H9c.json",
+        "headless/H9a.out",
+        "headless/H9b.out",
+        "headless/H9b.usage.json",
+        "headless/H9b.logs.txt",
+        "headless/H10a.out",
+        "headless/gateway-cwd.txt",
+        "shim/H2.jsonl"
+      ],
+      "reason": "`-z` with a dangerous absolute-path command and a smart-mode judgement were not run: run cap"
+    },
+    "Q10": {
+      "answer": "partly",
+      "summary": "`approvals.mode: off` in the scratch config.yaml removed the wait: under `chat -q` the absolute `rm -r` ran (exit_code 0, target removed) and the scratch config.yaml kept its hash, though hermes wrote a copy of it under backups/ (H8x); `--toolsets file,mcp-orchestrator` with `tools.include` on the entry removed the terminal and the `log` tool from the model's tool list, so the model reported them missing rather than getting an error (H10b); the hardline guard applies whatever the mode; `--yolo`, `HERMES_YOLO_MODE=1`, `trust: full`, `approvals.single_query_mode: approve` and `command_allowlist` were not run.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H8x --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H10b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H10a --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/H8x.out",
+        "records/H8x.json",
+        "headless/H10b.out",
+        "records/H10b.json",
+        "shim/H10b.jsonl",
+        "headless/H10a.out",
+        "records/H10a.json"
+      ],
+      "reason": "--yolo, HERMES_YOLO_MODE, trust: full and command_allowlist were not run: run cap"
+    },
+    "Q11": {
+      "answer": "partly",
+      "summary": "Over ACP a dangerous command arrives as session/request_permission with five options (allow_once, allow_session and allow_always of kind allow_always, deny of kind reject_once, deny_always) and names the command in toolCall.rawInput.command, toolCall.title (`delete in root path: rm -r ...`) and the content text; after `deny` the model got `BLOCKED: Command denied by user ... Do NOT retry` and the turn went on to end_turn (A11c); ordinary commands and MCP calls asked nothing (A2, A8a); the 30 s approvals.timeout with no answer was not observed, because A11b's relative path was hardline-blocked before any request.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run A11c --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A11b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "acp/A11c.frames.jsonl",
+        "acp/A11c.client.jsonl",
+        "records/A11c.json",
+        "acp/A11b.frames.jsonl",
+        "acp/A2.frames.jsonl"
+      ],
+      "reason": "the unanswered request with approvals.timeout 30 (scenario A11d) was not run: run cap"
+    },
+    "Q12": {
+      "answer": "yes",
+      "summary": "Headless with the local terminal backend the agent wrote greeting.txt and ran `git add greeting.txt && git commit -m \"probe: greeting\"` in the linked worktree: commit a6b8aa2 on task/PROBE/l1, a clean status, and main unchanged; the commit over ACP was not tried.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "records/H3.json",
+        "headless/H3.out"
+      ]
+    },
+    "Q13": {
+      "answer": "yes",
+      "summary": "`--provider nous -m qwen/qwen4-max:free` took effect (the stream-json `system` line and the usage file name the model and provider); model names have a slash and a colon, so they fail MODEL_PATTERN and fit OPENCODE_MODEL_PATTERN; an unknown model on `-z` exits 2 with `Model 'probe-no-such-model-9' isn't available on Nous Portal` and the provider's 404 on stdout, and a usage file with failed true; the effort option is `--reasoning none..ultra`; over ACP model ids are `<provider>:<model>`, session/set_model refuses an unknown one with -32603 model_resolution_failed and session/set_config_option for model or effort answers an empty configOptions.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H13 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run N0",
+        "node test/fixtures/hermes/probe.mjs --run A0"
+      ],
+      "evidence": [
+        "headless/H13.out",
+        "headless/H13.usage.json",
+        "records/H13.json",
+        "headless/H2.usage.json",
+        "headless/H3.out",
+        "headless/N0-chat-help.out",
+        "acp/A0-1.client.jsonl"
+      ]
+    },
+    "Q14": {
+      "answer": "yes",
+      "summary": "The `--usage-file` holds estimated_cost_usd (0, cost_status `estimated`, cost_source `provider_models_api`), input/output/cache_read/cache_write/reasoning/total tokens, api_calls, model, provider, session_id, completed/partial/interrupted/failed, turn_exit_reason, an `auxiliary` block (title generation) and total_including_auxiliary, so the main totals leave auxiliary calls out; the stream-json `result` holds session_id, exit_code, text, tokens (input, output, total, cache_read, cache_write) and duration_ms, and tokens.input includes the cache reads and writes; ACP's session/prompt result carries usage inputTokens (without the cache), cachedReadTokens, outputTokens, thoughtTokens and totalTokens, with no cost.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --preflight --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H7 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2 --provider nous --model qwen/qwen4-max:free"
+      ],
+      "evidence": [
+        "headless/H2.usage.json",
+        "headless/P0-preflight.usage.json",
+        "headless/H9b.usage.json",
+        "headless/H7.out",
+        "acp/A2.client.jsonl"
+      ]
+    },
+    "Q15": {
+      "answer": "yes",
+      "summary": "No credential: `-z` and `chat` exit 1 with `It looks like Hermes isn't configured yet`, ACP session/new -32603 storage_unavailable or session/prompt -32603 admitted_turn_failed; unknown model: `-z` exit 2 with the provider's 404 text, ACP set_model -32603 model_resolution_failed; a shim that did not start: no output at all, exit 0, only the gateway log; a denied command: the BLOCKED text goes to the model and `chat -q` exits 0, over ACP a tool_call_update `failed` and end_turn; a reached iteration limit: `chat` exit 1 with `I ran out of steps for this turn`.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run C0",
+        "node test/fixtures/hermes/probe.mjs --run H13 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H7 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H9c --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A11c --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3b --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A0"
+      ],
+      "evidence": [
+        "headless/C0-z.out",
+        "headless/C0-chat.out",
+        "acp/C0-acp-nomodel.client.jsonl",
+        "acp/C0-acp.client.jsonl",
+        "headless/H13.out",
+        "acp/A0-1.client.jsonl",
+        "headless/H7.out",
+        "headless/H9c.out",
+        "acp/A11c.frames.jsonl",
+        "headless/H3b.out"
+      ]
+    },
+    "Q16": {
+      "answer": "partly",
+      "summary": "A turn writes its HERMES_HOME (SOUL.md, .skills_prompt_snapshot.json, about 330 bundled skills, state.db, kanban.db, projects.db, cron/, caches, logs, plugin-update and source checks, and a backup of config.yaml) and nothing to the worktree but what the task asked; two no-key runs on one home both ended and shared one gateway and one shim; the longest gap between stream-json lines in a working turn was 59 s (H3) and 300 s while a block waited (H8a); SIGTERM to the started process group ended only the started process, leaving the gateway, the shim, the supervisor, the bash and its `sleep 120` (H2k, A2k); what a turn reads from the home and which switch turns each read off, and two model runs on one home, were not run.",
+      "commands": [
+        "node test/fixtures/hermes/probe.mjs --run H2k --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run A2k --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H3 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run H2 --provider nous --model qwen/qwen4-max:free",
+        "node test/fixtures/hermes/probe.mjs --run D16"
+      ],
+      "evidence": [
+        "records/H2k.json",
+        "headless/H2k.ps.json",
+        "records/A2k.json",
+        "acp/A2k.ps.json",
+        "records/H3.json",
+        "records/H2.json",
+        "records/H8a.json",
+        "records/D16-1.json",
+        "records/D16-2.json",
+        "shim/D16-1.jsonl"
+      ],
+      "reason": "the reads from the home and their switches, and H16 (two model runs on one home), were not run: run cap"
+    }
+  },
+  "userConfig": {
+    "~/.hermes/config.yaml": {
+      "sha256Before": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "sha256After": "76642bb9a161f72c65e6ad394efc3a2198ecef57e34042878bdb935629978391",
+      "changedBy": [],
+      "changedBetweenRuns": [
+        {
+          "afterRun": "D2k",
+          "beforeRun": "H2"
+        }
+      ]
+    },
+    "~/.hermes/.env": {
+      "changed": true,
+      "before": "absent",
+      "after": "present",
+      "changedBy": [],
+      "changedBetweenRuns": [
+        {
+          "afterRun": "D2k",
+          "beforeRun": "H2"
+        }
+      ]
+    },
+    "~/.hermes": "present"
+  },
+  "runs": [
+    {
+      "id": "A0-1",
+      "kind": "acp",
+      "questions": [
+        "Q2",
+        "Q5",
+        "Q6",
+        "Q13"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--mcp-json",
+        "<scratch>/mcp.json",
+        "--requests-json",
+        "<scratch>/requests.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-b184af43",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 6469,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A0-1.json",
+      "evidence": [
+        "acp/A0-1.ps.json",
+        "acp/A0-1.client.jsonl",
+        "acp/A0-1.stderr.txt",
+        "acp/A0-1.frames.jsonl",
+        "shim/A0-1.jsonl",
+        "acp/A0-1.logs.txt"
+      ]
+    },
+    {
+      "id": "A0-2",
+      "kind": "acp",
+      "questions": [
+        "Q2",
+        "Q5"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--mcp-json",
+        "<scratch>/mcp.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-b184af43",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 1094,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 85022,
+          "ppid": 84956,
+          "pgid": 85022,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A0-2.json",
+      "evidence": [
+        "acp/A0-2.ps.json",
+        "acp/A0-2.client.jsonl",
+        "acp/A0-2.stderr.txt",
+        "acp/A0-2.frames.jsonl",
+        "shim/A0-2.jsonl",
+        "acp/A0-2.logs.txt"
+      ]
+    },
+    {
+      "id": "A0-bad",
+      "kind": "acp",
+      "questions": [
+        "Q7",
+        "Q15"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--mcp-json",
+        "<scratch>/mcp.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-33192775",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 10494,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 95299,
+          "ppid": 95259,
+          "pgid": 95299,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A0-bad.json",
+      "evidence": [
+        "acp/A0-bad.ps.json",
+        "acp/A0-bad.client.jsonl",
+        "acp/A0-bad.stderr.txt",
+        "acp/A0-bad.frames.jsonl",
+        "shim/A0-bad.jsonl",
+        "acp/A0-bad.logs.txt"
+      ]
+    },
+    {
+      "id": "A11a",
+      "kind": "acp",
+      "questions": [
+        "Q11"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--prompt-file",
+        "<scratch>/prompt.txt",
+        "--policy",
+        "<scratch>/policy.json",
+        "--turn-timeout-ms",
+        "240000"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-a9b58033",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 56355,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 63189,
+          "ppid": 62617,
+          "pgid": 63189,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A11a.json",
+      "evidence": [
+        "acp/A11a.ps.json",
+        "acp/A11a.client.jsonl",
+        "acp/A11a.stderr.txt",
+        "acp/A11a.frames.jsonl",
+        "acp/A11a.logs.txt"
+      ]
+    },
+    {
+      "id": "A11b",
+      "kind": "acp",
+      "questions": [
+        "Q11"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--prompt-file",
+        "<scratch>/prompt.txt",
+        "--no-permission-answer",
+        "--turn-timeout-ms",
+        "200000"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-7aba2d9d",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 113142,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 10756,
+          "ppid": 10721,
+          "pgid": 10756,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A11b.json",
+      "evidence": [
+        "acp/A11b.ps.json",
+        "acp/A11b.client.jsonl",
+        "acp/A11b.stderr.txt",
+        "acp/A11b.frames.jsonl",
+        "acp/A11b.logs.txt"
+      ]
+    },
+    {
+      "id": "A11c",
+      "kind": "acp",
+      "questions": [
+        "Q11"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--prompt-file",
+        "<scratch>/prompt.txt",
+        "--policy",
+        "<scratch>/policy.json",
+        "--turn-timeout-ms",
+        "240000"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-1cf2ea24",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 74920,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 23793,
+          "ppid": 23766,
+          "pgid": 23793,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A11c.json",
+      "evidence": [
+        "acp/A11c.ps.json",
+        "acp/A11c.client.jsonl",
+        "acp/A11c.stderr.txt",
+        "acp/A11c.frames.jsonl",
+        "acp/A11c.logs.txt"
+      ]
+    },
+    {
+      "id": "A2",
+      "kind": "acp",
+      "questions": [
+        "Q2",
+        "Q5",
+        "Q6",
+        "Q14"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--mcp-json",
+        "<scratch>/mcp.json",
+        "--prompt-file",
+        "<scratch>/prompt.txt",
+        "--policy",
+        "<scratch>/policy.json",
+        "--turn-timeout-ms",
+        "240000"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-8d9a2844",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 61770,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 92734,
+          "ppid": 91551,
+          "pgid": 92734,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A2.json",
+      "evidence": [
+        "acp/A2.ps.json",
+        "acp/A2.client.jsonl",
+        "acp/A2.stderr.txt",
+        "acp/A2.frames.jsonl",
+        "shim/A2.jsonl",
+        "acp/A2.logs.txt"
+      ]
+    },
+    {
+      "id": "A2k",
+      "kind": "acp",
+      "questions": [
+        "Q2",
+        "Q16"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--mcp-json",
+        "<scratch>/mcp.json",
+        "--prompt-file",
+        "<scratch>/prompt.txt",
+        "--policy",
+        "<scratch>/policy.json",
+        "--turn-timeout-ms",
+        "240000"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-e3e17db0",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 3,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 28320,
+      "killed": {
+        "signal": "SIGTERM",
+        "ms": 28308
+      },
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 58371,
+          "ppid": 56786,
+          "pgid": 58371,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 59742,
+          "ppid": 58371,
+          "pgid": 59742,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-A2k.jsonl --block-sec 200"
+        },
+        {
+          "pid": 59793,
+          "ppid": 58371,
+          "pgid": 59793,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 58371"
+        },
+        {
+          "pid": 76049,
+          "ppid": 58371,
+          "pgid": 76049,
+          "comm": "bash",
+          "args": "/opt/homebrew/bin/bash -c source <tmpdir>/hermes-snap-e0d4c2b0ad8a.sh >/dev/null 2>&1 || true\\012export AI_AGENT=\"${AI_AGENT:-hermes-agent}\" HERMES_AGENT=\"${HERMES_AGENT:-true}\"\\012export GIT_PAGER=\"${GIT_PAGER:-cat}\" PAGER=\"${PAGER:-cat}\"\\012builtin cd -- <scratch>/wt || exit 126\\012eval 'sleep 120'\\012__hermes_ec=$?\\012umask 077\\012__hermes_snap_tmp=$(mktemp <tmpdir>/hermes-snap-e0d4c2b0ad8a.sh."
+        },
+        {
+          "pid": 76064,
+          "ppid": 76049,
+          "pgid": 76049,
+          "comm": "sleep",
+          "args": "sleep 120"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A2k.json",
+      "evidence": [
+        "acp/A2k.ps.json",
+        "acp/A2k.client.jsonl",
+        "acp/A2k.stderr.txt",
+        "acp/A2k.frames.jsonl",
+        "shim/A2k.jsonl",
+        "acp/A2k.logs.txt"
+      ]
+    },
+    {
+      "id": "A8a",
+      "kind": "acp",
+      "questions": [
+        "Q8"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--mcp-json",
+        "<scratch>/mcp.json",
+        "--prompt-file",
+        "<scratch>/prompt.txt",
+        "--policy",
+        "<scratch>/policy.json",
+        "--turn-timeout-ms",
+        "510000"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-6e0cdf45",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 322887,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 25124,
+          "ppid": 25066,
+          "pgid": 25124,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/A8a.json",
+      "evidence": [
+        "acp/A8a.ps.json",
+        "acp/A8a.client.jsonl",
+        "acp/A8a.stderr.txt",
+        "acp/A8a.frames.jsonl",
+        "shim/A8a.jsonl",
+        "acp/A8a.logs.txt"
+      ]
+    },
+    {
+      "id": "C0-acp-nomodel",
+      "kind": "acp",
+      "questions": [
+        "Q15",
+        "Q5"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-c7e4d93c",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 4,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 4372,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 7840,
+          "ppid": 7414,
+          "pgid": 7840,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/C0-acp-nomodel.json",
+      "evidence": [
+        "acp/C0-acp-nomodel.ps.json",
+        "acp/C0-acp-nomodel.client.jsonl",
+        "acp/C0-acp-nomodel.stderr.txt",
+        "acp/C0-acp-nomodel.frames.jsonl",
+        "acp/C0-acp-nomodel.logs.txt"
+      ]
+    },
+    {
+      "id": "C0-acp",
+      "kind": "acp",
+      "questions": [
+        "Q15",
+        "Q5"
+      ],
+      "command": [
+        "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+        "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+        "--agent-json",
+        "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+        "--cwd",
+        "<scratch>/wt",
+        "--frames",
+        "<scratch>/frames.jsonl",
+        "--keep-descendants",
+        "--prompt-file",
+        "<scratch>/prompt.txt",
+        "--turn-timeout-ms",
+        "120000"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-7a52094c",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 4,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 10250,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 15078,
+          "ppid": 15037,
+          "pgid": 15078,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/C0-acp.json",
+      "evidence": [
+        "acp/C0-acp.ps.json",
+        "acp/C0-acp.client.jsonl",
+        "acp/C0-acp.stderr.txt",
+        "acp/C0-acp.frames.jsonl",
+        "acp/C0-acp.logs.txt"
+      ]
+    },
+    {
+      "id": "C0-chat",
+      "kind": "headless",
+      "questions": [
+        "Q15",
+        "Q14"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Reply with the single word ok.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-33c75a6c",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 402,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/C0-chat.json",
+      "evidence": [
+        "headless/C0-chat.ps.json",
+        "headless/C0-chat.out",
+        "headless/C0-chat.err",
+        "headless/C0-chat.logs.txt"
+      ]
+    },
+    {
+      "id": "C0-z",
+      "kind": "headless",
+      "questions": [
+        "Q15",
+        "Q14",
+        "Q16"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "-z",
+        "Reply with the single word ok.",
+        "--usage-file",
+        "<scratch>/usage.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-b597a9f6",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 519,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/C0-z.json",
+      "evidence": [
+        "headless/C0-z.ps.json",
+        "headless/C0-z.out",
+        "headless/C0-z.err",
+        "headless/C0-z.logs.txt"
+      ]
+    },
+    {
+      "id": "D16-1",
+      "kind": "headless",
+      "questions": [
+        "Q16",
+        "Q2"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Reply with the single word ok.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "openrouter",
+        "-m",
+        "probe/placeholder-model"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-0ae719c5",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 3039,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-154624",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/D16-1.json",
+      "evidence": [
+        "headless/D16-1.ps.json",
+        "headless/D16-1.out",
+        "headless/D16-1.err",
+        "shim/D16-1.jsonl",
+        "headless/D16-1.logs.txt"
+      ]
+    },
+    {
+      "id": "D16-2",
+      "kind": "headless",
+      "questions": [
+        "Q16",
+        "Q2"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Reply with the single word ok.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "openrouter",
+        "-m",
+        "probe/placeholder-model"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-0ae719c5",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 2648,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 58955,
+          "ppid": 58506,
+          "pgid": 58955,
+          "comm": "Python"
+        },
+        {
+          "pid": 63733,
+          "ppid": 58955,
+          "pgid": 63733,
+          "comm": "node"
+        },
+        {
+          "pid": 63834,
+          "ppid": 58955,
+          "pgid": 63834,
+          "comm": "Python"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-154624",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/D16-2.json",
+      "evidence": [
+        "headless/D16-2.ps.json",
+        "headless/D16-2.out",
+        "headless/D16-2.err",
+        "headless/D16-2.logs.txt"
+      ]
+    },
+    {
+      "id": "D2",
+      "kind": "headless",
+      "questions": [
+        "Q2",
+        "Q6",
+        "Q14",
+        "Q15",
+        "Q16"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "-z",
+        "Call the orchestrator heartbeat tool once with progress \"probe\". Then run this exact shell command in the terminal: sleep 15 && pwd. Then reply with the single word done.",
+        "--provider",
+        "openrouter",
+        "-m",
+        "probe/placeholder-model",
+        "--usage-file",
+        "<scratch>/usage.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-cfdec2d8",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env",
+        "HERMES_MAX_ITERATIONS": "12"
+      },
+      "exit": {
+        "code": 2,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 7501,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 46443,
+          "ppid": 38993,
+          "pgid": 46443,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 80703,
+          "ppid": 46443,
+          "pgid": 80703,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-D2.jsonl --block-sec 200"
+        },
+        {
+          "pid": 81430,
+          "ppid": 46443,
+          "pgid": 81430,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 46443"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-154546",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/D2.json",
+      "evidence": [
+        "headless/D2.ps.json",
+        "headless/D2.out",
+        "headless/D2.err",
+        "shim/D2.jsonl",
+        "headless/D2.usage.json",
+        "headless/D2.logs.txt"
+      ]
+    },
+    {
+      "id": "D2k",
+      "kind": "headless",
+      "questions": [
+        "Q16",
+        "Q2"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "-z",
+        "Call the orchestrator heartbeat tool once with progress \"probe\". Then run this exact shell command in the terminal: sleep 15 && pwd. Then reply with the single word done.",
+        "--provider",
+        "openrouter",
+        "-m",
+        "probe/placeholder-model",
+        "--usage-file",
+        "<scratch>/usage.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-a3ff9585",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env",
+        "HERMES_MAX_ITERATIONS": "12"
+      },
+      "exit": {
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "timedOut": false,
+      "ms": 3508,
+      "killed": {
+        "signal": "SIGTERM",
+        "ms": 3502
+      },
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 94105,
+          "ppid": 91297,
+          "pgid": 94105,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 95397,
+          "ppid": 94105,
+          "pgid": 95397,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-D2k.jsonl --block-sec 200"
+        },
+        {
+          "pid": 95521,
+          "ppid": 94105,
+          "pgid": 95521,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 94105"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-155104",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/D2k.json",
+      "evidence": [
+        "headless/D2k.ps.json",
+        "headless/D2k.out",
+        "headless/D2k.err",
+        "shim/D2k.jsonl",
+        "headless/D2k.logs.txt"
+      ]
+    },
+    {
+      "id": "D3",
+      "kind": "headless",
+      "questions": [
+        "Q3",
+        "Q2",
+        "Q14",
+        "Q16"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "--query-file",
+        "<scratch>/home/brief.md",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "openrouter",
+        "-m",
+        "probe/placeholder-model"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-9ca824d6",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 6478,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 65030,
+          "ppid": 53270,
+          "pgid": 65030,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 94735,
+          "ppid": 65030,
+          "pgid": 94735,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-D3.jsonl --block-sec 200"
+        },
+        {
+          "pid": 95255,
+          "ppid": 65030,
+          "pgid": 95255,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 65030"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-154558",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/D3.json",
+      "evidence": [
+        "headless/D3.ps.json",
+        "headless/D3.out",
+        "headless/D3.err",
+        "shim/D3.jsonl",
+        "headless/D3.logs.txt"
+      ]
+    },
+    {
+      "id": "D7",
+      "kind": "headless",
+      "questions": [
+        "Q7",
+        "Q15"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Reply with the single word ok.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "openrouter",
+        "-m",
+        "probe/placeholder-model"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-1cf4cee1",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 11462,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-154608",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/D7.json",
+      "evidence": [
+        "headless/D7.ps.json",
+        "headless/D7.out",
+        "headless/D7.err",
+        "shim/D7.jsonl",
+        "headless/D7.logs.txt"
+      ]
+    },
+    {
+      "id": "H10a",
+      "kind": "headless",
+      "questions": [
+        "Q10"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Run this exact shell command in the terminal from the current directory: `rm -r ./probe-rm-target` and then reply with the single word done.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-4e81b3c7",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 68857,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 30112,
+          "ppid": 30046,
+          "pgid": 30112,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/H10a.json",
+      "evidence": [
+        "headless/H10a.ps.json",
+        "headless/H10a.out",
+        "headless/H10a.err",
+        "headless/H10a.logs.txt"
+      ]
+    },
+    {
+      "id": "H10b",
+      "kind": "headless",
+      "questions": [
+        "Q10"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Call the orchestrator log tool with text \"probe\". Then run the shell command uname -s in the terminal. Then reply with the single word done.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--toolsets",
+        "file,mcp-orchestrator",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-ce93b7a6",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 45961,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H10b.jsonl --block-sec 200"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 79967"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-170404",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/H10b.json",
+      "evidence": [
+        "headless/H10b.ps.json",
+        "headless/H10b.out",
+        "headless/H10b.err",
+        "shim/H10b.jsonl",
+        "headless/H10b.logs.txt"
+      ]
+    },
+    {
+      "id": "H13",
+      "kind": "headless",
+      "questions": [
+        "Q13",
+        "Q15"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "-z",
+        "Reply with the single word ok.",
+        "--provider",
+        "nous",
+        "-m",
+        "probe-no-such-model-9",
+        "--usage-file",
+        "<scratch>/usage.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-332efcc9",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env",
+        "HERMES_MAX_ITERATIONS": "12"
+      },
+      "exit": {
+        "code": 2,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 13316,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": 1,
+      "orphans": [
+        {
+          "pid": 97445,
+          "ppid": 95601,
+          "pgid": 97445,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/H13.json",
+      "evidence": [
+        "headless/H13.ps.json",
+        "headless/H13.out",
+        "headless/H13.err",
+        "headless/H13.usage.json",
+        "headless/H13.logs.txt"
+      ]
+    },
+    {
+      "id": "H2",
+      "kind": "headless",
+      "questions": [
+        "Q2",
+        "Q4",
+        "Q6",
+        "Q9",
+        "Q14"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "-z",
+        "Call the orchestrator heartbeat tool once with progress \"probe\". Then run this exact shell command in the terminal: sleep 15 && pwd. Then reply with the single word done.",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free",
+        "--usage-file",
+        "<scratch>/usage.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-b01aa813",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env",
+        "HERMES_MAX_ITERATIONS": "12"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 82016,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": 4,
+      "orphans": [
+        {
+          "pid": 18431,
+          "ppid": 18391,
+          "pgid": 18431,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 20292,
+          "ppid": 18431,
+          "pgid": 20292,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H2.jsonl --block-sec 200"
+        },
+        {
+          "pid": 20306,
+          "ppid": 18431,
+          "pgid": 20306,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 18431"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-165127",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/H2.json",
+      "evidence": [
+        "headless/H2.ps.json",
+        "headless/H2.out",
+        "headless/H2.err",
+        "shim/H2.jsonl",
+        "headless/H2.usage.json",
+        "headless/H2.logs.txt"
+      ]
+    },
+    {
+      "id": "H2k",
+      "kind": "headless",
+      "questions": [
+        "Q2",
+        "Q16"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "-z",
+        "Run this exact shell command in the terminal: sleep 120. Then reply with the single word done.",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free",
+        "--usage-file",
+        "<scratch>/usage.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-14e0a3a0",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env",
+        "HERMES_MAX_ITERATIONS": "12"
+      },
+      "exit": {
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "timedOut": false,
+      "ms": 24268,
+      "killed": {
+        "signal": "SIGTERM",
+        "ms": 24262
+      },
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 38104,
+          "ppid": 37907,
+          "pgid": 38104,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 39648,
+          "ppid": 38104,
+          "pgid": 39648,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H2k.jsonl --block-sec 200"
+        },
+        {
+          "pid": 39704,
+          "ppid": 38104,
+          "pgid": 39704,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 38104"
+        },
+        {
+          "pid": 54586,
+          "ppid": 38104,
+          "pgid": 54586,
+          "comm": "bash",
+          "args": "/opt/homebrew/bin/bash -c source <tmpdir>/hermes-snap-a4d5ea15ba5e.sh >/dev/null 2>&1 || true\\012export AI_AGENT=\"${AI_AGENT:-hermes-agent}\" HERMES_AGENT=\"${HERMES_AGENT:-true}\"\\012export GIT_PAGER=\"${GIT_PAGER:-cat}\" PAGER=\"${PAGER:-cat}\"\\012builtin cd -- <scratch>/wt || exit 126\\012eval 'sleep 120'\\012__hermes_ec=$?\\012umask 077\\012__hermes_snap_tmp=$(mktemp <tmpdir>/hermes-snap-a4d5ea15ba5e.sh."
+        },
+        {
+          "pid": 54587,
+          "ppid": 54586,
+          "pgid": 54586,
+          "comm": "sleep",
+          "args": "sleep 120"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-165422",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/H2k.json",
+      "evidence": [
+        "headless/H2k.ps.json",
+        "headless/H2k.out",
+        "headless/H2k.err",
+        "shim/H2k.jsonl",
+        "headless/H2k.logs.txt"
+      ]
+    },
+    {
+      "id": "H3",
+      "kind": "headless",
+      "questions": [
+        "Q3",
+        "Q12",
+        "Q14",
+        "Q16"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "--query-file",
+        "<scratch>/home/brief.md",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-02643dcf",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": null,
+        "signal": "SIGTERM"
+      },
+      "timedOut": true,
+      "ms": 300113,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 79097,
+          "ppid": 79056,
+          "pgid": 79097,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 79478,
+          "ppid": 79097,
+          "pgid": 79478,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H3.jsonl --block-sec 200"
+        },
+        {
+          "pid": 79527,
+          "ppid": 79097,
+          "pgid": 79527,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 79097"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-165523",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/H3.json",
+      "evidence": [
+        "headless/H3.ps.json",
+        "headless/H3.out",
+        "headless/H3.err",
+        "shim/H3.jsonl",
+        "headless/H3.logs.txt"
+      ]
+    },
+    {
+      "id": "H3b",
+      "kind": "headless",
+      "questions": [
+        "Q3",
+        "Q15"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Run these three shell commands one at a time, each as its own terminal call: pwd, then ls, then date. Then reply with the single word done.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "1",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-da560b4f",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 7685,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 34580,
+          "ppid": 33837,
+          "pgid": 34580,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/H3b.json",
+      "evidence": [
+        "headless/H3b.ps.json",
+        "headless/H3b.out",
+        "headless/H3b.err",
+        "headless/H3b.logs.txt"
+      ]
+    },
+    {
+      "id": "H7",
+      "kind": "headless",
+      "questions": [
+        "Q7",
+        "Q15"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Call the orchestrator heartbeat tool with progress \"probe\" if you have it. Then reply with the single word done.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-a9c51b07",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 20654,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 8985,
+          "ppid": 8931,
+          "pgid": 8985,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-170809",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/H7.json",
+      "evidence": [
+        "headless/H7.ps.json",
+        "headless/H7.out",
+        "headless/H7.err",
+        "shim/H7.jsonl",
+        "headless/H7.logs.txt"
+      ]
+    },
+    {
+      "id": "H8a",
+      "kind": "headless",
+      "questions": [
+        "Q8"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Call the orchestrator block tool once with seq 2, kind \"needsDecision\" and message \"Which file name should I use?\". Wait for its answer. Then reply with the exact text of the answer, or with the error you got.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-3de07bfc",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 374697,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 75529,
+          "ppid": 75479,
+          "pgid": 75529,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 75569,
+          "ppid": 75529,
+          "pgid": 75569,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H8a.jsonl --block-sec 310"
+        },
+        {
+          "pid": 75583,
+          "ppid": 75529,
+          "pgid": 75583,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 75529"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-171221",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/H8a.json",
+      "evidence": [
+        "headless/H8a.ps.json",
+        "headless/H8a.out",
+        "headless/H8a.err",
+        "shim/H8a.jsonl",
+        "headless/H8a.logs.txt"
+      ]
+    },
+    {
+      "id": "H8x",
+      "kind": "headless",
+      "questions": [
+        "Q8",
+        "Q10",
+        "Q9"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Do these two steps in order. Step 1: run this exact shell co...(410 chars)",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-140255b6",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 338298,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 52496,
+          "ppid": 51298,
+          "pgid": 52496,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        },
+        {
+          "pid": 52791,
+          "ppid": 52496,
+          "pgid": 52791,
+          "comm": "node",
+          "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H8x.jsonl --block-sec 310"
+        },
+        {
+          "pid": 52806,
+          "ppid": 52496,
+          "pgid": 52806,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 52496"
+        }
+      ],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-171920",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/H8x.json",
+      "evidence": [
+        "headless/H8x.ps.json",
+        "headless/H8x.out",
+        "headless/H8x.err",
+        "shim/H8x.jsonl",
+        "headless/H8x.logs.txt"
+      ]
+    },
+    {
+      "id": "H9a",
+      "kind": "headless",
+      "questions": [
+        "Q9",
+        "Q15"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Run this exact shell command in the terminal from the current directory: rm -r ./probe-rm-target . Then reply with the single word done.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-c7a09b31",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 53973,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 41382,
+          "ppid": 41343,
+          "pgid": 41382,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/H9a.json",
+      "evidence": [
+        "headless/H9a.ps.json",
+        "headless/H9a.out",
+        "headless/H9a.err",
+        "headless/H9a.logs.txt"
+      ]
+    },
+    {
+      "id": "H9b",
+      "kind": "headless",
+      "questions": [
+        "Q9"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "-z",
+        "Run this exact shell command in the terminal from the current directory: rm -r ./probe-rm-target . Then reply with the single word done.",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free",
+        "--usage-file",
+        "<scratch>/usage.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-ff85c6fc",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env",
+        "HERMES_MAX_ITERATIONS": "12"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 70136,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": 2,
+      "orphans": [
+        {
+          "pid": 81817,
+          "ppid": 79963,
+          "pgid": 81817,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/H9b.json",
+      "evidence": [
+        "headless/H9b.ps.json",
+        "headless/H9b.out",
+        "headless/H9b.err",
+        "headless/H9b.usage.json",
+        "headless/H9b.logs.txt"
+      ]
+    },
+    {
+      "id": "H9c",
+      "kind": "headless",
+      "questions": [
+        "Q9",
+        "Q15"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "-q",
+        "Run this exact shell command in the terminal: `rm -r <scratch>/wt/probe-rm-target` and then reply with the single word done.",
+        "--oneshot",
+        "--format",
+        "stream-json",
+        "--max-turns",
+        "12",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-109cbd8d",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 135439,
+      "killed": null,
+      "modelCalls": 1,
+      "apiCalls": null,
+      "orphans": [
+        {
+          "pid": 29219,
+          "ppid": 29179,
+          "pgid": 29219,
+          "comm": "Python",
+          "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+        }
+      ],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/H9c.json",
+      "evidence": [
+        "headless/H9c.ps.json",
+        "headless/H9c.out",
+        "headless/H9c.err",
+        "headless/H9c.logs.txt"
+      ]
+    },
+    {
+      "id": "N0-acp-help",
+      "kind": "headless",
+      "questions": [
+        "Q3",
+        "Q10",
+        "Q13"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "acp",
+        "--help"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-a4784511",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 294,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/N0-acp-help.json",
+      "evidence": [
+        "headless/N0-acp-help.ps.json",
+        "headless/N0-acp-help.out",
+        "headless/N0-acp-help.err",
+        "headless/N0-acp-help.logs.txt"
+      ]
+    },
+    {
+      "id": "N0-chat-help",
+      "kind": "headless",
+      "questions": [
+        "Q3",
+        "Q10",
+        "Q13"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "chat",
+        "--help"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-a5eec65d",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 277,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/N0-chat-help.json",
+      "evidence": [
+        "headless/N0-chat-help.ps.json",
+        "headless/N0-chat-help.out",
+        "headless/N0-chat-help.err",
+        "headless/N0-chat-help.logs.txt"
+      ]
+    },
+    {
+      "id": "N0-help",
+      "kind": "headless",
+      "questions": [
+        "Q3",
+        "Q10",
+        "Q13"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "--help"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-067967a0",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 300,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/N0-help.json",
+      "evidence": [
+        "headless/N0-help.ps.json",
+        "headless/N0-help.out",
+        "headless/N0-help.err",
+        "headless/N0-help.logs.txt"
+      ]
+    },
+    {
+      "id": "N0-mcp-help",
+      "kind": "headless",
+      "questions": [
+        "Q3",
+        "Q10",
+        "Q13"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "mcp",
+        "--help"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-20c2cacb",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 260,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/N0-mcp-help.json",
+      "evidence": [
+        "headless/N0-mcp-help.ps.json",
+        "headless/N0-mcp-help.out",
+        "headless/N0-mcp-help.err",
+        "headless/N0-mcp-help.logs.txt"
+      ]
+    },
+    {
+      "id": "N1-mcp-test-bad",
+      "kind": "headless",
+      "questions": [
+        "Q4",
+        "Q6",
+        "Q7"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "mcp",
+        "test",
+        "orchestrator"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-a80ff4a4",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 8515,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-153533",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/N1-mcp-test-bad.json",
+      "evidence": [
+        "headless/N1-mcp-test-bad.ps.json",
+        "headless/N1-mcp-test-bad.out",
+        "headless/N1-mcp-test-bad.err",
+        "shim/N1-mcp-test-bad.jsonl",
+        "headless/N1-mcp-test-bad.logs.txt"
+      ]
+    },
+    {
+      "id": "N1-mcp-test-envfile",
+      "kind": "headless",
+      "questions": [
+        "Q4",
+        "Q6",
+        "Q7"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "mcp",
+        "test",
+        "orchestrator"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-196ef118",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 691,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [],
+      "userConfigChanged": false,
+      "record": "records/N1-mcp-test-envfile.json",
+      "evidence": [
+        "headless/N1-mcp-test-envfile.ps.json",
+        "headless/N1-mcp-test-envfile.out",
+        "headless/N1-mcp-test-envfile.err",
+        "shim/N1-mcp-test-envfile.jsonl",
+        "headless/N1-mcp-test-envfile.logs.txt"
+      ]
+    },
+    {
+      "id": "N1-mcp-test",
+      "kind": "headless",
+      "questions": [
+        "Q4",
+        "Q6",
+        "Q7"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "mcp",
+        "test",
+        "orchestrator"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-569f5b9b",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 728,
+      "killed": null,
+      "modelCalls": 0,
+      "apiCalls": null,
+      "orphans": [],
+      "tokenFoundIn": [
+        "home/.hermes/backups/config/config.yaml.good.20261120-153528",
+        "home/.hermes/config.yaml"
+      ],
+      "userConfigChanged": false,
+      "record": "records/N1-mcp-test.json",
+      "evidence": [
+        "headless/N1-mcp-test.ps.json",
+        "headless/N1-mcp-test.out",
+        "headless/N1-mcp-test.err",
+        "shim/N1-mcp-test.jsonl",
+        "headless/N1-mcp-test.logs.txt"
+      ]
+    },
+    {
+      "id": "P0-preflight",
+      "kind": "headless",
+      "questions": [
+        "Q1"
+      ],
+      "command": [
+        "/opt/homebrew/bin/hermes",
+        "-z",
+        "Reply with the single word ok.",
+        "--provider",
+        "nous",
+        "-m",
+        "qwen/qwen4-max:free",
+        "--usage-file",
+        "<scratch>/usage.json"
+      ],
+      "env": {
+        "PATH": "<set>",
+        "HOME": "<scratch>/home",
+        "USER": "<set>",
+        "LANG": "en_US.UTF-8",
+        "TMPDIR": "<tmpdir>/",
+        "HERMES_HOME": "<scratch>/home/.hermes",
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-2354ac2f",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-client-env"
+      },
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "ms": 10606,
+      "modelCalls": 1,
+      "orphans": [
+        {
+          "pid": 268,
+          "ppid": 227,
+          "pgid": 268,
+          "comm": "Python"
+        }
+      ],
+      "userConfigChanged": false,
+      "record": "records/P0-preflight.json",
+      "evidence": [
+        "headless/P0-preflight.out",
+        "headless/P0-preflight.err",
+        "headless/P0-preflight.usage.json"
+      ]
+    }
+  ]
+}

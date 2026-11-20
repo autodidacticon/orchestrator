@@ -1,0 +1,355 @@
+==> logs/agent.log <==
+2026-11-20 16:54:23,884 INFO hermes_cli.plugins: Plugin 'browser-browser-use' registered browser provider: browser-use
+2026-11-20 16:54:23,887 INFO hermes_cli.plugins: Plugin 'browser-browserbase' registered browser provider: browserbase
+2026-11-20 16:54:23,888 INFO hermes_cli.plugins: Plugin 'browser-firecrawl' registered browser provider: firecrawl
+2026-11-20 16:54:23,959 INFO hermes_cli.plugins: Plugin 'deepinfra' registered image_gen provider: deepinfra
+2026-11-20 16:54:23,960 INFO hermes_cli.plugins: Plugin 'fal' registered image_gen provider: fal
+2026-11-20 16:54:23,961 INFO hermes_cli.plugins: Plugin 'krea' registered image_gen provider: krea
+2026-11-20 16:54:23,962 INFO hermes_cli.plugins: Plugin 'meta-ai-image-gen' registered image_gen provider: meta-ai
+2026-11-20 16:54:23,963 INFO hermes_cli.plugins: Plugin 'openai' registered image_gen provider: openai
+2026-11-20 16:54:23,966 INFO hermes_cli.plugins: Plugin 'openai-codex' registered image_gen provider: openai-codex
+2026-11-20 16:54:23,967 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: openrouter
+2026-11-20 16:54:23,967 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: nous
+2026-11-20 16:54:23,969 INFO hermes_cli.plugins: Plugin 'xai' registered image_gen provider: xai
+2026-11-20 16:54:23,976 INFO hermes_cli.plugins: Plugin 'deepinfra' registered video_gen provider: deepinfra
+2026-11-20 16:54:23,977 INFO hermes_cli.plugins: Plugin 'fal' registered video_gen provider: fal
+2026-11-20 16:54:23,978 INFO hermes_cli.plugins: Plugin 'openrouter' registered video_gen provider: openrouter
+2026-11-20 16:54:23,981 INFO hermes_cli.plugins: Plugin 'xai' registered video_gen provider: xai
+2026-11-20 16:54:23,985 INFO hermes_cli.plugins: Plugin 'web-brave-free' registered web provider: brave-free
+2026-11-20 16:54:23,988 INFO hermes_cli.plugins: Plugin 'web-ddgs' registered web provider: ddgs
+2026-11-20 16:54:23,991 INFO hermes_cli.plugins: Plugin 'web-exa' registered web provider: exa
+2026-11-20 16:54:23,995 INFO hermes_cli.plugins: Plugin 'web-firecrawl' registered web provider: firecrawl
+2026-11-20 16:54:23,996 INFO hermes_cli.plugins: Plugin 'web-keenable' registered web provider: keenable
+2026-11-20 16:54:23,998 INFO hermes_cli.plugins: Plugin 'web-openai-native' registered web provider: openai-native
+2026-11-20 16:54:24,001 INFO hermes_cli.plugins: Plugin 'web-parallel' registered web provider: parallel
+2026-11-20 16:54:24,004 INFO hermes_cli.plugins: Plugin 'web-perplexity' registered web provider: perplexity
+2026-11-20 16:54:24,006 INFO hermes_cli.plugins: Plugin 'web-searxng' registered web provider: searxng
+2026-11-20 16:54:24,007 INFO hermes_cli.plugins: Plugin 'web-tavily' registered web provider: tavily
+2026-11-20 16:54:24,008 INFO hermes_cli.plugins: Plugin 'web-xai' registered web provider: xai
+2026-11-20 16:54:24,008 INFO hermes_cli.plugins: Plugin discovery complete: 61 found, 57 enabled
+2026-11-20 16:54:24,021 INFO hermes_cli.gateway_multiplex_mode: Single-profile install: gateway.multiplex_profiles unset, serving the default profile only.
+2026-11-20 16:54:24,420 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-2d5468ef31ebb0f9/control.sock
+2026-11-20 16:54:24,835 INFO tools.mcp_tool: MCP server 'orchestrator' (stdio): registered 5 tool(s): mcp__orchestrator__heartbeat, mcp__orchestrator__report, mcp__orchestrator__block, mcp__orchestrator__inbox, mcp__orchestrator__log
+2026-11-20 16:54:24,836 INFO tools.mcp_tool: MCP: registered 5 tool(s) from 1 server(s)
+2026-11-20 16:54:24,836 INFO tools.mcp_tool:   MCP: 5 tool(s) from 1 server(s)
+2026-11-20 16:54:24,836 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 16:54:24,837 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 16:54:24,843 INFO gateway.run: Agent budget: max_iterations=12 (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 16:54:24,844 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 16:54:24,860 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 16:54:24,860 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 16:54:24,875 INFO run_agent: Loaded environment variables from <scratch>/home/.hermes/.env
+2026-11-20 16:54:24,894 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 16:54:25,172 INFO tools.registry: check_fn check_browser_back_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,172 INFO tools.registry: check_fn _browser_cdp_check returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,172 INFO tools.registry: check_fn check_browser_click_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,173 INFO tools.registry: check_fn check_browser_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,173 INFO tools.registry: check_fn _browser_dialog_check returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,175 INFO tools.registry: check_fn check_browser_navigate_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,175 INFO tools.registry: check_fn check_browser_press_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,176 INFO tools.registry: check_fn check_browser_scroll_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,176 INFO tools.registry: check_fn check_browser_snapshot_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,176 INFO tools.registry: check_fn check_browser_type_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,176 INFO tools.registry: check_fn check_browser_vision_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,180 INFO tools.registry: check_fn check_computer_use_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,181 INFO tools.registry: check_fn check_image_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,189 INFO agent.auxiliary_client: Vision auto-detect: using main provider nous (google/gemini-3.6-flash)
+2026-11-20 16:54:25,217 INFO agent.model_metadata: Cached context length qwen/qwen4-max:free@<credential> -> 1,000,000 tokens
+2026-11-20 16:54:25,219 INFO tools.tool_search: tool_search activated (tier 1): 18 core/visible tools kept, 10 deferred (~4517 tokens), listing full (budget ~4000 tokens)
+2026-11-20 16:54:25,221 INFO gateway.run: Model context warmed: qwen/qwen4-max:free -> 1000000 tokens (detected)
+2026-11-20 16:54:25,222 INFO gateway.run: Turn machinery warmed in 0.3s (21 tool schema(s) materialized)
+2026-11-20 16:54:25,232 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 16:54:25,233 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 16:54:25,236 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 16:54:25,236 INFO cron.scheduler_provider: In-process cron scheduler started (interval=60s)
+2026-11-20 16:54:25,237 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 16:54:25,238 INFO cron.scheduler_provider: Multiplex cron scheduler started for 1 profile(s): ['default'] (re-enumerated every cycle)
+2026-11-20 16:54:25,239 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 16:54:25,451 INFO tui_gateway.ws: ws accepted peer=127.0.0.1:61747
+2026-11-20 16:54:25,520 INFO tools.tool_search: tool_search activated (tier 1): 18 core/visible tools kept, 10 deferred (~4517 tokens), listing full (budget ~4000 tokens)
+2026-11-20 16:54:25,521 INFO tools.registry: check_fn _a2a_tools_available returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,521 INFO tools.registry: check_fn check_discord_tool_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,521 INFO tools.registry: check_fn _check_feishu returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,526 INFO tools.registry: check_fn _check_yuanbao returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,527 INFO agent.auxiliary_client: Vision auto-detect: using main provider nous (google/gemini-3.6-flash)
+2026-11-20 16:54:25,529 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 16:54:25,529 INFO tools.registry: check_fn check_video_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,530 INFO tools.registry: check_fn _check_xai_video_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,530 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 16:54:25,530 INFO tools.registry: check_fn check_x_search_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:54:25,559 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d msg='Run this exact shell command in the terminal: sleep 120. Then reply with the sin' reply_to_id=None reply_to_text=''
+2026-11-20 16:54:25,725 INFO run_agent: OpenAI client created (agent_init, shared=True) thread=hermes-gateway_3:12952186880 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:54:25,765 INFO [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.turn_context: conversation turn: session=local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d model=qwen/qwen4-max:free provider=nous platform=cli history=0 msg='Run this exact shell command in the terminal: sleep 120. Then reply with the sin...'
+2026-11-20 16:54:25,886 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-9 (<lambda>):13038809088 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:54:25,988 INFO agent.auxiliary_client: Auxiliary auto-detect: using main provider nous (qwen/qwen4-max:free)
+2026-11-20 16:54:25,988 INFO agent.auxiliary_client: Auxiliary title_generation: using nous (qwen/qwen4-max:free) at <credential>/
+2026-11-20 16:54:26,375 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 15, 'alternates': ['~openai/gpt-sol-latest', 'qwen/qwen3.5-9b', 'x-ai/grok-4.20']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 15, 'alternates': ['~openai/gpt-sol-latest', 'qwen/qwen3.5-9b', 'x-ai/grok-4.20']}
+2026-11-20 16:54:26,375 INFO run_agent: OpenAI client closed (stream_error_cleanup, shared=False, tcp_force_closed=0) thread=Thread-9 (<lambda>):13038809088 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:54:26,379 WARNING [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:12952186880 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:54:26,380 INFO [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.conversation_loop: Nous 429 looks like upstream capacity (no exhausted bucket in headers or last-known state) -- not tripping cross-session breaker.
+2026-11-20 16:54:26,381 WARNING [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.conversation_loop: Retrying API call in 15.0s (attempt 1/3) thread=hermes-gateway_3:12952186880 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 15, 'alternates': ['~openai/gpt-sol-latest', 'qwen/qwen3.5-9b', 'x-ai/grok-4.20']}
+2026-11-20 16:54:28,285 INFO agent.credential_pool: credential pool: marking author@example.invalid exhausted (status=429), rotating
+2026-11-20 16:54:28,286 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 16:54:28,286 INFO agent.auxiliary_client: Auxiliary title_generation: rate limit on auto (Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 14, 'alternates': ['qwen/qwen3-coder-flash', 'deepseek/deepseek-chat-v3.1', 'qwen/qwen3.5-27b']}), trying fallback
+2026-11-20 16:54:28,289 WARNING agent.auxiliary_client: Auxiliary title_generation: main provider nous is unavailable and no fallback_chain / fallback_providers is configured — refusing to guess another logged-in provider. Re-authenticate (`hermes model`) or declare a fallback.
+2026-11-20 16:54:28,289 WARNING agent.auxiliary_client: Auxiliary title_generation: rate limit on auto and all fallbacks exhausted (fallback_chain + main agent model). Raising the primary error.
+2026-11-20 16:54:28,290 WARNING agent.title_generator: Title generation failed: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 14, 'alternates': ['qwen/qwen3-coder-flash', 'deepseek/deepseek-chat-v3.1', 'qwen/qwen3.5-27b']}
+2026-11-20 16:54:30,235 INFO gateway.run: kanban dispatcher: embedded in gateway (interval=60.0s)
+2026-11-20 16:54:41,481 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-10 (<lambda>):13021982720 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:54:46,870 INFO [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.conversation_loop: API call #1: model=qwen/qwen4-max:free provider=nous in=14290 out=115 total=14405 latency=21.0s cache=12399/14290 (87%) write=1885 id=gen-1795215281-lcY4UuOBVnmDNIfWmENQ
+2026-11-20 16:54:46,899 INFO tools.terminal_tool: Creating new local environment for task session:...
+2026-11-20 16:54:46,977 INFO tools.environments.base: Session snapshot created (session=a4d5ea15ba5e, cwd=<scratch>/wt)
+2026-11-20 16:54:46,978 INFO tools.terminal_tool: local environment ready for task session:
+2026-11-20 16:54:47,114 INFO tui_gateway.ws: ws closed peer=127.0.0.1:61747 reason=client_disconnect(code=1006,reason=) messages=3 parse_errors=0 dispatch_crashes=0 send_failures=0 reaped_sessions=0 detached_sessions=0
+2026-11-20 16:54:48,749 INFO gateway.run: Received SIGTERM — initiating shutdown
+2026-11-20 16:54:48,749 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=3.93
+2026-11-20 16:54:48,760 INFO gateway.run: Stopping gateway...
+2026-11-20 16:54:48,763 INFO gateway.run: Sent shutdown notification to active chat local:local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d
+2026-11-20 16:54:48,763 INFO gateway.run: Shutdown phase: notify_active_sessions done at +0.00s
+2026-11-20 16:54:48,766 INFO gateway.run: Shutdown phase: drain done at +0.01s (drain took 0.00s, timed_out=True, active_at_start=1, active_now=1, cron_at_start=0, cron_now=0, api_at_start=0, api_now=0, deferred_at_start=0, deferred_now=0)
+2026-11-20 16:54:48,766 WARNING gateway.run: Gateway drain timed out after 0.0s with 1 active agent(s), 0 in-flight cron job(s), 0 api_server run(s), and 0 deferred agent worker(s); interrupting remaining work.
+2026-11-20 16:54:48,768 INFO run_agent: Interrupt requested (hard): gateway shutdown
+2026-11-20 16:54:48,768 INFO gateway.run: Shutdown phase: allowing 1.0s for interrupted agents to unwind
+2026-11-20 16:54:48,883 WARNING [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.tool_executor: Tool terminal returned error (1.99s): {"output": "", "exit_code": -15, "error": null, "exit_code_meaning": "Command terminated by signal 15: SIGTERM (terminated — kill/timeout or shutdown requested it to stop)"}
+2026-11-20 16:54:48,889 INFO [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.conversation_loop: Turn ended: reason=interrupted_by_system(gateway_shutdown) model=qwen/qwen4-max:free api_calls=1/9223372036854775807 budget=1/9223372036854775807 tool_turns=1 last_msg_role=assistant response_len=0 session=local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d
+2026-11-20 16:54:48,893 INFO gateway.run: Ignoring control interrupt message for session agent:main:local:dm:local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d: Gateway shutting down
+2026-11-20 16:54:48,895 INFO gateway.run: response ready: platform=local chat=local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d session=agent:main:local:dm:local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d time=23.3s api_calls=1 response=0 chars
+2026-11-20 16:54:48,901 WARNING gateway.session_authority: Session local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d paused: runtime_draining
+2026-11-20 16:54:48,980 INFO tools.terminal_tool: Manually cleaned up environment for task: session:agent:main:local:dm:local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d
+2026-11-20 16:54:48,988 INFO tools.terminal_tool: Cleaned 1 environments
+2026-11-20 16:54:48,989 INFO gateway.run: Shutdown phase: post-interrupt tool kill done at +0.23s
+2026-11-20 16:54:48,989 INFO gateway.run: Shutdown phase: cron interrupt notices done at +0.23s
+2026-11-20 16:54:49,127 INFO run_agent: OpenAI client closed (agent_close, shared=True, tcp_force_closed=0) thread=hermes-gateway-hk_0:6314405888 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:54:49,127 INFO run_agent: OpenAI client closed (agent_close, shared=False, tcp_force_closed=0) thread=hermes-gateway-hk_0:6314405888 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:54:49,209 INFO gateway.run: ✓ local disconnected (0.00s)
+2026-11-20 16:54:49,209 INFO gateway.run: Shutdown phase: all adapters disconnected at +0.45s
+2026-11-20 16:54:49,210 INFO gateway.run: Shutdown phase: final-cleanup tool kill done at +0.45s
+2026-11-20 16:54:49,210 INFO gateway.run: Shutdown phase: executor quiesced at +0.45s
+2026-11-20 16:54:49,281 INFO gateway.run: Shutdown phase: SessionDB close done at +0.52s
+2026-11-20 16:54:49,281 INFO gateway.run: Skipping .clean_shutdown marker — drain timed out with interrupted agents; next startup will recover their interrupted turns.
+2026-11-20 16:54:49,282 INFO gateway.run: Gateway stopped by an unexpected signal — persisting gateway_state=running so container_boot auto-starts on the next boot (issue #42675)
+2026-11-20 16:54:49,283 INFO gateway.run: Gateway stopped (total teardown 0.52s)
+2026-11-20 16:54:49,283 INFO gateway.run: Gateway housekeeping stopped
+2026-11-20 16:54:49,488 INFO gateway.run: Exiting with code 1 (signal-initiated shutdown without restart request) so the service manager can revive the gateway.
+
+==> logs/errors.log <==
+2026-11-20 16:54:24,860 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 16:54:26,375 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 15, 'alternates': ['~openai/gpt-sol-latest', 'qwen/qwen3.5-9b', 'x-ai/grok-4.20']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 15, 'alternates': ['~openai/gpt-sol-latest', 'qwen/qwen3.5-9b', 'x-ai/grok-4.20']}
+2026-11-20 16:54:26,379 WARNING [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:12952186880 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:54:26,381 WARNING [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.conversation_loop: Retrying API call in 15.0s (attempt 1/3) thread=hermes-gateway_3:12952186880 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 15, 'alternates': ['~openai/gpt-sol-latest', 'qwen/qwen3.5-9b', 'x-ai/grok-4.20']}
+2026-11-20 16:54:28,289 WARNING agent.auxiliary_client: Auxiliary title_generation: main provider nous is unavailable and no fallback_chain / fallback_providers is configured — refusing to guess another logged-in provider. Re-authenticate (`hermes model`) or declare a fallback.
+2026-11-20 16:54:28,289 WARNING agent.auxiliary_client: Auxiliary title_generation: rate limit on auto and all fallbacks exhausted (fallback_chain + main agent model). Raising the primary error.
+2026-11-20 16:54:28,290 WARNING agent.title_generator: Title generation failed: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 14, 'alternates': ['qwen/qwen3-coder-flash', 'deepseek/deepseek-chat-v3.1', 'qwen/qwen3.5-27b']}
+2026-11-20 16:54:48,749 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=3.93
+2026-11-20 16:54:48,766 WARNING gateway.run: Gateway drain timed out after 0.0s with 1 active agent(s), 0 in-flight cron job(s), 0 api_server run(s), and 0 deferred agent worker(s); interrupting remaining work.
+2026-11-20 16:54:48,883 WARNING [local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d] agent.tool_executor: Tool terminal returned error (1.99s): {"output": "", "exit_code": -15, "error": null, "exit_code_meaning": "Command terminated by signal 15: SIGTERM (terminated — kill/timeout or shutdown requested it to stop)"}
+2026-11-20 16:54:48,901 WARNING gateway.session_authority: Session local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d paused: runtime_draining
+
+==> logs/gateway-exit-diag.log <==
+{"ts": "2026-11-20T22:54:24.001390+00:00", "tag": "gateway.start", "pid": 38104, "python": "3.14.10", "platform": "darwin", "replace": false, "argv": ["/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/hermes_cli/main.py", "gateway", "run", "--quiet", "--idle-exit"], "stdin_is_tty": false, "console_window_attached": null, "detached": true, "breakaway": null, "absorb_windows_console_controls": false}
+{"ts": "2026-11-20T22:54:49.489308+00:00", "tag": "asyncio.run.returned", "pid": 38104, "python": "3.14.10", "platform": "darwin", "success": false}
+{"ts": "2026-11-20T22:54:49.489683+00:00", "tag": "gateway.exit_nonzero", "pid": 38104, "python": "3.14.10", "platform": "darwin"}
+
+==> logs/gateway-shutdown-diag.log <==
+=== shutdown diagnostic removed: it listed every process of the host ===
+
+==> logs/gateway-stdio.log <==
+┌─────────────────────────────────────────────────────────┐
+│           ☤ Hermes Gateway Starting...                 │
+├─────────────────────────────────────────────────────────┤
+│  Messaging platforms + cron scheduler                    │
+│  Press Ctrl+C to stop                                   │
+└─────────────────────────────────────────────────────────┘
+
+
+==> logs/gateway.log <==
+2026-11-20 16:54:24,420 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-2d5468ef31ebb0f9/control.sock
+2026-11-20 16:54:24,836 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 16:54:24,837 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 16:54:24,843 INFO gateway.run: Agent budget: max_iterations=12 (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 16:54:24,844 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 16:54:24,860 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 16:54:24,860 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 16:54:24,894 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 16:54:25,221 INFO gateway.run: Model context warmed: qwen/qwen4-max:free -> 1000000 tokens (detected)
+2026-11-20 16:54:25,222 INFO gateway.run: Turn machinery warmed in 0.3s (21 tool schema(s) materialized)
+2026-11-20 16:54:25,232 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 16:54:25,233 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 16:54:25,236 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 16:54:25,237 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 16:54:25,239 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 16:54:25,559 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d msg='Run this exact shell command in the terminal: sleep 120. Then reply with the sin' reply_to_id=None reply_to_text=''
+2026-11-20 16:54:30,235 INFO gateway.run: kanban dispatcher: embedded in gateway (interval=60.0s)
+2026-11-20 16:54:48,749 INFO gateway.run: Received SIGTERM — initiating shutdown
+2026-11-20 16:54:48,749 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=3.93
+2026-11-20 16:54:48,760 INFO gateway.run: Stopping gateway...
+2026-11-20 16:54:48,763 INFO gateway.run: Sent shutdown notification to active chat local:local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d
+2026-11-20 16:54:48,763 INFO gateway.run: Shutdown phase: notify_active_sessions done at +0.00s
+2026-11-20 16:54:48,766 INFO gateway.run: Shutdown phase: drain done at +0.01s (drain took 0.00s, timed_out=True, active_at_start=1, active_now=1, cron_at_start=0, cron_now=0, api_at_start=0, api_now=0, deferred_at_start=0, deferred_now=0)
+2026-11-20 16:54:48,766 WARNING gateway.run: Gateway drain timed out after 0.0s with 1 active agent(s), 0 in-flight cron job(s), 0 api_server run(s), and 0 deferred agent worker(s); interrupting remaining work.
+2026-11-20 16:54:48,768 INFO gateway.run: Shutdown phase: allowing 1.0s for interrupted agents to unwind
+2026-11-20 16:54:48,893 INFO gateway.run: Ignoring control interrupt message for session agent:main:local:dm:local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d: Gateway shutting down
+2026-11-20 16:54:48,895 INFO gateway.run: response ready: platform=local chat=local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d session=agent:main:local:dm:local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d time=23.3s api_calls=1 response=0 chars
+2026-11-20 16:54:48,901 WARNING gateway.session_authority: Session local-0df0f7ce5e065e09e6526e2ac00abb93adfe0e43fe56e45d83968c6bf1d9808d paused: runtime_draining
+2026-11-20 16:54:48,989 INFO gateway.run: Shutdown phase: post-interrupt tool kill done at +0.23s
+2026-11-20 16:54:48,989 INFO gateway.run: Shutdown phase: cron interrupt notices done at +0.23s
+2026-11-20 16:54:49,209 INFO gateway.run: ✓ local disconnected (0.00s)
+2026-11-20 16:54:49,209 INFO gateway.run: Shutdown phase: all adapters disconnected at +0.45s
+2026-11-20 16:54:49,210 INFO gateway.run: Shutdown phase: final-cleanup tool kill done at +0.45s
+2026-11-20 16:54:49,210 INFO gateway.run: Shutdown phase: executor quiesced at +0.45s
+2026-11-20 16:54:49,281 INFO gateway.run: Shutdown phase: SessionDB close done at +0.52s
+2026-11-20 16:54:49,281 INFO gateway.run: Skipping .clean_shutdown marker — drain timed out with interrupted agents; next startup will recover their interrupted turns.
+2026-11-20 16:54:49,282 INFO gateway.run: Gateway stopped by an unexpected signal — persisting gateway_state=running so container_boot auto-starts on the next boot (issue #42675)
+2026-11-20 16:54:49,283 INFO gateway.run: Gateway stopped (total teardown 0.52s)
+2026-11-20 16:54:49,283 INFO gateway.run: Gateway housekeeping stopped
+2026-11-20 16:54:49,488 INFO gateway.run: Exiting with code 1 (signal-initiated shutdown without restart request) so the service manager can revive the gateway.
+
+==> logs/gateway_faulthandler.log <==
+
+==> logs/mcp-stderr.log <==
+
+2026-11-20 16:54:24,744 ===== starting MCP server 'orchestrator' =====
+
+==> logs/update_receipts/.pm-write.lock <==
+
+==> logs/update_receipts/latest.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T22:54:25.295342+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T22:54:25.295311+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}
+
+==> logs/update_receipts/pm_20261120T225425Z-plugin-check-38104-eaa58c5e4a91472f93749e1ccb221f84.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T22:54:25.295342+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T22:54:25.295311+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}

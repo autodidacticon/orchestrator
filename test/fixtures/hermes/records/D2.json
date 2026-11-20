@@ -1,0 +1,176 @@
+{
+  "id": "D2",
+  "kind": "headless",
+  "questions": [
+    "Q2",
+    "Q6",
+    "Q14",
+    "Q15",
+    "Q16"
+  ],
+  "note": "placeholder model, no key: the turn stops at the provider call",
+  "at": "2026-11-20T21:45:57.227Z",
+  "command": [
+    "/opt/homebrew/bin/hermes",
+    "-z",
+    "Call the orchestrator heartbeat tool once with progress \"probe\". Then run this exact shell command in the terminal: sleep 15 && pwd. Then reply with the single word done.",
+    "--provider",
+    "openrouter",
+    "-m",
+    "probe/placeholder-model",
+    "--usage-file",
+    "<scratch>/usage.json"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-cfdec2d8",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env",
+    "HERMES_MAX_ITERATIONS": "12"
+  },
+  "exit": {
+    "code": 2,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 7501,
+  "killed": null,
+  "modelCalls": 0,
+  "observedApiCalls": 0,
+  "plannedModelCalls": 0,
+  "apiCalls": null,
+  "orphans": [
+    {
+      "pid": 46443,
+      "ppid": 38993,
+      "pgid": 46443,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    },
+    {
+      "pid": 80703,
+      "ppid": 46443,
+      "pgid": 80703,
+      "comm": "node",
+      "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-D2.jsonl --block-sec 200"
+    },
+    {
+      "pid": 81430,
+      "ppid": 46443,
+      "pgid": 81430,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 46443"
+    }
+  ],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    ".clean_shutdown",
+    ".install_id.lock",
+    ".mcp-discovery.lock",
+    "SOUL.md",
+    "auth.lock",
+    "backups/config/config.yaml.good.20261120-154546",
+    "cache/mcp_schema_cache.json",
+    "cache/openrouter_model_metadata.json",
+    "cache/plugin_toolset_keys.json",
+    "cache/schema_columns.json",
+    "cache/tool_discovery_cache.json",
+    "channel_directory.json",
+    "config.yaml",
+    "cron/.jobs.lock",
+    "cron/.tick.lock",
+    "cron/executions.db",
+    "cron/ticker_heartbeat",
+    "cron/ticker_last_success",
+    "gateway-starts.log",
+    "gateway.lock",
+    "gateway_state.json",
+    "install_id",
+    "kanban/.dispatcher.lock",
+    "logs/agent.log",
+    "logs/errors.log",
+    "logs/gateway-exit-diag.log",
+    "logs/gateway-shutdown-diag.log",
+    "logs/gateway-stdio.log",
+    "logs/gateway.log",
+    "logs/gateway_faulthandler.log",
+    "logs/mcp-stderr.log",
+    "logs/update_receipts/.pm-write.lock",
+    "logs/update_receipts/latest.json",
+    "logs/update_receipts/pm_20261120T214552Z-plugin-check-46443-25f4e29d1e89483a8721df9e1b57ff90.json",
+    "models_dev_cache.etag",
+    "models_dev_cache.json",
+    "plugin-update-checks/last-run",
+    "plugin-update-checks/results.json",
+    "projects.db",
+    "runtime/active_sessions.json",
+    "runtime/active_sessions.lock",
+    "runtime/bot_live_delivery/.lock",
+    "source-checks/4e245f1fb3feac96.json",
+    "spawn-ledger.json",
+    "state.db",
+    "state.db.fts_rebuild.lock",
+    "state.db.quarantine.lock",
+    "state/dashboard_clients.heartbeat",
+    "state/gateway.heartbeat",
+    "state/gateway.lifecycle.json",
+    "skills/ (328 files)"
+  ],
+  "homeConfig": "{\n  \"model\": {\n    \"default\": \"probe/placeholder-model\",\n    \"provider\": \"openrouter\"\n  },\n  \"mcp_servers\": {\n    \"orchestrator\": {\n      \"command\": \"~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node\",\n      \"args\": [\n        \"<repo>/test/fixtures/acp/recording-shim.mjs\",\n        \"<scratch>/shim-D2.jsonl\",\n        \"--block-sec\",\n        \"200\"\n      ],\n      \"env\": {\n        \"ORCH_LAUNCH_ID\": \"probe-launch\",\n        \"ORCH_TOKEN\": \"orch-probe-token-cfdec2d8\",\n        \"ORCH_API\": \"http://127.0.0.1:9\",\n        \"PROBE_MARKER\": \"from-mcp-entry\"\n      }\n    }\n  }\n}\n",
+  "tokenFoundIn": [
+    "home/.hermes/backups/config/config.yaml.good.20261120-154546",
+    "home/.hermes/config.yaml"
+  ],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "47321e3 initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "47321e3 initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "after": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "changed": false
+  },
+  "result": null,
+  "evidence": [
+    "headless/D2.ps.json",
+    "headless/D2.out",
+    "headless/D2.err",
+    "shim/D2.jsonl",
+    "headless/D2.usage.json",
+    "headless/D2.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 4,
+    "firstMs": 7273,
+    "maxGapMs": 7273,
+    "maxGapBeforeLine": 1,
+    "times": [
+      7273,
+      7273,
+      7273,
+      7273
+    ]
+  }
+}

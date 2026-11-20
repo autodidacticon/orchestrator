@@ -1,0 +1,41 @@
+{"type": "system", "subtype": "init", "model": "qwen/qwen4-max:free", "session_id": "", "timestamp": 1795215772052}
+{"type": "tool_use", "name": "terminal", "tool_call_id": "call_8ac42751be9a40fba0ff72c0", "input": {"command": "rm -r ./probe-rm-target"}, "timestamp": 1795215780017}
+{"type": "tool_result", "name": "terminal", "tool_call_id": "call_8ac42751be9a40fba0ff72c0", "output": "{\"output\": \"\", \"exit_code\": -1, \"error\": \"BLOCKED (hardline): recursive/any delete of this Hermes runtime's own virtualenv. This command is on the unconditional blocklist and cannot be executed via the agent — not even with --yolo, /yolo, approvals.mode=off, or cron approve mode. If you genuinely need to run it, run it yourself in a terminal outside the agent.\", \"status\": \"blocked\"}", "duration_ms": 128, "is_error": true, "timestamp": 1795215780145}
+{"type": "tool_use", "name": "terminal", "tool_call_id": "call_f8d0a1223c46457dab3d11c0", "input": {"command": "ls -ld ./probe-rm-target; readlink ./probe-rm-target"}, "timestamp": 1795215807053}
+{"type": "tool_result", "name": "terminal", "tool_call_id": "call_f8d0a1223c46457dab3d11c0", "output": "{\"output\": \"drwxr-xr-x@ 3 user  staff  96 Nov 20 17:02 ./probe-rm-target\", \"exit_code\": 1, \"error\": null}", "duration_ms": 66, "is_error": true, "timestamp": 1795215807119}
+{"type": "text", "text": "\n\nI can't say", "timestamp": 1795215837604}
+{"type": "text", "text": " done", "timestamp": 1795215837604}
+{"type": "text", "text": " — the command was blocked", "timestamp": 1795215837735}
+{"type": "text", "text": ",", "timestamp": 1795215837737}
+{"type": "text", "text": " not executed.\n\n", "timestamp": 1795215837805}
+{"type": "text", "text": "The runtime's hard", "timestamp": 1795215837887}
+{"type": "text", "text": "line safety guard rejected", "timestamp": 1795215837970}
+{"type": "text", "text": " `rm -r ./", "timestamp": 1795215838107}
+{"type": "text", "text": "probe-rm", "timestamp": 1795215838110}
+{"type": "text", "text": "-target` outright", "timestamp": 1795215838380}
+{"type": "text", "text": " (it treats", "timestamp": 1795215838380}
+{"type": "text", "text": " it", "timestamp": 1795215838380}
+{"type": "text", "text": " as a recursive delete", "timestamp": 1795215838380}
+{"type": "text", "text": " of the Hermes runtime's", "timestamp": 1795215838665}
+{"type": "text", "text": " own environment", "timestamp": 1795215838666}
+{"type": "text", "text": ",", "timestamp": 1795215838666}
+{"type": "text", "text": " even", "timestamp": 1795215838985}
+{"type": "text", "text": " though the directory here", "timestamp": 1795215838986}
+{"type": "text", "text": " is just", "timestamp": 1795215838986}
+{"type": "text", "text": " a plain local", "timestamp": 1795215838986}
+{"type": "text", "text": " directory", "timestamp": 1795215839040}
+{"type": "text", "text": "). This", "timestamp": 1795215839040}
+{"type": "text", "text": " block applies", "timestamp": 1795215839145}
+{"type": "text", "text": " regardless", "timestamp": 1795215839241}
+{"type": "text", "text": " of approval", "timestamp": 1795215839241}
+{"type": "text", "text": " settings, and I won't", "timestamp": 1795215839319}
+{"type": "text", "text": " try to work", "timestamp": 1795215839416}
+{"type": "text", "text": " around it with an", "timestamp": 1795215839497}
+{"type": "text", "text": " equivalent delete.", "timestamp": 1795215839671}
+{"type": "text", "text": "If", "timestamp": 1795215839672}
+{"type": "text", "text": " you want it", "timestamp": 1795215839779}
+{"type": "text", "text": " removed, run `", "timestamp": 1795215839779}
+{"type": "text", "text": "rm -r ./probe-r", "timestamp": 1795215839829}
+{"type": "text", "text": "m-target` yourself in a", "timestamp": 1795215839900}
+{"type": "text", "text": " terminal outside the agent.", "timestamp": 1795215839995}
+{"type": "result", "session_id": "local-227042ccd229122a2b7f9fe47a01501772cfecd4d71599601a3696df656fd773", "exit_code": 0, "text": "I can't say done — the command was blocked, not executed.\n\nThe runtime's hardline safety guard rejected `rm -r ./probe-rm-target` outright (it treats it as a recursive delete of the Hermes runtime's own environment, even though the directory here is just a plain local directory). This block applies regardless of approval settings, and I won't try to work around it with an equivalent delete.\n\nIf you want it removed, run `rm -r ./probe-rm-target` yourself in a terminal outside the agent.", "tokens": {"input": 40036, "output": 455, "total": 40491, "cache_read": 37705, "cache_write": 2311}, "duration_ms": 68191, "timestamp": 1795215840244}

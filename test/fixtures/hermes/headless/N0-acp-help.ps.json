@@ -1,0 +1,76 @@
+{
+  "note": "rows of the probe's own tree (in: tree), of the started child's tree or group (in: started) and whose command is the hermes install (in: hermes); nothing else",
+  "before": [
+    {
+      "pid": 66054,
+      "ppid": 61788,
+      "pgid": 61788,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 70054,
+      "ppid": 66054,
+      "pgid": 61788,
+      "comm": "ps",
+      "in": "tree"
+    }
+  ],
+  "during": [
+    {
+      "ms": 135,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 70060,
+          "ppid": 66054,
+          "pgid": 70060,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70086,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "pid": 66054,
+      "ppid": 61788,
+      "pgid": 61788,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 72101,
+      "ppid": 66054,
+      "pgid": 61788,
+      "comm": "ps",
+      "in": "tree"
+    }
+  ],
+  "seen": [
+    {
+      "pid": 70060,
+      "ppid": 66054,
+      "pgid": 70060,
+      "comm": "Python",
+      "firstMs": 135,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/hermes acp --help"
+    }
+  ],
+  "leftAfterExit": [],
+  "homePids": []
+}

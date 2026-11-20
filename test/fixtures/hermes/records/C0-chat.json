@@ -1,0 +1,110 @@
+{
+  "id": "C0-chat",
+  "kind": "headless",
+  "questions": [
+    "Q15",
+    "Q14"
+  ],
+  "at": "2026-11-20T21:36:15.614Z",
+  "command": [
+    "/opt/homebrew/bin/hermes",
+    "chat",
+    "-q",
+    "Reply with the single word ok.",
+    "--oneshot",
+    "--format",
+    "stream-json",
+    "--max-turns",
+    "12"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-33c75a6c",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env"
+  },
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 402,
+  "killed": null,
+  "modelCalls": 0,
+  "observedApiCalls": 1,
+  "plannedModelCalls": 0,
+  "apiCalls": null,
+  "orphans": [],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    "SOUL.md",
+    "logs/agent.log",
+    "logs/errors.log",
+    "spawn-ledger.json"
+  ],
+  "homeConfig": null,
+  "tokenFoundIn": [],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "fb882c2 initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "fb882c2 initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "after": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "changed": false
+  },
+  "result": {
+    "type": "result",
+    "session_id": "",
+    "exit_code": 1,
+    "text": "",
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "duration_ms": 180,
+    "error": "credentials or agent init failed",
+    "timestamp": 1795210573942
+  },
+  "evidence": [
+    "headless/C0-chat.ps.json",
+    "headless/C0-chat.out",
+    "headless/C0-chat.err",
+    "headless/C0-chat.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 2,
+    "firstMs": 180,
+    "maxGapMs": 181,
+    "maxGapBeforeLine": 2,
+    "times": [
+      180,
+      361
+    ]
+  }
+}

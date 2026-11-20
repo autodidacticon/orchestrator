@@ -1,0 +1,38 @@
+{
+  "estimated_cost_usd": null,
+  "cost_status": null,
+  "cost_source": null,
+  "input_tokens": 0,
+  "output_tokens": 0,
+  "cache_read_tokens": null,
+  "cache_write_tokens": null,
+  "reasoning_tokens": null,
+  "total_tokens": null,
+  "api_calls": 1,
+  "model": "probe-no-such-model-9",
+  "provider": null,
+  "session_id": "local-800b94efe14c40a9a8bee400cb2ded0c5dc8a8f86b3913c840bfeaec57495193",
+  "completed": false,
+  "partial": false,
+  "interrupted": false,
+  "turn_exit_reason": null,
+  "failed": true,
+  "service_tier": null,
+  "auxiliary": {
+    "api_calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 0,
+    "estimated_cost_usd": 0,
+    "total_tokens": 0,
+    "by_task": {}
+  },
+  "total_including_auxiliary": {
+    "estimated_cost_usd": null,
+    "total_tokens": 0,
+    "api_calls": 1
+  },
+  "failure": "HTTP 404: Model 'probe-no-such-model-9' not found. The requested model does not exist in our configuration or OpenRouter catalog."
+}

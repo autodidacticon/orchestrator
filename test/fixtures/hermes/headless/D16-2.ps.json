@@ -1,0 +1,229 @@
+{
+  "note": "rows of the probe's own tree (in: tree), of the started child's tree or group (in: started) and whose command is the hermes install (in: hermes); nothing else",
+  "before": [
+    {
+      "pid": 34449,
+      "ppid": 34307,
+      "pgid": 34307,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 58506,
+      "ppid": 34449,
+      "pgid": 58506,
+      "comm": "Python",
+      "hermes": true,
+      "in": "tree"
+    },
+    {
+      "pid": 58823,
+      "ppid": 34449,
+      "pgid": 34307,
+      "comm": "ps",
+      "in": "tree"
+    }
+  ],
+  "during": [
+    {
+      "ms": 113,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 58506,
+          "ppid": 34449,
+          "pgid": 58506,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 58889,
+          "ppid": 58506,
+          "pgid": 58506,
+          "comm": "(Python)",
+          "in": "tree"
+        },
+        {
+          "pid": 58824,
+          "ppid": 34449,
+          "pgid": 58824,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 58901,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 1238,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 58506,
+          "ppid": 34449,
+          "pgid": 58506,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 58955,
+          "ppid": 58506,
+          "pgid": 58955,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 60071,
+          "ppid": 58955,
+          "pgid": 58955,
+          "comm": "Python",
+          "in": "tree"
+        },
+        {
+          "pid": 58824,
+          "ppid": 34449,
+          "pgid": 58824,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 63084,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 2214,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 58506,
+          "ppid": 34449,
+          "pgid": 58506,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 58955,
+          "ppid": 58506,
+          "pgid": 58955,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 63733,
+          "ppid": 58955,
+          "pgid": 63733,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 63834,
+          "ppid": 58955,
+          "pgid": 63834,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 58824,
+          "ppid": 34449,
+          "pgid": 58824,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65991,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "pid": 34449,
+      "ppid": 34307,
+      "pgid": 34307,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 73428,
+      "ppid": 34449,
+      "pgid": 34307,
+      "comm": "ps",
+      "in": "tree"
+    },
+    {
+      "pid": 58955,
+      "ppid": 1,
+      "pgid": 58955,
+      "comm": "Python",
+      "hermes": true,
+      "in": "hermes"
+    },
+    {
+      "pid": 63834,
+      "ppid": 58955,
+      "pgid": 63834,
+      "comm": "Python",
+      "hermes": true,
+      "in": "hermes"
+    }
+  ],
+  "seen": [
+    {
+      "pid": 58824,
+      "ppid": 34449,
+      "pgid": 58824,
+      "comm": "Python",
+      "firstMs": 113,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/hermes chat -q Reply with the single word ok. --oneshot --format stream-json --max-turns 12 --provider openrouter -m probe/placeholder-model"
+    }
+  ],
+  "leftAfterExit": [],
+  "homePids": [
+    {
+      "file": "gateway.pid",
+      "pid": 58955,
+      "alive": true
+    }
+  ]
+}

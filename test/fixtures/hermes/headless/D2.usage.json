@@ -1,0 +1,22 @@
+{
+  "estimated_cost_usd": null,
+  "cost_status": null,
+  "cost_source": null,
+  "input_tokens": null,
+  "output_tokens": null,
+  "cache_read_tokens": null,
+  "cache_write_tokens": null,
+  "reasoning_tokens": null,
+  "total_tokens": null,
+  "api_calls": null,
+  "model": null,
+  "provider": null,
+  "session_id": "local-de8e9eb4ee228184488fc16f753cf03968f1a8dcfd19fb80e5631952ade36c5c",
+  "completed": false,
+  "partial": null,
+  "interrupted": false,
+  "turn_exit_reason": null,
+  "failed": true,
+  "service_tier": null,
+  "failure": "⚠️ Something went wrong and I couldn't finish this reply.\nUse /retry to try again, or /new to start a fresh conversation. Technical details are in the gateway log (`hermes logs`).\n\nThis turn did not complete. Some actions may already have run; verify their effects before resending."
+}

@@ -1,0 +1,371 @@
+{
+  "note": "rows of the probe's own tree (in: tree), of the started child's tree or group (in: started) and whose command is the hermes install (in: hermes); nothing else",
+  "before": [
+    {
+      "pid": 66054,
+      "ppid": 61788,
+      "pgid": 61788,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 84940,
+      "ppid": 66054,
+      "pgid": 61788,
+      "comm": "ps",
+      "in": "tree"
+    }
+  ],
+  "during": [
+    {
+      "ms": 99,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84943,
+          "ppid": 66054,
+          "pgid": 84943,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84956,
+          "ppid": 84943,
+          "pgid": 84943,
+          "comm": "Python",
+          "in": "tree"
+        },
+        {
+          "pid": 84968,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 1238,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84943,
+          "ppid": 66054,
+          "pgid": 84943,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84956,
+          "ppid": 84943,
+          "pgid": 84943,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 85022,
+          "ppid": 84956,
+          "pgid": 85022,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 85059,
+          "ppid": 85022,
+          "pgid": 85022,
+          "comm": "<defunct>",
+          "in": "tree"
+        },
+        {
+          "pid": 85097,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 2245,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84943,
+          "ppid": 66054,
+          "pgid": 84943,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84956,
+          "ppid": 84943,
+          "pgid": 84943,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 85022,
+          "ppid": 84956,
+          "pgid": 85022,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 86259,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 3230,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84943,
+          "ppid": 66054,
+          "pgid": 84943,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84956,
+          "ppid": 84943,
+          "pgid": 84943,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 85022,
+          "ppid": 84956,
+          "pgid": 85022,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 88840,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 4230,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84943,
+          "ppid": 66054,
+          "pgid": 84943,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84956,
+          "ppid": 84943,
+          "pgid": 84943,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 85022,
+          "ppid": 84956,
+          "pgid": 85022,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 88957,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 5232,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84943,
+          "ppid": 66054,
+          "pgid": 84943,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 89065,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 85022,
+          "ppid": 1,
+          "pgid": 85022,
+          "comm": "Python",
+          "hermes": true,
+          "in": "started"
+        }
+      ]
+    },
+    {
+      "ms": 6235,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 84943,
+          "ppid": 66054,
+          "pgid": 84943,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 89166,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 85022,
+          "ppid": 1,
+          "pgid": 85022,
+          "comm": "Python",
+          "hermes": true,
+          "in": "started"
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "pid": 66054,
+      "ppid": 61788,
+      "pgid": 61788,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 91590,
+      "ppid": 66054,
+      "pgid": 61788,
+      "comm": "ps",
+      "in": "tree"
+    },
+    {
+      "pid": 85022,
+      "ppid": 1,
+      "pgid": 85022,
+      "comm": "Python",
+      "hermes": true,
+      "in": "started"
+    }
+  ],
+  "seen": [
+    {
+      "pid": 84943,
+      "ppid": 66054,
+      "pgid": 84943,
+      "comm": "node",
+      "firstMs": 99,
+      "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/hermes/acp-client.local.mjs --agent-json [\"/opt/homebrew/bin/hermes\",\"acp\"] --cwd <scratch>/wt --frames <scratch>/frames.jsonl --keep-descendants --mcp-json <scratch>/mcp.json --requests-json <scratch>/requests.json"
+    },
+    {
+      "pid": 84956,
+      "ppid": 84943,
+      "pgid": 84943,
+      "comm": "Python",
+      "firstMs": 99,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/hermes acp"
+    },
+    {
+      "pid": 85022,
+      "ppid": 84956,
+      "pgid": 85022,
+      "comm": "Python",
+      "firstMs": 1238,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    },
+    {
+      "pid": 85059,
+      "ppid": 85022,
+      "pgid": 85022,
+      "comm": "<defunct>",
+      "firstMs": 1238,
+      "args": null
+    }
+  ],
+  "leftAfterExit": [
+    {
+      "pid": 85022,
+      "ppid": 84956,
+      "pgid": 85022,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    }
+  ],
+  "homePids": [
+    {
+      "file": "gateway.pid",
+      "pid": 85022,
+      "alive": true
+    }
+  ]
+}

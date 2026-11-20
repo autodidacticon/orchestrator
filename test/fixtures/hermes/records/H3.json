@@ -1,0 +1,204 @@
+{
+  "id": "H3",
+  "kind": "headless",
+  "questions": [
+    "Q3",
+    "Q12",
+    "Q14",
+    "Q16"
+  ],
+  "note": "brief 30079 bytes",
+  "at": "2026-11-20T23:00:27.258Z",
+  "command": [
+    "/opt/homebrew/bin/hermes",
+    "chat",
+    "--query-file",
+    "<scratch>/home/brief.md",
+    "--oneshot",
+    "--format",
+    "stream-json",
+    "--max-turns",
+    "12",
+    "--provider",
+    "nous",
+    "-m",
+    "qwen/qwen4-max:free"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-02643dcf",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env"
+  },
+  "exit": {
+    "code": null,
+    "signal": "SIGTERM"
+  },
+  "timedOut": true,
+  "ms": 300113,
+  "killed": null,
+  "modelCalls": 1,
+  "observedApiCalls": 0,
+  "plannedModelCalls": 1,
+  "apiCalls": null,
+  "orphans": [
+    {
+      "pid": 79097,
+      "ppid": 79056,
+      "pgid": 79097,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    },
+    {
+      "pid": 79478,
+      "ppid": 79097,
+      "pgid": 79478,
+      "comm": "node",
+      "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H3.jsonl --block-sec 200"
+    },
+    {
+      "pid": 79527,
+      "ppid": 79097,
+      "pgid": 79527,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 79097"
+    }
+  ],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    ".env",
+    ".install_id.lock",
+    ".mcp-discovery.lock",
+    ".restart_failure_counts",
+    ".skills_prompt_snapshot.json",
+    "SOUL.md",
+    "auth.json",
+    "auth.lock",
+    "backups/config/config.yaml.good.20261120-165523",
+    "cache/endpoint_model_metadata.json",
+    "cache/mcp_schema_cache.json",
+    "cache/model_catalog.json",
+    "cache/nous_recommended_cache.json",
+    "cache/openrouter_curated_catalog.json",
+    "cache/plugin_toolset_keys.json",
+    "cache/reasoning_caps.json",
+    "cache/schema_columns.json",
+    "cache/scratch/.last_prune",
+    "cache/tool_discovery_cache.json",
+    "channel_directory.json",
+    "config.yaml",
+    "context_length_cache.yaml",
+    "context_length_cache.yaml.lock",
+    "cron/.jobs.lock",
+    "cron/.tick.lock",
+    "cron/executions.db",
+    "cron/ticker_heartbeat",
+    "cron/ticker_last_success",
+    "gateway-starts.log",
+    "gateway.lock",
+    "gateway_state.json",
+    "install_id",
+    "kanban.db",
+    "kanban.db-shm",
+    "kanban.db-wal",
+    "kanban.db.dispatch.lock",
+    "kanban.db.init.lock",
+    "kanban/.dispatcher.lock",
+    "logs/agent.log",
+    "logs/errors.log",
+    "logs/gateway-exit-diag.log",
+    "logs/gateway-shutdown-diag.log",
+    "logs/gateway-stdio.log",
+    "logs/gateway.log",
+    "logs/gateway_faulthandler.log",
+    "logs/mcp-stderr.log",
+    "logs/update_receipts/.pm-write.lock",
+    "logs/update_receipts/latest.json",
+    "logs/update_receipts/pm_20261120T225525Z-plugin-check-79097-3f1b2c86a4e74e29ab4153ff2d60492d.json",
+    "plugin-update-checks/last-run",
+    "plugin-update-checks/results.json",
+    "projects.db",
+    "runtime/active_sessions.json",
+    "runtime/active_sessions.lock",
+    "runtime/bot_live_delivery/.lock",
+    "sessions/sessions.json",
+    "shared/nous_auth.lock",
+    "source-checks/4e245f1fb3feac96.json",
+    "spawn-ledger.json",
+    "state.db",
+    "state.db-shm",
+    "state.db-wal",
+    "state.db.fts_rebuild.lock",
+    "state.db.quarantine.lock",
+    "state/dashboard_clients.heartbeat",
+    "state/gateway.heartbeat",
+    "state/gateway.lifecycle.json",
+    "skills/ (328 files)"
+  ],
+  "homeConfig": "{\n  \"model\": {\n    \"default\": \"qwen/qwen4-max:free\",\n    \"provider\": \"nous\"\n  },\n  \"mcp_servers\": {\n    \"orchestrator\": {\n      \"command\": \"~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node\",\n      \"args\": [\n        \"<repo>/test/fixtures/acp/recording-shim.mjs\",\n        \"<scratch>/shim-H3.jsonl\",\n        \"--block-sec\",\n        \"200\"\n      ],\n      \"env\": {\n        \"ORCH_LAUNCH_ID\": \"probe-launch\",\n        \"ORCH_TOKEN\": \"orch-probe-token-02643dcf\",\n        \"ORCH_API\": \"http://127.0.0.1:9\",\n        \"PROBE_MARKER\": \"from-mcp-entry\"\n      }\n    }\n  }\n}\n",
+  "tokenFoundIn": [
+    "home/.hermes/backups/config/config.yaml.good.20261120-165523",
+    "home/.hermes/config.yaml"
+  ],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "a6b8aa2 probe: greeting",
+      "e742679 initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "e742679 initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "76642bb9a161f72c65e6ad394efc3a2198ecef57e34042878bdb935629978391",
+      "env": "32d2148d97e8f3a8d90124b916c5fe8e415cf3333a0235aaf61a69693d1d29d3"
+    },
+    "after": {
+      "home": "present",
+      "config": "76642bb9a161f72c65e6ad394efc3a2198ecef57e34042878bdb935629978391",
+      "env": "32d2148d97e8f3a8d90124b916c5fe8e415cf3333a0235aaf61a69693d1d29d3"
+    },
+    "changed": false
+  },
+  "result": null,
+  "evidence": [
+    "headless/H3.ps.json",
+    "headless/H3.out",
+    "headless/H3.err",
+    "shim/H3.jsonl",
+    "headless/H3.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 13,
+    "firstMs": 488,
+    "maxGapMs": 59224,
+    "maxGapBeforeLine": 10,
+    "times": [
+      488,
+      30300,
+      30300,
+      85008,
+      85012,
+      85014,
+      85093,
+      141443,
+      141549,
+      200773,
+      200876,
+      259419,
+      259425
+    ]
+  }
+}

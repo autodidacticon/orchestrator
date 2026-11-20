@@ -1,0 +1,219 @@
+==> logs/agent.log <==
+2026-11-20 17:18:41,044 INFO hermes_cli.plugins: Plugin 'browser-browser-use' registered browser provider: browser-use
+2026-11-20 17:18:41,045 INFO hermes_cli.plugins: Plugin 'browser-browserbase' registered browser provider: browserbase
+2026-11-20 17:18:41,045 INFO hermes_cli.plugins: Plugin 'browser-firecrawl' registered browser provider: firecrawl
+2026-11-20 17:18:41,107 INFO hermes_cli.plugins: Plugin 'deepinfra' registered image_gen provider: deepinfra
+2026-11-20 17:18:41,108 INFO hermes_cli.plugins: Plugin 'fal' registered image_gen provider: fal
+2026-11-20 17:18:41,108 INFO hermes_cli.plugins: Plugin 'krea' registered image_gen provider: krea
+2026-11-20 17:18:41,109 INFO hermes_cli.plugins: Plugin 'meta-ai-image-gen' registered image_gen provider: meta-ai
+2026-11-20 17:18:41,110 INFO hermes_cli.plugins: Plugin 'openai' registered image_gen provider: openai
+2026-11-20 17:18:41,111 INFO hermes_cli.plugins: Plugin 'openai-codex' registered image_gen provider: openai-codex
+2026-11-20 17:18:41,111 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: openrouter
+2026-11-20 17:18:41,114 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: nous
+2026-11-20 17:18:41,115 INFO hermes_cli.plugins: Plugin 'xai' registered image_gen provider: xai
+2026-11-20 17:18:41,132 INFO hermes_cli.plugins: Plugin 'deepinfra' registered video_gen provider: deepinfra
+2026-11-20 17:18:41,133 INFO hermes_cli.plugins: Plugin 'fal' registered video_gen provider: fal
+2026-11-20 17:18:41,133 INFO hermes_cli.plugins: Plugin 'openrouter' registered video_gen provider: openrouter
+2026-11-20 17:18:41,134 INFO hermes_cli.plugins: Plugin 'xai' registered video_gen provider: xai
+2026-11-20 17:18:41,138 INFO hermes_cli.plugins: Plugin 'web-brave-free' registered web provider: brave-free
+2026-11-20 17:18:41,139 INFO hermes_cli.plugins: Plugin 'web-ddgs' registered web provider: ddgs
+2026-11-20 17:18:41,140 INFO hermes_cli.plugins: Plugin 'web-exa' registered web provider: exa
+2026-11-20 17:18:41,141 INFO hermes_cli.plugins: Plugin 'web-firecrawl' registered web provider: firecrawl
+2026-11-20 17:18:41,143 INFO hermes_cli.plugins: Plugin 'web-keenable' registered web provider: keenable
+2026-11-20 17:18:41,144 INFO hermes_cli.plugins: Plugin 'web-openai-native' registered web provider: openai-native
+2026-11-20 17:18:41,145 INFO hermes_cli.plugins: Plugin 'web-parallel' registered web provider: parallel
+2026-11-20 17:18:41,146 INFO hermes_cli.plugins: Plugin 'web-perplexity' registered web provider: perplexity
+2026-11-20 17:18:41,146 INFO hermes_cli.plugins: Plugin 'web-searxng' registered web provider: searxng
+2026-11-20 17:18:41,147 INFO hermes_cli.plugins: Plugin 'web-tavily' registered web provider: tavily
+2026-11-20 17:18:41,148 INFO hermes_cli.plugins: Plugin 'web-xai' registered web provider: xai
+2026-11-20 17:18:41,149 INFO hermes_cli.plugins: Plugin discovery complete: 61 found, 57 enabled
+2026-11-20 17:18:41,197 INFO hermes_cli.gateway_multiplex_mode: Single-profile install: gateway.multiplex_profiles unset, serving the default profile only.
+2026-11-20 17:18:41,564 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-983bf4d095c4ef02/control.sock
+2026-11-20 17:18:41,639 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 17:18:41,639 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 17:18:41,640 INFO gateway.run: Agent budget: max_iterations=unlimited (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 17:18:41,640 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 17:18:41,651 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 17:18:41,651 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 17:18:41,666 INFO run_agent: Loaded environment variables from <scratch>/home/.hermes/.env
+2026-11-20 17:18:41,684 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 17:18:41,944 INFO tools.registry: check_fn check_browser_back_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,945 INFO tools.registry: check_fn _browser_cdp_check returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,945 INFO tools.registry: check_fn check_browser_click_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,945 INFO tools.registry: check_fn check_browser_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,945 INFO tools.registry: check_fn _browser_dialog_check returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,948 INFO tools.registry: check_fn check_browser_navigate_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,948 INFO tools.registry: check_fn check_browser_press_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,949 INFO tools.registry: check_fn check_browser_scroll_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,949 INFO tools.registry: check_fn check_browser_snapshot_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,949 INFO tools.registry: check_fn check_browser_type_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,949 INFO tools.registry: check_fn check_browser_vision_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,954 INFO tools.registry: check_fn check_computer_use_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,954 INFO tools.registry: check_fn check_image_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:41,962 INFO agent.auxiliary_client: Vision auto-detect: using main provider nous (google/gemini-3.6-flash)
+2026-11-20 17:18:42,288 INFO agent.model_metadata: Cached context length qwen/qwen4-max:free@<credential> -> 1,000,000 tokens
+2026-11-20 17:18:42,292 INFO tools.tool_search: tool_search activated (tier 1): 18 core/visible tools kept, 5 deferred (~3797 tokens), listing full (budget ~4000 tokens)
+2026-11-20 17:18:42,299 INFO gateway.run: Model context warmed: qwen/qwen4-max:free -> 1000000 tokens (detected)
+2026-11-20 17:18:42,300 INFO gateway.run: Turn machinery warmed in 0.6s (21 tool schema(s) materialized)
+2026-11-20 17:18:42,316 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 17:18:42,317 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 17:18:42,322 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 17:18:42,322 INFO cron.scheduler_provider: In-process cron scheduler started (interval=60s)
+2026-11-20 17:18:42,324 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 17:18:42,325 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 17:18:42,325 INFO cron.scheduler_provider: Multiplex cron scheduler started for 1 profile(s): ['default'] (re-enumerated every cycle)
+2026-11-20 17:18:42,534 INFO tui_gateway.ws: ws accepted peer=127.0.0.1:63542
+2026-11-20 17:18:42,846 INFO tools.mcp_tool: MCP server 'editor_orchestrator_a350fb8b' (stdio): registered 5 tool(s): mcp__editor_orchestrator_a350fb8b__heartbeat, mcp__editor_orchestrator_a350fb8b__report, mcp__editor_orchestrator_a350fb8b__block, mcp__editor_orchestrator_a350fb8b__inbox, mcp__editor_orchestrator_a350fb8b__log
+2026-11-20 17:18:42,847 INFO tools.mcp_tool: MCP: registered 5 tool(s) from 1 server(s)
+2026-11-20 17:18:42,943 INFO tools.tool_search: tool_search activated (tier 1): 16 core/visible tools kept, 4 deferred (~2051 tokens), listing full (budget ~4000 tokens)
+2026-11-20 17:18:42,944 INFO tools.registry: check_fn _a2a_tools_available returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:42,944 INFO tools.registry: check_fn check_discord_tool_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:42,944 INFO tools.registry: check_fn _check_feishu returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:42,950 INFO tools.registry: check_fn _check_yuanbao returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:42,952 INFO agent.auxiliary_client: Vision auto-detect: using main provider nous (google/gemini-3.6-flash)
+2026-11-20 17:18:42,954 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 17:18:42,954 INFO tools.registry: check_fn check_video_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:42,954 INFO tools.registry: check_fn _check_xai_video_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:42,955 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 17:18:42,955 INFO tools.registry: check_fn check_x_search_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 17:18:44,254 INFO tools.mcp_tool: MCP server 'editor_orchestrator_a350fb8b' (stdio): registered 5 tool(s): mcp__editor_orchestrator_a350fb8b__heartbeat, mcp__editor_orchestrator_a350fb8b__report, mcp__editor_orchestrator_a350fb8b__block, mcp__editor_orchestrator_a350fb8b__inbox, mcp__editor_orchestrator_a350fb8b__log
+2026-11-20 17:18:44,254 INFO tools.mcp_tool: MCP: registered 5 tool(s) from 1 server(s)
+2026-11-20 17:18:44,268 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa msg='Call the orchestrator block tool once with seq 2, kind "needsDecision" and messa' reply_to_id=None reply_to_text=''
+2026-11-20 17:18:44,558 INFO run_agent: OpenAI client created (agent_init, shared=True) thread=hermes-gateway_3:13002665984 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 17:18:44,563 INFO tools.tool_search: tool_search activated (tier 1): 16 core/visible tools kept, 9 deferred (~2791 tokens), listing full (budget ~4000 tokens)
+2026-11-20 17:18:44,599 INFO [local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa] agent.turn_context: conversation turn: session=local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa model=qwen/qwen4-max:free provider=nous platform=acp history=0 msg='Call the orchestrator block tool once with seq 2, kind "needsDecision" and messa...'
+2026-11-20 17:18:44,694 INFO agent.auxiliary_client: Auxiliary auto-detect: using main provider nous (qwen/qwen4-max:free)
+2026-11-20 17:18:44,695 INFO agent.auxiliary_client: Auxiliary title_generation: using nous (qwen/qwen4-max:free) at <credential>/
+2026-11-20 17:18:44,706 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-9 (<lambda>):13084995584 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 17:18:47,319 INFO gateway.run: kanban dispatcher: embedded in gateway (interval=60.0s)
+2026-11-20 17:18:49,303 INFO [local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa] agent.conversation_loop: API call #1: model=qwen/qwen4-max:free provider=nous in=13505 out=80 total=13585 latency=4.6s write=13499 id=gen-1795216726-LYvVyuuemoVj6r5cNlGO
+2026-11-20 17:18:49,338 INFO [local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa] agent.tool_executor: tool tool_describe completed (0.02s, 543 chars)
+2026-11-20 17:18:52,108 INFO [local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa] agent.conversation_loop: API call #2: model=qwen/qwen4-max:free provider=nous in=13756 out=78 total=13834 latency=2.8s cache=13499/13756 (98%) write=250 id=gen-1795216729-eIdI1KiPbCZVmGwYtKdz
+2026-11-20 17:23:42,539 INFO tui_gateway.server: Reclaimed 1 orphaned active-session lease(s)
+2026-11-20 17:23:52,156 ERROR tools.mcp_tool: MCP tool editor_orchestrator_a350fb8b/block call failed: MCP call timed out after 300.0s (configured timeout: 300.0s)
+2026-11-20 17:23:52,157 WARNING [local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa] agent.tool_executor: Tool mcp__editor_orchestrator_a350fb8b__block returned error (300.02s): {"error": "MCP call failed: TimeoutError: MCP call timed out after 300.0s (configured timeout: 300.0s)"}
+2026-11-20 17:23:59,778 INFO [local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa] agent.conversation_loop: API call #3: model=qwen/qwen4-max:free provider=nous in=13967 out=130 total=14097 latency=7.6s write=13960 id=gen-1795217032-C0P5ANkihMAtnLlXcz9j
+2026-11-20 17:24:00,174 INFO [local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa] agent.conversation_loop: Turn ended: reason=text_response(finish_reason=stop) model=qwen/qwen4-max:free api_calls=3/9223372036854775807 budget=3/9223372036854775807 tool_turns=2 last_msg_role=assistant response_len=148 session=local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa
+2026-11-20 17:24:00,200 INFO gateway.run: response ready: platform=local chat=local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa session=agent:main:local:dm:local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa time=315.9s api_calls=3 response=148 chars
+2026-11-20 17:24:00,206 INFO gateway.platforms.base: [Local] Sending response (148 chars) to local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa
+2026-11-20 17:24:00,422 INFO tui_gateway.ws: ws closed peer=127.0.0.1:63542 reason=client_disconnect(code=1000,reason=) messages=6 parse_errors=0 dispatch_crashes=0 send_failures=0 reaped_sessions=0 detached_sessions=0
+2026-11-20 17:24:04,259 INFO gateway.run: Received SIGTERM — initiating shutdown
+2026-11-20 17:24:04,259 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=2.18
+2026-11-20 17:24:04,271 INFO gateway.run: Stopping gateway...
+2026-11-20 17:24:04,272 INFO gateway.run: Shutdown phase: notify_active_sessions done at +0.00s
+2026-11-20 17:24:04,274 INFO gateway.run: Shutdown phase: drain done at +0.00s (drain took 0.00s, timed_out=False, active_at_start=0, active_now=0, cron_at_start=0, cron_now=0, api_at_start=0, api_now=0, deferred_at_start=0, deferred_now=0)
+2026-11-20 17:24:04,430 INFO run_agent: OpenAI client closed (agent_close, shared=True, tcp_force_closed=0) thread=hermes-gateway-hk_0:6343815168 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 17:24:04,430 INFO run_agent: OpenAI client closed (agent_close, shared=False, tcp_force_closed=0) thread=hermes-gateway-hk_0:6343815168 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 17:24:04,557 INFO gateway.run: ✓ local disconnected (0.00s)
+2026-11-20 17:24:04,557 INFO gateway.run: Shutdown phase: all adapters disconnected at +0.29s
+2026-11-20 17:24:04,558 INFO gateway.run: Shutdown phase: final-cleanup tool kill done at +0.29s
+2026-11-20 17:24:04,558 INFO gateway.run: Shutdown phase: executor quiesced at +0.29s
+2026-11-20 17:24:04,629 INFO gateway.run: Shutdown phase: SessionDB close done at +0.36s
+2026-11-20 17:24:04,629 INFO gateway.run: Gateway stopped by an unexpected signal — persisting gateway_state=running so container_boot auto-starts on the next boot (issue #42675)
+2026-11-20 17:24:04,630 INFO gateway.run: Gateway stopped (total teardown 0.36s)
+2026-11-20 17:24:04,631 INFO gateway.run: Gateway housekeeping stopped
+2026-11-20 17:24:04,835 INFO gateway.run: Exiting with code 1 (signal-initiated shutdown without restart request) so the service manager can revive the gateway.
+
+==> logs/errors.log <==
+2026-11-20 17:18:41,651 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 17:23:52,156 ERROR tools.mcp_tool: MCP tool editor_orchestrator_a350fb8b/block call failed: MCP call timed out after 300.0s (configured timeout: 300.0s)
+2026-11-20 17:23:52,157 WARNING [local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa] agent.tool_executor: Tool mcp__editor_orchestrator_a350fb8b__block returned error (300.02s): {"error": "MCP call failed: TimeoutError: MCP call timed out after 300.0s (configured timeout: 300.0s)"}
+2026-11-20 17:24:04,259 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=2.18
+
+==> logs/gateway-exit-diag.log <==
+{"ts": "2026-11-20T23:18:41.183579+00:00", "tag": "gateway.start", "pid": 25124, "python": "3.14.10", "platform": "darwin", "replace": false, "argv": ["/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/hermes_cli/main.py", "gateway", "run", "--quiet", "--idle-exit"], "stdin_is_tty": false, "console_window_attached": null, "detached": true, "breakaway": null, "absorb_windows_console_controls": false}
+{"ts": "2026-11-20T23:24:04.840732+00:00", "tag": "asyncio.run.returned", "pid": 25124, "python": "3.14.10", "platform": "darwin", "success": false}
+{"ts": "2026-11-20T23:24:04.841837+00:00", "tag": "gateway.exit_nonzero", "pid": 25124, "python": "3.14.10", "platform": "darwin"}
+
+==> logs/gateway-shutdown-diag.log <==
+=== shutdown diagnostic removed: it listed every process of the host ===
+
+==> logs/gateway-stdio.log <==
+┌─────────────────────────────────────────────────────────┐
+│           ☤ Hermes Gateway Starting...                 │
+├─────────────────────────────────────────────────────────┤
+│  Messaging platforms + cron scheduler                    │
+│  Press Ctrl+C to stop                                   │
+└─────────────────────────────────────────────────────────┘
+
+
+==> logs/gateway.log <==
+2026-11-20 17:18:41,564 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-983bf4d095c4ef02/control.sock
+2026-11-20 17:18:41,639 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 17:18:41,639 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 17:18:41,640 INFO gateway.run: Agent budget: max_iterations=unlimited (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 17:18:41,640 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 17:18:41,651 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 17:18:41,651 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 17:18:41,684 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 17:18:42,299 INFO gateway.run: Model context warmed: qwen/qwen4-max:free -> 1000000 tokens (detected)
+2026-11-20 17:18:42,300 INFO gateway.run: Turn machinery warmed in 0.6s (21 tool schema(s) materialized)
+2026-11-20 17:18:42,316 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 17:18:42,317 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 17:18:42,322 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 17:18:42,324 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 17:18:42,325 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 17:18:44,268 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa msg='Call the orchestrator block tool once with seq 2, kind "needsDecision" and messa' reply_to_id=None reply_to_text=''
+2026-11-20 17:18:47,319 INFO gateway.run: kanban dispatcher: embedded in gateway (interval=60.0s)
+2026-11-20 17:24:00,200 INFO gateway.run: response ready: platform=local chat=local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa session=agent:main:local:dm:local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa time=315.9s api_calls=3 response=148 chars
+2026-11-20 17:24:00,206 INFO gateway.platforms.base: [Local] Sending response (148 chars) to local-5402a50d880aca0fde4ff7e87b2b03f5a74cdf41f386d74a7cc25dbb778854fa
+2026-11-20 17:24:04,259 INFO gateway.run: Received SIGTERM — initiating shutdown
+2026-11-20 17:24:04,259 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=2.18
+2026-11-20 17:24:04,271 INFO gateway.run: Stopping gateway...
+2026-11-20 17:24:04,272 INFO gateway.run: Shutdown phase: notify_active_sessions done at +0.00s
+2026-11-20 17:24:04,274 INFO gateway.run: Shutdown phase: drain done at +0.00s (drain took 0.00s, timed_out=False, active_at_start=0, active_now=0, cron_at_start=0, cron_now=0, api_at_start=0, api_now=0, deferred_at_start=0, deferred_now=0)
+2026-11-20 17:24:04,557 INFO gateway.run: ✓ local disconnected (0.00s)
+2026-11-20 17:24:04,557 INFO gateway.run: Shutdown phase: all adapters disconnected at +0.29s
+2026-11-20 17:24:04,558 INFO gateway.run: Shutdown phase: final-cleanup tool kill done at +0.29s
+2026-11-20 17:24:04,558 INFO gateway.run: Shutdown phase: executor quiesced at +0.29s
+2026-11-20 17:24:04,629 INFO gateway.run: Shutdown phase: SessionDB close done at +0.36s
+2026-11-20 17:24:04,629 INFO gateway.run: Gateway stopped by an unexpected signal — persisting gateway_state=running so container_boot auto-starts on the next boot (issue #42675)
+2026-11-20 17:24:04,630 INFO gateway.run: Gateway stopped (total teardown 0.36s)
+2026-11-20 17:24:04,631 INFO gateway.run: Gateway housekeeping stopped
+2026-11-20 17:24:04,835 INFO gateway.run: Exiting with code 1 (signal-initiated shutdown without restart request) so the service manager can revive the gateway.
+
+==> logs/gateway_faulthandler.log <==
+
+==> logs/mcp-stderr.log <==
+
+2026-11-20 17:18:42,752 ===== starting MCP server 'editor_orchestrator_a350fb8b' =====
+
+2026-11-20 17:18:44,162 ===== starting MCP server 'editor_orchestrator_a350fb8b' =====
+
+==> logs/update_receipts/.pm-write.lock <==
+
+==> logs/update_receipts/latest.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T23:18:42.346853+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T23:18:42.346814+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}
+
+==> logs/update_receipts/pm_20261120T231842Z-plugin-check-25124-afa04455b6e14bc780e51834dc14ef34.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T23:18:42.346853+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T23:18:42.346814+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}

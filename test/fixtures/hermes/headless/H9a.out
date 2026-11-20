@@ -1,0 +1,39 @@
+{"type": "system", "subtype": "init", "model": "qwen/qwen4-max:free", "session_id": "", "timestamp": 1795215639720}
+{"type": "tool_use", "name": "terminal", "tool_call_id": "call_929af40c2a96403aa415b9f4", "input": {"command": "rm -r ./probe-rm-target ."}, "timestamp": 1795215673532}
+{"type": "tool_result", "name": "terminal", "tool_call_id": "call_929af40c2a96403aa415b9f4", "output": "{\"output\": \"\", \"exit_code\": -1, \"error\": \"BLOCKED (hardline): recursive/any delete of this Hermes runtime's own virtualenv. This command is on the unconditional blocklist and cannot be executed via the agent — not even with --yolo, /yolo, approvals.mode=off, or cron approve mode. If you genuinely need to run it, run it yourself in a terminal outside the agent.\", \"status\": \"blocked\"}", "duration_ms": 67, "is_error": true, "timestamp": 1795215673600}
+{"type": "text", "text": "\n\nNot", "timestamp": 1795215691294}
+{"type": "text", "text": " done — the", "timestamp": 1795215691296}
+{"type": "text", "text": " command was blocked by", "timestamp": 1795215691297}
+{"type": "text", "text": " a", "timestamp": 1795215691297}
+{"type": "text", "text": " hardline", "timestamp": 1795215691605}
+{"type": "text", "text": " safety rule (", "timestamp": 1795215691608}
+{"type": "text", "text": "it", "timestamp": 1795215691610}
+{"type": "text", "text": " recursively", "timestamp": 1795215691633}
+{"type": "text", "text": " deletes `.", "timestamp": 1795215691699}
+{"type": "text", "text": "`, the", "timestamp": 1795215691699}
+{"type": "text", "text": " current working directory, which contains", "timestamp": 1795215691701}
+{"type": "text", "text": " this", "timestamp": 1795215691701}
+{"type": "text", "text": " runtime", "timestamp": 1795215691866}
+{"type": "text", "text": "'s environment", "timestamp": 1795215691866}
+{"type": "text", "text": "). It cannot", "timestamp": 1795215691866}
+{"type": "text", "text": " be run", "timestamp": 1795215691866}
+{"type": "text", "text": " through the agent, even with", "timestamp": 1795215692102}
+{"type": "text", "text": " approvals disabled", "timestamp": 1795215692102}
+{"type": "text", "text": ". If you genuinely", "timestamp": 1795215692102}
+{"type": "text", "text": " need it, run it yourself", "timestamp": 1795215692102}
+{"type": "text", "text": " in a terminal outside the agent", "timestamp": 1795215692342}
+{"type": "text", "text": " — though", "timestamp": 1795215692342}
+{"type": "text", "text": " note `", "timestamp": 1795215692343}
+{"type": "text", "text": "rm -r .", "timestamp": 1795215692343}
+{"type": "text", "text": "` will refuse", "timestamp": 1795215692607}
+{"type": "text", "text": " or", "timestamp": 1795215692607}
+{"type": "text", "text": " wipe", "timestamp": 1795215692607}
+{"type": "text", "text": " the directory", "timestamp": 1795215692607}
+{"type": "text", "text": "'s", "timestamp": 1795215692779}
+{"type": "text", "text": " contents, so you", "timestamp": 1795215692779}
+{"type": "text", "text": " may", "timestamp": 1795215692782}
+{"type": "text", "text": " want `rm -r ./", "timestamp": 1795215692783}
+{"type": "text", "text": "probe-rm-target", "timestamp": 1795215692906}
+{"type": "text", "text": "` alone instead", "timestamp": 1795215692907}
+{"type": "text", "text": ".", "timestamp": 1795215692907}
+{"type": "result", "session_id": "local-711e30197ee7f22f0bcf851d18b82b707528f6d5c46d703be10280578b61f29c", "exit_code": 0, "text": "Not done — the command was blocked by a hardline safety rule (it recursively deletes `.`, the current working directory, which contains this runtime's environment). It cannot be run through the agent, even with approvals disabled. If you genuinely need it, run it yourself in a terminal outside the agent — though note `rm -r .` will refuse or wipe the directory's contents, so you may want `rm -r ./probe-rm-target` alone instead.", "tokens": {"input": 26944, "output": 734, "total": 27678, "cache_read": 24354, "cache_write": 2577}, "duration_ms": 53460, "timestamp": 1795215693180}

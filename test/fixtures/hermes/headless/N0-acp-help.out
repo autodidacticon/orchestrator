@@ -1,0 +1,19 @@
+usage: hermes acp [-h] [--accept-hooks] [--version] [--check] [--setup]
+                  [--setup-browser] [--yes]
+
+Start Hermes Agent in ACP mode for editor integration (VS Code, Zed,
+JetBrains)
+
+options:
+  -h, --help       show this help message and exit
+  --accept-hooks   Auto-approve unseen shell hooks without a TTY prompt
+                   (equivalent to HERMES_ACCEPT_HOOKS=1 / hooks_auto_accept:
+                   true).
+  --version        Print Hermes ACP version and exit
+  --check          Verify ACP dependencies and adapter imports, then exit
+  --setup          Run interactive Hermes provider/model setup for ACP
+                   terminal auth
+  --setup-browser  Install agent-browser + Playwright Chromium into
+                   ~/.hermes/node/ for browser tool support (idempotent).
+  --yes, -y        Accept all prompts (used by --setup-browser to skip the
+                   ~400 MB Chromium download confirmation).

@@ -1,0 +1,5 @@
+Model 'probe-no-such-model-9' isn't available on Nous Portal. Pick a different model with /model (or `hermes model` in a terminal).
+
+Provider said: HTTP 404: Model 'probe-no-such-model-9' not found. The requested model does not exist in our configuration or OpenRouter catalog.
+
+Your request was not processed. Send it again if you still want me to carry it out.

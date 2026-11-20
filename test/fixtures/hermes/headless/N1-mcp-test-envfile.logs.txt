@@ -1,0 +1,7 @@
+==> logs/agent.log <==
+
+==> logs/errors.log <==
+
+==> logs/mcp-stderr.log <==
+
+2026-11-20 15:35:31,139 ===== starting MCP server 'orchestrator' =====

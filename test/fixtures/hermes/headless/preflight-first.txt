@@ -1,0 +1,7 @@
+# node test/fixtures/hermes/probe.mjs --preflight, first run, 2026-11-20 15:03 CST (21:03Z); the output sent with the needsAccess question (seq 2)
+ok: hermes binary /opt/homebrew/bin/hermes
+ok: version Hermes Agent vunknown (2026.9.24)
+ok: hermes acp --check exit 0 Hermes ACP check OK
+missing: user Hermes home (~/.hermes does not exist)
+missing: probe provider and model (the issue line reads "Probe provider and model: (not named yet)")
+missing: credential works under a scratch HERMES_HOME (no credential file in ~/.hermes and no provider key exported)

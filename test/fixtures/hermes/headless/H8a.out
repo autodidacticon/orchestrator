@@ -1,0 +1,16 @@
+{"type": "system", "subtype": "init", "model": "qwen/qwen4-max:free", "session_id": "", "timestamp": 1795216341500}
+{"type": "tool_use", "name": "tool_describe", "tool_call_id": "call_3653c86b50f04fc9ac5acfa5", "input": {"names": ["mcp__orchestrator__block"]}, "timestamp": 1795216374250}
+{"type": "tool_result", "name": "tool_describe", "tool_call_id": "call_3653c86b50f04fc9ac5acfa5", "output": "{\"tools\": {\"mcp__orchestrator__block\": {\"description\": \"Ask a human a question and wait for the answer. Returns {answer} or {timeout:true}.\", \"parameters\": {\"type\": \"object\", \"properties\": {\"seq\": {\"type\": \"integer\", \"minimum\": 0}, \"kind\": {\"type\": \"string\", \"enum\": [\"needsDecision\", \"needsAccess\", \"impossible\", \"dependencyCancelled\", \"outOfScope\", \"insufficientSpec\", \"milestoneRejected\"]}, \"message\": {\"type\": \"string\"}, \"options\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"seq\", \"kind\", \"message\"]}}}}", "duration_ms": 23, "is_error": false, "timestamp": 1795216374274}
+{"type": "tool_use", "name": "mcp__orchestrator__block", "tool_call_id": "call_d014b5f9d9824716998dba73", "input": {"seq": 2, "kind": "needsDecision", "message": "Which file name should I use?"}, "timestamp": 1795216411710}
+{"type": "tool_result", "name": "mcp__orchestrator__block", "tool_call_id": "call_d014b5f9d9824716998dba73", "output": "{\"error\": \"MCP call failed: TimeoutError: MCP call timed out after 300.0s (configured timeout: 300.0s)\"}", "duration_ms": 300024, "is_error": true, "timestamp": 1795216711735}
+{"type": "text", "text": "\n\nM", "timestamp": 1795216714730}
+{"type": "text", "text": "CP call failed:", "timestamp": 1795216714730}
+{"type": "text", "text": " TimeoutError: MCP", "timestamp": 1795216714730}
+{"type": "text", "text": " call timed out after 3", "timestamp": 1795216714730}
+{"type": "text", "text": "00", "timestamp": 1795216714730}
+{"type": "text", "text": ".0s", "timestamp": 1795216714886}
+{"type": "text", "text": " (configured timeout: 3", "timestamp": 1795216714887}
+{"type": "text", "text": "00", "timestamp": 1795216714887}
+{"type": "text", "text": ".0s", "timestamp": 1795216714887}
+{"type": "text", "text": ")", "timestamp": 1795216714887}
+{"type": "result", "session_id": "local-45d2116a5063bd0b6f7e6f2421abf97191aeb5c3d561f11c950a66ae4ad20b29", "exit_code": 0, "text": "MCP call failed: TimeoutError: MCP call timed out after 300.0s (configured timeout: 300.0s)", "tokens": {"input": 43607, "output": 168, "total": 43775, "cache_read": 14318, "cache_write": 29269}, "duration_ms": 374080, "timestamp": 1795216715580}

@@ -1,0 +1,646 @@
+==> logs/agent.log <==
+2026-11-20 15:46:24,920 INFO hermes_cli.plugins: Plugin 'browser-browser-use' registered browser provider: browser-use
+2026-11-20 15:46:24,922 INFO hermes_cli.plugins: Plugin 'browser-browserbase' registered browser provider: browserbase
+2026-11-20 15:46:24,926 INFO hermes_cli.plugins: Plugin 'browser-firecrawl' registered browser provider: firecrawl
+2026-11-20 15:46:24,997 INFO hermes_cli.plugins: Plugin 'deepinfra' registered image_gen provider: deepinfra
+2026-11-20 15:46:24,999 INFO hermes_cli.plugins: Plugin 'fal' registered image_gen provider: fal
+2026-11-20 15:46:25,000 INFO hermes_cli.plugins: Plugin 'krea' registered image_gen provider: krea
+2026-11-20 15:46:25,000 INFO hermes_cli.plugins: Plugin 'meta-ai-image-gen' registered image_gen provider: meta-ai
+2026-11-20 15:46:25,003 INFO hermes_cli.plugins: Plugin 'openai' registered image_gen provider: openai
+2026-11-20 15:46:25,004 INFO hermes_cli.plugins: Plugin 'openai-codex' registered image_gen provider: openai-codex
+2026-11-20 15:46:25,007 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: openrouter
+2026-11-20 15:46:25,008 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: nous
+2026-11-20 15:46:25,009 INFO hermes_cli.plugins: Plugin 'xai' registered image_gen provider: xai
+2026-11-20 15:46:25,020 INFO hermes_cli.plugins: Plugin 'deepinfra' registered video_gen provider: deepinfra
+2026-11-20 15:46:25,022 INFO hermes_cli.plugins: Plugin 'fal' registered video_gen provider: fal
+2026-11-20 15:46:25,023 INFO hermes_cli.plugins: Plugin 'openrouter' registered video_gen provider: openrouter
+2026-11-20 15:46:25,024 INFO hermes_cli.plugins: Plugin 'xai' registered video_gen provider: xai
+2026-11-20 15:46:25,028 INFO hermes_cli.plugins: Plugin 'web-brave-free' registered web provider: brave-free
+2026-11-20 15:46:25,032 INFO hermes_cli.plugins: Plugin 'web-ddgs' registered web provider: ddgs
+2026-11-20 15:46:25,033 INFO hermes_cli.plugins: Plugin 'web-exa' registered web provider: exa
+2026-11-20 15:46:25,037 INFO hermes_cli.plugins: Plugin 'web-firecrawl' registered web provider: firecrawl
+2026-11-20 15:46:25,041 INFO hermes_cli.plugins: Plugin 'web-keenable' registered web provider: keenable
+2026-11-20 15:46:25,042 INFO hermes_cli.plugins: Plugin 'web-openai-native' registered web provider: openai-native
+2026-11-20 15:46:25,047 INFO hermes_cli.plugins: Plugin 'web-parallel' registered web provider: parallel
+2026-11-20 15:46:25,049 INFO hermes_cli.plugins: Plugin 'web-perplexity' registered web provider: perplexity
+2026-11-20 15:46:25,051 INFO hermes_cli.plugins: Plugin 'web-searxng' registered web provider: searxng
+2026-11-20 15:46:25,053 INFO hermes_cli.plugins: Plugin 'web-tavily' registered web provider: tavily
+2026-11-20 15:46:25,054 INFO hermes_cli.plugins: Plugin 'web-xai' registered web provider: xai
+2026-11-20 15:46:25,055 INFO hermes_cli.plugins: Plugin discovery complete: 61 found, 57 enabled
+2026-11-20 15:46:25,075 INFO hermes_cli.gateway_multiplex_mode: Single-profile install: gateway.multiplex_profiles unset, serving the default profile only.
+2026-11-20 15:46:25,095 INFO hermes_cli.plugins: Plugin 'browser-browser-use' registered browser provider: browser-use
+2026-11-20 15:46:25,097 INFO hermes_cli.plugins: Plugin 'browser-browserbase' registered browser provider: browserbase
+2026-11-20 15:46:25,099 INFO hermes_cli.plugins: Plugin 'browser-firecrawl' registered browser provider: firecrawl
+2026-11-20 15:46:25,171 INFO hermes_cli.plugins: Plugin 'deepinfra' registered image_gen provider: deepinfra
+2026-11-20 15:46:25,172 INFO hermes_cli.plugins: Plugin 'fal' registered image_gen provider: fal
+2026-11-20 15:46:25,174 INFO hermes_cli.plugins: Plugin 'krea' registered image_gen provider: krea
+2026-11-20 15:46:25,175 INFO hermes_cli.plugins: Plugin 'meta-ai-image-gen' registered image_gen provider: meta-ai
+2026-11-20 15:46:25,177 INFO hermes_cli.plugins: Plugin 'openai' registered image_gen provider: openai
+2026-11-20 15:46:25,178 INFO hermes_cli.plugins: Plugin 'openai-codex' registered image_gen provider: openai-codex
+2026-11-20 15:46:25,181 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: openrouter
+2026-11-20 15:46:25,181 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: nous
+2026-11-20 15:46:25,183 INFO hermes_cli.plugins: Plugin 'xai' registered image_gen provider: xai
+2026-11-20 15:46:25,191 INFO hermes_cli.plugins: Plugin 'deepinfra' registered video_gen provider: deepinfra
+2026-11-20 15:46:25,192 INFO hermes_cli.plugins: Plugin 'fal' registered video_gen provider: fal
+2026-11-20 15:46:25,194 INFO hermes_cli.plugins: Plugin 'openrouter' registered video_gen provider: openrouter
+2026-11-20 15:46:25,195 INFO hermes_cli.plugins: Plugin 'xai' registered video_gen provider: xai
+2026-11-20 15:46:25,202 INFO hermes_cli.plugins: Plugin 'web-brave-free' registered web provider: brave-free
+2026-11-20 15:46:25,203 INFO hermes_cli.plugins: Plugin 'web-ddgs' registered web provider: ddgs
+2026-11-20 15:46:25,205 INFO hermes_cli.plugins: Plugin 'web-exa' registered web provider: exa
+2026-11-20 15:46:25,210 INFO hermes_cli.plugins: Plugin 'web-firecrawl' registered web provider: firecrawl
+2026-11-20 15:46:25,212 INFO hermes_cli.plugins: Plugin 'web-keenable' registered web provider: keenable
+2026-11-20 15:46:25,213 INFO hermes_cli.plugins: Plugin 'web-openai-native' registered web provider: openai-native
+2026-11-20 15:46:25,214 INFO hermes_cli.plugins: Plugin 'web-parallel' registered web provider: parallel
+2026-11-20 15:46:25,215 INFO hermes_cli.plugins: Plugin 'web-perplexity' registered web provider: perplexity
+2026-11-20 15:46:25,215 INFO hermes_cli.plugins: Plugin 'web-searxng' registered web provider: searxng
+2026-11-20 15:46:25,216 INFO hermes_cli.plugins: Plugin 'web-tavily' registered web provider: tavily
+2026-11-20 15:46:25,217 INFO hermes_cli.plugins: Plugin 'web-xai' registered web provider: xai
+2026-11-20 15:46:25,217 INFO hermes_cli.plugins: Plugin discovery complete: 61 found, 57 enabled
+2026-11-20 15:46:25,231 INFO hermes_cli.gateway_multiplex_mode: Single-profile install: gateway.multiplex_profiles unset, serving the default profile only.
+2026-11-20 15:46:25,243 ERROR gateway.run: Another gateway instance is already running (PID 58955, HERMES_HOME=<scratch>/home/.hermes) and did not publish a host record this process could attach to.
+2026-11-20 15:46:25,427 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-d7646d71748e56ca/control.sock
+2026-11-20 15:46:25,864 INFO tools.mcp_tool: MCP server 'orchestrator' (stdio): registered 5 tool(s): mcp__orchestrator__heartbeat, mcp__orchestrator__report, mcp__orchestrator__block, mcp__orchestrator__inbox, mcp__orchestrator__log
+2026-11-20 15:46:25,865 INFO tools.mcp_tool: MCP: registered 5 tool(s) from 1 server(s)
+2026-11-20 15:46:25,865 INFO tools.mcp_tool:   MCP: 5 tool(s) from 1 server(s)
+2026-11-20 15:46:25,865 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 15:46:25,866 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 15:46:25,867 INFO gateway.run: Agent budget: max_iterations=unlimited (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 15:46:25,867 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 15:46:25,880 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 15:46:25,880 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 15:46:25,896 INFO run_agent: No .env file found. Using system environment variables.
+2026-11-20 15:46:25,920 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 15:46:26,201 INFO tools.registry: check_fn check_browser_back_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,201 INFO tools.registry: check_fn _browser_cdp_check returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,202 INFO tools.registry: check_fn check_browser_click_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,202 INFO tools.registry: check_fn check_browser_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,202 INFO tools.registry: check_fn _browser_dialog_check returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,484 INFO tools.registry: check_fn check_browser_navigate_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,484 INFO tools.registry: check_fn check_browser_press_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,485 INFO tools.registry: check_fn check_browser_scroll_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,485 INFO tools.registry: check_fn check_browser_snapshot_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,485 INFO tools.registry: check_fn check_browser_type_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,486 INFO tools.registry: check_fn check_browser_vision_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,490 INFO tools.registry: check_fn check_computer_use_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,491 INFO tools.registry: check_fn check_image_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,496 WARNING agent.auxiliary_client: Auxiliary client: PAID lane engaged for auxiliary task — OpenRouter fallback model 'probe/placeholder-model' is not a :free SKU and may incur real spend. Set auxiliary.free_only: true to restrict auxiliary fallbacks to free models, or auxiliary.openrouter_model to a :free model.
+2026-11-20 15:46:26,497 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,499 WARNING agent.auxiliary_unavailable: Auxiliary Nous client unavailable: Nous Portal runtime credentials unavailable: Hermes is not logged into Nous Portal. Run `hermes model` to re-authenticate. (code: nous_auth_missing)
+2026-11-20 15:46:26,499 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,499 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,500 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,500 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,500 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,500 INFO tools.registry: check_fn check_vision_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,547 WARNING agent.model_metadata: Could not determine context length for model 'probe/placeholder-model' (base_url=https://openrouter.ai/api/v1) — falling back to 256,000 tokens. Set model.context_length in config.yaml to override.
+2026-11-20 15:46:26,549 INFO tools.tool_search: tool_search activated (tier 1): 17 core/visible tools kept, 10 deferred (~4517 tokens), listing full (budget ~4000 tokens)
+2026-11-20 15:46:26,550 INFO gateway.run: Model context warmed: probe/placeholder-model -> 256000 tokens (default)
+2026-11-20 15:46:26,551 INFO gateway.run: Turn machinery warmed in 0.7s (20 tool schema(s) materialized)
+2026-11-20 15:46:26,558 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 15:46:26,559 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 15:46:26,562 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 15:46:26,562 INFO cron.scheduler_provider: In-process cron scheduler started (interval=60s)
+2026-11-20 15:46:26,563 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 15:46:26,564 INFO cron.scheduler_provider: Multiplex cron scheduler started for 1 profile(s): ['default'] (re-enumerated every cycle)
+2026-11-20 15:46:26,564 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 15:46:26,792 INFO tui_gateway.ws: ws accepted peer=127.0.0.1:49678
+2026-11-20 15:46:26,795 INFO tui_gateway.ws: ws accepted peer=127.0.0.1:49679
+2026-11-20 15:46:26,866 INFO tools.tool_search: tool_search activated (tier 1): 17 core/visible tools kept, 10 deferred (~4517 tokens), listing full (budget ~4000 tokens)
+2026-11-20 15:46:26,867 INFO tools.registry: check_fn _a2a_tools_available returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,867 INFO tools.registry: check_fn check_discord_tool_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,867 INFO tools.registry: check_fn _check_feishu returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,873 INFO tools.registry: check_fn _check_yuanbao returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,874 INFO tools.registry: check_fn _check_yuanbao returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,876 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,877 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,879 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,879 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,880 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,881 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,881 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,881 INFO tools.registry: check_fn check_video_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,883 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 15:46:26,884 INFO tools.registry: check_fn check_video_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,884 INFO tools.registry: check_fn _check_xai_video_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,884 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 15:46:26,885 INFO tools.registry: check_fn check_x_search_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,917 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-93d49e28840914eb7a5c649d0c345736e84cc6ab22931236c5b53e007fb7d755 msg='Reply with the single word ok.' reply_to_id=None reply_to_text=''
+2026-11-20 15:46:26,933 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,933 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,935 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,938 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,938 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,938 INFO tools.registry: check_fn check_video_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:46:26,940 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,942 ERROR gateway.run: Agent error in session agent:main:local:dm:local-93d49e28840914eb7a5c649d0c345736e84cc6ab22931236c5b53e007fb7d755
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 267, in _handle_message_with_agent
+    agent_result = await self._run_agent(
+                   ^^^^^^^^^^^^^^^^^^^^^^
+    ...<15 lines>...
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1001, in _run_agent
+    return await self._run_agent_inner(message, context_prompt, history, source, session_id, **turn_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 2381, in _run_agent_inner
+    response = await self._run_agent_await_turn_worker(worker, turn_ctx, _interrupt_detected, interrupt_monitor)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1636, in _run_agent_await_turn_worker
+    return worker.executor_task.result()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run.py", line 4030, in _run_in_executor_with_context
+    return await loop.run_in_executor(self._get_executor(), ctx.run, func, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/turn_executor.py", line 34, in _run
+    fut.set_result(fn(*args, **kwargs))
+                   ~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1516, in _run_sync_with_timeout_lifecycle
+    return run_sync()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1162, in run_sync
+    result = self._run_sync_scoped()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1265, in _run_sync_scoped
+    agent, reused_cached_agent = self._resolve_turn_agent(
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~^
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 224, in _resolve_turn_agent
+    agent = self._build_fresh_agent(
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr, skip_context_files,
+    )
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 161, in _build_fresh_agent
+    return ctx.AIAgent(
+           ~~~~~~~~~~~^
+        model=turn_route["model"], **turn_route["runtime"], **_checkpoint_agent_kwargs(ctx.user_config),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<25 lines>...
+        run_budget_seconds=policy.run_budget_seconds if policy else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/run_agent.py", line 288, in __init__
+    init_agent(self, **init_kwargs)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 2360, in init_agent
+    _build_client(agent, api_key, base_url, fallback_model)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 1043, in _build_client
+    _init_openai_client(agent, api_key, base_url, fallback_model, _provider_timeout)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 996, in _init_openai_client
+    client_kwargs = _routed_client_kwargs(agent, fallback_model, _provider_timeout)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 952, in _routed_client_kwargs
+    raise ProviderNotConfiguredError(
+    ...<3 lines>...
+    )
+agent.auxiliary_unavailable.ProviderNotConfiguredError: No LLM provider configured. Run `hermes model` to select a provider, or run `hermes setup` for first-time configuration.
+2026-11-20 15:46:27,006 INFO gateway.platforms.base: [Local] Sending response (282 chars) to local-93d49e28840914eb7a5c649d0c345736e84cc6ab22931236c5b53e007fb7d755
+2026-11-20 15:46:27,015 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-8a95a3277f191ce1450124adf6cc3256ec63edeeab1c654e244b69bc5768a3ef msg='Reply with the single word ok.' reply_to_id=None reply_to_text=''
+2026-11-20 15:46:27,030 INFO tui_gateway.ws: ws closed peer=127.0.0.1:49678 reason=client_disconnect(code=1000,reason=) messages=4 parse_errors=0 dispatch_crashes=0 send_failures=0 reaped_sessions=0 detached_sessions=0
+2026-11-20 15:46:27,031 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:27,034 ERROR gateway.run: Agent error in session agent:main:local:dm:local-8a95a3277f191ce1450124adf6cc3256ec63edeeab1c654e244b69bc5768a3ef
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 267, in _handle_message_with_agent
+    agent_result = await self._run_agent(
+                   ^^^^^^^^^^^^^^^^^^^^^^
+    ...<15 lines>...
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1001, in _run_agent
+    return await self._run_agent_inner(message, context_prompt, history, source, session_id, **turn_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 2381, in _run_agent_inner
+    response = await self._run_agent_await_turn_worker(worker, turn_ctx, _interrupt_detected, interrupt_monitor)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1636, in _run_agent_await_turn_worker
+    return worker.executor_task.result()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run.py", line 4030, in _run_in_executor_with_context
+    return await loop.run_in_executor(self._get_executor(), ctx.run, func, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/turn_executor.py", line 34, in _run
+    fut.set_result(fn(*args, **kwargs))
+                   ~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1516, in _run_sync_with_timeout_lifecycle
+    return run_sync()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1162, in run_sync
+    result = self._run_sync_scoped()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1265, in _run_sync_scoped
+    agent, reused_cached_agent = self._resolve_turn_agent(
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~^
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 224, in _resolve_turn_agent
+    agent = self._build_fresh_agent(
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr, skip_context_files,
+    )
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 161, in _build_fresh_agent
+    return ctx.AIAgent(
+           ~~~~~~~~~~~^
+        model=turn_route["model"], **turn_route["runtime"], **_checkpoint_agent_kwargs(ctx.user_config),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<25 lines>...
+        run_budget_seconds=policy.run_budget_seconds if policy else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/run_agent.py", line 288, in __init__
+    init_agent(self, **init_kwargs)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 2360, in init_agent
+    _build_client(agent, api_key, base_url, fallback_model)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 1043, in _build_client
+    _init_openai_client(agent, api_key, base_url, fallback_model, _provider_timeout)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 996, in _init_openai_client
+    client_kwargs = _routed_client_kwargs(agent, fallback_model, _provider_timeout)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 952, in _routed_client_kwargs
+    raise ProviderNotConfiguredError(
+    ...<3 lines>...
+    )
+agent.auxiliary_unavailable.ProviderNotConfiguredError: No LLM provider configured. Run `hermes model` to select a provider, or run `hermes setup` for first-time configuration.
+2026-11-20 15:46:27,050 INFO gateway.platforms.base: [Local] Sending response (282 chars) to local-8a95a3277f191ce1450124adf6cc3256ec63edeeab1c654e244b69bc5768a3ef
+2026-11-20 15:46:27,058 INFO tui_gateway.ws: ws closed peer=127.0.0.1:49679 reason=client_disconnect(code=1000,reason=) messages=4 parse_errors=0 dispatch_crashes=0 send_failures=0 reaped_sessions=0 detached_sessions=0
+
+==> logs/errors.log <==
+2026-11-20 15:46:25,243 ERROR gateway.run: Another gateway instance is already running (PID 58955, HERMES_HOME=<scratch>/home/.hermes) and did not publish a host record this process could attach to.
+2026-11-20 15:46:25,880 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 15:46:26,496 WARNING agent.auxiliary_client: Auxiliary client: PAID lane engaged for auxiliary task — OpenRouter fallback model 'probe/placeholder-model' is not a :free SKU and may incur real spend. Set auxiliary.free_only: true to restrict auxiliary fallbacks to free models, or auxiliary.openrouter_model to a :free model.
+2026-11-20 15:46:26,497 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,499 WARNING agent.auxiliary_unavailable: Auxiliary Nous client unavailable: Nous Portal runtime credentials unavailable: Hermes is not logged into Nous Portal. Run `hermes model` to re-authenticate. (code: nous_auth_missing)
+2026-11-20 15:46:26,499 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,499 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,500 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,500 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,500 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,547 WARNING agent.model_metadata: Could not determine context length for model 'probe/placeholder-model' (base_url=https://openrouter.ai/api/v1) — falling back to 256,000 tokens. Set model.context_length in config.yaml to override.
+2026-11-20 15:46:26,876 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,877 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,879 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,879 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,880 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,881 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,881 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,933 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,933 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,935 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,938 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:46:26,938 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:46:26,940 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:26,942 ERROR gateway.run: Agent error in session agent:main:local:dm:local-93d49e28840914eb7a5c649d0c345736e84cc6ab22931236c5b53e007fb7d755
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 267, in _handle_message_with_agent
+    agent_result = await self._run_agent(
+                   ^^^^^^^^^^^^^^^^^^^^^^
+    ...<15 lines>...
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1001, in _run_agent
+    return await self._run_agent_inner(message, context_prompt, history, source, session_id, **turn_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 2381, in _run_agent_inner
+    response = await self._run_agent_await_turn_worker(worker, turn_ctx, _interrupt_detected, interrupt_monitor)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1636, in _run_agent_await_turn_worker
+    return worker.executor_task.result()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run.py", line 4030, in _run_in_executor_with_context
+    return await loop.run_in_executor(self._get_executor(), ctx.run, func, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/turn_executor.py", line 34, in _run
+    fut.set_result(fn(*args, **kwargs))
+                   ~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1516, in _run_sync_with_timeout_lifecycle
+    return run_sync()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1162, in run_sync
+    result = self._run_sync_scoped()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1265, in _run_sync_scoped
+    agent, reused_cached_agent = self._resolve_turn_agent(
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~^
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 224, in _resolve_turn_agent
+    agent = self._build_fresh_agent(
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr, skip_context_files,
+    )
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 161, in _build_fresh_agent
+    return ctx.AIAgent(
+           ~~~~~~~~~~~^
+        model=turn_route["model"], **turn_route["runtime"], **_checkpoint_agent_kwargs(ctx.user_config),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<25 lines>...
+        run_budget_seconds=policy.run_budget_seconds if policy else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/run_agent.py", line 288, in __init__
+    init_agent(self, **init_kwargs)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 2360, in init_agent
+    _build_client(agent, api_key, base_url, fallback_model)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 1043, in _build_client
+    _init_openai_client(agent, api_key, base_url, fallback_model, _provider_timeout)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 996, in _init_openai_client
+    client_kwargs = _routed_client_kwargs(agent, fallback_model, _provider_timeout)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 952, in _routed_client_kwargs
+    raise ProviderNotConfiguredError(
+    ...<3 lines>...
+    )
+agent.auxiliary_unavailable.ProviderNotConfiguredError: No LLM provider configured. Run `hermes model` to select a provider, or run `hermes setup` for first-time configuration.
+2026-11-20 15:46:27,031 WARNING agent.auxiliary_client: resolve_provider_client: openrouter requested but OPENROUTER_API_KEY not set
+2026-11-20 15:46:27,034 ERROR gateway.run: Agent error in session agent:main:local:dm:local-8a95a3277f191ce1450124adf6cc3256ec63edeeab1c654e244b69bc5768a3ef
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 267, in _handle_message_with_agent
+    agent_result = await self._run_agent(
+                   ^^^^^^^^^^^^^^^^^^^^^^
+    ...<15 lines>...
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1001, in _run_agent
+    return await self._run_agent_inner(message, context_prompt, history, source, session_id, **turn_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 2381, in _run_agent_inner
+    response = await self._run_agent_await_turn_worker(worker, turn_ctx, _interrupt_detected, interrupt_monitor)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1636, in _run_agent_await_turn_worker
+    return worker.executor_task.result()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run.py", line 4030, in _run_in_executor_with_context
+    return await loop.run_in_executor(self._get_executor(), ctx.run, func, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/turn_executor.py", line 34, in _run
+    fut.set_result(fn(*args, **kwargs))
+                   ~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1516, in _run_sync_with_timeout_lifecycle
+    return run_sync()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1162, in run_sync
+    result = self._run_sync_scoped()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1265, in _run_sync_scoped
+    agent, reused_cached_agent = self._resolve_turn_agent(
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~^
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 224, in _resolve_turn_agent
+    agent = self._build_fresh_agent(
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr, skip_context_files,
+    )
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 161, in _build_fresh_agent
+    return ctx.AIAgent(
+           ~~~~~~~~~~~^
+        model=turn_route["model"], **turn_route["runtime"], **_checkpoint_agent_kwargs(ctx.user_config),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<25 lines>...
+        run_budget_seconds=policy.run_budget_seconds if policy else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/run_agent.py", line 288, in __init__
+    init_agent(self, **init_kwargs)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 2360, in init_agent
+    _build_client(agent, api_key, base_url, fallback_model)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 1043, in _build_client
+    _init_openai_client(agent, api_key, base_url, fallback_model, _provider_timeout)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 996, in _init_openai_client
+    client_kwargs = _routed_client_kwargs(agent, fallback_model, _provider_timeout)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 952, in _routed_client_kwargs
+    raise ProviderNotConfiguredError(
+    ...<3 lines>...
+    )
+agent.auxiliary_unavailable.ProviderNotConfiguredError: No LLM provider configured. Run `hermes model` to select a provider, or run `hermes setup` for first-time configuration.
+
+==> logs/gateway-exit-diag.log <==
+{"ts": "2026-11-20T21:46:25.059743+00:00", "tag": "gateway.start", "pid": 58955, "python": "3.14.10", "platform": "darwin", "replace": false, "argv": ["/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/hermes_cli/main.py", "gateway", "run", "--quiet", "--idle-exit"], "stdin_is_tty": false, "console_window_attached": null, "detached": true, "breakaway": null, "absorb_windows_console_controls": false}
+{"ts": "2026-11-20T21:46:25.209045+00:00", "tag": "gateway.start", "pid": 59120, "python": "3.14.10", "platform": "darwin", "replace": false, "argv": ["/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/hermes_cli/main.py", "gateway", "run", "--quiet", "--idle-exit"], "stdin_is_tty": false, "console_window_attached": null, "detached": true, "breakaway": null, "absorb_windows_console_controls": false}
+{"ts": "2026-11-20T21:46:25.244802+00:00", "tag": "asyncio.run.returned", "pid": 59120, "python": "3.14.10", "platform": "darwin", "success": false}
+{"ts": "2026-11-20T21:46:25.244936+00:00", "tag": "gateway.exit_nonzero", "pid": 59120, "python": "3.14.10", "platform": "darwin"}
+
+==> logs/gateway-stdio.log <==
+┌─────────────────────────────────────────────────────────┐
+│           ☤ Hermes Gateway Starting...                 │
+├─────────────────────────────────────────────────────────┤
+│  Messaging platforms + cron scheduler                    │
+│  Press Ctrl+C to stop                                   │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│           ☤ Hermes Gateway Starting...                 │
+├─────────────────────────────────────────────────────────┤
+│  Messaging platforms + cron scheduler                    │
+│  Press Ctrl+C to stop                                   │
+└─────────────────────────────────────────────────────────┘
+
+
+❌ A gateway already owns this host (PID 58955).
+   One gateway per host serves every profile, so there is nothing to start here.
+   Attach is impossible: PID 58955 published no usable host record
+   (an older build, or an unwritable lock directory).
+   Take the host over:  hermes gateway run --replace
+   Or stop it first:    hermes gateway stop
+
+
+==> logs/gateway.log <==
+2026-11-20 15:46:25,427 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-d7646d71748e56ca/control.sock
+2026-11-20 15:46:25,865 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 15:46:25,866 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 15:46:25,867 INFO gateway.run: Agent budget: max_iterations=unlimited (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 15:46:25,867 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 15:46:25,880 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 15:46:25,880 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 15:46:25,920 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 15:46:26,550 INFO gateway.run: Model context warmed: probe/placeholder-model -> 256000 tokens (default)
+2026-11-20 15:46:26,551 INFO gateway.run: Turn machinery warmed in 0.7s (20 tool schema(s) materialized)
+2026-11-20 15:46:26,558 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 15:46:26,559 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 15:46:26,562 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 15:46:26,563 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 15:46:26,564 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 15:46:26,917 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-93d49e28840914eb7a5c649d0c345736e84cc6ab22931236c5b53e007fb7d755 msg='Reply with the single word ok.' reply_to_id=None reply_to_text=''
+2026-11-20 15:46:26,942 ERROR gateway.run: Agent error in session agent:main:local:dm:local-93d49e28840914eb7a5c649d0c345736e84cc6ab22931236c5b53e007fb7d755
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 267, in _handle_message_with_agent
+    agent_result = await self._run_agent(
+                   ^^^^^^^^^^^^^^^^^^^^^^
+    ...<15 lines>...
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1001, in _run_agent
+    return await self._run_agent_inner(message, context_prompt, history, source, session_id, **turn_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 2381, in _run_agent_inner
+    response = await self._run_agent_await_turn_worker(worker, turn_ctx, _interrupt_detected, interrupt_monitor)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1636, in _run_agent_await_turn_worker
+    return worker.executor_task.result()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run.py", line 4030, in _run_in_executor_with_context
+    return await loop.run_in_executor(self._get_executor(), ctx.run, func, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/turn_executor.py", line 34, in _run
+    fut.set_result(fn(*args, **kwargs))
+                   ~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1516, in _run_sync_with_timeout_lifecycle
+    return run_sync()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1162, in run_sync
+    result = self._run_sync_scoped()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1265, in _run_sync_scoped
+    agent, reused_cached_agent = self._resolve_turn_agent(
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~^
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 224, in _resolve_turn_agent
+    agent = self._build_fresh_agent(
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr, skip_context_files,
+    )
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 161, in _build_fresh_agent
+    return ctx.AIAgent(
+           ~~~~~~~~~~~^
+        model=turn_route["model"], **turn_route["runtime"], **_checkpoint_agent_kwargs(ctx.user_config),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<25 lines>...
+        run_budget_seconds=policy.run_budget_seconds if policy else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/run_agent.py", line 288, in __init__
+    init_agent(self, **init_kwargs)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 2360, in init_agent
+    _build_client(agent, api_key, base_url, fallback_model)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 1043, in _build_client
+    _init_openai_client(agent, api_key, base_url, fallback_model, _provider_timeout)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 996, in _init_openai_client
+    client_kwargs = _routed_client_kwargs(agent, fallback_model, _provider_timeout)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 952, in _routed_client_kwargs
+    raise ProviderNotConfiguredError(
+    ...<3 lines>...
+    )
+agent.auxiliary_unavailable.ProviderNotConfiguredError: No LLM provider configured. Run `hermes model` to select a provider, or run `hermes setup` for first-time configuration.
+2026-11-20 15:46:27,006 INFO gateway.platforms.base: [Local] Sending response (282 chars) to local-93d49e28840914eb7a5c649d0c345736e84cc6ab22931236c5b53e007fb7d755
+2026-11-20 15:46:27,015 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-8a95a3277f191ce1450124adf6cc3256ec63edeeab1c654e244b69bc5768a3ef msg='Reply with the single word ok.' reply_to_id=None reply_to_text=''
+2026-11-20 15:46:27,034 ERROR gateway.run: Agent error in session agent:main:local:dm:local-8a95a3277f191ce1450124adf6cc3256ec63edeeab1c654e244b69bc5768a3ef
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 267, in _handle_message_with_agent
+    agent_result = await self._run_agent(
+                   ^^^^^^^^^^^^^^^^^^^^^^
+    ...<15 lines>...
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1001, in _run_agent
+    return await self._run_agent_inner(message, context_prompt, history, source, session_id, **turn_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 2381, in _run_agent_inner
+    response = await self._run_agent_await_turn_worker(worker, turn_ctx, _interrupt_detected, interrupt_monitor)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1636, in _run_agent_await_turn_worker
+    return worker.executor_task.result()
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run.py", line 4030, in _run_in_executor_with_context
+    return await loop.run_in_executor(self._get_executor(), ctx.run, func, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/turn_executor.py", line 34, in _run
+    fut.set_result(fn(*args, **kwargs))
+                   ~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn.py", line 1516, in _run_sync_with_timeout_lifecycle
+    return run_sync()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1162, in run_sync
+    result = self._run_sync_scoped()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/run_turn_runner.py", line 1265, in _run_sync_scoped
+    agent, reused_cached_agent = self._resolve_turn_agent(
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~^
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 224, in _resolve_turn_agent
+    agent = self._build_fresh_agent(
+        turn_route, platform_key, combined_ephemeral, max_iterations, reasoning_config, pr, skip_context_files,
+    )
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/gateway/session_execution.py", line 161, in _build_fresh_agent
+    return ctx.AIAgent(
+           ~~~~~~~~~~~^
+        model=turn_route["model"], **turn_route["runtime"], **_checkpoint_agent_kwargs(ctx.user_config),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<25 lines>...
+        run_budget_seconds=policy.run_budget_seconds if policy else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/run_agent.py", line 288, in __init__
+    init_agent(self, **init_kwargs)
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 2360, in init_agent
+    _build_client(agent, api_key, base_url, fallback_model)
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 1043, in _build_client
+    _init_openai_client(agent, api_key, base_url, fallback_model, _provider_timeout)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 996, in _init_openai_client
+    client_kwargs = _routed_client_kwargs(agent, fallback_model, _provider_timeout)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/agent_init.py", line 952, in _routed_client_kwargs
+    raise ProviderNotConfiguredError(
+    ...<3 lines>...
+    )
+agent.auxiliary_unavailable.ProviderNotConfiguredError: No LLM provider configured. Run `hermes model` to select a provider, or run `hermes setup` for first-time configuration.
+2026-11-20 15:46:27,050 INFO gateway.platforms.base: [Local] Sending response (282 chars) to local-8a95a3277f191ce1450124adf6cc3256ec63edeeab1c654e244b69bc5768a3ef
+
+==> logs/gateway_faulthandler.log <==
+
+==> logs/mcp-stderr.log <==
+
+2026-11-20 15:46:25,779 ===== starting MCP server 'orchestrator' =====
+
+==> logs/update_receipts/.pm-write.lock <==
+
+==> logs/update_receipts/latest.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T21:46:26.584096+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T21:46:26.584067+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}
+
+==> logs/update_receipts/pm_20261120T214626Z-plugin-check-58955-c6cceb04927a40638dd955cc4b57e1a8.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T21:46:26.584096+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T21:46:26.584067+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}

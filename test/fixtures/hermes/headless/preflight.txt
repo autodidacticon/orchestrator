@@ -1,0 +1,6 @@
+ok: hermes binary /opt/homebrew/bin/hermes
+ok: version Hermes Agent vunknown (2026.9.24)
+ok: hermes acp --check exit 0 Hermes ACP check OK
+ok: user Hermes home ~/.hermes
+ok: probe provider and model nous qwen/qwen4-max:free (from --provider/--model)
+ok: credential works under a scratch HERMES_HOME exit 0, reply "ok" (copied .env, auth.json)

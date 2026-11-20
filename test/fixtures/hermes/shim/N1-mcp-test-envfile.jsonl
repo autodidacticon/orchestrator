@@ -1,0 +1,5 @@
+{"t":1795210531262,"pid":76407,"event":"start","argv":["<repo>/test/fixtures/acp/recording-shim.mjs","<scratch>/shim-N1-mcp-test-envfile.jsonl","--block-sec","200","--orch-env-file","<scratch>/home/orch.env"],"cwd":"<scratch>/wt","envNames":["HOME","LANG","PATH","TMPDIR","USER","__CF_USER_TEXT_ENCODING"],"values":{"ORCH_LAUNCH_ID":{"value":"probe-launch","source":"envFile"},"ORCH_TOKEN":{"value":"orch-probe-token-196ef118","source":"envFile"},"ORCH_API":{"value":"http://127.0.0.1:9","source":"envFile"}},"envFile":"<scratch>/home/orch.env","chain":[{"pid":76407,"ppid":76009,"pgid":76407,"comm":"node"},{"pid":76009,"ppid":66054,"pgid":76009,"comm":"Python"},{"pid":66054,"comm":"probe.mjs (chain cut here)"}]}
+{"t":1795210531263,"pid":76407,"event":"request","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"sampling":{},"elicitation":{"form":{},"url":{}}},"clientInfo":{"name":"mcp","version":"0.1.0"}}}
+{"t":1795210531264,"pid":76407,"event":"request","method":"notifications/initialized"}
+{"t":1795210531264,"pid":76407,"event":"request","method":"tools/list"}
+{"t":1795210531266,"pid":76407,"event":"stdinClosed"}

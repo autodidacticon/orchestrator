@@ -1,0 +1,32 @@
+usage: hermes mcp [-h] [--accept-hooks]
+                  {serve,add,remove,rm,list,ls,test,configure,config,login,reauth,picker,catalog,install} ...
+
+Manage MCP server connections and run Hermes as an MCP server. MCP servers
+provide additional tools via the Model Context Protocol. Use 'hermes mcp add'
+to connect to a new server, or 'hermes mcp serve' to expose Hermes
+conversations over MCP.
+
+positional arguments:
+  {serve,add,remove,rm,list,ls,test,configure,config,login,reauth,picker,catalog,install}
+    serve               Run Hermes as an MCP server (expose conversations to
+                        other agents)
+    add                 Add an MCP server (discovery-first install)
+    remove (rm)         Remove an MCP server
+    list (ls)           List configured MCP servers
+    test                Test MCP server connection
+    configure (config)  Toggle tool selection
+    login               Force re-authentication for an OAuth-based MCP server
+    reauth              Re-authenticate one OAuth MCP server, or all of them
+                        (--all)
+    picker              Interactive catalog picker (also the default for
+                        `hermes mcp`)
+    catalog             List Nous-approved MCPs available for one-click
+                        install
+    install             Install a catalog MCP by name (e.g. `hermes mcp
+                        install deepwiki`)
+
+options:
+  -h, --help            show this help message and exit
+  --accept-hooks        Auto-approve unseen shell hooks without a TTY prompt
+                        (equivalent to HERMES_ACCEPT_HOOKS=1 /
+                        hooks_auto_accept: true).

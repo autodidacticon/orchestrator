@@ -1,0 +1,120 @@
+{
+  "note": "rows of the probe's own tree (in: tree), of the started child's tree or group (in: started) and whose command is the hermes install (in: hermes); nothing else",
+  "before": [
+    {
+      "pid": 66054,
+      "ppid": 61788,
+      "pgid": 61788,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 91913,
+      "ppid": 66054,
+      "pgid": 61788,
+      "comm": "ps",
+      "in": "tree"
+    },
+    {
+      "pid": 85022,
+      "ppid": 1,
+      "pgid": 85022,
+      "comm": "Python",
+      "hermes": true,
+      "in": "hermes"
+    }
+  ],
+  "during": [
+    {
+      "ms": 118,
+      "rows": [
+        {
+          "pid": 66054,
+          "ppid": 61788,
+          "pgid": 61788,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 91997,
+          "ppid": 66054,
+          "pgid": 91997,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 92045,
+          "ppid": 91997,
+          "pgid": 91997,
+          "comm": "Python",
+          "in": "tree"
+        },
+        {
+          "pid": 92106,
+          "ppid": 66054,
+          "pgid": 61788,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 85022,
+          "ppid": 1,
+          "pgid": 85022,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "pid": 66054,
+      "ppid": 61788,
+      "pgid": 61788,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 93217,
+      "ppid": 66054,
+      "pgid": 61788,
+      "comm": "ps",
+      "in": "tree"
+    },
+    {
+      "pid": 85022,
+      "ppid": 1,
+      "pgid": 85022,
+      "comm": "Python",
+      "hermes": true,
+      "in": "hermes"
+    }
+  ],
+  "seen": [
+    {
+      "pid": 91997,
+      "ppid": 66054,
+      "pgid": 91997,
+      "comm": "node",
+      "firstMs": 118,
+      "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/hermes/acp-client.local.mjs --agent-json [\"/opt/homebrew/bin/hermes\",\"acp\"] --cwd <scratch>/wt --frames <scratch>/frames.jsonl --keep-descendants --mcp-json <scratch>/mcp.json"
+    },
+    {
+      "pid": 92045,
+      "ppid": 91997,
+      "pgid": 91997,
+      "comm": "Python",
+      "firstMs": 118,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/hermes acp"
+    }
+  ],
+  "leftAfterExit": [],
+  "homePids": [
+    {
+      "file": "gateway.pid",
+      "pid": 85022,
+      "alive": true
+    }
+  ]
+}

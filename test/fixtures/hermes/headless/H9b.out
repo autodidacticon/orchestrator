@@ -1,0 +1,5 @@
+I can't reply "done" — the command was blocked and nothing was deleted.
+
+The trailing `.` in `rm -r ./probe-rm-target .` targets the current working directory itself, and the runtime's hardline safety policy unconditionally blocks recursive deletes of its own directory tree. It cannot be run through the agent, even with approvals disabled.
+
+If you only meant to remove the probe target, I can run `rm -r ./probe-rm-target` (without the `.`) — say the word. Otherwise, run the full command yourself in a terminal outside the agent.

@@ -1,0 +1,506 @@
+{
+  "note": "rows of the probe's own tree (in: tree), of the started child's tree or group (in: started) and whose command is the hermes install (in: hermes); nothing else",
+  "before": [
+    {
+      "pid": 34449,
+      "ppid": 34307,
+      "pgid": 34307,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 60427,
+      "ppid": 34449,
+      "pgid": 34307,
+      "comm": "ps",
+      "in": "tree"
+    }
+  ],
+  "during": [
+    {
+      "ms": 185,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 62355,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 1359,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 75778,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 2427,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79353,
+          "ppid": 70064,
+          "pgid": 70064,
+          "comm": "Python",
+          "in": "tree"
+        },
+        {
+          "pid": 82324,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 3366,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 90427,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 4342,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 98206,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 5379,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 5937,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 6366,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 13563,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 7348,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 22991,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 8344,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 30499,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 9340,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 35930,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 10334,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 41927,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        }
+      ]
+    },
+    {
+      "ms": 11322,
+      "rows": [
+        {
+          "pid": 34449,
+          "ppid": 34307,
+          "pgid": 34307,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 44906,
+          "ppid": 34449,
+          "pgid": 34307,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 61330,
+          "ppid": 34449,
+          "pgid": 61330,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 70064,
+          "ppid": 61330,
+          "pgid": 70064,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "pid": 34449,
+      "ppid": 34307,
+      "pgid": 34307,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 52817,
+      "ppid": 34449,
+      "pgid": 34307,
+      "comm": "ps",
+      "in": "tree"
+    },
+    {
+      "pid": 70064,
+      "ppid": 1,
+      "pgid": 70064,
+      "comm": "Python",
+      "hermes": true,
+      "in": "started"
+    }
+  ],
+  "seen": [
+    {
+      "pid": 61330,
+      "ppid": 34449,
+      "pgid": 61330,
+      "comm": "Python",
+      "firstMs": 185,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/hermes chat -q Reply with the single word ok. --oneshot --format stream-json --max-turns 12 --provider openrouter -m probe/placeholder-model"
+    },
+    {
+      "pid": 70064,
+      "ppid": 61330,
+      "pgid": 70064,
+      "comm": "Python",
+      "firstMs": 1359,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    },
+    {
+      "pid": 79353,
+      "ppid": 70064,
+      "pgid": 70064,
+      "comm": "Python",
+      "firstMs": 2427,
+      "args": "/Applications/Xcode.app/Contents/Developer/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python -m pip --version"
+    }
+  ],
+  "leftAfterExit": [
+    {
+      "pid": 70064,
+      "ppid": 61330,
+      "pgid": 70064,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    }
+  ],
+  "homePids": [
+    {
+      "file": "gateway.pid",
+      "pid": 70064,
+      "alive": true
+    }
+  ]
+}

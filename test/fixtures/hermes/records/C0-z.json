@@ -1,0 +1,109 @@
+{
+  "id": "C0-z",
+  "kind": "headless",
+  "questions": [
+    "Q15",
+    "Q14",
+    "Q16"
+  ],
+  "at": "2026-11-20T21:36:13.392Z",
+  "command": [
+    "/opt/homebrew/bin/hermes",
+    "-z",
+    "Reply with the single word ok.",
+    "--usage-file",
+    "<scratch>/usage.json"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-b597a9f6",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env"
+  },
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 519,
+  "killed": null,
+  "modelCalls": 0,
+  "observedApiCalls": 0,
+  "plannedModelCalls": 0,
+  "apiCalls": null,
+  "orphans": [],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    "SOUL.md",
+    "logs/agent.log",
+    "logs/errors.log",
+    "spawn-ledger.json"
+  ],
+  "homeConfig": null,
+  "tokenFoundIn": [],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "2a32e7d initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "2a32e7d initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "after": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "changed": false
+  },
+  "result": null,
+  "evidence": [
+    "headless/C0-z.ps.json",
+    "headless/C0-z.out",
+    "headless/C0-z.err",
+    "headless/C0-z.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 19,
+    "firstMs": 459,
+    "maxGapMs": 459,
+    "maxGapBeforeLine": 1,
+    "times": [
+      459,
+      459,
+      459,
+      459,
+      459,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477,
+      477
+    ]
+  }
+}

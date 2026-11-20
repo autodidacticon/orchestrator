@@ -1,0 +1,102 @@
+{
+  "id": "N1-mcp-test-bad",
+  "kind": "headless",
+  "questions": [
+    "Q4",
+    "Q6",
+    "Q7"
+  ],
+  "at": "2026-11-20T21:35:43.338Z",
+  "command": [
+    "/opt/homebrew/bin/hermes",
+    "mcp",
+    "test",
+    "orchestrator"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-a80ff4a4",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env"
+  },
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 8515,
+  "killed": null,
+  "modelCalls": 0,
+  "observedApiCalls": 0,
+  "plannedModelCalls": 0,
+  "apiCalls": null,
+  "orphans": [],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    "SOUL.md",
+    "backups/config/config.yaml.good.20261120-153533",
+    "config.yaml",
+    "logs/agent.log",
+    "logs/errors.log",
+    "logs/mcp-stderr.log",
+    "spawn-ledger.json"
+  ],
+  "homeConfig": "{\n  \"mcp_servers\": {\n    \"orchestrator\": {\n      \"command\": \"~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node\",\n      \"args\": [\n        \"<repo>/test/fixtures/acp/recording-shim.mjs\",\n        \"<scratch>/shim-N1-mcp-test-bad.jsonl\",\n        \"--block-sec\",\n        \"200\",\n        \"--orch-env-file\",\n        \"<scratch>/home/missing.env\"\n      ],\n      \"env\": {\n        \"ORCH_LAUNCH_ID\": \"probe-launch\",\n        \"ORCH_TOKEN\": \"orch-probe-token-a80ff4a4\",\n        \"ORCH_API\": \"http://127.0.0.1:9\",\n        \"PROBE_MARKER\": \"from-mcp-entry\"\n      }\n    }\n  }\n}\n",
+  "tokenFoundIn": [
+    "home/.hermes/backups/config/config.yaml.good.20261120-153533",
+    "home/.hermes/config.yaml"
+  ],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "2a3cf75 initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "2a3cf75 initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "after": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "changed": false
+  },
+  "result": null,
+  "evidence": [
+    "headless/N1-mcp-test-bad.ps.json",
+    "headless/N1-mcp-test-bad.out",
+    "headless/N1-mcp-test-bad.err",
+    "shim/N1-mcp-test-bad.jsonl",
+    "headless/N1-mcp-test-bad.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 6,
+    "firstMs": 258,
+    "maxGapMs": 8174,
+    "maxGapBeforeLine": 5,
+    "times": [
+      258,
+      258,
+      258,
+      258,
+      8432,
+      8432
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+2026-11-20 17:11:02 [INFO] acp_adapter.entry: Loaded env from <scratch>/home/.hermes/.env
+2026-11-20 17:11:02 [INFO] acp_adapter.entry: Starting hermes-agent ACP adapter
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'browser-browser-use' registered browser provider: browser-use
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'browser-browserbase' registered browser provider: browserbase
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'browser-firecrawl' registered browser provider: firecrawl
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'deepinfra' registered image_gen provider: deepinfra
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'fal' registered image_gen provider: fal
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'krea' registered image_gen provider: krea
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'meta-ai-image-gen' registered image_gen provider: meta-ai
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'openai' registered image_gen provider: openai
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'openai-codex' registered image_gen provider: openai-codex
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: openrouter
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: nous
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'xai' registered image_gen provider: xai
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'deepinfra' registered video_gen provider: deepinfra
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'fal' registered video_gen provider: fal
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'openrouter' registered video_gen provider: openrouter
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'xai' registered video_gen provider: xai
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-brave-free' registered web provider: brave-free
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-ddgs' registered web provider: ddgs
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-exa' registered web provider: exa
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-firecrawl' registered web provider: firecrawl
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-keenable' registered web provider: keenable
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-openai-native' registered web provider: openai-native
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-parallel' registered web provider: parallel
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-perplexity' registered web provider: perplexity
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-searxng' registered web provider: searxng
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-tavily' registered web provider: tavily
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin 'web-xai' registered web provider: xai
+2026-11-20 17:11:02 [INFO] hermes_cli.plugins: Plugin discovery complete: 61 found, 57 enabled

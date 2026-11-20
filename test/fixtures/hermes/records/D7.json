@@ -1,0 +1,173 @@
+{
+  "id": "D7",
+  "kind": "headless",
+  "questions": [
+    "Q7",
+    "Q15"
+  ],
+  "note": "placeholder model, no key, a shim command that exits 1",
+  "at": "2026-11-20T21:46:23.801Z",
+  "command": [
+    "/opt/homebrew/bin/hermes",
+    "chat",
+    "-q",
+    "Reply with the single word ok.",
+    "--oneshot",
+    "--format",
+    "stream-json",
+    "--max-turns",
+    "12",
+    "--provider",
+    "openrouter",
+    "-m",
+    "probe/placeholder-model"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-1cf4cee1",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env"
+  },
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 11462,
+  "killed": null,
+  "modelCalls": 0,
+  "observedApiCalls": 1,
+  "plannedModelCalls": 0,
+  "apiCalls": null,
+  "orphans": [
+    {
+      "pid": 70064,
+      "ppid": 61330,
+      "pgid": 70064,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    }
+  ],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    ".clean_shutdown",
+    ".install_id.lock",
+    ".mcp-discovery.lock",
+    "SOUL.md",
+    "auth.lock",
+    "backups/config/config.yaml.good.20261120-154608",
+    "cache/openrouter_model_metadata.json",
+    "cache/plugin_toolset_keys.json",
+    "cache/schema_columns.json",
+    "cache/tool_discovery_cache.json",
+    "channel_directory.json",
+    "config.yaml",
+    "cron/.jobs.lock",
+    "cron/.tick.lock",
+    "cron/executions.db",
+    "cron/ticker_heartbeat",
+    "cron/ticker_last_success",
+    "gateway-starts.log",
+    "gateway.lock",
+    "gateway_state.json",
+    "install_id",
+    "kanban/.dispatcher.lock",
+    "logs/agent.log",
+    "logs/errors.log",
+    "logs/gateway-exit-diag.log",
+    "logs/gateway-shutdown-diag.log",
+    "logs/gateway-stdio.log",
+    "logs/gateway.log",
+    "logs/gateway_faulthandler.log",
+    "logs/mcp-stderr.log",
+    "logs/update_receipts/.pm-write.lock",
+    "logs/update_receipts/latest.json",
+    "logs/update_receipts/pm_20261120T214619Z-plugin-check-70064-aa927e5d09a141b4baad51dce53eaef5.json",
+    "models_dev_cache.etag",
+    "models_dev_cache.json",
+    "plugin-update-checks/last-run",
+    "plugin-update-checks/results.json",
+    "projects.db",
+    "runtime/active_sessions.json",
+    "runtime/active_sessions.lock",
+    "runtime/bot_live_delivery/.lock",
+    "source-checks/4e245f1fb3feac96.json",
+    "spawn-ledger.json",
+    "state.db",
+    "state.db.fts_rebuild.lock",
+    "state.db.quarantine.lock",
+    "state/dashboard_clients.heartbeat",
+    "state/gateway.heartbeat",
+    "state/gateway.lifecycle.json",
+    "skills/ (328 files)"
+  ],
+  "homeConfig": "{\n  \"model\": {\n    \"default\": \"probe/placeholder-model\",\n    \"provider\": \"openrouter\"\n  },\n  \"mcp_servers\": {\n    \"orchestrator\": {\n      \"command\": \"~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node\",\n      \"args\": [\n        \"<repo>/test/fixtures/acp/recording-shim.mjs\",\n        \"<scratch>/shim-D7.jsonl\",\n        \"--block-sec\",\n        \"200\",\n        \"--orch-env-file\",\n        \"<scratch>/home/missing.env\"\n      ],\n      \"env\": {\n        \"ORCH_LAUNCH_ID\": \"probe-launch\",\n        \"ORCH_TOKEN\": \"orch-probe-token-1cf4cee1\",\n        \"ORCH_API\": \"http://127.0.0.1:9\",\n        \"PROBE_MARKER\": \"from-mcp-entry\"\n      }\n    }\n  }\n}\n",
+  "tokenFoundIn": [
+    "home/.hermes/backups/config/config.yaml.good.20261120-154608",
+    "home/.hermes/config.yaml"
+  ],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "d3af764 initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "d3af764 initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "after": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "changed": false
+  },
+  "result": {
+    "type": "result",
+    "session_id": "local-87588b27306f7ff69abe169f781c793216c4c0053a7bbd3e40afaa46af04c946",
+    "exit_code": 1,
+    "text": "⚠️ Something went wrong and I couldn't finish this reply.\nUse /retry to try again, or /new to start a fresh conversation. Technical details are in the gateway log (`hermes logs`).\n\nThis turn did not complete. Some actions may already have run; verify their effects before resending.",
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "cache_read": 0,
+      "cache_write": 0
+    },
+    "duration_ms": 10688,
+    "error": "⚠️ Something went wrong and I couldn't finish this reply.\nUse /retry to try again, or /new to start a fresh conversation. Technical details are in the gateway log (`hermes logs`).\n\nThis turn did not complete. Some actions may already have run; verify their effects before resending.",
+    "timestamp": 1795211180096
+  },
+  "evidence": [
+    "headless/D7.ps.json",
+    "headless/D7.out",
+    "headless/D7.err",
+    "shim/D7.jsonl",
+    "headless/D7.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 2,
+    "firstMs": 701,
+    "maxGapMs": 10688,
+    "maxGapBeforeLine": 2,
+    "times": [
+      701,
+      11389
+    ]
+  }
+}

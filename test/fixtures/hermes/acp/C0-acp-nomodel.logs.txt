@@ -1,0 +1,183 @@
+==> logs/agent.log <==
+2026-11-20 15:36:16,671 INFO hermes_cli.plugins: Plugin 'browser-browser-use' registered browser provider: browser-use
+2026-11-20 15:36:16,673 INFO hermes_cli.plugins: Plugin 'browser-browserbase' registered browser provider: browserbase
+2026-11-20 15:36:16,675 INFO hermes_cli.plugins: Plugin 'browser-firecrawl' registered browser provider: firecrawl
+2026-11-20 15:36:16,742 INFO hermes_cli.plugins: Plugin 'deepinfra' registered image_gen provider: deepinfra
+2026-11-20 15:36:16,745 INFO hermes_cli.plugins: Plugin 'fal' registered image_gen provider: fal
+2026-11-20 15:36:16,748 INFO hermes_cli.plugins: Plugin 'krea' registered image_gen provider: krea
+2026-11-20 15:36:16,749 INFO hermes_cli.plugins: Plugin 'meta-ai-image-gen' registered image_gen provider: meta-ai
+2026-11-20 15:36:16,750 INFO hermes_cli.plugins: Plugin 'openai' registered image_gen provider: openai
+2026-11-20 15:36:16,751 INFO hermes_cli.plugins: Plugin 'openai-codex' registered image_gen provider: openai-codex
+2026-11-20 15:36:16,754 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: openrouter
+2026-11-20 15:36:16,754 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: nous
+2026-11-20 15:36:16,758 INFO hermes_cli.plugins: Plugin 'xai' registered image_gen provider: xai
+2026-11-20 15:36:16,771 INFO hermes_cli.plugins: Plugin 'deepinfra' registered video_gen provider: deepinfra
+2026-11-20 15:36:16,772 INFO hermes_cli.plugins: Plugin 'fal' registered video_gen provider: fal
+2026-11-20 15:36:16,773 INFO hermes_cli.plugins: Plugin 'openrouter' registered video_gen provider: openrouter
+2026-11-20 15:36:16,775 INFO hermes_cli.plugins: Plugin 'xai' registered video_gen provider: xai
+2026-11-20 15:36:16,777 INFO hermes_cli.plugins: Plugin 'web-brave-free' registered web provider: brave-free
+2026-11-20 15:36:16,778 INFO hermes_cli.plugins: Plugin 'web-ddgs' registered web provider: ddgs
+2026-11-20 15:36:16,779 INFO hermes_cli.plugins: Plugin 'web-exa' registered web provider: exa
+2026-11-20 15:36:16,783 INFO hermes_cli.plugins: Plugin 'web-firecrawl' registered web provider: firecrawl
+2026-11-20 15:36:16,786 INFO hermes_cli.plugins: Plugin 'web-keenable' registered web provider: keenable
+2026-11-20 15:36:16,789 INFO hermes_cli.plugins: Plugin 'web-openai-native' registered web provider: openai-native
+2026-11-20 15:36:16,790 INFO hermes_cli.plugins: Plugin 'web-parallel' registered web provider: parallel
+2026-11-20 15:36:16,792 INFO hermes_cli.plugins: Plugin 'web-perplexity' registered web provider: perplexity
+2026-11-20 15:36:16,795 INFO hermes_cli.plugins: Plugin 'web-searxng' registered web provider: searxng
+2026-11-20 15:36:16,799 INFO hermes_cli.plugins: Plugin 'web-tavily' registered web provider: tavily
+2026-11-20 15:36:16,801 INFO hermes_cli.plugins: Plugin 'web-xai' registered web provider: xai
+2026-11-20 15:36:16,802 INFO hermes_cli.plugins: Plugin discovery complete: 61 found, 57 enabled
+2026-11-20 15:36:16,830 INFO hermes_cli.gateway_multiplex_mode: Single-profile install: gateway.multiplex_profiles unset, serving the default profile only.
+2026-11-20 15:36:17,179 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-d19ac84be7d968bc/control.sock
+2026-11-20 15:36:17,257 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 15:36:17,258 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 15:36:17,258 INFO gateway.run: Agent budget: max_iterations=unlimited (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 15:36:17,258 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 15:36:17,272 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 15:36:17,273 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 15:36:17,292 INFO run_agent: No .env file found. Using system environment variables.
+2026-11-20 15:36:17,314 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 15:36:17,573 INFO tools.registry: check_fn check_browser_back_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,574 INFO tools.registry: check_fn _browser_cdp_check returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,575 INFO tools.registry: check_fn check_browser_click_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,576 INFO tools.registry: check_fn check_browser_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,576 INFO tools.registry: check_fn _browser_dialog_check returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,580 INFO tools.registry: check_fn check_browser_navigate_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,581 INFO tools.registry: check_fn check_browser_press_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,581 INFO tools.registry: check_fn check_browser_scroll_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,582 INFO tools.registry: check_fn check_browser_snapshot_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,583 INFO tools.registry: check_fn check_browser_type_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,583 INFO tools.registry: check_fn check_browser_vision_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,588 INFO tools.registry: check_fn check_computer_use_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,592 INFO tools.registry: check_fn check_image_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,606 WARNING agent.auxiliary_unavailable: Auxiliary Nous client unavailable: Nous Portal runtime credentials unavailable: Hermes is not logged into Nous Portal. Run `hermes model` to re-authenticate. (code: nous_auth_missing)
+2026-11-20 15:36:17,606 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:36:17,606 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:36:17,611 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:36:17,612 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:36:17,612 INFO tools.registry: check_fn check_vision_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 15:36:17,677 INFO tools.tool_search: tool_search activated (tier 1): 17 core/visible tools kept, 5 deferred (~3797 tokens), listing full (budget ~4000 tokens)
+2026-11-20 15:36:17,685 INFO agent.model_metadata: No model id provided for context length resolution — defaulting to 256,000 tokens.
+2026-11-20 15:36:17,686 INFO gateway.run: Model context warmed:  -> 256000 tokens (default)
+2026-11-20 15:36:17,686 INFO gateway.run: Turn machinery warmed in 0.4s (20 tool schema(s) materialized)
+2026-11-20 15:36:17,694 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 15:36:17,695 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 15:36:17,698 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 15:36:17,699 INFO cron.scheduler_provider: In-process cron scheduler started (interval=60s)
+2026-11-20 15:36:17,700 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 15:36:17,701 INFO cron.scheduler_provider: Multiplex cron scheduler started for 1 profile(s): ['default'] (re-enumerated every cycle)
+2026-11-20 15:36:17,701 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 15:36:17,901 INFO tui_gateway.ws: ws accepted peer=127.0.0.1:60737
+2026-11-20 15:36:17,954 WARNING gateway.session_local_recovery: Local session local-cdd397f547117ca51098aa5f41153a867105de1e3f5bd10eb5ea842c25dbdce2 receipt refused: storage_unavailable at restore_policy:982, caused by ValueError: invalid policy at restore_policy:972
+2026-11-20 15:36:18,015 INFO tui_gateway.ws: ws closed peer=127.0.0.1:60737 reason=client_disconnect(code=1000,reason=) messages=3 parse_errors=0 dispatch_crashes=0 send_failures=0 reaped_sessions=0 detached_sessions=0
+2026-11-20 15:36:21,824 INFO gateway.run: Received SIGTERM — initiating shutdown
+2026-11-20 15:36:21,824 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=5.70
+2026-11-20 15:36:21,834 INFO gateway.run: Stopping gateway...
+2026-11-20 15:36:21,854 INFO gateway.run: Shutdown phase: notify_active_sessions done at +0.02s
+2026-11-20 15:36:21,855 INFO gateway.run: Shutdown phase: drain done at +0.02s (drain took 0.00s, timed_out=False, active_at_start=0, active_now=0, cron_at_start=0, cron_now=0, api_at_start=0, api_now=0, deferred_at_start=0, deferred_now=0)
+2026-11-20 15:36:21,963 INFO gateway.run: Shutdown phase: all adapters disconnected at +0.13s
+2026-11-20 15:36:21,965 INFO gateway.run: Shutdown phase: final-cleanup tool kill done at +0.13s
+2026-11-20 15:36:21,965 INFO gateway.run: Shutdown phase: executor quiesced at +0.13s
+2026-11-20 15:36:22,040 INFO gateway.run: Shutdown phase: SessionDB close done at +0.21s
+2026-11-20 15:36:22,040 INFO gateway.run: Gateway stopped by an unexpected signal — persisting gateway_state=running so container_boot auto-starts on the next boot (issue #42675)
+2026-11-20 15:36:22,042 INFO gateway.run: Gateway stopped (total teardown 0.21s)
+2026-11-20 15:36:22,042 INFO gateway.run: Gateway housekeeping stopped
+2026-11-20 15:36:22,145 INFO gateway.run: Exiting with code 1 (signal-initiated shutdown without restart request) so the service manager can revive the gateway.
+
+==> logs/errors.log <==
+2026-11-20 15:36:17,272 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 15:36:17,606 WARNING agent.auxiliary_unavailable: Auxiliary Nous client unavailable: Nous Portal runtime credentials unavailable: Hermes is not logged into Nous Portal. Run `hermes model` to re-authenticate. (code: nous_auth_missing)
+2026-11-20 15:36:17,606 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:36:17,606 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:36:17,611 WARNING agent.auxiliary_client: Auxiliary Nous client unavailable: no Nous authentication found (run: hermes auth).
+2026-11-20 15:36:17,612 WARNING agent.auxiliary_client: resolve_provider_client: nous requested but Nous Portal not configured (run: hermes auth)
+2026-11-20 15:36:17,954 WARNING gateway.session_local_recovery: Local session local-cdd397f547117ca51098aa5f41153a867105de1e3f5bd10eb5ea842c25dbdce2 receipt refused: storage_unavailable at restore_policy:982, caused by ValueError: invalid policy at restore_policy:972
+2026-11-20 15:36:21,824 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=5.70
+
+==> logs/gateway-exit-diag.log <==
+{"ts": "2026-11-20T21:36:16.816694+00:00", "tag": "gateway.start", "pid": 7840, "python": "3.14.10", "platform": "darwin", "replace": false, "argv": ["/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/hermes_cli/main.py", "gateway", "run", "--quiet", "--idle-exit"], "stdin_is_tty": false, "console_window_attached": null, "detached": true, "breakaway": null, "absorb_windows_console_controls": false}
+{"ts": "2026-11-20T21:36:22.146806+00:00", "tag": "asyncio.run.returned", "pid": 7840, "python": "3.14.10", "platform": "darwin", "success": false}
+{"ts": "2026-11-20T21:36:22.146911+00:00", "tag": "gateway.exit_nonzero", "pid": 7840, "python": "3.14.10", "platform": "darwin"}
+
+==> logs/gateway-shutdown-diag.log <==
+=== shutdown diagnostic removed: it listed every process of the host ===
+
+==> logs/gateway-stdio.log <==
+┌─────────────────────────────────────────────────────────┐
+│           ☤ Hermes Gateway Starting...                 │
+├─────────────────────────────────────────────────────────┤
+│  Messaging platforms + cron scheduler                    │
+│  Press Ctrl+C to stop                                   │
+└─────────────────────────────────────────────────────────┘
+
+
+==> logs/gateway.log <==
+2026-11-20 15:36:17,179 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-d19ac84be7d968bc/control.sock
+2026-11-20 15:36:17,257 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 15:36:17,258 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 15:36:17,258 INFO gateway.run: Agent budget: max_iterations=unlimited (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 15:36:17,258 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 15:36:17,272 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 15:36:17,273 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 15:36:17,314 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 15:36:17,686 INFO gateway.run: Model context warmed:  -> 256000 tokens (default)
+2026-11-20 15:36:17,686 INFO gateway.run: Turn machinery warmed in 0.4s (20 tool schema(s) materialized)
+2026-11-20 15:36:17,694 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 15:36:17,695 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 15:36:17,698 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 15:36:17,700 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 15:36:17,701 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 15:36:17,954 WARNING gateway.session_local_recovery: Local session local-cdd397f547117ca51098aa5f41153a867105de1e3f5bd10eb5ea842c25dbdce2 receipt refused: storage_unavailable at restore_policy:982, caused by ValueError: invalid policy at restore_policy:972
+2026-11-20 15:36:21,824 INFO gateway.run: Received SIGTERM — initiating shutdown
+2026-11-20 15:36:21,824 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=5.70
+2026-11-20 15:36:21,834 INFO gateway.run: Stopping gateway...
+2026-11-20 15:36:21,854 INFO gateway.run: Shutdown phase: notify_active_sessions done at +0.02s
+2026-11-20 15:36:21,855 INFO gateway.run: Shutdown phase: drain done at +0.02s (drain took 0.00s, timed_out=False, active_at_start=0, active_now=0, cron_at_start=0, cron_now=0, api_at_start=0, api_now=0, deferred_at_start=0, deferred_now=0)
+2026-11-20 15:36:21,963 INFO gateway.run: Shutdown phase: all adapters disconnected at +0.13s
+2026-11-20 15:36:21,965 INFO gateway.run: Shutdown phase: final-cleanup tool kill done at +0.13s
+2026-11-20 15:36:21,965 INFO gateway.run: Shutdown phase: executor quiesced at +0.13s
+2026-11-20 15:36:22,040 INFO gateway.run: Shutdown phase: SessionDB close done at +0.21s
+2026-11-20 15:36:22,040 INFO gateway.run: Gateway stopped by an unexpected signal — persisting gateway_state=running so container_boot auto-starts on the next boot (issue #42675)
+2026-11-20 15:36:22,042 INFO gateway.run: Gateway stopped (total teardown 0.21s)
+2026-11-20 15:36:22,042 INFO gateway.run: Gateway housekeeping stopped
+2026-11-20 15:36:22,145 INFO gateway.run: Exiting with code 1 (signal-initiated shutdown without restart request) so the service manager can revive the gateway.
+
+==> logs/gateway_faulthandler.log <==
+
+==> logs/update_receipts/.pm-write.lock <==
+
+==> logs/update_receipts/latest.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T21:36:17.725753+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T21:36:17.725716+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}
+
+==> logs/update_receipts/pm_20261120T213617Z-plugin-check-7840-9fcf08697db54460a6f81cc6d7fa2ea9.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T21:36:17.725753+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T21:36:17.725716+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}

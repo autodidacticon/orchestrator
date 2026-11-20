@@ -1,0 +1,3192 @@
+{
+  "note": "rows of the probe's own tree (in: tree), of the started child's tree or group (in: started) and whose command is the hermes install (in: hermes); nothing else",
+  "before": [
+    {
+      "pid": 79849,
+      "ppid": 91020,
+      "pgid": 91007,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 79927,
+      "ppid": 79849,
+      "pgid": 91007,
+      "comm": "ps",
+      "in": "tree"
+    },
+    {
+      "pid": 65648,
+      "ppid": 65645,
+      "pgid": 65648,
+      "comm": "Python",
+      "hermes": true,
+      "in": "hermes"
+    },
+    {
+      "pid": 65645,
+      "ppid": 55159,
+      "pgid": 65645,
+      "comm": "Python",
+      "hermes": true,
+      "in": "hermes"
+    }
+  ],
+  "during": [
+    {
+      "ms": 111,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79952,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 1225,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79980,
+          "ppid": 79967,
+          "pgid": 79967,
+          "comm": "python3",
+          "in": "tree"
+        },
+        {
+          "pid": 79981,
+          "ppid": 79980,
+          "pgid": 79967,
+          "comm": "xcodebuild",
+          "in": "tree"
+        },
+        {
+          "pid": 79993,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 2231,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80066,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 3236,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80108,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 4228,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 82148,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 5252,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 83647,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 6233,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 83695,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 7268,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 83719,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 8256,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 83743,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 9262,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 83768,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 10225,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 86443,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 11236,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 87333,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 12269,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 87362,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 13267,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 87386,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 14262,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 87439,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 15273,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 89287,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 16232,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 90012,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 17265,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 91056,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 18267,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 91080,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 19277,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 91104,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 20291,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 92951,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 21285,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 92980,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 22268,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 93670,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 23280,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 94798,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 24288,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 94894,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 25284,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 236,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 26282,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 4113,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 27279,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 8397,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 28314,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 12077,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 29283,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 15462,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 30298,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 18395,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 31283,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 21362,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 32268,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 23792,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 33264,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 25451,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 34264,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 27231,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 35273,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 30408,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 36282,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 34174,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 37275,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 36176,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 35874,
+          "ppid": 57771,
+          "pgid": 35874,
+          "comm": "zsh",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 38280,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 37916,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 39271,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 39639,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 40273,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 41271,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 41284,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 45960,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 42285,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 48255,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 43304,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 49593,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 44278,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 50673,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    },
+    {
+      "ms": 45290,
+      "rows": [
+        {
+          "pid": 79849,
+          "ppid": 91020,
+          "pgid": 91007,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 51864,
+          "ppid": 79849,
+          "pgid": 91007,
+          "comm": "ps",
+          "in": "tree"
+        },
+        {
+          "pid": 79928,
+          "ppid": 79849,
+          "pgid": 79928,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 79967,
+          "ppid": 79928,
+          "pgid": 79967,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 80025,
+          "ppid": 79967,
+          "pgid": 80025,
+          "comm": "node",
+          "in": "tree"
+        },
+        {
+          "pid": 80041,
+          "ppid": 79967,
+          "pgid": 80041,
+          "comm": "Python",
+          "hermes": true,
+          "in": "tree"
+        },
+        {
+          "pid": 65648,
+          "ppid": 65645,
+          "pgid": 65648,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        },
+        {
+          "pid": 65645,
+          "ppid": 55159,
+          "pgid": 65645,
+          "comm": "Python",
+          "hermes": true,
+          "in": "hermes"
+        }
+      ]
+    }
+  ],
+  "after": [
+    {
+      "pid": 79849,
+      "ppid": 91020,
+      "pgid": 91007,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 59018,
+      "ppid": 79849,
+      "pgid": 91007,
+      "comm": "ps",
+      "in": "tree"
+    },
+    {
+      "pid": 65648,
+      "ppid": 65645,
+      "pgid": 65648,
+      "comm": "Python",
+      "hermes": true,
+      "in": "hermes"
+    },
+    {
+      "pid": 79967,
+      "ppid": 1,
+      "pgid": 79967,
+      "comm": "Python",
+      "hermes": true,
+      "in": "started"
+    },
+    {
+      "pid": 80025,
+      "ppid": 79967,
+      "pgid": 80025,
+      "comm": "node",
+      "in": "started"
+    },
+    {
+      "pid": 80041,
+      "ppid": 79967,
+      "pgid": 80041,
+      "comm": "Python",
+      "hermes": true,
+      "in": "started"
+    },
+    {
+      "pid": 65645,
+      "ppid": 55159,
+      "pgid": 65645,
+      "comm": "Python",
+      "hermes": true,
+      "in": "hermes"
+    }
+  ],
+  "seen": [
+    {
+      "pid": 79928,
+      "ppid": 79849,
+      "pgid": 79928,
+      "comm": "Python",
+      "firstMs": 111,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/bin/hermes chat -q Call the orchestrator log tool with text \"probe\". Then run the shell command uname -s in the terminal. Then reply with the single word done. --oneshot --format stream-json --max-turns 12 --toolsets file,m"
+    },
+    {
+      "pid": 79967,
+      "ppid": 79928,
+      "pgid": 79967,
+      "comm": "Python",
+      "firstMs": 1225,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    },
+    {
+      "pid": 79980,
+      "ppid": 79967,
+      "pgid": 79967,
+      "comm": "python3",
+      "firstMs": 1225,
+      "args": "python3 -c import sys; print('.'.join(map(str, sys.version_info[:3])))"
+    },
+    {
+      "pid": 79981,
+      "ppid": 79980,
+      "pgid": 79967,
+      "comm": "xcodebuild",
+      "firstMs": 1225,
+      "args": "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -license check"
+    },
+    {
+      "pid": 80025,
+      "ppid": 79967,
+      "pgid": 80025,
+      "comm": "node",
+      "firstMs": 2231,
+      "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H10b.jsonl --block-sec 200"
+    },
+    {
+      "pid": 80041,
+      "ppid": 79967,
+      "pgid": 80041,
+      "comm": "Python",
+      "firstMs": 2231,
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 79967"
+    }
+  ],
+  "leftAfterExit": [
+    {
+      "pid": 79967,
+      "ppid": 79928,
+      "pgid": 79967,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    },
+    {
+      "pid": 80025,
+      "ppid": 79967,
+      "pgid": 80025,
+      "comm": "node",
+      "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-H10b.jsonl --block-sec 200"
+    },
+    {
+      "pid": 80041,
+      "ppid": 79967,
+      "pgid": 80041,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 79967"
+    }
+  ],
+  "homePids": [
+    {
+      "file": "gateway.pid",
+      "pid": 79967,
+      "alive": true
+    }
+  ]
+}

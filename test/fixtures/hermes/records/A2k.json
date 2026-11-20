@@ -1,0 +1,247 @@
+{
+  "id": "A2k",
+  "kind": "acp",
+  "questions": [
+    "Q2",
+    "Q16"
+  ],
+  "at": "2026-11-20T22:55:23.101Z",
+  "command": [
+    "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+    "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+    "--agent-json",
+    "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--frames",
+    "<scratch>/frames.jsonl",
+    "--keep-descendants",
+    "--mcp-json",
+    "<scratch>/mcp.json",
+    "--prompt-file",
+    "<scratch>/prompt.txt",
+    "--policy",
+    "<scratch>/policy.json",
+    "--turn-timeout-ms",
+    "240000"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-e3e17db0",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env"
+  },
+  "exit": {
+    "code": 3,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 28320,
+  "killed": {
+    "signal": "SIGTERM",
+    "ms": 28308
+  },
+  "modelCalls": 1,
+  "observedApiCalls": 0,
+  "plannedModelCalls": 1,
+  "apiCalls": null,
+  "orphans": [
+    {
+      "pid": 58371,
+      "ppid": 56786,
+      "pgid": 58371,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    },
+    {
+      "pid": 59742,
+      "ppid": 58371,
+      "pgid": 59742,
+      "comm": "node",
+      "args": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/shim-A2k.jsonl --block-sec 200"
+    },
+    {
+      "pid": 59793,
+      "ppid": 58371,
+      "pgid": 59793,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/tools/mcp_death_supervisor.py --parent-pgid 58371"
+    },
+    {
+      "pid": 76049,
+      "ppid": 58371,
+      "pgid": 76049,
+      "comm": "bash",
+      "args": "/opt/homebrew/bin/bash -c source <tmpdir>/hermes-snap-e0d4c2b0ad8a.sh >/dev/null 2>&1 || true\\012export AI_AGENT=\"${AI_AGENT:-hermes-agent}\" HERMES_AGENT=\"${HERMES_AGENT:-true}\"\\012export GIT_PAGER=\"${GIT_PAGER:-cat}\" PAGER=\"${PAGER:-cat}\"\\012builtin cd -- <scratch>/wt || exit 126\\012eval 'sleep 120'\\012__hermes_ec=$?\\012umask 077\\012__hermes_snap_tmp=$(mktemp <tmpdir>/hermes-snap-e0d4c2b0ad8a.sh."
+    },
+    {
+      "pid": 76064,
+      "ppid": 76049,
+      "pgid": 76049,
+      "comm": "sleep",
+      "args": "sleep 120"
+    }
+  ],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    ".env",
+    ".install_id.lock",
+    ".restart_failure_counts",
+    ".skills_prompt_snapshot.json",
+    "SOUL.md",
+    "auth.json",
+    "auth.lock",
+    "backups/config/config.yaml.good.20261120-165451",
+    "cache/endpoint_model_metadata.json",
+    "cache/model_catalog.json",
+    "cache/nous_recommended_cache.json",
+    "cache/plugin_toolset_keys.json",
+    "cache/reasoning_caps.json",
+    "cache/schema_columns.json",
+    "cache/scratch/.last_prune",
+    "cache/tool_discovery_cache.json",
+    "channel_directory.json",
+    "config.yaml",
+    "context_length_cache.yaml",
+    "context_length_cache.yaml.lock",
+    "cron/.jobs.lock",
+    "cron/.tick.lock",
+    "cron/executions.db",
+    "cron/ticker_heartbeat",
+    "cron/ticker_last_success",
+    "gateway-starts.log",
+    "gateway.lock",
+    "gateway_state.json",
+    "install_id",
+    "kanban.db",
+    "kanban.db-shm",
+    "kanban.db-wal",
+    "kanban.db.dispatch.lock",
+    "kanban.db.init.lock",
+    "kanban/.dispatcher.lock",
+    "logs/agent.log",
+    "logs/errors.log",
+    "logs/gateway-exit-diag.log",
+    "logs/gateway-shutdown-diag.log",
+    "logs/gateway-stdio.log",
+    "logs/gateway.log",
+    "logs/gateway_faulthandler.log",
+    "logs/mcp-stderr.log",
+    "logs/update_receipts/.pm-write.lock",
+    "logs/update_receipts/latest.json",
+    "logs/update_receipts/pm_20261120T225453Z-plugin-check-58371-a3782172a4a14142bd57f8aeb3930888.json",
+    "models_dev_cache.etag",
+    "models_dev_cache.json",
+    "plugin-update-checks/last-run",
+    "plugin-update-checks/results.json",
+    "projects.db",
+    "runtime/active_sessions.json",
+    "runtime/active_sessions.lock",
+    "runtime/bot_live_delivery/.lock",
+    "sessions/sessions.json",
+    "shared/nous_auth.lock",
+    "source-checks/4e245f1fb3feac96.json",
+    "spawn-ledger.json",
+    "state.db",
+    "state.db-shm",
+    "state.db-wal",
+    "state.db.fts_rebuild.lock",
+    "state.db.quarantine.lock",
+    "state/dashboard_clients.heartbeat",
+    "state/gateway.heartbeat",
+    "state/gateway.lifecycle.json",
+    "skills/ (328 files)"
+  ],
+  "homeConfig": "{\n  \"model\": {\n    \"default\": \"qwen/qwen4-max:free\",\n    \"provider\": \"nous\"\n  }\n}\n",
+  "tokenFoundIn": [],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "10e9271 initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "10e9271 initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "76642bb9a161f72c65e6ad394efc3a2198ecef57e34042878bdb935629978391",
+      "env": "32d2148d97e8f3a8d90124b916c5fe8e415cf3333a0235aaf61a69693d1d29d3"
+    },
+    "after": {
+      "home": "present",
+      "config": "76642bb9a161f72c65e6ad394efc3a2198ecef57e34042878bdb935629978391",
+      "env": "32d2148d97e8f3a8d90124b916c5fe8e415cf3333a0235aaf61a69693d1d29d3"
+    },
+    "changed": false
+  },
+  "result": {
+    "type": "result",
+    "t": 28293,
+    "stage": "session/prompt",
+    "sessionId": "local-10ca414d38233a26a9e0f9d8a20a680033e2715591511736224e373e8b00a8a2",
+    "stoppedBy": "signal",
+    "error": "the agent exited before answering session/prompt",
+    "exitCode": 3,
+    "agentPid": 56786,
+    "agentExit": {
+      "code": null,
+      "signal": "SIGTERM",
+      "t": 28293,
+      "how": "before"
+    },
+    "treeAtEnd": [],
+    "killedDescendants": [],
+    "leftDescendants": []
+  },
+  "evidence": [
+    "acp/A2k.ps.json",
+    "acp/A2k.client.jsonl",
+    "acp/A2k.stderr.txt",
+    "acp/A2k.frames.jsonl",
+    "shim/A2k.jsonl",
+    "acp/A2k.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 24,
+    "firstMs": 522,
+    "maxGapMs": 22158,
+    "maxGapBeforeLine": 5,
+    "times": [
+      522,
+      3826,
+      3826,
+      4346,
+      26504,
+      26505,
+      26505,
+      26505,
+      26650,
+      26651,
+      26651,
+      26751,
+      26751,
+      27050,
+      27050,
+      27074,
+      27074,
+      27305,
+      27305,
+      27305,
+      27305,
+      27656,
+      27914,
+      28316
+    ]
+  }
+}

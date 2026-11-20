@@ -1,0 +1,6 @@
+
+  Testing 'orchestrator'...
+  Transport: stdio → ~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node
+  Auth: none
+  ✗ Connection failed (8.2s): Connection closed
+  Check the server is running and the URL/command in its config, then run: hermes mcp test orchestrator

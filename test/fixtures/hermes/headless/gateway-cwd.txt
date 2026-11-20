@@ -1,0 +1,5 @@
+# 2026-11-20 17:04 CST during the H10b run: lsof -a -d cwd -p <pid> for each process whose args hold 'hermes_cli.main --profile default gateway run'
+# 65648 is the owner's own gateway on ~/.hermes (listed, left alone); 79967 is a probe-started gateway
+65648 cwd=/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages
+79967 cwd=/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages
+# protected paths (agent/runtime_self_protection.py _protected_snapshot): sys.executable, sys.prefix = /opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec, the base interpreter; a relative rm argument is realpath'd against the gateway's cwd (_normalize_path), not the terminal's

@@ -1,0 +1,188 @@
+{
+  "id": "A0-bad",
+  "kind": "acp",
+  "questions": [
+    "Q7",
+    "Q15"
+  ],
+  "at": "2026-11-20T21:36:10.940Z",
+  "command": [
+    "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+    "<repo>/test/fixtures/hermes/acp-client.local.mjs",
+    "--agent-json",
+    "[\"/opt/homebrew/bin/hermes\",\"acp\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--frames",
+    "<scratch>/frames.jsonl",
+    "--keep-descendants",
+    "--mcp-json",
+    "<scratch>/mcp.json"
+  ],
+  "cwd": "<scratch>/wt",
+  "env": {
+    "PATH": "<set>",
+    "HOME": "<scratch>/home",
+    "USER": "<set>",
+    "LANG": "en_US.UTF-8",
+    "TMPDIR": "<tmpdir>/",
+    "HERMES_HOME": "<scratch>/home/.hermes",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-33192775",
+    "ORCH_API": "http://127.0.0.1:9",
+    "PROBE_MARKER": "from-client-env"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 10494,
+  "killed": null,
+  "modelCalls": 0,
+  "observedApiCalls": 0,
+  "plannedModelCalls": 0,
+  "apiCalls": null,
+  "orphans": [
+    {
+      "pid": 95299,
+      "ppid": 95259,
+      "pgid": 95299,
+      "comm": "Python",
+      "args": "/opt/homebrew/Cellar/python@3.14/3.14.10/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python -m hermes_cli.main --profile default gateway run --quiet --idle-exit"
+    }
+  ],
+  "carriedToNextRun": [],
+  "carriedFromPreviousRun": [],
+  "homeFiles": [
+    ".clean_shutdown",
+    ".install_id.lock",
+    "SOUL.md",
+    "auth.json",
+    "auth.lock",
+    "backups/config/config.yaml.good.20261120-153556",
+    "cache/model_catalog.json",
+    "cache/openrouter_model_metadata.json",
+    "cache/plugin_toolset_keys.json",
+    "cache/schema_columns.json",
+    "cache/tool_discovery_cache.json",
+    "channel_directory.json",
+    "config.yaml",
+    "cron/.jobs.lock",
+    "cron/.tick.lock",
+    "cron/executions.db",
+    "cron/ticker_heartbeat",
+    "cron/ticker_last_success",
+    "gateway-starts.log",
+    "gateway.lock",
+    "gateway_state.json",
+    "install_id",
+    "kanban.db",
+    "kanban.db.dispatch.lock",
+    "kanban.db.init.lock",
+    "kanban/.dispatcher.lock",
+    "logs/agent.log",
+    "logs/errors.log",
+    "logs/gateway-exit-diag.log",
+    "logs/gateway-shutdown-diag.log",
+    "logs/gateway-stdio.log",
+    "logs/gateway.log",
+    "logs/gateway_faulthandler.log",
+    "logs/mcp-stderr.log",
+    "logs/update_receipts/.pm-write.lock",
+    "logs/update_receipts/latest.json",
+    "logs/update_receipts/pm_20261120T213559Z-plugin-check-95299-2e71edf1ce6544669f521b940579c045.json",
+    "models_dev_cache.etag",
+    "models_dev_cache.json",
+    "plugin-update-checks/last-run",
+    "plugin-update-checks/results.json",
+    "projects.db",
+    "runtime/bot_live_delivery/.lock",
+    "source-checks/4e245f1fb3feac96.json",
+    "spawn-ledger.json",
+    "state.db",
+    "state.db.fts_rebuild.lock",
+    "state.db.quarantine.lock",
+    "state/dashboard_clients.heartbeat",
+    "state/gateway.heartbeat",
+    "state/gateway.lifecycle.json",
+    "skills/ (328 files)"
+  ],
+  "homeConfig": "{\n  \"model\": {\n    \"default\": \"probe/placeholder-model\",\n    \"provider\": \"openrouter\"\n  }\n}\n",
+  "tokenFoundIn": [],
+  "git": {
+    "branch": "task/PROBE/l1",
+    "log": [
+      "e00f3f7 initial"
+    ],
+    "status": [],
+    "mainLog": [
+      "e00f3f7 initial"
+    ]
+  },
+  "userConfig": {
+    "before": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "after": {
+      "home": "present",
+      "config": "352f32130711bbd2caa5b41ec1b94f4eab43ee9827bcaac9796b82ae8b716f12",
+      "env": "absent"
+    },
+    "changed": false
+  },
+  "result": {
+    "type": "result",
+    "t": 10470,
+    "stage": "session/new",
+    "stopReason": null,
+    "noPrompt": true,
+    "exitCode": 0,
+    "agentPid": 95259,
+    "agentExit": {
+      "code": 0,
+      "signal": null,
+      "t": 8442,
+      "how": "stdinClosed"
+    },
+    "treeAtEnd": [
+      {
+        "pid": 95299,
+        "ppid": 95259,
+        "pgid": 95299,
+        "comm": "Python"
+      }
+    ],
+    "killedDescendants": [],
+    "leftDescendants": [
+      {
+        "pid": 95299,
+        "ppid": 95259,
+        "pgid": 95299,
+        "comm": "Python"
+      }
+    ]
+  },
+  "evidence": [
+    "acp/A0-bad.ps.json",
+    "acp/A0-bad.client.jsonl",
+    "acp/A0-bad.stderr.txt",
+    "acp/A0-bad.frames.jsonl",
+    "shim/A0-bad.jsonl",
+    "acp/A0-bad.logs.txt"
+  ],
+  "stdoutLines": {
+    "count": 4,
+    "firstMs": 387,
+    "maxGapMs": 7859,
+    "maxGapBeforeLine": 2,
+    "times": [
+      387,
+      8246,
+      8323,
+      10491
+    ]
+  }
+}

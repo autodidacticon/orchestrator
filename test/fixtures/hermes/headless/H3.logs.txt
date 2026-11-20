@@ -1,0 +1,933 @@
+==> logs/agent.log <==
+n 'deepinfra' registered image_gen provider: deepinfra
+2026-11-20 16:55:24,363 INFO hermes_cli.plugins: Plugin 'fal' registered image_gen provider: fal
+2026-11-20 16:55:24,365 INFO hermes_cli.plugins: Plugin 'krea' registered image_gen provider: krea
+2026-11-20 16:55:24,367 INFO hermes_cli.plugins: Plugin 'meta-ai-image-gen' registered image_gen provider: meta-ai
+2026-11-20 16:55:24,368 INFO hermes_cli.plugins: Plugin 'openai' registered image_gen provider: openai
+2026-11-20 16:55:24,368 INFO hermes_cli.plugins: Plugin 'openai-codex' registered image_gen provider: openai-codex
+2026-11-20 16:55:24,369 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: openrouter
+2026-11-20 16:55:24,370 INFO hermes_cli.plugins: Plugin 'openrouter' registered image_gen provider: nous
+2026-11-20 16:55:24,371 INFO hermes_cli.plugins: Plugin 'xai' registered image_gen provider: xai
+2026-11-20 16:55:24,376 INFO hermes_cli.plugins: Plugin 'deepinfra' registered video_gen provider: deepinfra
+2026-11-20 16:55:24,377 INFO hermes_cli.plugins: Plugin 'fal' registered video_gen provider: fal
+2026-11-20 16:55:24,379 INFO hermes_cli.plugins: Plugin 'openrouter' registered video_gen provider: openrouter
+2026-11-20 16:55:24,379 INFO hermes_cli.plugins: Plugin 'xai' registered video_gen provider: xai
+2026-11-20 16:55:24,384 INFO hermes_cli.plugins: Plugin 'web-brave-free' registered web provider: brave-free
+2026-11-20 16:55:24,385 INFO hermes_cli.plugins: Plugin 'web-ddgs' registered web provider: ddgs
+2026-11-20 16:55:24,387 INFO hermes_cli.plugins: Plugin 'web-exa' registered web provider: exa
+2026-11-20 16:55:24,391 INFO hermes_cli.plugins: Plugin 'web-firecrawl' registered web provider: firecrawl
+2026-11-20 16:55:24,395 INFO hermes_cli.plugins: Plugin 'web-keenable' registered web provider: keenable
+2026-11-20 16:55:24,396 INFO hermes_cli.plugins: Plugin 'web-openai-native' registered web provider: openai-native
+2026-11-20 16:55:24,399 INFO hermes_cli.plugins: Plugin 'web-parallel' registered web provider: parallel
+2026-11-20 16:55:24,401 INFO hermes_cli.plugins: Plugin 'web-perplexity' registered web provider: perplexity
+2026-11-20 16:55:24,402 INFO hermes_cli.plugins: Plugin 'web-searxng' registered web provider: searxng
+2026-11-20 16:55:24,403 INFO hermes_cli.plugins: Plugin 'web-tavily' registered web provider: tavily
+2026-11-20 16:55:24,406 INFO hermes_cli.plugins: Plugin 'web-xai' registered web provider: xai
+2026-11-20 16:55:24,406 INFO hermes_cli.plugins: Plugin discovery complete: 61 found, 57 enabled
+2026-11-20 16:55:24,421 INFO hermes_cli.gateway_multiplex_mode: Single-profile install: gateway.multiplex_profiles unset, serving the default profile only.
+2026-11-20 16:55:24,725 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-2bf1ad3157311e88/control.sock
+2026-11-20 16:55:25,117 INFO tools.mcp_tool: MCP server 'orchestrator' (stdio): registered 5 tool(s): mcp__orchestrator__heartbeat, mcp__orchestrator__report, mcp__orchestrator__block, mcp__orchestrator__inbox, mcp__orchestrator__log
+2026-11-20 16:55:25,118 INFO tools.mcp_tool: MCP: registered 5 tool(s) from 1 server(s)
+2026-11-20 16:55:25,118 INFO tools.mcp_tool:   MCP: 5 tool(s) from 1 server(s)
+2026-11-20 16:55:25,118 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 16:55:25,118 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 16:55:25,120 INFO gateway.run: Agent budget: max_iterations=unlimited (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 16:55:25,120 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 16:55:25,132 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 16:55:25,132 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 16:55:25,147 INFO run_agent: Loaded environment variables from <scratch>/home/.hermes/.env
+2026-11-20 16:55:25,167 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 16:55:25,447 INFO tools.registry: check_fn check_browser_back_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,448 INFO tools.registry: check_fn _browser_cdp_check returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,448 INFO tools.registry: check_fn check_browser_click_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,448 INFO tools.registry: check_fn check_browser_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,449 INFO tools.registry: check_fn _browser_dialog_check returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,451 INFO tools.registry: check_fn check_browser_navigate_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,451 INFO tools.registry: check_fn check_browser_press_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,451 INFO tools.registry: check_fn check_browser_scroll_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,452 INFO tools.registry: check_fn check_browser_snapshot_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,452 INFO tools.registry: check_fn check_browser_type_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,452 INFO tools.registry: check_fn check_browser_vision_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,457 INFO tools.registry: check_fn check_computer_use_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,458 INFO tools.registry: check_fn check_image_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,466 INFO agent.auxiliary_client: Vision auto-detect: using main provider nous (google/gemini-3.6-flash)
+2026-11-20 16:55:25,496 INFO agent.model_metadata: Cached context length qwen/qwen4-max:free@<credential> -> 1,000,000 tokens
+2026-11-20 16:55:25,498 INFO tools.tool_search: tool_search activated (tier 1): 18 core/visible tools kept, 10 deferred (~4517 tokens), listing full (budget ~4000 tokens)
+2026-11-20 16:55:25,500 INFO gateway.run: Model context warmed: qwen/qwen4-max:free -> 1000000 tokens (detected)
+2026-11-20 16:55:25,501 INFO gateway.run: Turn machinery warmed in 0.4s (21 tool schema(s) materialized)
+2026-11-20 16:55:25,508 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 16:55:25,510 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 16:55:25,512 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 16:55:25,513 INFO cron.scheduler_provider: In-process cron scheduler started (interval=60s)
+2026-11-20 16:55:25,513 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 16:55:25,514 INFO cron.scheduler_provider: Multiplex cron scheduler started for 1 profile(s): ['default'] (re-enumerated every cycle)
+2026-11-20 16:55:25,515 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 16:55:25,749 INFO tui_gateway.ws: ws accepted peer=127.0.0.1:61822
+2026-11-20 16:55:25,820 INFO tools.tool_search: tool_search activated (tier 1): 18 core/visible tools kept, 10 deferred (~4517 tokens), listing full (budget ~4000 tokens)
+2026-11-20 16:55:25,821 INFO tools.registry: check_fn _a2a_tools_available returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,821 INFO tools.registry: check_fn check_discord_tool_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,821 INFO tools.registry: check_fn _check_feishu returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,828 INFO tools.registry: check_fn _check_yuanbao returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,830 INFO agent.auxiliary_client: Vision auto-detect: using main provider nous (google/gemini-3.6-flash)
+2026-11-20 16:55:25,832 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 16:55:25,832 INFO tools.registry: check_fn check_video_generation_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,833 INFO tools.registry: check_fn _check_xai_video_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,833 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 16:55:25,834 INFO tools.registry: check_fn check_x_search_requirements returned False; dependent tools will be unavailable this turn
+2026-11-20 16:55:25,866 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 msg='# Task PROBE-1: add a greeting file  You are working in a git worktree on branch' reply_to_id=None reply_to_text=''
+2026-11-20 16:55:26,029 INFO run_agent: OpenAI client created (agent_init, shared=True) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:55:26,064 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.turn_context: conversation turn: session=local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 model=qwen/qwen4-max:free provider=nous platform=cli history=0 msg='# Task PROBE-1: add a greeting file  You are working in a git worktree on branch...'
+2026-11-20 16:55:26,175 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-9 (<lambda>):13114699776 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:55:26,271 INFO agent.auxiliary_client: Auxiliary auto-detect: using main provider nous (qwen/qwen4-max:free)
+2026-11-20 16:55:26,271 INFO agent.auxiliary_client: Auxiliary title_generation: using nous (qwen/qwen4-max:free) at <credential>/
+2026-11-20 16:55:27,238 INFO agent.credential_pool: credential pool: marking author@example.invalid exhausted (status=429), rotating
+2026-11-20 16:55:27,239 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 16:55:27,239 INFO agent.auxiliary_client: Auxiliary title_generation: rate limit on auto (Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['openai/gpt-oss-120b', 'openai/gpt-4o-2024-08-06', 'openai/gpt-5.6-terra-pro']}), trying fallback
+2026-11-20 16:55:27,242 WARNING agent.auxiliary_client: Auxiliary title_generation: main provider nous is unavailable and no fallback_chain / fallback_providers is configured — refusing to guess another logged-in provider. Re-authenticate (`hermes model`) or declare a fallback.
+2026-11-20 16:55:27,242 WARNING agent.auxiliary_client: Auxiliary title_generation: rate limit on auto and all fallbacks exhausted (fallback_chain + main agent model). Raising the primary error.
+2026-11-20 16:55:27,242 WARNING agent.title_generator: Title generation failed: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['openai/gpt-oss-120b', 'openai/gpt-4o-2024-08-06', 'openai/gpt-5.6-terra-pro']}
+2026-11-20 16:55:27,936 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['upstage/solar-pro4', 'google/gemma-4-26b-a4b-it', 'minimax/minimax-m2.5']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['upstage/solar-pro4', 'google/gemma-4-26b-a4b-it', 'minimax/minimax-m2.5']}
+2026-11-20 16:55:27,937 INFO run_agent: OpenAI client closed (stream_error_cleanup, shared=False, tcp_force_closed=0) thread=Thread-9 (<lambda>):13114699776 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:55:27,940 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:55:27,941 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Nous 429 looks like upstream capacity (no exhausted bucket in headers or last-known state) -- not tripping cross-session breaker.
+2026-11-20 16:55:27,941 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 20.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['upstage/solar-pro4', 'google/gemma-4-26b-a4b-it', 'minimax/minimax-m2.5']}
+2026-11-20 16:55:30,512 INFO gateway.run: kanban dispatcher: embedded in gateway (interval=60.0s)
+2026-11-20 16:55:47,994 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-10 (<lambda>):12985839616 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:55:53,696 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call #1: model=qwen/qwen4-max:free provider=nous in=21935 out=179 total=22114 latency=27.5s cache=12399/21935 (57%) write=9530 id=gen-1795215348-rvcH59EQ0A2MAwGJqHld
+2026-11-20 16:55:53,711 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.tool_executor: tool tool_describe completed (0.01s, 1870 chars)
+2026-11-20 16:55:55,232 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 48, 'alternates': ['anthropic/claude-sonnet-5', 'deepseek/deepseek-v4-flash-0731', 'perplexity/pplx-embed-v2-context-0.6b']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 48, 'alternates': ['anthropic/claude-sonnet-5', 'deepseek/deepseek-v4-flash-0731', 'perplexity/pplx-embed-v2-context-0.6b']}
+2026-11-20 16:55:55,232 INFO run_agent: OpenAI client closed (stream_error_cleanup, shared=False, tcp_force_closed=0) thread=Thread-11 (<lambda>):13097873408 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:55:55,249 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:55:55,249 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Nous 429 looks like upstream capacity (no exhausted bucket in headers or last-known state) -- not tripping cross-session breaker.
+2026-11-20 16:55:55,250 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 48.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 48, 'alternates': ['anthropic/claude-sonnet-5', 'deepseek/deepseek-v4-flash-0731', 'perplexity/pplx-embed-v2-context-0.6b']}
+2026-11-20 16:56:24,780 INFO agent.credential_pool: credential pool: no available entries (all exhausted or empty)
+2026-11-20 16:56:43,401 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-12 (<lambda>):12985839616 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:56:48,400 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call #2: model=qwen/qwen4-max:free provider=nous in=22666 out=200 total=22866 latency=54.7s cache=21929/22666 (97%) write=730 id=gen-1795215404-NBfwsD7me86qwFELOLFH
+2026-11-20 16:56:48,450 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.tool_executor: tool mcp__orchestrator__heartbeat completed (0.00s, 42 chars)
+2026-11-20 16:56:48,454 INFO tools.file_tools: Creating new local environment for task session:...
+2026-11-20 16:56:48,519 INFO tools.environments.base: Session snapshot created (session=e71d0787ae2b, cwd=<scratch>/wt)
+2026-11-20 16:56:48,520 INFO tools.file_tools: local environment ready for task session:
+2026-11-20 16:56:48,528 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.tool_executor: tool write_file completed (0.08s, 360 chars)
+2026-11-20 16:56:48,751 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 52, 'alternates': ['tencent/hy3', 'google/gemma-4-31b-it', 'moonshotai/kimi-k3']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 52, 'alternates': ['tencent/hy3', 'google/gemma-4-31b-it', 'moonshotai/kimi-k3']}
+2026-11-20 16:56:48,752 INFO run_agent: OpenAI client closed (stream_error_cleanup, shared=False, tcp_force_closed=0) thread=Thread-15 (<lambda>):13114699776 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:56:48,760 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:56:48,760 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Nous 429 looks like upstream capacity (no exhausted bucket in headers or last-known state) -- not tripping cross-session breaker.
+2026-11-20 16:56:48,761 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 52.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 52, 'alternates': ['tencent/hy3', 'google/gemma-4-31b-it', 'moonshotai/kimi-k3']}
+2026-11-20 16:57:40,790 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-16 (<lambda>):12985839616 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:57:44,855 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call #3: model=qwen/qwen4-max:free provider=nous in=23120 out=79 total=23199 latency=56.3s cache=22659/23120 (98%) write=454 id=gen-1795215461-82xoROkYe61UvXi0A98I
+2026-11-20 16:57:44,985 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.tool_executor: tool terminal completed (0.13s, 151 chars)
+2026-11-20 16:57:45,297 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['openai/gpt-5.6-terra-pro', 'qwen/qwen3-coder-flash', 'google/gemini-3.1-flash-lite-preview']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['openai/gpt-5.6-terra-pro', 'qwen/qwen3-coder-flash', 'google/gemini-3.1-flash-lite-preview']}
+2026-11-20 16:57:45,297 INFO run_agent: OpenAI client closed (stream_error_cleanup, shared=False, tcp_force_closed=0) thread=Thread-18 (<lambda>):13148352512 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:57:45,299 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:57:45,307 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Nous 429 looks like upstream capacity (no exhausted bucket in headers or last-known state) -- not tripping cross-session breaker.
+2026-11-20 16:57:45,308 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 55.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['openai/gpt-5.6-terra-pro', 'qwen/qwen3-coder-flash', 'google/gemini-3.1-flash-lite-preview']}
+2026-11-20 16:58:40,464 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-19 (<lambda>):12985839616 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:58:44,209 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call #4: model=qwen/qwen4-max:free provider=nous in=23266 out=120 total=23386 latency=59.2s cache=23113/23266 (99%) write=146 id=gen-1795215521-L4WkTzUIsvflW9EQUcqE
+2026-11-20 16:58:44,308 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.tool_executor: tool terminal completed (0.10s, 87 chars)
+2026-11-20 16:58:46,128 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 53, 'alternates': ['openai/gpt-4o-2024-08-06', 'qwen/qwen3.8-27b', 'moonshotai/kimi-k2.7-code']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 53, 'alternates': ['openai/gpt-4o-2024-08-06', 'qwen/qwen3.8-27b', 'moonshotai/kimi-k2.7-code']}
+2026-11-20 16:58:46,128 INFO run_agent: OpenAI client closed (stream_error_cleanup, shared=False, tcp_force_closed=0) thread=Thread-21 (<lambda>):13097873408 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:58:46,138 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:58:46,138 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Nous 429 looks like upstream capacity (no exhausted bucket in headers or last-known state) -- not tripping cross-session breaker.
+2026-11-20 16:58:46,139 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 53.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 53, 'alternates': ['openai/gpt-4o-2024-08-06', 'qwen/qwen3.8-27b', 'moonshotai/kimi-k2.7-code']}
+2026-11-20 16:59:39,175 INFO run_agent: OpenAI client created (chat_completion_stream_request, shared=False) thread=Thread-22 (<lambda>):12985839616 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:59:42,847 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call #5: model=qwen/qwen4-max:free provider=nous in=23428 out=103 total=23531 latency=58.5s cache=23259/23428 (99%) write=162 id=gen-1795215579-jWjoezoYusymU2VpPrOo
+2026-11-20 16:59:42,863 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.tool_executor: tool mcp__orchestrator__report completed (0.01s, 58 chars)
+2026-11-20 16:59:43,506 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['deepseek/deepseek-chat-v3-0324', '~openai/gpt-mini-latest', 'anthropic/claude-fable-5.2']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['deepseek/deepseek-chat-v3-0324', '~openai/gpt-mini-latest', 'anthropic/claude-fable-5.2']}
+2026-11-20 16:59:43,506 INFO run_agent: OpenAI client closed (stream_error_cleanup, shared=False, tcp_force_closed=0) thread=Thread-23 (<lambda>):13114699776 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 16:59:43,515 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:59:43,516 INFO [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Nous 429 looks like upstream capacity (no exhausted bucket in headers or last-known state) -- not tripping cross-session breaker.
+2026-11-20 16:59:43,516 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 55.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['deepseek/deepseek-chat-v3-0324', '~openai/gpt-mini-latest', 'anthropic/claude-fable-5.2']}
+2026-11-20 17:00:23,554 INFO tui_gateway.ws: ws closed peer=127.0.0.1:61822 reason=client_disconnect(code=1006,reason=) messages=3 parse_errors=0 dispatch_crashes=0 send_failures=0 reaped_sessions=0 detached_sessions=0
+2026-11-20 17:00:25,215 INFO gateway.run: Received SIGTERM — initiating shutdown
+2026-11-20 17:00:25,215 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=3.67
+2026-11-20 17:00:25,225 INFO gateway.run: Stopping gateway...
+2026-11-20 17:00:25,227 INFO gateway.run: Sent shutdown notification to active chat local:local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0
+2026-11-20 17:00:25,227 INFO gateway.run: Shutdown phase: notify_active_sessions done at +0.00s
+2026-11-20 17:00:25,230 INFO gateway.run: Shutdown phase: drain done at +0.00s (drain took 0.00s, timed_out=True, active_at_start=1, active_now=1, cron_at_start=0, cron_now=0, api_at_start=0, api_now=0, deferred_at_start=0, deferred_now=0)
+2026-11-20 17:00:25,230 WARNING gateway.run: Gateway drain timed out after 0.0s with 1 active agent(s), 0 in-flight cron job(s), 0 api_server run(s), and 0 deferred agent worker(s); interrupting remaining work.
+2026-11-20 17:00:25,231 INFO run_agent: Interrupt requested (hard): gateway shutdown
+2026-11-20 17:00:25,231 INFO gateway.run: Shutdown phase: allowing 1.0s for interrupted agents to unwind
+2026-11-20 17:00:25,259 INFO gateway.run: response ready: platform=local chat=local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 session=agent:main:local:dm:local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 time=299.4s api_calls=6 response=65 chars
+2026-11-20 17:00:25,268 INFO gateway.platforms.base: [Local] Sending response (65 chars) to local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0
+2026-11-20 17:00:25,269 WARNING gateway.session_authority: Session local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 paused: runtime_draining
+2026-11-20 17:00:25,384 INFO tools.terminal_tool: Manually cleaned up environment for task: session:agent:main:local:dm:local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0
+2026-11-20 17:00:25,391 INFO tools.terminal_tool: Cleaned 1 environments
+2026-11-20 17:00:25,392 INFO gateway.run: Shutdown phase: post-interrupt tool kill done at +0.17s
+2026-11-20 17:00:25,392 INFO gateway.run: Shutdown phase: cron interrupt notices done at +0.17s
+2026-11-20 17:00:25,594 INFO run_agent: OpenAI client closed (agent_close, shared=True, tcp_force_closed=0) thread=hermes-gateway-hk_0:6441365504 provider=nous base_url=<credential> model=qwen/qwen4-max:free
+2026-11-20 17:00:25,692 INFO gateway.run: ✓ local disconnected (0.00s)
+2026-11-20 17:00:25,692 INFO gateway.run: Shutdown phase: all adapters disconnected at +0.47s
+2026-11-20 17:00:25,693 INFO gateway.run: Shutdown phase: final-cleanup tool kill done at +0.47s
+2026-11-20 17:00:25,693 INFO gateway.run: Shutdown phase: executor quiesced at +0.47s
+2026-11-20 17:00:25,766 INFO gateway.run: Shutdown phase: SessionDB close done at +0.54s
+2026-11-20 17:00:25,766 INFO gateway.run: Skipping .clean_shutdown marker — drain timed out with interrupted agents; next startup will recover their interrupted turns.
+2026-11-20 17:00:25,767 INFO gateway.run: Gateway stopped by an unexpected signal — persisting gateway_state=running so container_boot auto-starts on the next boot (issue #42675)
+2026-11-20 17:00:25,768 INFO gateway.run: Gateway stopped (total teardown 0.54s)
+2026-11-20 17:00:25,768 INFO gateway.run: Gateway housekeeping stopped
+2026-11-20 17:00:25,972 INFO gateway.run: Exiting with code 1 (signal-initiated shutdown without restart request) so the service manager can revive the gateway.
+
+==> logs/errors.log <==
+2026-11-20 16:55:25,132 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 16:55:27,242 WARNING agent.auxiliary_client: Auxiliary title_generation: main provider nous is unavailable and no fallback_chain / fallback_providers is configured — refusing to guess another logged-in provider. Re-authenticate (`hermes model`) or declare a fallback.
+2026-11-20 16:55:27,242 WARNING agent.auxiliary_client: Auxiliary title_generation: rate limit on auto and all fallbacks exhausted (fallback_chain + main agent model). Raising the primary error.
+2026-11-20 16:55:27,242 WARNING agent.title_generator: Title generation failed: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['openai/gpt-oss-120b', 'openai/gpt-4o-2024-08-06', 'openai/gpt-5.6-terra-pro']}
+2026-11-20 16:55:27,936 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['upstage/solar-pro4', 'google/gemma-4-26b-a4b-it', 'minimax/minimax-m2.5']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['upstage/solar-pro4', 'google/gemma-4-26b-a4b-it', 'minimax/minimax-m2.5']}
+2026-11-20 16:55:27,940 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:55:27,941 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 20.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 20, 'alternates': ['upstage/solar-pro4', 'google/gemma-4-26b-a4b-it', 'minimax/minimax-m2.5']}
+2026-11-20 16:55:55,232 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 48, 'alternates': ['anthropic/claude-sonnet-5', 'deepseek/deepseek-v4-flash-0731', 'perplexity/pplx-embed-v2-context-0.6b']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 48, 'alternates': ['anthropic/claude-sonnet-5', 'deepseek/deepseek-v4-flash-0731', 'perplexity/pplx-embed-v2-context-0.6b']}
+2026-11-20 16:55:55,249 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:55:55,250 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 48.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 48, 'alternates': ['anthropic/claude-sonnet-5', 'deepseek/deepseek-v4-flash-0731', 'perplexity/pplx-embed-v2-context-0.6b']}
+2026-11-20 16:56:48,751 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 52, 'alternates': ['tencent/hy3', 'google/gemma-4-31b-it', 'moonshotai/kimi-k3']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 52, 'alternates': ['tencent/hy3', 'google/gemma-4-31b-it', 'moonshotai/kimi-k3']}
+2026-11-20 16:56:48,760 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:56:48,761 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 52.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 52, 'alternates': ['tencent/hy3', 'google/gemma-4-31b-it', 'moonshotai/kimi-k3']}
+2026-11-20 16:57:45,297 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['openai/gpt-5.6-terra-pro', 'qwen/qwen3-coder-flash', 'google/gemini-3.1-flash-lite-preview']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['openai/gpt-5.6-terra-pro', 'qwen/qwen3-coder-flash', 'google/gemini-3.1-flash-lite-preview']}
+2026-11-20 16:57:45,299 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:57:45,308 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 55.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['openai/gpt-5.6-terra-pro', 'qwen/qwen3-coder-flash', 'google/gemini-3.1-flash-lite-preview']}
+2026-11-20 16:58:46,128 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 53, 'alternates': ['openai/gpt-4o-2024-08-06', 'qwen/qwen3.8-27b', 'moonshotai/kimi-k2.7-code']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 53, 'alternates': ['openai/gpt-4o-2024-08-06', 'qwen/qwen3.8-27b', 'moonshotai/kimi-k2.7-code']}
+2026-11-20 16:58:46,138 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:58:46,139 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 53.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 53, 'alternates': ['openai/gpt-4o-2024-08-06', 'qwen/qwen3.8-27b', 'moonshotai/kimi-k2.7-code']}
+2026-11-20 16:59:43,506 ERROR agent.chat_completion_helpers: Streaming failed before delivery: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['deepseek/deepseek-chat-v3-0324', '~openai/gpt-mini-latest', 'anthropic/claude-fable-5.2']}
+Traceback (most recent call last):
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3756, in _call
+    self.result["response"] = _with_stream_emitters(
+                              ~~~~~~~~~~~~~~~~~~~~~^
+        self.agent, lambda: self._call_wire(stream_attempt_id))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2501, in _with_stream_emitters
+    response = run()
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3757, in <lambda>
+    self.agent, lambda: self._call_wire(stream_attempt_id))
+                        ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3733, in _call_wire
+    return self._call_chat_completions(stream_attempt_id)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3075, in _call_chat_completions
+    stream = self._set_managed_stream(relay_llm.stream(self.api_kwargs, _open_stream,
+                                      ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **_relay_stream_identity(self.agent, "provider"), finalizer=relay_response.finalize,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        completed_response_predicate=lambda value: hasattr(value, "choices"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        metadata=_relay_stream_metadata(self.agent, "chat_completions"), defer_logical_completion=True))
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 331, in __init__
+    self._start_unmanaged(request)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/relay_llm.py", line 337, in _start_unmanaged
+    raw_stream = self._stream_factory(request)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 3066, in _open_stream
+    return self._open_chat_stream({**next_api_kwargs, "stream": True, "timeout": timeout})
+           ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/agent/chat_completion_helpers.py", line 2959, in _open_chat_stream
+    return request_client.chat.completions.create(**stream_kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_utils/_utils.py", line 286, in wrapper
+    return func(*args, **kwargs)
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/resources/chat/completions/completions.py", line 1204, in create
+    return self._post(
+           ~~~~~~~~~~^
+        "/chat/completions",
+        ^^^^^^^^^^^^^^^^^^^^
+    ...<47 lines>...
+        stream_cls=Stream[ChatCompletionChunk],
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1297, in post
+    return cast(ResponseT, self.request(cast_to, opts, stream=stream, stream_cls=stream_cls))
+                           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/openai/_base_client.py", line 1070, in request
+    raise self._make_status_error_from_response(err.response) from None
+openai.RateLimitError: Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['deepseek/deepseek-chat-v3-0324', '~openai/gpt-mini-latest', 'anthropic/claude-fable-5.2']}
+2026-11-20 16:59:43,515 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: API call failed (attempt 1/3) error_type=RateLimitError thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free summary=HTTP 429: You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.
+2026-11-20 16:59:43,516 WARNING [local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0] agent.conversation_loop: Retrying API call in 55.0s (attempt 1/3) thread=hermes-gateway_3:13019492352 provider=nous base_url=<credential> model=qwen/qwen4-max:free policy=default error=Error code: 429 - {'status': 429, 'message': "You've reached this model's current fair-share rate limit. It adapts to demand — retry after the indicated delay, or try an alternate model.", 'reason': 'rate_limited', 'retry_after': 55, 'alternates': ['deepseek/deepseek-chat-v3-0324', '~openai/gpt-mini-latest', 'anthropic/claude-fable-5.2']}
+2026-11-20 17:00:25,215 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=3.67
+2026-11-20 17:00:25,230 WARNING gateway.run: Gateway drain timed out after 0.0s with 1 active agent(s), 0 in-flight cron job(s), 0 api_server run(s), and 0 deferred agent worker(s); interrupting remaining work.
+2026-11-20 17:00:25,269 WARNING gateway.session_authority: Session local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 paused: runtime_draining
+
+==> logs/gateway-exit-diag.log <==
+{"ts": "2026-11-20T22:55:24.407174+00:00", "tag": "gateway.start", "pid": 79097, "python": "3.14.10", "platform": "darwin", "replace": false, "argv": ["/opt/homebrew/Cellar/hermes-agent/0.22.4_1/libexec/lib/python3.14/site-packages/hermes_cli/main.py", "gateway", "run", "--quiet", "--idle-exit"], "stdin_is_tty": false, "console_window_attached": null, "detached": true, "breakaway": null, "absorb_windows_console_controls": false}
+{"ts": "2026-11-20T23:00:25.979469+00:00", "tag": "asyncio.run.returned", "pid": 79097, "python": "3.14.10", "platform": "darwin", "success": false}
+{"ts": "2026-11-20T23:00:25.979931+00:00", "tag": "gateway.exit_nonzero", "pid": 79097, "python": "3.14.10", "platform": "darwin"}
+
+==> logs/gateway-shutdown-diag.log <==
+=== shutdown diagnostic removed: it listed every process of the host ===
+
+==> logs/gateway-stdio.log <==
+┌─────────────────────────────────────────────────────────┐
+│           ☤ Hermes Gateway Starting...                 │
+├─────────────────────────────────────────────────────────┤
+│  Messaging platforms + cron scheduler                    │
+│  Press Ctrl+C to stop                                   │
+└─────────────────────────────────────────────────────────┘
+
+
+==> logs/gateway.log <==
+2026-11-20 16:55:24,725 INFO gateway.control_socket: Gateway control socket listening at <tmpdir>/hermes-gw-2bf1ad3157311e88/control.sock
+2026-11-20 16:55:25,118 INFO gateway.run: Starting Hermes Gateway...
+2026-11-20 16:55:25,118 INFO gateway.run: Session storage: <scratch>/home/.hermes/sessions
+2026-11-20 16:55:25,120 INFO gateway.run: Agent budget: max_iterations=unlimited (agent.max_turns from config.yaml, else the HERMES_MAX_ITERATIONS bridge)
+2026-11-20 16:55:25,120 INFO gateway.run: Secret redaction: ENABLED (tool output, logs, and chat responses are scrubbed before delivery)
+2026-11-20 16:55:25,132 WARNING gateway.run: No messaging platforms enabled.
+2026-11-20 16:55:25,132 INFO gateway.run: Gateway will continue running for cron job execution.
+2026-11-20 16:55:25,167 INFO gateway.run: Channel directory built: 0 target(s)
+2026-11-20 16:55:25,500 INFO gateway.run: Model context warmed: qwen/qwen4-max:free -> 1000000 tokens (detected)
+2026-11-20 16:55:25,501 INFO gateway.run: Turn machinery warmed in 0.4s (21 tool schema(s) materialized)
+2026-11-20 16:55:25,508 INFO gateway.run: Press Ctrl+C to stop
+2026-11-20 16:55:25,510 INFO gateway.run: kanban dispatcher: holding singleton dispatcher lock (<scratch>/home/.hermes/kanban/.dispatcher.lock)
+2026-11-20 16:55:25,512 INFO gateway.run: Cron scheduler will tick 1 profile(s): ['default']
+2026-11-20 16:55:25,513 INFO gateway.run: Auto-started gateway: exits after 600s with no clients, adapters, cron/kanban work or admissions (gateway.unmanaged_idle_exit_seconds)
+2026-11-20 16:55:25,515 INFO gateway.run: Gateway housekeeping started (interval=60s)
+2026-11-20 16:55:25,866 INFO gateway.run: inbound message: platform=local user=uid:501 chat=local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 msg='# Task PROBE-1: add a greeting file  You are working in a git worktree on branch' reply_to_id=None reply_to_text=''
+2026-11-20 16:55:30,512 INFO gateway.run: kanban dispatcher: embedded in gateway (interval=60.0s)
+2026-11-20 17:00:25,215 INFO gateway.run: Received SIGTERM — initiating shutdown
+2026-11-20 17:00:25,215 WARNING gateway.run: Shutdown context: signal=SIGTERM under_systemd=yes parent_pid=1 parent_name=? loadavg_1m=3.67
+2026-11-20 17:00:25,225 INFO gateway.run: Stopping gateway...
+2026-11-20 17:00:25,227 INFO gateway.run: Sent shutdown notification to active chat local:local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0
+2026-11-20 17:00:25,227 INFO gateway.run: Shutdown phase: notify_active_sessions done at +0.00s
+2026-11-20 17:00:25,230 INFO gateway.run: Shutdown phase: drain done at +0.00s (drain took 0.00s, timed_out=True, active_at_start=1, active_now=1, cron_at_start=0, cron_now=0, api_at_start=0, api_now=0, deferred_at_start=0, deferred_now=0)
+2026-11-20 17:00:25,230 WARNING gateway.run: Gateway drain timed out after 0.0s with 1 active agent(s), 0 in-flight cron job(s), 0 api_server run(s), and 0 deferred agent worker(s); interrupting remaining work.
+2026-11-20 17:00:25,231 INFO gateway.run: Shutdown phase: allowing 1.0s for interrupted agents to unwind
+2026-11-20 17:00:25,259 INFO gateway.run: response ready: platform=local chat=local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 session=agent:main:local:dm:local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 time=299.4s api_calls=6 response=65 chars
+2026-11-20 17:00:25,268 INFO gateway.platforms.base: [Local] Sending response (65 chars) to local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0
+2026-11-20 17:00:25,269 WARNING gateway.session_authority: Session local-29eec9746aa3e59e0e9b24827df80cd27b3f06b5440e8cc0326502eaba7c77b0 paused: runtime_draining
+2026-11-20 17:00:25,392 INFO gateway.run: Shutdown phase: post-interrupt tool kill done at +0.17s
+2026-11-20 17:00:25,392 INFO gateway.run: Shutdown phase: cron interrupt notices done at +0.17s
+2026-11-20 17:00:25,692 INFO gateway.run: ✓ local disconnected (0.00s)
+2026-11-20 17:00:25,692 INFO gateway.run: Shutdown phase: all adapters disconnected at +0.47s
+2026-11-20 17:00:25,693 INFO gateway.run: Shutdown phase: final-cleanup tool kill done at +0.47s
+2026-11-20 17:00:25,693 INFO gateway.run: Shutdown phase: executor quiesced at +0.47s
+2026-11-20 17:00:25,766 INFO gateway.run: Shutdown phase: SessionDB close done at +0.54s
+2026-11-20 17:00:25,766 INFO gateway.run: Skipping .clean_shutdown marker — drain timed out with interrupted agents; next startup will recover their interrupted turns.
+2026-11-20 17:00:25,767 INFO gateway.run: Gateway stopped by an unexpected signal — persisting gateway_state=running so container_boot auto-starts on the next boot (issue #42675)
+2026-11-20 17:00:25,768 INFO gateway.run: Gateway stopped (total teardown 0.54s)
+2026-11-20 17:00:25,768 INFO gateway.run: Gateway housekeeping stopped
+2026-11-20 17:00:25,972 INFO gateway.run: Exiting with code 1 (signal-initiated shutdown without restart request) so the service manager can revive the gateway.
+
+==> logs/gateway_faulthandler.log <==
+
+==> logs/mcp-stderr.log <==
+
+2026-11-20 16:55:25,030 ===== starting MCP server 'orchestrator' =====
+
+==> logs/update_receipts/.pm-write.lock <==
+
+==> logs/update_receipts/latest.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T22:55:25.596121+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T22:55:25.596087+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}
+
+==> logs/update_receipts/pm_20261120T225525Z-plugin-check-79097-3f1b2c86a4e74e29ab4153ff2d60492d.json <==
+{
+  "exit_code": 0,
+  "feature_list": null,
+  "finished_at": "2026-11-20T22:55:25.596121+00:00",
+  "kind": "plugin-check",
+  "outcome": "ok",
+  "platform": null,
+  "plugin_checks": [],
+  "refusal": null,
+  "schema": 1,
+  "started_at": "2026-11-20T22:55:25.596087+00:00",
+  "steps": [],
+  "update_id": null,
+  "venv_rebuild": null,
+  "warnings": []
+}
