@@ -13,7 +13,7 @@ vi.mock('../../src/runner/command.js', async (importOriginal) => {
 });
 
 const command = await import('../../src/runner/command.js');
-const { Backoff, composeAgentCommand, DEFAULT_WORKER_CACHE, launchState, runWorkerLoop, startOf, USAGE, workerSettings } = await import('../../src/worker/loop.js');
+const { Backoff, composeAgentCommand, DEFAULT_WORKER_CACHE, launchState, runWorkerLoop, startOf, statusVerdict, USAGE, workerSettings } = await import('../../src/worker/loop.js');
 
 const settings = (over: Partial<import('../../src/worker/loop.js').WorkerSettings> = {}) => ({
   api: 'http://daemon.test',
@@ -317,5 +317,124 @@ describe('runner filter (ORCH_WORKER_RUNNER)', () => {
     expect(unset[0]).toContain('every runner kind');
     expect(await warnings({ agent: 'command', command: 'true', runnerKinds: ['claude-code'] })).toEqual([]);
     expect(await warnings({ agent: 'scripted' })).toEqual([]);
+  });
+});
+
+/**
+ * A daemon with nothing claimable for this loop whose status carries `workByKind`: `verdicts(now)` gives each kind's
+ * verdict at the time of the read (a kind left out is `idle`). Records the time and strongest word of every read.
+ */
+function verdictDaemon(now: () => number, verdicts: (t: number) => Record<string, string>) {
+  const reads: Array<{ t: number; by: Record<string, string> }> = [];
+  const fetchFn = (async (url: string | URL | Request) => {
+    const route = String(url).replace('http://daemon.test', '');
+    if (route === '/v1/claims') return new Response(JSON.stringify({ error: 'nothing is claimable', paused: false }), { status: 404 });
+    if (route === '/v1/status') {
+      const by = verdicts(now());
+      reads.push({ t: now(), by });
+      const workByKind: Record<string, unknown> = {};
+      for (const k of ['claude-code', 'codex', 'opencode']) workByKind[k] = { verdict: by[k] ?? 'idle', claimable: 0, preparing: 0, working: 0 };
+      return new Response(JSON.stringify({ finished: false, workByKind }), { status: 200 });
+    }
+    return new Response('{}', { status: 500 });
+  }) as typeof fetch;
+  return { fetchFn, reads };
+}
+
+const ALL = (v: string) => ({ 'claude-code': v, codex: v, opencode: v });
+
+describe('work verdict (workByKind)', () => {
+  it('exits 0 with finished when the status answers finished for the loop\'s kind', async () => {
+    const clock = fakeClock();
+    const daemon = verdictDaemon(clock.now, () => ({ codex: 'finished' }));
+    const out: string[] = [];
+    expect(await runWorkerLoop(settings({ runnerKinds: ['codex'], idleExitMs: 120_000 }), { fetch: daemon.fetchFn, sleep: clock.sleep, now: clock.now, out: (l) => out.push(l), err: () => undefined })).toBe(0);
+    expect(out.at(-1)).toBe('worker w-1 finished - -');
+    expect(daemon.reads).toHaveLength(1);
+  });
+
+  for (const next of ['human', 'stalled', 'paused', 'idle', 'claim']) {
+    it(`standby holds the idle limit off for 600 s; then ${next} exits with idle-exit 120 s later`, async () => {
+      const clock = fakeClock();
+      const start = clock.now();
+      const switchAt = start + 600_000;
+      const daemon = verdictDaemon(clock.now, (t) => ALL(t < switchAt ? 'standby' : next));
+      const out: string[] = [];
+      // For claim, every claim still answers 404: the verdict alone never restarts the idle clock.
+      expect(await runWorkerLoop(settings({ idleExitMs: 120_000 }), { fetch: daemon.fetchFn, sleep: clock.sleep, now: clock.now, out: (l) => out.push(l), err: () => undefined })).toBe(0);
+      expect(out.at(-1)).toBe('worker w-1 idle-exit - -');
+      const end = daemon.reads.at(-1)!.t;
+      expect(end).toBeGreaterThan(start + 600_000);
+      const lastStandby = daemon.reads.filter((r) => r.by['codex'] === 'standby').at(-1)!.t;
+      expect(lastStandby).toBeGreaterThanOrEqual(switchAt - 30_000);
+      // The first read at or past 120 s after the last standby exits; reads are at most the 30 s backoff cap apart.
+      expect(end - lastStandby).toBeGreaterThanOrEqual(120_000);
+      expect(end - lastStandby).toBeLessThan(150_000);
+      expect(daemon.reads.filter((r) => r.t > lastStandby).every((r) => r.by['codex'] === next)).toBe(true);
+    });
+  }
+
+  it('task filter: ORCH_WORKER_TASK keeps the plain idle limit under standby, and exits at once on finished', async () => {
+    const clock = fakeClock();
+    const start = clock.now();
+    const daemon = verdictDaemon(clock.now, () => ALL('standby'));
+    const out: string[] = [];
+    expect(await runWorkerLoop(settings({ task: 'T9', idleExitMs: 120_000 }), { fetch: daemon.fetchFn, sleep: clock.sleep, now: clock.now, out: (l) => out.push(l), err: () => undefined })).toBe(0);
+    expect(out.at(-1)).toBe('worker w-1 idle-exit - -');
+    expect(clock.now() - start).toBe(121_000);
+    const clock2 = fakeClock();
+    const done = verdictDaemon(clock2.now, () => ALL('finished'));
+    const out2: string[] = [];
+    expect(await runWorkerLoop(settings({ task: 'T9', idleExitMs: 120_000 }), { fetch: done.fetchFn, sleep: clock2.sleep, now: clock2.now, out: (l) => out2.push(l), err: () => undefined })).toBe(0);
+    expect(out2.at(-1)).toBe('worker w-1 finished - -');
+    expect(done.reads).toHaveLength(1);
+  });
+
+  it('kinds: the loop reads only its runnerKinds; without a filter, the strongest verdict of the three kinds', async () => {
+    const claimFromClaude = { finished: false, workByKind: { 'claude-code': { verdict: 'claim' }, codex: { verdict: 'idle' }, opencode: { verdict: 'idle' } } };
+    expect(statusVerdict(claimFromClaude, ['codex', 'opencode'])).toBe('idle');
+    expect(statusVerdict(claimFromClaude)).toBe('claim');
+    const mixed = { workByKind: { 'claude-code': { verdict: 'idle' }, codex: { verdict: 'human' }, opencode: { verdict: 'standby' } } };
+    expect(statusVerdict(mixed)).toBe('standby');
+    expect(statusVerdict(mixed, ['codex'])).toBe('human');
+    expect(statusVerdict({ finished: true })).toBeUndefined();
+
+    // A standby of claude-code does not hold a codex/opencode loop.
+    const clock = fakeClock();
+    const start = clock.now();
+    const daemon = verdictDaemon(clock.now, () => ({ 'claude-code': 'standby' }));
+    const out: string[] = [];
+    expect(await runWorkerLoop(settings({ runnerKinds: ['codex', 'opencode'], idleExitMs: 120_000 }), { fetch: daemon.fetchFn, sleep: clock.sleep, now: clock.now, out: (l) => out.push(l), err: () => undefined })).toBe(0);
+    expect(out.at(-1)).toBe('worker w-1 idle-exit - -');
+    expect(clock.now() - start).toBe(121_000);
+
+    // claude-code answers claim and codex standby: a codex/opencode loop reads standby and stays up, while a loop with no
+    // filter reads claim (stronger), which never restarts the idle clock, and leaves at 121 s.
+    const clock3 = fakeClock();
+    const start3 = clock3.now();
+    const held = verdictDaemon(clock3.now, (t) => (t < start3 + 600_000 ? { 'claude-code': 'claim', codex: 'standby' } : ALL('finished')));
+    const out3: string[] = [];
+    expect(await runWorkerLoop(settings({ runnerKinds: ['codex', 'opencode'], idleExitMs: 120_000 }), { fetch: held.fetchFn, sleep: clock3.sleep, now: clock3.now, out: (l) => out3.push(l), err: () => undefined })).toBe(0);
+    expect(out3.at(-1)).toBe('worker w-1 finished - -');
+    expect(clock3.now() - start3).toBeGreaterThanOrEqual(600_000);
+    const clock4 = fakeClock();
+    const start4 = clock4.now();
+    const loose = verdictDaemon(clock4.now, () => ({ 'claude-code': 'claim', codex: 'standby' }));
+    const out4: string[] = [];
+    expect(await runWorkerLoop(settings({ idleExitMs: 120_000 }), { fetch: loose.fetchFn, sleep: clock4.sleep, now: clock4.now, out: (l) => out4.push(l), err: () => undefined })).toBe(0);
+    expect(out4.at(-1)).toBe('worker w-1 idle-exit - -');
+    expect(clock4.now() - start4).toBe(121_000);
+
+    // Without a filter, finished for one kind is the strongest and ends the loop.
+    const clock2 = fakeClock();
+    const any = verdictDaemon(clock2.now, () => ({ 'claude-code': 'claim', codex: 'standby', opencode: 'finished' }));
+    const out2: string[] = [];
+    expect(await runWorkerLoop(settings({ idleExitMs: 120_000 }), { fetch: any.fetchFn, sleep: clock2.sleep, now: clock2.now, out: (l) => out2.push(l), err: () => undefined })).toBe(0);
+    expect(out2.at(-1)).toBe('worker w-1 finished - -');
+  });
+
+  it('USAGE: the idle limit does not count while work is prepared, worked or verified', () => {
+    const line = USAGE.split('\n').find((l) => l.includes('ORCH_WORKER_IDLE_EXIT_MS'));
+    expect(line).toContain('prepared, worked or verified');
   });
 });

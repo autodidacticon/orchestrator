@@ -179,10 +179,11 @@ describe('slice: the remote worker loop', () => {
       ORCH_WORKER_AGENT: 'command',
       ORCH_WORKER_COMMAND: `node --import ${tsxLoader} ${fallbackAgent} {briefJson} {taskId} {launchId}`,
       ORCH_WORKER_CACHE: cache,
-      ORCH_WORKER_IDLE_EXIT_MS: '1000',
+      ORCH_WORKER_MAX_LAUNCHES: '1',
       AGENT_LOG: path.join(f.dir, 'agent.log'),
     });
-    // No tick while the loop runs: the verifier does not start, so the task stays submitted.
+    // No tick while the loop runs: the verifier does not start, so the task stays submitted. A task under verification
+    // holds the idle limit off, so the loop ends after its one launch.
     expect(await w.exited, w.stderr()).toBe(0);
     expect(h.orch.entry('T1').status.kind).toBe('submitted');
     const [launch] = h.store.listLaunches({ taskId: 'T1' });
@@ -194,7 +195,22 @@ describe('slice: the remote worker loop', () => {
     expect(existsSync(path.join(cloneDirFor(cache, f.bare), '.orchestrator', 'report.json'))).toBe(false);
     expect(lines(w.stdout(), 'relayed')).toHaveLength(1);
     expect(lines(w.stdout(), 'report accepted')).toHaveLength(1);
+    expect(lines(w.stdout(), 'max-launches')).toHaveLength(1);
+  }, 120_000);
+
+  it('exits 0 with idle-exit after ORCH_WORKER_IDLE_EXIT_MS when nothing for its kinds is claimable, prepared, worked or verified', async () => {
+    const f = fixture();
+    // The one launch is for opencode; the loop claims claude-code only, and nothing is under verification.
+    const h = await makeSlice({ graph: `nodes:\n${node('T1')}`, dir: f.dir, repo: f.repo, config: { ...remoteRun(f.bare), runner: { ...remoteRun(f.bare).runner, kind: 'opencode' as const } } });
+    harnesses.push(h);
+    await h.orch.tick();
+    const [oc] = h.store.listLaunches({ taskId: 'T1' });
+    expect(oc).toMatchObject({ status: 'claimable', runner: 'opencode' });
+    const w = startLoop(h, { POD_NAME: 'w-1', ORCH_WORKER_AGENT: 'scripted', ORCH_WORKER_CACHE: path.join(f.dir, 'cache'), ORCH_WORKER_RUNNER: 'claude-code', ORCH_WORKER_IDLE_EXIT_MS: '1000' });
+    expect(await w.exited, w.stderr()).toBe(0);
+    expect(lines(w.stdout(), 'claimed')).toHaveLength(0);
     expect(lines(w.stdout(), 'idle-exit')).toHaveLength(1);
+    expect(h.store.getLaunch(oc!.launchId)?.status).toBe('claimable');
   }, 120_000);
 
   it('reuses one clone for two launches in a row, and the second starts with a clean tree', async () => {
@@ -209,7 +225,8 @@ describe('slice: the remote worker loop', () => {
       ORCH_WORKER_AGENT: 'command',
       ORCH_WORKER_COMMAND: `node --import ${tsxLoader} ${fallbackAgent} {briefJson} {taskId} {launchId}`,
       ORCH_WORKER_CACHE: cache,
-      ORCH_WORKER_IDLE_EXIT_MS: '1000',
+      // Both tasks stay submitted, which holds the idle limit off: the loop ends after its two launches.
+      ORCH_WORKER_MAX_LAUNCHES: '2',
       AGENT_LOG: agentLog,
     });
     expect(await w.exited, w.stderr()).toBe(0);

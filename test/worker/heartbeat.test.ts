@@ -134,7 +134,8 @@ describe('the loop heartbeat', () => {
     };
     const out: string[] = [];
     const errs: string[] = [];
-    const code = await runWorkerLoop(settings(h!.orch.apiBaseUrl, cache), { fetch: fetchFn, sleep, now: time.now, schedule: time.schedule, scriptedIdleMs: 3 * TTL, out: (l) => out.push(l), err: (e) => errs.push(e) });
+    // The task stays submitted (under verification), so the idle limit never runs: the loop ends after its one launch.
+    const code = await runWorkerLoop({ ...settings(h!.orch.apiBaseUrl, cache), maxLaunches: 1 }, { fetch: fetchFn, sleep, now: time.now, schedule: time.schedule, scriptedIdleMs: 3 * TTL, out: (l) => out.push(l), err: (e) => errs.push(e) });
     expect(code, errs.join('')).toBe(0);
 
     const [launch] = h!.store.listLaunches({ taskId: 'T1' });
@@ -190,7 +191,8 @@ describe('the loop heartbeat', () => {
       time.answeredOne();
       return res;
     }) as typeof fetch;
-    await runWorkerLoop(settings(h!.orch.apiBaseUrl, path.join(f.dir, 'cache')), { fetch: fetchFn, sleep: time.sleep, now: time.now, schedule: time.schedule, scriptedIdleMs: 3 * TTL, out: () => undefined, err: () => undefined });
+    // The loop ends after its one launch, whatever state the 401 left the task in (submitted holds the idle limit off).
+    await runWorkerLoop({ ...settings(h!.orch.apiBaseUrl, path.join(f.dir, 'cache')), maxLaunches: 1 }, { fetch: fetchFn, sleep: time.sleep, now: time.now, schedule: time.schedule, scriptedIdleMs: 3 * TTL, out: () => undefined, err: () => undefined });
     // Three TTLs of silence would hold nine heartbeats; after the 401 none follows.
     expect(heartbeats).toBe(2);
   }, 60_000);

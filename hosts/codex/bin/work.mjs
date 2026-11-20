@@ -119,7 +119,8 @@ export function parseWorkArgs(argv) {
 }
 
 /**
- * The stop rule, read from GET /v1/status: the run finished or stalled; or nothing is claimable
+ * The stop rule, read from GET /v1/status. A status that carries `workByKind.<kind>.verdict` (#192) is read through
+ * that verdict alone (stopByWorkVerdict). Without it (an older daemon): the run finished or stalled; or nothing is claimable
  * for the kind, nothing is being prepared for it (`preparingByKind`: launches whose prepare command
  * runs and tasks waiting for a prepare retry; a status without the field counts as 0) and no launch
  * of it is live while questions or reviews wait on a human; or that
@@ -129,6 +130,8 @@ export function parseWorkArgs(argv) {
  * a milestone in `awaitingReview`; the verifying tasks listed there wait on no human.
  */
 export function stopVerdict(s, quietSinceMs, now, idleExitMs, kind = DEFAULT_RUNNER) {
+  const verdict = s.workByKind?.[kind]?.verdict;
+  if (typeof verdict === 'string') return stopByWorkVerdict(verdict, quietSinceMs, now, idleExitMs, kind);
   if (s.finished === true) return { stop: true, why: 'the run is finished' };
   if (s.stalled === true) return { stop: true, why: 'the run is stalled' };
   const claimable = Number(s.claimableByKind?.[kind] ?? 0);
@@ -141,6 +144,28 @@ export function stopVerdict(s, quietSinceMs, now, idleExitMs, kind = DEFAULT_RUN
   if ((s.openQuestions ?? []).length || reviews.length) return { stop: true, why: `nothing is claimable for ${kind} and the run waits on a human` };
   if (quietSinceMs !== undefined && now - quietSinceMs >= idleExitMs) return { stop: true, why: `nothing claimable for ${kind} for ${idleExitMs}ms` };
   return { stop: false, quiet: true };
+}
+
+/**
+ * The stop rule from the daemon's work verdict for the kind (`workByKind.<kind>.verdict`, see specs/operator-control
+ * "Work verdict"): finished, stalled and human stop; idle stops once quiet has lasted `idleExitMs`; claim, standby,
+ * paused and a word this loop does not know keep it polling with the idle timer reset.
+ * See specs/host-integration "Work loop by runner kind: stop rule".
+ */
+function stopByWorkVerdict(verdict, quietSinceMs, now, idleExitMs, kind) {
+  switch (verdict) {
+    case 'finished':
+      return { stop: true, why: 'the run is finished' };
+    case 'stalled':
+      return { stop: true, why: 'the run is stalled' };
+    case 'human':
+      return { stop: true, why: `nothing is claimable for ${kind} and the run waits on a human` };
+    case 'idle':
+      if (quietSinceMs !== undefined && now - quietSinceMs >= idleExitMs) return { stop: true, why: `nothing claimable for ${kind} for ${idleExitMs}ms` };
+      return { stop: false, quiet: true };
+    default:
+      return { stop: false, quiet: false };
+  }
 }
 
 /**

@@ -81,10 +81,11 @@ describe('slice: the worker loop with an agent that reports through the shim', (
       ORCH_WORKER_AGENT: 'command',
       ORCH_WORKER_COMMAND: `node --import ${tsxLoader} ${mcpReportAgent} {mcpConfig} {briefJson} {taskId}`,
       ORCH_WORKER_CACHE: cache,
-      ORCH_WORKER_IDLE_EXIT_MS: '1000',
+      ORCH_WORKER_MAX_LAUNCHES: '1',
       AGENT_LOG: agentLog,
     });
-    // No tick while the loop runs: the verifier does not start, so the task stays submitted.
+    // No tick while the loop runs: the verifier does not start, so the task stays submitted. A task under verification
+    // holds the idle limit off, so the loop ends after its one launch.
     expect(await w.exited, w.stderr()).toBe(0);
     expect(h.orch.entry('T1').status.kind, w.stderr()).toBe('submitted');
 

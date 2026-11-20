@@ -14,6 +14,7 @@ import { isEntrypoint } from '../entry.js';
 import { withoutStore } from '../runs/childEnv.js';
 import type { Launch } from '../state/store.js';
 import { isRunnerKind, RUNNER_KINDS, type RunnerKind } from '../runner/selection.js';
+import { strongestVerdict, type WorkVerdict } from '../loop/verdict.js';
 import { fixedSlots, quoteRules, substitute } from '../runner/command.js';
 import { shimCommand, shimEnv } from '../runner/shim-command.js';
 import { treeFingerprint } from '../workspace/fingerprint.js';
@@ -42,7 +43,7 @@ export interface WorkerSettings {
   agent: WorkerAgent;
   /** The agent command template (`ORCH_WORKER_COMMAND`); required for the `command` agent. */
   command?: string;
-  /** Exit 0 after this long with nothing claimable; 0 never (`ORCH_WORKER_IDLE_EXIT_MS`). */
+  /** Exit 0 after this long with nothing claimed, restarted while the verdict for the loop's kinds is standby; 0 never (`ORCH_WORKER_IDLE_EXIT_MS`). */
   idleExitMs: number;
   /** How long connection failures are retried (`ORCH_RETRY_WINDOW_MS`). */
   retryWindowMs: number;
@@ -364,6 +365,24 @@ export function launchState(status: Record<string, unknown>, workerId: string, c
   return holds && (has('running') || has('waiting')) ? 'held' : 'ended';
 }
 
+/**
+ * The work verdict for the loop's kinds from a GET /v1/status body: the strongest (strongestVerdict) of
+ * `workByKind.<kind>.verdict` over `runnerKinds`, else over every runner kind. Undefined when the body carries no
+ * verdict for any of them (an older daemon): the loop then reads only `finished`. See specs/worker-pool
+ * "Worker loop: nothing claimable: work verdict".
+ */
+export function statusVerdict(body: Record<string, unknown>, runnerKinds?: readonly RunnerKind[]): WorkVerdict | undefined {
+  const by = body['workByKind'];
+  if (by === null || typeof by !== 'object') return undefined;
+  const words: string[] = [];
+  for (const kind of runnerKinds ?? RUNNER_KINDS) {
+    const entry = (by as Record<string, unknown>)[kind];
+    const v = entry !== null && typeof entry === 'object' ? (entry as Record<string, unknown>)['verdict'] : undefined;
+    if (typeof v === 'string') words.push(v);
+  }
+  return words.length ? strongestVerdict(words) : undefined;
+}
+
 /** Run the loop until the run is finished or the idle limit passes (0), or a fatal claim refusal (1). */
 export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): Promise<number> {
   const sleep = deps.sleep ?? realSleep;
@@ -436,10 +455,15 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
     const read = await term.race(call('GET', '/v1/status'));
     if (!read.ok) return 0;
     const st = read.value;
-    if (st.status === 200 && st.body['finished'] === true) {
+    const verdict = st.status === 200 ? statusVerdict(st.body, s.runnerKinds) : undefined;
+    if (st.status === 200 && (st.body['finished'] === true || verdict === 'finished')) {
       log('finished');
       return 0;
     }
+    // Work for the loop's kinds is being prepared, worked or verified: the idle limit starts again. A loop with a task
+    // filter keeps the plain limit, since a verdict per kind says nothing about its one task. `claim` resets nothing:
+    // only a claim that succeeds does, so a loop whose claims keep missing can still leave.
+    if (verdict === 'standby' && !s.task) idleSince = now();
     if (s.idleExitMs > 0 && now() - idleSince >= s.idleExitMs) {
       log('idle-exit');
       return 0;
@@ -818,7 +842,7 @@ finished. Environment:
   ORCH_WORKER_COMMAND        the agent command template for command; {brief}, {briefJson},
                              {worktree}, {launchId}, {taskId}, {mcpConfig}, {allowedTools},
                              {model} and {effort} are substituted
-  ORCH_WORKER_IDLE_EXIT_MS   exit 0 after this long with nothing claimable (default 0, never)
+  ORCH_WORKER_IDLE_EXIT_MS   exit 0 after this long with nothing claimed (default 0, never); the time does not count while work for the worker's kinds is being prepared, worked or verified (it does with ORCH_WORKER_TASK)
   ORCH_WORKER_TASK           claim only this task id (default: any task)
   ORCH_WORKER_RUNNER         claim only launches of this runner kind, or of a comma-separated list
                              of kinds (claude-code, codex, opencode); default: every runner kind
