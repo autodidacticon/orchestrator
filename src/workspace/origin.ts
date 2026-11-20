@@ -228,6 +228,38 @@ export class Origin {
   }
 
   /**
+   * Fetch origin's `<ref>` into the clone's `<ref>` (forced) and answer its sha, or undefined when origin has no such
+   * ref, even when the clone still holds one from an earlier fetch (that ref is then left as it is). Runs on the serial
+   * chain like every other remote command; the integration branch's tracking ref and the fetch interval are left alone.
+   * A name outside `refs/` or one `git check-ref-format` rejects is refused with an `Error` before origin is touched.
+   * Throws `OriginFetchError` (refused or unreachable) when the fetch fails otherwise.
+   */
+  fetchRef(ref: string): Promise<string | undefined> {
+    return this.serial(async () => {
+      await this.checkRefName(ref, false);
+      await this.ensure();
+      const r = await this.remoteGit(['fetch', '--quiet', '--no-tags', '--no-write-fetch-head', this.remote, `+${ref}:${ref}`]);
+      if (r.code !== 0) {
+        // The answer comes from origin, never from a ref an earlier fetch left in the clone.
+        if (!r.timedOut && /couldn't find remote ref/i.test(r.stderr)) return undefined;
+        throw new OriginFetchError(`git fetch ${this.remote} ${ref} failed: ${r.stderr.trim() || r.stdout.trim()}`, classifyFetchFailure(r.stderr, r.timedOut));
+      }
+      return revParse(this.repo, ref);
+    });
+  }
+
+  /**
+   * Refuse a ref name a remote method must not use: one outside `refs/`, one `git check-ref-format` rejects, and for a
+   * delete the integration branch. Runs no command that talks to origin and adds or re-points no remote.
+   */
+  private async checkRefName(ref: string, forDelete: boolean): Promise<void> {
+    if (!ref.startsWith('refs/')) throw new Error(`refused ref name ${JSON.stringify(ref)}: it does not start with refs/`);
+    const r = await git(this.repo, ['check-ref-format', ref], { allowFail: true });
+    if (r.code !== 0) throw new Error(`refused ref name ${JSON.stringify(ref)}: git check-ref-format rejects it`);
+    if (forDelete && ref === this.localRef) throw new Error(`refused ref name ${JSON.stringify(ref)}: the integration branch is never deleted`);
+  }
+
+  /**
    * Read the tip of origin's `refs/heads/<branch>` with `ls-remote`, fetching nothing: undefined when origin has no such
    * branch. Runs on the serial chain like every other remote command. Throws `OriginFetchError` (refused or
    * unreachable) when origin cannot be read. See specs/pull-runner "Lease expiry".
@@ -396,6 +428,24 @@ export class Origin {
       if (remoteSha && remoteSha === sha) return;
       if (remoteSha) throw new TagConflictError(name, remoteSha, sha);
       throw new Error(`git push ${this.remote} ${ref} failed: ${r.stderr.trim() || r.stdout.trim()}`);
+    });
+  }
+
+  /**
+   * Delete `<ref>` on origin, then the clone's `<ref>`. A ref origin does not have, or the clone never had, is not an
+   * error. Runs on the serial chain like every other remote command. A name outside `refs/`, one `git check-ref-format`
+   * rejects, or the integration branch is refused before origin is touched. Any other failure rejects and leaves the
+   * clone's ref.
+   */
+  deleteRef(ref: string): Promise<void> {
+    return this.serial(async () => {
+      await this.checkRefName(ref, true);
+      await this.ensure();
+      const r = await this.remoteGit(['push', '--quiet', '--no-verify', this.remote, `:${ref}`]);
+      if (r.code !== 0 && (r.timedOut || !/remote ref does not exist/i.test(r.stderr))) {
+        throw new Error(`git push ${this.remote} :${ref} failed: ${r.stderr.trim() || r.stdout.trim()}`);
+      }
+      await git(this.repo, ['update-ref', '-d', ref], { allowFail: true });
     });
   }
 

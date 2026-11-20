@@ -54,16 +54,16 @@ const identity = {
 };
 
 export class GitVerifierBackend implements VerifierBackend {
-  private origin: Origin | undefined;
+  protected origin: Origin | undefined;
 
-  constructor(private readonly opts: GitVerifierOptions) {}
+  constructor(protected readonly opts: GitVerifierOptions) {}
 
   /** Make origin the source of truth for publication. See specs/integration-pipeline "Origin as source of truth". */
   useOrigin(origin: Origin | undefined): void {
     this.origin = origin;
   }
 
-  private get ref(): string {
+  protected get ref(): string {
     return `refs/heads/${this.opts.integrationBranch}`;
   }
 
@@ -85,19 +85,15 @@ export class GitVerifierBackend implements VerifierBackend {
     await rm(temp, { recursive: true, force: true });
     await worktreeAddDetached(repo, temp, expectedHead);
     try {
-      // 1. Rebase the sealed range onto the current head, from the merge base so a branch the
-      //    agent already rebased onto a newer head does not replay published commits.
-      const mergeBase = (await git(temp, ['merge-base', expectedHead, job.sealedSha], { allowFail: true })).stdout.trim() || job.baseSha;
-      const rebase = await git(temp, ['rebase', '--onto', 'HEAD', mergeBase, job.sealedSha], { allowFail: true, env: identity });
-      if (rebase.code !== 0) {
-        const unmerged = (await git(temp, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true })).stdout.trim().split('\n').filter(Boolean);
-        await git(temp, ['rebase', '--abort'], { allowFail: true });
-        if (unmerged.length || /CONFLICT|conflict/i.test(rebase.stdout + rebase.stderr)) {
-          return { kind: 'conflict', files: unmerged, since: await ctx.publishedSince(job.baseSha) };
-        }
-        return { kind: 'failed', reason: { kind: 'checkFailed', message: 'rebase failed', output: tail(rebase.stderr || rebase.stdout, this.maxOut) } };
+      // 1. Rebase the sealed range onto the current head.
+      const rebased = await rebaseSealed(temp, expectedHead, job.sealedSha, job.baseSha, this.maxOut);
+      if (rebased.kind === 'conflict') {
+        return { kind: 'conflict', files: rebased.files, since: await ctx.publishedSince(job.baseSha) };
       }
-      const rebasedSha = await revParse(temp, 'HEAD');
+      if (rebased.kind === 'failed') {
+        return { kind: 'failed', reason: { kind: 'checkFailed', message: 'rebase failed', output: rebased.output } };
+      }
+      const { rebasedSha } = rebased;
       ctx.progress({ rebasedSha });
       crashPoint('verify.afterRebase');
 
@@ -137,42 +133,52 @@ export class GitVerifierBackend implements VerifierBackend {
       }
       ctx.progress({ status: 'verified', verifiedSha: rebasedSha });
 
-      // 3. Squash: the verified tree with one parent and the trailers.
-      const message = `${ctx.summary.trim() || job.taskId}\n\n${TRAILER_TASK}: ${job.taskId}\n${TRAILER_LAUNCH}: ${job.launchId}\n`;
-      const squashSha = (await git(repo, ['commit-tree', rebasedTree, '-p', expectedHead, '-m', message], { env: identity })).stdout.trim();
-      crashPoint('verify.afterSquash');
-      ctx.progress({ status: 'publishing', squashSha });
-      // The ref update and the push are outside effects: they wait until the publishing record is durable.
-      await ctx.durable?.();
-
-      // 4. Compare-and-swap publication.
-      const changedFiles = (await git(temp, ['diff', '--name-only', expectedHead, rebasedSha], { allowFail: true })).stdout.trim().split('\n').filter(Boolean).sort();
-      const ok = await updateRefCas(repo, this.ref, squashSha, expectedHead);
-      crashPoint('verify.afterPublish');
-      if (!ok) return { kind: 'requeue' };
-      if (this.origin) {
-        this.origin.inFlight = squashSha;
-        try {
-          const pushed = await this.origin.pushBranch(squashSha, expectedHead);
-          if (!pushed.ok) {
-            // Undo the local swap, whatever the cause: the clone never keeps a squash origin did not take.
-            await updateRefCas(repo, this.ref, expectedHead, squashSha);
-            return pushRequeue(this.origin.remote, `push of ${squashSha} (lease on ${expectedHead})`, pushed);
-          }
-        } finally {
-          this.origin.inFlight = undefined;
-        }
-      }
-      await this.syncPrimaryWorktree();
-      return { kind: 'published', publishedSha: squashSha, verifiedSha: rebasedSha, changedFiles };
+      return await this.publishVerified(job, ctx, expectedHead, rebasedSha, rebasedTree, temp);
     } finally {
       await worktreeRemove(repo, temp);
       await rm(temp, { recursive: true, force: true });
     }
   }
 
+  /**
+   * Squash the rebased, verified tree onto `expectedHead` with the trailers and publish it by compare-and-swap (and a
+   * push with a lease when origin is on). `diffDir` is any checkout of the clone's object store that holds both
+   * commits; the changed files are read there.
+   */
+  protected async publishVerified(job: VerifierJob, ctx: VerifierContext, expectedHead: string, rebasedSha: string, rebasedTree: string, diffDir: string): Promise<VerifierOutcome> {
+    const { repo } = this.opts;
+    // 3. Squash: the verified tree with one parent and the trailers.
+    const message = `${ctx.summary.trim() || job.taskId}\n\n${TRAILER_TASK}: ${job.taskId}\n${TRAILER_LAUNCH}: ${job.launchId}\n`;
+    const squashSha = (await git(repo, ['commit-tree', rebasedTree, '-p', expectedHead, '-m', message], { env: identity })).stdout.trim();
+    crashPoint('verify.afterSquash');
+    ctx.progress({ status: 'publishing', squashSha });
+    // The ref update and the push are outside effects: they wait until the publishing record is durable.
+    await ctx.durable?.();
+
+    // 4. Compare-and-swap publication.
+    const changedFiles = (await git(diffDir, ['diff', '--name-only', expectedHead, rebasedSha], { allowFail: true })).stdout.trim().split('\n').filter(Boolean).sort();
+    const ok = await updateRefCas(repo, this.ref, squashSha, expectedHead);
+    crashPoint('verify.afterPublish');
+    if (!ok) return { kind: 'requeue' };
+    if (this.origin) {
+      this.origin.inFlight = squashSha;
+      try {
+        const pushed = await this.origin.pushBranch(squashSha, expectedHead);
+        if (!pushed.ok) {
+          // Undo the local swap, whatever the cause: the clone never keeps a squash origin did not take.
+          await updateRefCas(repo, this.ref, expectedHead, squashSha);
+          return pushRequeue(this.origin.remote, `push of ${squashSha} (lease on ${expectedHead})`, pushed);
+        }
+      } finally {
+        this.origin.inFlight = undefined;
+      }
+    }
+    await this.syncPrimaryWorktree();
+    return { kind: 'published', publishedSha: squashSha, verifiedSha: rebasedSha, changedFiles };
+  }
+
   /** The ref moved by CAS; bring the primary clone's index and tree along. Never used for work. */
-  private async syncPrimaryWorktree(): Promise<void> {
+  protected async syncPrimaryWorktree(): Promise<void> {
     const head = (await git(this.opts.repo, ['symbolic-ref', '--quiet', 'HEAD'], { allowFail: true })).stdout.trim();
     if (head === this.ref) await git(this.opts.repo, ['reset', '--quiet', '--hard', 'HEAD'], { allowFail: true });
   }
@@ -181,7 +187,7 @@ export class GitVerifierBackend implements VerifierBackend {
    * Fetch, then bring the clone to origin: fast-forward when behind, push the clone's publications when ahead.
    * A launch already on origin (a push whose answer was lost) is published as found; a diverged clone fails the job.
    */
-  private async startFromOrigin(job: VerifierJob): Promise<{ kind: 'head'; head: string } | { kind: 'done'; outcome: VerifierOutcome }> {
+  protected async startFromOrigin(job: VerifierJob): Promise<{ kind: 'head'; head: string } | { kind: 'done'; outcome: VerifierOutcome }> {
     const origin = this.origin as Origin;
     try {
       await origin.fetch();
@@ -358,7 +364,7 @@ export class GitVerifierBackend implements VerifierBackend {
     return foreign;
   }
 
-  private get maxOut(): number {
+  protected get maxOut(): number {
     return this.opts.maxOutputBytes ?? 64 * 1024;
   }
 }
@@ -372,6 +378,34 @@ function pushRequeue(remote: string, what: string, pushed: Exclude<PushResult, {
 
 function tail(text: string, max: number): string {
   return text.length > max ? text.slice(text.length - max) : text;
+}
+
+/**
+ * Rebase the sealed range onto `expectedHead` in `dir`, a worktree whose `HEAD` is `expectedHead`, detached. The range
+ * starts from the merge base of `expectedHead` and `sealedSha` (or `baseSha` when there is none), so a branch the agent
+ * already rebased onto a newer head does not replay published commits. A failed rebase is aborted first.
+ */
+export async function rebaseSealed(
+  dir: string,
+  expectedHead: string,
+  sealedSha: string,
+  baseSha: string,
+  maxOut: number,
+): Promise<{ kind: 'rebased'; rebasedSha: string } | { kind: 'conflict'; files: string[] } | { kind: 'failed'; output: string }> {
+  // Rebase from the merge base so a branch the agent already rebased onto a newer head does not replay published commits.
+  const mergeBase = (await git(dir, ['merge-base', expectedHead, sealedSha], { allowFail: true })).stdout.trim() || baseSha;
+  const rebase = await git(dir, ['rebase', '--onto', 'HEAD', mergeBase, sealedSha], { allowFail: true, env: identity });
+  if (rebase.code !== 0) {
+    const unmerged = (await git(dir, ['diff', '--name-only', '--diff-filter=U'], { allowFail: true })).stdout.trim().split('\n').filter(Boolean);
+    await git(dir, ['rebase', '--abort'], { allowFail: true });
+    await git(dir, ['checkout', '--quiet', '--detach', expectedHead], { allowFail: true });
+    if (unmerged.length || /CONFLICT|conflict/i.test(rebase.stdout + rebase.stderr)) {
+      return { kind: 'conflict', files: unmerged };
+    }
+    return { kind: 'failed', output: tail(rebase.stderr || rebase.stdout, maxOut) };
+  }
+  const rebasedSha = await revParse(dir, 'HEAD');
+  return { kind: 'rebased', rebasedSha };
 }
 
 /**
