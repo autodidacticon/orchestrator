@@ -1,0 +1,17 @@
+timestamp=2026-11-20T20:31:19.110Z level=WARN run=9640978d message="server unavailable" key=orchestrator type=local status=failed
+Error handling request {
+  jsonrpc: "2.0",
+  id: 5,
+  method: "session/set_model",
+  params: {
+    sessionId: "ses_e0557f606ffeAVSZvIYeQRqNtu",
+    modelId: "opencode/gpt-bogus-9",
+  },
+} {
+  code: -32602,
+  message: "Invalid params: model not found: opencode/gpt-bogus-9",
+  data: {
+    providerId: "opencode",
+    modelId: "opencode/gpt-bogus-9",
+  },
+}

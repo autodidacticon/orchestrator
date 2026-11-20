@@ -1,0 +1,129 @@
+{
+  "id": "S1f",
+  "scenario": "S1f",
+  "probedAt": "2026-11-20T20:32:44.027Z",
+  "modelCalls": 1,
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--mcp-json",
+    "<scratch>/out/S1f/mcp.json",
+    "--policy",
+    "<scratch>/out/S1f/policy.json",
+    "--frames",
+    "<scratch>/out/S1f/frames.jsonl",
+    "--turn-timeout-ms",
+    "290000",
+    "--cancel-grace-ms",
+    "15000",
+    "--prompt-file",
+    "<scratch>/out/S1f/prompt.txt"
+  ],
+  "spawnCwd": "<scratch>/wt",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-67cf3636",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S1f/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S1f/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S1f/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S1f/state"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 3622
+  },
+  "timedOut": false,
+  "limitMs": 200000,
+  "driven": null,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 52515,
+      "ppid": 31661,
+      "pgid": 52515,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 32706,
+      "ppid": 31692,
+      "pgid": 32706,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 32752,
+      "ppid": 32647,
+      "pgid": 32647,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 32754,
+      "ppid": 32646,
+      "pgid": 32646,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 99088,
+      "ppid": 99033,
+      "pgid": 99033,
+      "comm": "opencode",
+      "in": "opencode"
+    }
+  ],
+  "frameStats": {
+    "frames": 29,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 1515,
+    "maxGapAfterMs": 867,
+    "usageUpdates": 1,
+    "lastUsage": {
+      "sessionUpdate": "usage_update",
+      "used": 5133,
+      "size": 200000,
+      "cost": {
+        "amount": 0,
+        "currency": "USD"
+      }
+    },
+    "promptAnswer": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 5133,
+          "outputTokens": 8,
+          "totalTokens": 5236,
+          "thoughtTokens": 95
+        },
+        "_meta": {}
+      }
+    }
+  },
+  "token": "orch-probe-token-67cf3636",
+  "tokenFoundIn": [],
+  "evidence": {
+    "frames": "frames/S1f.jsonl",
+    "stderr": "stderr/S1f.txt",
+    "shim": "shim/S1f.jsonl",
+    "logs": "logs/S1f.log",
+    "client": "client/S1f.jsonl"
+  }
+}

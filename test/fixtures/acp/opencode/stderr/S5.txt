@@ -1,0 +1,1 @@
+timestamp=2026-11-20T20:32:43.995Z level=ERROR run=4143c570 message=process session.id=ses_e0556da79ffeqNU4WuvICkICV6 messageID=msg_1faa9265d001iyXYCchYvhURsu error=Aborted stack=undefined

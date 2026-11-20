@@ -1,0 +1,117 @@
+{
+  "id": "S9",
+  "scenario": "S9",
+  "probedAt": "2026-11-20T20:35:43.100Z",
+  "modelCalls": 1,
+  "command": [
+    "opencode",
+    "run",
+    "--format",
+    "json",
+    "--pure",
+    "--print-logs",
+    "--log-level",
+    "WARN",
+    "-m",
+    "opencode/big-pickle",
+    "<",
+    "prompt.md"
+  ],
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"},\"mcp\":{\"orchestrator\":{\"type\":\"local\",\"command\":[\"~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node\",\"<repo>/test/fixtures/acp/recording-shim.mjs\",\"<scratch>/out/S9/shim.jsonl\",\"--block-sec\",\"75\"],\"enabled\":true,\"timeout\":360000}}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-c57a32e5",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S9/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S9/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S9/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S9/state"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 190860
+  },
+  "timedOut": false,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 32706,
+      "ppid": 31692,
+      "pgid": 32706,
+      "comm": "opencode",
+      "in": "tree"
+    },
+    {
+      "pid": 34254,
+      "ppid": 32706,
+      "pgid": 34254,
+      "comm": "<defunct>",
+      "in": "tree"
+    },
+    {
+      "pid": 32752,
+      "ppid": 32647,
+      "pgid": 32647,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 32754,
+      "ppid": 32646,
+      "pgid": 32646,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 32761,
+      "ppid": 32648,
+      "pgid": 32648,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 99088,
+      "ppid": 99033,
+      "pgid": 99033,
+      "comm": "opencode",
+      "in": "opencode"
+    }
+  ],
+  "usage": {
+    "steps": 14,
+    "turns": 1,
+    "input": 11041,
+    "output": 1419,
+    "reasoning": 1132,
+    "cacheRead": 99328,
+    "cacheWrite": 0,
+    "cost": 0
+  },
+  "git": {
+    "branchLog": [
+      "2a6b167 Add greeting file",
+      "Fixture Author <author@example.invalid>"
+    ],
+    "worktreeStatus": [],
+    "files": [
+      "README.md",
+      "greeting.txt"
+    ]
+  },
+  "token": "orch-probe-token-c57a32e5",
+  "tokenFoundIn": [],
+  "evidence": {
+    "stderr": "stderr/S9.txt",
+    "shim": "shim/S9.jsonl",
+    "logs": "logs/S9.log",
+    "run": "run/S9.jsonl"
+  }
+}

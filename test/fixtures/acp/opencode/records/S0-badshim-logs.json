@@ -1,0 +1,122 @@
+{
+  "id": "S0-badshim-logs",
+  "scenario": "S0",
+  "probedAt": "2026-11-20T20:31:20.313Z",
+  "modelCalls": 0,
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--mcp-json",
+    "<scratch>/out/S0-badshim-logs/mcp.json",
+    "--policy",
+    "<scratch>/out/S0-badshim-logs/policy.json",
+    "--frames",
+    "<scratch>/out/S0-badshim-logs/frames.jsonl",
+    "--turn-timeout-ms",
+    "290000",
+    "--cancel-grace-ms",
+    "15000",
+    "--requests-json",
+    "<scratch>/out/S0-badshim-logs/requests.json"
+  ],
+  "spawnCwd": "<scratch>/wt",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-f3c87665",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S0-badshim-logs/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S0-badshim-logs/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S0-badshim-logs/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S0-badshim-logs/state"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 986
+  },
+  "timedOut": false,
+  "limitMs": 90000,
+  "driven": null,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 90407,
+      "ppid": 64325,
+      "pgid": 90407,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 90693,
+      "ppid": 90407,
+      "pgid": 90407,
+      "comm": "opencode",
+      "in": "tree"
+    },
+    {
+      "pid": 92973,
+      "ppid": 90693,
+      "pgid": 92973,
+      "comm": "(git)",
+      "in": "tree"
+    },
+    {
+      "pid": 67004,
+      "ppid": 66850,
+      "pgid": 66850,
+      "comm": "opencode",
+      "in": "opencode"
+    }
+  ],
+  "frameStats": {
+    "frames": 13,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 534,
+    "maxGapAfterMs": 1,
+    "usageUpdates": 0,
+    "lastUsage": null,
+    "promptAnswer": null
+  },
+  "token": "orch-probe-token-f3c87665",
+  "tokenFoundIn": [],
+  "xdg": [
+    "cache/",
+    "cache/opencode/",
+    "cache/opencode/bin/",
+    "cache/opencode/models.json",
+    "config/",
+    "config/opencode/",
+    "config/opencode/.gitignore",
+    "data/",
+    "data/opencode/",
+    "data/opencode/log/",
+    "data/opencode/log/opencode.log",
+    "data/opencode/opencode.db",
+    "data/opencode/opencode.db-shm",
+    "data/opencode/opencode.db-wal",
+    "data/opencode/repos/",
+    "state/",
+    "state/opencode/",
+    "state/opencode/locks/",
+    "state/opencode/locks/88656cedbf627cd2b6f626cb39da2963e345111b.lock/"
+  ],
+  "evidence": {
+    "frames": "frames/S0-badshim-logs.jsonl",
+    "stderr": "stderr/S0-badshim-logs.txt",
+    "shim": "shim/S0-badshim-logs.jsonl",
+    "logs": "logs/S0-badshim-logs.log",
+    "client": "client/S0-badshim-logs.jsonl"
+  }
+}

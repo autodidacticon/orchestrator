@@ -1,0 +1,20 @@
+{"type":"initialized","t":616,"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true},"promptCapabilities":{"embeddedContext":true,"image":true},"sessionCapabilities":{"close":{},"fork":{},"list":{},"resume":{}}},"authMethods":[{"description":"Run `opencode auth login` in the terminal","name":"Login with opencode","id":"opencode-login"}],"agentInfo":{"name":"OpenCode","version":"1.18.30"}}
+{"type":"session","t":1060,"sessionId":"ses_e0555b96effe6yvuQUTEWJ9Fwh","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opencode/big-pickle","options":[{"value":"opencode/big-pickle","name":"OpenCode Zen/Big Pickle"},{"value":"opencode/ling-3.0-flash-fin-free","name":"OpenCode Zen/Ling 3.0 Flash Fin Free"},{"value":"opencode/mimo-v2.5-free","name":"OpenCode Zen/MiMo V2.5 Free"},{"value":"opencode/muse-spark-1.2-contributor-free","name":"OpenCode Zen/Muse Spark 1.2 Free"},{"value":"opencode/muse-spark-1.3-contributor-free","name":"OpenCode Zen/Muse Spark 1.3 Free"},{"value":"opencode/nemotron-3-ultra-free","name":"OpenCode Zen/Nemotron 3 Ultra Free"},{"value":"opencode/nemotron-3.5-lightning-free","name":"OpenCode Zen/Nemotron 3.5 Lightning Free"}]},{"id":"mode","name":"Session Mode","category":"mode","type":"select","currentValue":"build","options":[{"value":"build","name":"build","description":"The default agent. Executes tools based on configured permissions."},{"value":"plan","name":"plan","description":"Plan mode. Disallows all edit tools."}]}]}
+{"type":"update","t":1061,"kind":"available_commands_update"}
+{"type":"update","t":3594,"kind":"agent_thought_chunk"}
+{"type":"update","t":3651,"kind":"agent_thought_chunk"}
+{"type":"update","t":3665,"kind":"agent_thought_chunk"}
+{"type":"update","t":3755,"kind":"agent_thought_chunk"}
+{"type":"update","t":3755,"kind":"agent_thought_chunk"}
+{"type":"update","t":3755,"kind":"agent_thought_chunk"}
+{"type":"update","t":3755,"kind":"agent_thought_chunk"}
+{"type":"update","t":3756,"kind":"tool_call","toolCallId":"chatcmpl-tool-821e8afad8473e01","title":"orchestrator_heartbeat","status":"pending","toolKind":"other"}
+{"type":"update","t":3963,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-821e8afad8473e01","title":"orchestrator_heartbeat","status":"in_progress","toolKind":"other"}
+{"type":"update","t":3972,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-821e8afad8473e01","status":"completed"}
+{"type":"update","t":5803,"kind":"agent_thought_chunk"}
+{"type":"update","t":5830,"kind":"agent_thought_chunk"}
+{"type":"update","t":5948,"kind":"agent_thought_chunk"}
+{"type":"update","t":5950,"kind":"agent_thought_chunk"}
+{"type":"update","t":5953,"kind":"agent_message_chunk"}
+{"type":"usage","t":6122,"update":{"sessionUpdate":"usage_update","used":6034,"size":200000,"cost":{"amount":0,"currency":"USD"}}}
+{"type":"result","t":6400,"stage":"session/prompt","sessionId":"ses_e0555b96effe6yvuQUTEWJ9Fwh","stopReason":"end_turn","usage":{"inputTokens":146,"outputTokens":4,"totalTokens":6047,"thoughtTokens":9,"cachedReadTokens":5888},"exitCode":0,"agentPid":74589,"agentExit":{"code":0,"signal":null,"t":6400,"how":"stdinClosed"},"treeAtEnd":[{"pid":76537,"ppid":74589,"pgid":74569,"comm":"node"}],"killedDescendants":[]}

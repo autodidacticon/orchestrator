@@ -1,0 +1,16 @@
+Error handling request {
+  jsonrpc: "2.0",
+  id: 5,
+  method: "session/set_model",
+  params: {
+    sessionId: "ses_e0558084effebNo7rzsDBKn1Gn",
+    modelId: "opencode/gpt-bogus-9",
+  },
+} {
+  code: -32602,
+  message: "Invalid params: model not found: opencode/gpt-bogus-9",
+  data: {
+    providerId: "opencode",
+    modelId: "opencode/gpt-bogus-9",
+  },
+}

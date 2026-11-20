@@ -1,0 +1,119 @@
+{
+  "id": "S6b",
+  "scenario": "S6b",
+  "probedAt": "2026-11-20T20:33:52.911Z",
+  "modelCalls": 1,
+  "command": [
+    "node",
+    "-e",
+    "<parent: spawn sh -c <client> detached, stdin ignored, stdout+stderr to launch.log, exit>"
+  ],
+  "clientCommand": "'~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node' '<repo>/test/fixtures/acp/acp-client.mjs' '--agent-json' '[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]' '--cwd' '<scratch>/wt' '--mcp-json' '<scratch>/out/S6b/mcp.json' '--policy' '<scratch>/out/S6b/policy.json' '--frames' '<scratch>/out/S6b/frames.jsonl' '--prompt-file' '<scratch>/out/S6b/prompt.txt' '--turn-timeout-ms' '240000'",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-a5c8e987",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S6b/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S6b/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S6b/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S6b/state"
+  },
+  "parentExit": {
+    "code": 0,
+    "ms": 8189
+  },
+  "shPid": 74569,
+  "exit": {
+    "code": 0,
+    "ms": 8189
+  },
+  "finishedAfterParentExit": true,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 74569,
+      "ppid": 1,
+      "pgid": 74569,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 32706,
+      "ppid": 31692,
+      "pgid": 32706,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 32754,
+      "ppid": 32646,
+      "pgid": 32646,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 70937,
+      "ppid": 70715,
+      "pgid": 70715,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 99088,
+      "ppid": 99033,
+      "pgid": 99033,
+      "comm": "opencode",
+      "in": "opencode"
+    }
+  ],
+  "frameStats": {
+    "frames": 23,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 2533,
+    "maxGapAfterMs": 1061,
+    "usageUpdates": 1,
+    "lastUsage": {
+      "sessionUpdate": "usage_update",
+      "used": 6034,
+      "size": 200000,
+      "cost": {
+        "amount": 0,
+        "currency": "USD"
+      }
+    },
+    "promptAnswer": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 146,
+          "outputTokens": 4,
+          "totalTokens": 6047,
+          "thoughtTokens": 9,
+          "cachedReadTokens": 5888
+        },
+        "_meta": {}
+      }
+    }
+  },
+  "token": "orch-probe-token-a5c8e987",
+  "tokenFoundIn": [
+    "frames:<scratch>/out/S6b/frames.jsonl"
+  ],
+  "evidence": {
+    "frames": "frames/S6b.jsonl",
+    "stderr": "stderr/S6b.txt",
+    "shim": "shim/S6b.jsonl",
+    "logs": "logs/S6b.log",
+    "client": "client/S6b.jsonl"
+  }
+}

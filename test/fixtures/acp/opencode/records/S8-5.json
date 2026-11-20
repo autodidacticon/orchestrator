@@ -1,0 +1,134 @@
+{
+  "id": "S8-5",
+  "scenario": "S8",
+  "probedAt": "2026-11-20T20:33:44.536Z",
+  "modelCalls": 0,
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--mcp-json",
+    "<scratch>/out/S8-5/mcp.json",
+    "--policy",
+    "<scratch>/out/S8-5/policy.json",
+    "--frames",
+    "<scratch>/out/S8-5/frames.jsonl",
+    "--turn-timeout-ms",
+    "290000",
+    "--cancel-grace-ms",
+    "15000"
+  ],
+  "spawnCwd": "<scratch>/wt",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-53c8237a",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S8-shared/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S8-shared/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S8-shared/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S8-shared/state"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 2138
+  },
+  "timedOut": false,
+  "limitMs": 120000,
+  "driven": null,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 71495,
+      "ppid": 69354,
+      "pgid": 71495,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 32706,
+      "ppid": 31692,
+      "pgid": 32706,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 32754,
+      "ppid": 32646,
+      "pgid": 32646,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 70864,
+      "ppid": 70632,
+      "pgid": 70632,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 70937,
+      "ppid": 70715,
+      "pgid": 70715,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 71351,
+      "ppid": 71134,
+      "pgid": 71134,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 71449,
+      "ppid": 71417,
+      "pgid": 71417,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 71469,
+      "ppid": 71450,
+      "pgid": 71450,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 99088,
+      "ppid": 99033,
+      "pgid": 99033,
+      "comm": "opencode",
+      "in": "opencode"
+    }
+  ],
+  "frameStats": {
+    "frames": 5,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 1218,
+    "maxGapAfterMs": 4,
+    "usageUpdates": 0,
+    "lastUsage": null,
+    "promptAnswer": null
+  },
+  "token": "orch-probe-token-53c8237a",
+  "sharedXdg": "S8-shared",
+  "evidence": {
+    "frames": "frames/S8-5.jsonl",
+    "stderr": "stderr/S8-5.txt",
+    "shim": "shim/S8-5.jsonl",
+    "logs": "logs/S8-5.log",
+    "client": "client/S8-5.jsonl"
+  }
+}

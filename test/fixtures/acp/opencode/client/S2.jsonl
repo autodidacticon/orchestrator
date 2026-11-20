@@ -1,0 +1,37 @@
+{"type":"initialized","t":708,"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true},"promptCapabilities":{"embeddedContext":true,"image":true},"sessionCapabilities":{"close":{},"fork":{},"list":{},"resume":{}}},"authMethods":[{"description":"Run `opencode auth login` in the terminal","name":"Login with opencode","id":"opencode-login"}],"agentInfo":{"name":"OpenCode","version":"1.18.30"}}
+{"type":"session","t":1040,"sessionId":"ses_e05581115ffenQ6Ed7vJHO26jl","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opencode/big-pickle","options":[{"value":"opencode/beam-free","name":"OpenCode/Beam Free"},{"value":"opencode/big-pickle","name":"OpenCode/Big Pickle"},{"value":"opencode/deepseek-v4.1-flash-free","name":"OpenCode/DeepSeek V4.1 Flash Free"},{"value":"opencode/flint-40b-free","name":"OpenCode/Flint 40B Free"},{"value":"opencode/hy4-flash-free","name":"OpenCode/Hy4 flash Free"},{"value":"opencode/iceman-free","name":"OpenCode/Iceman Free"},{"value":"opencode/longcat-2.5-free","name":"OpenCode/LongCat 2.5 Free"},{"value":"opencode/mimo-v2.6-flash-free","name":"OpenCode/MiMo-V2.6-Flash Free"},{"value":"opencode/nemotron-3.5-lightning-free","name":"OpenCode/Nemotron 3.5 Lightning Free"},{"value":"opencode/nemotron-3.5-super-vl-free","name":"OpenCode/Nemotron 3.5 Super VL Free"},{"value":"opencode/tidepool-alpha-free","name":"OpenCode/Tidepool Alpha Free"}]},{"id":"mode","name":"Session Mode","category":"mode","type":"select","currentValue":"build","options":[{"value":"build","name":"build","description":"The default agent. Executes tools based on configured permissions."},{"value":"plan","name":"plan","description":"Plan mode. Disallows all edit tools."}]}]}
+{"type":"update","t":1042,"kind":"available_commands_update"}
+{"type":"update","t":3440,"kind":"agent_thought_chunk"}
+{"type":"update","t":3488,"kind":"agent_thought_chunk"}
+{"type":"update","t":3505,"kind":"agent_thought_chunk"}
+{"type":"update","t":3633,"kind":"agent_thought_chunk"}
+{"type":"update","t":3634,"kind":"agent_thought_chunk"}
+{"type":"update","t":3634,"kind":"agent_thought_chunk"}
+{"type":"update","t":3634,"kind":"agent_thought_chunk"}
+{"type":"update","t":3634,"kind":"agent_thought_chunk"}
+{"type":"update","t":3715,"kind":"agent_thought_chunk"}
+{"type":"update","t":3715,"kind":"agent_thought_chunk"}
+{"type":"update","t":3715,"kind":"agent_thought_chunk"}
+{"type":"update","t":3715,"kind":"agent_thought_chunk"}
+{"type":"update","t":3716,"kind":"agent_thought_chunk"}
+{"type":"update","t":3716,"kind":"agent_thought_chunk"}
+{"type":"update","t":3819,"kind":"agent_thought_chunk"}
+{"type":"update","t":3819,"kind":"agent_thought_chunk"}
+{"type":"update","t":3819,"kind":"agent_thought_chunk"}
+{"type":"update","t":3819,"kind":"agent_thought_chunk"}
+{"type":"update","t":3819,"kind":"agent_thought_chunk"}
+{"type":"update","t":3819,"kind":"agent_thought_chunk"}
+{"type":"update","t":3883,"kind":"tool_call","toolCallId":"chatcmpl-tool-b42fbd47342479be","title":"orchestrator_heartbeat","status":"pending","toolKind":"other"}
+{"type":"update","t":3884,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-b42fbd47342479be","title":"orchestrator_heartbeat","status":"in_progress","toolKind":"other"}
+{"type":"update","t":3908,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-b42fbd47342479be","status":"completed"}
+{"type":"update","t":7170,"kind":"agent_thought_chunk"}
+{"type":"update","t":7417,"kind":"agent_thought_chunk"}
+{"type":"update","t":7417,"kind":"agent_thought_chunk"}
+{"type":"update","t":7417,"kind":"agent_thought_chunk"}
+{"type":"update","t":7417,"kind":"agent_thought_chunk"}
+{"type":"update","t":7417,"kind":"tool_call","toolCallId":"chatcmpl-tool-9c46466940f66ce4","title":"bash","status":"pending","toolKind":"execute"}
+{"type":"update","t":7680,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-9c46466940f66ce4","title":"uname -s","status":"in_progress","toolKind":"execute"}
+{"type":"permission","t":7706,"id":0,"toolCall":{"toolCallId":"chatcmpl-tool-9c46466940f66ce4","title":"uname -s","kind":"execute","status":"pending","locations":[],"rawInput":{"command":"uname -s"}},"options":[{"optionId":"once","kind":"allow_once","name":"Allow once"},{"optionId":"always","kind":"allow_always","name":"Always allow"},{"optionId":"reject","kind":"reject_once","name":"Reject"}],"request":{"kind":"execute","title":"uname -s","command":"uname -s"},"decision":"reject","answer":{"outcome":"selected","optionId":"reject"},"kind":"reject_once"}
+{"type":"update","t":7715,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-9c46466940f66ce4","title":"uname -s","status":"failed","toolKind":"execute"}
+{"type":"usage","t":7719,"update":{"sessionUpdate":"usage_update","used":8669,"size":200000,"cost":{"amount":0,"currency":"USD"}}}
+{"type":"result","t":8609,"stage":"session/prompt","sessionId":"ses_e05581115ffenQ6Ed7vJHO26jl","stopReason":"end_turn","usage":{"inputTokens":221,"outputTokens":15,"totalTokens":8695,"thoughtTokens":11,"cachedReadTokens":8448},"exitCode":0,"agentPid":67004,"agentExit":{"code":0,"signal":null,"t":8609,"how":"stdinClosed"},"treeAtEnd":[{"pid":69259,"ppid":67004,"pgid":66850,"comm":"node"}],"killedDescendants":[]}

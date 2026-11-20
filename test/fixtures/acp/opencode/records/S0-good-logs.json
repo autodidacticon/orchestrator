@@ -1,0 +1,131 @@
+{
+  "id": "S0-good-logs",
+  "scenario": "S0",
+  "probedAt": "2026-11-20T20:31:15.721Z",
+  "modelCalls": 0,
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--mcp-json",
+    "<scratch>/out/S0-good-logs/mcp.json",
+    "--policy",
+    "<scratch>/out/S0-good-logs/policy.json",
+    "--frames",
+    "<scratch>/out/S0-good-logs/frames.jsonl",
+    "--turn-timeout-ms",
+    "290000",
+    "--cancel-grace-ms",
+    "15000",
+    "--requests-json",
+    "<scratch>/out/S0-good-logs/requests.json"
+  ],
+  "spawnCwd": "<scratch>/wt",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-472fd392",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S0-good-logs/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S0-good-logs/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S0-good-logs/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S0-good-logs/state"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 1102
+  },
+  "timedOut": false,
+  "limitMs": 90000,
+  "driven": null,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 74407,
+      "ppid": 64325,
+      "pgid": 74407,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 74496,
+      "ppid": 74407,
+      "pgid": 74407,
+      "comm": "opencode",
+      "in": "tree"
+    },
+    {
+      "pid": 75841,
+      "ppid": 74496,
+      "pgid": 75841,
+      "comm": "<defunct>",
+      "in": "tree"
+    },
+    {
+      "pid": 75842,
+      "ppid": 74496,
+      "pgid": 75842,
+      "comm": "<defunct>",
+      "in": "tree"
+    },
+    {
+      "pid": 67004,
+      "ppid": 66850,
+      "pgid": 66850,
+      "comm": "opencode",
+      "in": "opencode"
+    }
+  ],
+  "frameStats": {
+    "frames": 13,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 561,
+    "maxGapAfterMs": 2,
+    "usageUpdates": 0,
+    "lastUsage": null,
+    "promptAnswer": null
+  },
+  "token": "orch-probe-token-472fd392",
+  "tokenFoundIn": [
+    "frames:<scratch>/out/S0-good-logs/frames.jsonl"
+  ],
+  "xdg": [
+    "cache/",
+    "cache/opencode/",
+    "cache/opencode/bin/",
+    "cache/opencode/models.json",
+    "config/",
+    "config/opencode/",
+    "config/opencode/.gitignore",
+    "data/",
+    "data/opencode/",
+    "data/opencode/log/",
+    "data/opencode/log/opencode.log",
+    "data/opencode/opencode.db",
+    "data/opencode/opencode.db-shm",
+    "data/opencode/opencode.db-wal",
+    "data/opencode/repos/",
+    "state/",
+    "state/opencode/",
+    "state/opencode/locks/",
+    "state/opencode/locks/4615c8f6041a46592e7f4a1af264b3dd7af4bfbe.lock/"
+  ],
+  "evidence": {
+    "frames": "frames/S0-good-logs.jsonl",
+    "stderr": "stderr/S0-good-logs.txt",
+    "shim": "shim/S0-good-logs.jsonl",
+    "logs": "logs/S0-good-logs.log",
+    "client": "client/S0-good-logs.jsonl"
+  }
+}

@@ -1,0 +1,444 @@
+{
+  "questions": [
+    {
+      "id": "Q1",
+      "question": "Does `opencode acp` answer `initialize` with protocol version 1, and which capabilities and auth methods does it state?",
+      "answer": "yes",
+      "summary": "It answers protocolVersion 1 with agentCapabilities loadSession true, mcpCapabilities {http, sse}, promptCapabilities {embeddedContext, image} and sessionCapabilities {close, fork, list, resume}, one auth method `opencode-login` (\"Run `opencode auth login` in the terminal\"), and agentInfo OpenCode 1.18.30.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S0",
+        "grep -m1 '\"dir\":\"recv\"' test/fixtures/acp/opencode/frames/S0-good.jsonl"
+      ],
+      "evidence": [
+        "frames/S0-good.jsonl",
+        "client/S0-good.jsonl"
+      ],
+      "runs": [
+        "S0-good"
+      ]
+    },
+    {
+      "id": "Q2",
+      "question": "Does stdout carry only JSON-RPC frames, with and without `--print-logs`, and where do the logs go?",
+      "answer": "partly",
+      "summary": "Stdout carried only JSON-RPC frames in every run, with and without --print-logs (frameStats.nonJsonStdoutLines is 0 in every record), and with --print-logs --log-level WARN the log lines go to stderr and also to $XDG_DATA_HOME/opencode/log/opencode.log (S1f, S4), but where they go without --print-logs was not shown: stderr stayed empty and the log file was empty in the 1 s S0 runs both with and without the flag; a refused request also prints an \"Error handling request\" dump on stderr.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S0",
+        "cat test/fixtures/acp/opencode/stderr/S0-badshim.txt test/fixtures/acp/opencode/stderr/S0-badshim-logs.txt",
+        "grep -h nonJsonStdoutLines test/fixtures/acp/opencode/records/*.json | sort | uniq -c",
+        "cat test/fixtures/acp/opencode/logs/S1f.log test/fixtures/acp/opencode/logs/S4.log",
+        "wc -c test/fixtures/acp/opencode/logs/S0-*.log"
+      ],
+      "evidence": [
+        "stderr/S0-badshim.txt",
+        "stderr/S0-badshim-logs.txt",
+        "logs/S0-badshim.log",
+        "logs/S0-badshim-logs.log",
+        "logs/S1f.log",
+        "logs/S4.log",
+        "stderr/S0-model.txt",
+        "records/S0-good.json"
+      ],
+      "runs": [
+        "S0-good",
+        "S0-good-logs",
+        "S0-badshim",
+        "S0-badshim-logs",
+        "S0-model",
+        "S1f",
+        "S4"
+      ]
+    },
+    {
+      "id": "Q3",
+      "question": "Which directory does a session work in when `session/new.cwd`, `--cwd`, the spawn cwd and `$PWD` differ, and does the agent read, write and run commands itself there when the client advertises no `fs` and no `terminal`?",
+      "answer": "yes",
+      "summary": "The session works in session/new.cwd: with --cwd, the spawn cwd and $PWD naming three other directories, the agent's `pwd` printed <scratch>/wt and the shim started in <scratch>/wt; with no fs and no terminal capability the agent never sent an fs/* or terminal/* request in any run, and ran commands (S1d, S3), wrote greeting.txt and committed it (S1b) with its own tools.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S1d",
+        "grep -o '\"rawOutput\":{\"output\":\"[^\"]*\"' test/fixtures/acp/opencode/frames/S1d.jsonl",
+        "grep -l '\"method\":\"\\(fs\\|terminal\\)/' test/fixtures/acp/opencode/frames/*.jsonl",
+        "grep -o '\"cwd\":\"[^\"]*\"' test/fixtures/acp/opencode/shim/S1d.jsonl"
+      ],
+      "evidence": [
+        "frames/S1d.jsonl",
+        "shim/S1d.jsonl",
+        "records/S1d.json",
+        "frames/S1b.jsonl",
+        "records/S1b.json"
+      ],
+      "runs": [
+        "S1d",
+        "S1b"
+      ]
+    },
+    {
+      "id": "Q4",
+      "question": "Does a stdio server named in `session/new.mcpServers` start; with which environment (the listed variables, the parent's, both); under which parent process; and under which names does the model see its tools?",
+      "answer": "yes",
+      "summary": "It starts during session/new (the shim recorded initialize and tools/list in every S0 run, which sent no prompt) as a child of the `opencode acp` process in the client's process group, with both environments: OpenCode's own (the client's PROBE_MARKER) plus the listed entries (PROBE_FROM_SESSION), plus AGENT, OPENCODE, OPENCODE_CLIENT, OPENCODE_CONFIG_CONTENT, OPENCODE_PID, OPENCODE_PURE and npm_config_user_agent that OpenCode adds (and OPENCODE_PRINT_LOGS and OPENCODE_LOG_LEVEL under --print-logs, S0-good-logs); the model sees the tools as orchestrator_heartbeat, orchestrator_block, orchestrator_inbox, orchestrator_log and orchestrator_report (the tool_call titles).",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S0",
+        "head -1 test/fixtures/acp/opencode/shim/S0-good.jsonl",
+        "grep -ho '\"title\":\"orchestrator_[a-z]*\"' test/fixtures/acp/opencode/frames/S1.jsonl test/fixtures/acp/opencode/frames/S1b.jsonl | sort -u"
+      ],
+      "evidence": [
+        "shim/S0-good.jsonl",
+        "shim/S0-good-logs.jsonl",
+        "frames/S1.jsonl",
+        "frames/S1b.jsonl",
+        "client/S3.jsonl"
+      ],
+      "runs": [
+        "S0-good",
+        "S0-good-logs",
+        "S1",
+        "S1b",
+        "S3"
+      ]
+    },
+    {
+      "id": "Q5",
+      "question": "When that server's command cannot start, is it an error of `session/new`, a failed prompt, or a turn without the tools?",
+      "answer": "yes",
+      "summary": "A turn without the tools: session/new answers normally (S0-badshim, S1f), stderr gets `level=WARN message=\"server unavailable\" key=orchestrator type=local status=failed` only under --print-logs, and in S1f the prompt ended end_turn with the model replying NO-TOOL; no frame says the server is missing.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S1f",
+        "cat test/fixtures/acp/opencode/stderr/S1f.txt",
+        "grep '\"type\":\"result\"' test/fixtures/acp/opencode/client/S1f.jsonl",
+        "head -1 test/fixtures/acp/opencode/shim/S1f.jsonl"
+      ],
+      "evidence": [
+        "frames/S1f.jsonl",
+        "stderr/S1f.txt",
+        "client/S1f.jsonl",
+        "shim/S1f.jsonl",
+        "frames/S0-badshim.jsonl",
+        "stderr/S0-badshim-logs.txt"
+      ],
+      "runs": [
+        "S1f",
+        "S0-badshim",
+        "S0-badshim-logs"
+      ]
+    },
+    {
+      "id": "Q6",
+      "question": "Is the `block` call answered after 75 s cut for a server passed over ACP, and does a per-launch setting (`OPENCODE_CONFIG_CONTENT` with `mcp.orchestrator.timeout`) lift the limit?",
+      "answer": "yes",
+      "summary": "Yes and yes: with no timeout setting (S1) every `block` call failed at 60 s with \"MCP error -32001: Request timed out\" although the shim answered at 75 s; a disabled `mcp.orchestrator` entry in OPENCODE_CONFIG_CONTENT carrying only `timeout: 900000` (S1b) lifted the limit for the server passed over ACP, so both 75 s `block` calls completed with the answer, and that entry's own command never started (configShimCalls 0); and `experimental.mcp_timeout: 900000` (S1b-exp) did the same.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S1",
+        "node test/fixtures/acp/opencode/probe.mjs --run S1b",
+        "grep -o '\"text\":\"MCP error -32001: Request timed out\"' test/fixtures/acp/opencode/frames/S1.jsonl | wc -l",
+        "grep '\"answered\"' test/fixtures/acp/opencode/shim/S1b.jsonl"
+      ],
+      "evidence": [
+        "frames/S1.jsonl",
+        "shim/S1.jsonl",
+        "frames/S1b.jsonl",
+        "shim/S1b.jsonl",
+        "records/S1b.json",
+        "shim/S1b-exp.jsonl",
+        "records/S1b-exp.json"
+      ],
+      "runs": [
+        "S1",
+        "S1b",
+        "S1b-exp"
+      ]
+    },
+    {
+      "id": "Q7",
+      "question": "Does `OPENCODE_CONFIG_CONTENT` (the permission ruleset, `snapshots: false`, `share: disabled`, `model`) apply to a session of `opencode acp`?",
+      "answer": "partly",
+      "summary": "The permission ruleset applies (the `ask` rules of S2-S4 produced session/request_permission, the `deny` rule of S1 refused `sleep 60` naming the rules), and a valid `model` applies (S0-model: currentValue opencode/nemotron-3.5-lightning-free), but an unknown `model` is dropped without a word (S7), and whether `snapshots: false` and `share: disabled` apply was not shown (no run went without them, and the one data directory listed, S1's, belongs to a run that edited no file).",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S0m",
+        "node test/fixtures/acp/opencode/probe.mjs --run S7",
+        "grep -o '\"currentValue\":\"[^\"]*\"' test/fixtures/acp/opencode/client/S0-model.jsonl test/fixtures/acp/opencode/client/S7.jsonl",
+        "grep -o 'The user has specified a rule which prevents you[^\\\\]*' test/fixtures/acp/opencode/frames/S1.jsonl | head -1",
+        "grep -c request_permission test/fixtures/acp/opencode/frames/S2.jsonl"
+      ],
+      "evidence": [
+        "client/S0-model.jsonl",
+        "client/S7.jsonl",
+        "frames/S2.jsonl",
+        "frames/S1.jsonl",
+        "records/S1.json"
+      ],
+      "runs": [
+        "S0-model",
+        "S7",
+        "S2",
+        "S1"
+      ]
+    },
+    {
+      "id": "Q8",
+      "question": "Under a rule that asks, does the agent send `session/request_permission`, with which options and which fields naming the command; and are the shim's tools asked for or pre-approved by `\"orchestrator_*\": \"allow\"`?",
+      "answer": "yes",
+      "summary": "Under bash `\"*\": \"ask\"` the agent sends session/request_permission with the options once/allow_once \"Allow once\", always/allow_always \"Always allow\" and reject/reject_once \"Reject\" (no reject_always), naming the command in toolCall.title and toolCall.rawInput.command (kind execute); orchestrator_heartbeat ran with no request, pre-approved by \"orchestrator_*\": \"allow\", and a `deny` rule sends no request at all.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S2",
+        "grep request_permission test/fixtures/acp/opencode/frames/S2.jsonl",
+        "grep '\"type\":\"permission\"' test/fixtures/acp/opencode/client/S3.jsonl"
+      ],
+      "evidence": [
+        "frames/S2.jsonl",
+        "client/S2.jsonl",
+        "client/S3.jsonl",
+        "frames/S1.jsonl"
+      ],
+      "runs": [
+        "S2",
+        "S3",
+        "S1"
+      ]
+    },
+    {
+      "id": "Q9",
+      "question": "After `reject_once`, does the model get an error and the turn go on, or does the turn end as it does under `opencode run`? After `allow_once`, does the command run? With no answer, what does the turn do within 120 s?",
+      "answer": "yes",
+      "summary": "After reject_once the tool call is marked failed (\"The user rejected permission to use this specific tool call.\") and session/prompt answers end_turn 4 ms later with no model step between, so the turn ends as under `opencode run` and the model never sees the error (no FALLBACK-OK); after allow_once `uname -s` ran and the model replied Darwin; with no answer the turn sent no frame for 120 s (frameStats.maxGapMs 120005) until session/cancel, after which the tool failed and the prompt answered cancelled.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S2",
+        "node test/fixtures/acp/opencode/probe.mjs --run S3",
+        "node test/fixtures/acp/opencode/probe.mjs --run S4",
+        "tail -3 test/fixtures/acp/opencode/frames/S2.jsonl",
+        "grep -o '\"maxGapMs\": [0-9]*' test/fixtures/acp/opencode/records/S4.json"
+      ],
+      "evidence": [
+        "frames/S2.jsonl",
+        "frames/S3.jsonl",
+        "frames/S4.jsonl",
+        "records/S4.json"
+      ],
+      "runs": [
+        "S2",
+        "S3",
+        "S4"
+      ]
+    },
+    {
+      "id": "Q10",
+      "question": "How does a turn end: the `stopReason`; whether the process stays up afterwards; what ends it (closing stdin, SIGTERM); with which exit code?",
+      "answer": "yes",
+      "summary": "A completed turn ends with the session/prompt result `stopReason: end_turn` and a `usage` object; the agent stays up after the turn until the client closes its stdin, then exits with code 0 (agentExit.how stdinClosed after every completed turn, S1b, S2, S3, S1d, S7), while SIGTERM to the group ends it by the signal (code null, signal SIGTERM) before it answers the prompt.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S3",
+        "node test/fixtures/acp/opencode/probe.mjs --run S6a",
+        "grep -ho '\"stopReason\":\"[a-z_]*\"\\|\"agentExit\":{[^}]*}' test/fixtures/acp/opencode/client/S1b.jsonl test/fixtures/acp/opencode/client/S3.jsonl test/fixtures/acp/opencode/client/S6a-term.jsonl"
+      ],
+      "evidence": [
+        "client/S3.jsonl",
+        "client/S1b.jsonl",
+        "client/S2.jsonl",
+        "client/S6a-term.jsonl"
+      ],
+      "runs": [
+        "S3",
+        "S1b",
+        "S2",
+        "S6a-term"
+      ]
+    },
+    {
+      "id": "Q11",
+      "question": "Does `session/cancel` during a 60 s shell command end the turn with `cancelled`, how soon, and do the command's process and the shim's process end?",
+      "answer": "yes",
+      "summary": "session/cancel sent 10 s into `sleep 60` was answered `stopReason: cancelled` 15 ms later (frames t 13682 and 13697), the `sleep` process ended (no orphan), and the shim stayed up with the session until the agent's stdin was closed, then exited by itself.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S5",
+        "grep -n 'session/cancel\\|\"stopReason\"' test/fixtures/acp/opencode/frames/S5.jsonl",
+        "node -e \"console.log(require('./test/fixtures/acp/opencode/records/S5.json').orphans, require('./test/fixtures/acp/opencode/records/S5.json').driven.treeBeforeCancel)\""
+      ],
+      "evidence": [
+        "frames/S5.jsonl",
+        "records/S5.json",
+        "shim/S5.jsonl",
+        "client/S5.jsonl"
+      ],
+      "runs": [
+        "S5"
+      ]
+    },
+    {
+      "id": "Q12",
+      "question": "Does SIGTERM to the client's process group during a turn leave a process; what is left after SIGKILL of that group; and does a client started as `SubprocessRunner` starts an agent (detached, stdin ignored, stdout and stderr in one file) finish its turn after its parent has exited?",
+      "answer": "yes",
+      "summary": "Both signals leave the bash tool's `sleep 60`, which OpenCode starts in a process group of its own (pgid = its pid), while the client, `opencode acp` and the shim are in the client's group and end (the shim recorded the SIGTERM); the probe had to kill the `sleep` both times (orphans); a client started detached with stdin ignored and stdout and stderr in one file finished its turn (DONE, exit 0, no orphan) after its parent had exited.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S6a",
+        "node test/fixtures/acp/opencode/probe.mjs --run S6b",
+        "node -e \"for (const r of ['S6a-term', 'S6a-kill', 'S6b']) console.log(r, JSON.stringify(require('./test/fixtures/acp/opencode/records/' + r + '.json').orphans))\""
+      ],
+      "evidence": [
+        "records/S6a-term.json",
+        "records/S6a-kill.json",
+        "shim/S6a-term.jsonl",
+        "records/S6b.json",
+        "client/S6b.jsonl"
+      ],
+      "runs": [
+        "S6a-term",
+        "S6a-kill",
+        "S6b"
+      ]
+    },
+    {
+      "id": "Q13",
+      "question": "Which usage does ACP carry (the fields of `usage_update`, a `usage` on the prompt response, a cost), and how does it compare with the tokens and cost `opencode run --format json` reports for the same prompt?",
+      "answer": "yes",
+      "summary": "The prompt response carries `usage` {inputTokens, outputTokens, totalTokens, thoughtTokens, cachedReadTokens} and one `usage_update` {used, size, cost {amount, currency}} arrives at the end of the turn, but both describe the last step (the last assistant message) only, not the turn: for the task prompt ACP reported 996 input, 35 output and 9984 cache-read tokens where `opencode run --format json` summed 11041, 1419 and 99328 over 14 steps (its last step alone was 720, 28 and 8960); cost was 0 both ways (free model), and ACP reports no step or turn count.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S1b",
+        "node test/fixtures/acp/opencode/probe.mjs --run S9",
+        "grep '\"stopReason\"' test/fixtures/acp/opencode/frames/S1b.jsonl",
+        "node -e \"console.log(require('./test/fixtures/acp/opencode/records/S9.json').usage)\""
+      ],
+      "evidence": [
+        "frames/S1b.jsonl",
+        "records/S1b.json",
+        "run/S9.jsonl",
+        "records/S9.json"
+      ],
+      "runs": [
+        "S1b",
+        "S9"
+      ]
+    },
+    {
+      "id": "Q14",
+      "question": "How are the model and the effort chosen for a session: an option in the `session/new` answer, a set-model method, or only configuration?",
+      "answer": "yes",
+      "summary": "All three for the model: the session/new answer carries configOptions `model` (a select with currentValue and the options) and `mode` (build, plan); session/set_model and session/set_config_option {configId: \"model\"} both take a model, and refuse an unknown one with -32602 \"Invalid params: model not found\"; `model` in OPENCODE_CONFIG_CONTENT sets the default; no effort option is offered for these models and set_config_option {configId: \"effort\"} answers -32602 \"effort not found: high\"; the list of options differed between two fresh starts (\"OpenCode/\u2026\" against \"OpenCode Zen/\u2026\" names).",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S0",
+        "node test/fixtures/acp/opencode/probe.mjs --run S0m",
+        "grep '\"type\":\"extra\"' test/fixtures/acp/opencode/client/S0-good-logs.jsonl test/fixtures/acp/opencode/client/S0-model.jsonl"
+      ],
+      "evidence": [
+        "client/S0-good-logs.jsonl",
+        "client/S0-model.jsonl",
+        "client/S0-good.jsonl"
+      ],
+      "runs": [
+        "S0-good-logs",
+        "S0-model",
+        "S0-good"
+      ]
+    },
+    {
+      "id": "Q15",
+      "question": "How do an unknown model, a server that did not start and a rejected permission show in the frames and on stderr, and can the reasons of `classifyOpenCodeFailure` be told apart?",
+      "answer": "partly",
+      "summary": "An unknown model in the configuration shows nowhere (S7 ran the default model, empty stderr), while one set over ACP is a JSON-RPC error -32602 \"model not found\" plus an \"Error handling request\" dump on stderr; a server that did not start shows only as the WARN `server unavailable key=orchestrator` on stderr under --print-logs (which the mcpStartupFailed pattern matches); a rejected permission shows only in the frames (a failed tool_call_update with \"The user rejected permission\u2026\" and end_turn), with no `auto-rejecting` line; so mcpStartupFailed can be told apart, unknownModel only when the client sets the model itself, permissionDenied only from the frames, and authFailed was not probed (the free model needs no login).",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S7",
+        "node test/fixtures/acp/opencode/probe.mjs --run S0m",
+        "node test/fixtures/acp/opencode/probe.mjs --run S1f",
+        "node test/fixtures/acp/opencode/probe.mjs --run S2",
+        "cat test/fixtures/acp/opencode/stderr/S7.txt test/fixtures/acp/opencode/stderr/S1f.txt test/fixtures/acp/opencode/stderr/S2.txt"
+      ],
+      "evidence": [
+        "stderr/S7.txt",
+        "client/S0-model.jsonl",
+        "stderr/S0-model.txt",
+        "stderr/S1f.txt",
+        "frames/S2.jsonl",
+        "stderr/S2.txt"
+      ],
+      "runs": [
+        "S7",
+        "S0-model",
+        "S1f",
+        "S2"
+      ]
+    },
+    {
+      "id": "Q16",
+      "question": "What does the stream show while the agent waits: are there frames during the 75 s tool call, and what is the longest gap between two frames of the task run?",
+      "answer": "yes",
+      "summary": "Nothing arrives while a tool call runs: in S1b each 75 s `block` call left a gap with no frame of 75017 and 75159 ms (the longest), in S1 the cut calls left 60 s gaps, and in S4 the unanswered permission request left 120005 ms; progress otherwise streams as session/update frames (thought and message chunks, tool_call and tool_call_update) as the agent works.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S1b",
+        "grep -o '\"maxGapMs\": [0-9]*' test/fixtures/acp/opencode/records/S1.json test/fixtures/acp/opencode/records/S1b.json test/fixtures/acp/opencode/records/S4.json"
+      ],
+      "evidence": [
+        "records/S1b.json",
+        "records/S1.json",
+        "records/S4.json",
+        "frames/S1b.jsonl"
+      ],
+      "runs": [
+        "S1",
+        "S1b",
+        "S4"
+      ]
+    },
+    {
+      "id": "Q17",
+      "question": "Of 8 clients started in the same instant on one data directory, with no prompt sent, how many fail `initialize` or `session/new`, and with which message?",
+      "answer": "yes",
+      "summary": "None: all 8 clients started together on one XDG_DATA_HOME answered initialize and session/new and exited 0 in 1.6-2.6 s, with no `database is locked` line on any stderr.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S8",
+        "grep -h '\"type\":\"result\"' test/fixtures/acp/opencode/client/S8-*.jsonl",
+        "cat test/fixtures/acp/opencode/stderr/S8-*.txt"
+      ],
+      "evidence": [
+        "client/S8-1.jsonl",
+        "client/S8-2.jsonl",
+        "client/S8-3.jsonl",
+        "client/S8-4.jsonl",
+        "client/S8-5.jsonl",
+        "client/S8-6.jsonl",
+        "client/S8-7.jsonl",
+        "client/S8-8.jsonl",
+        "stderr/S8-1.txt",
+        "stderr/S8-2.txt",
+        "stderr/S8-3.txt",
+        "stderr/S8-4.txt",
+        "stderr/S8-5.txt",
+        "stderr/S8-6.txt",
+        "stderr/S8-7.txt",
+        "stderr/S8-8.txt"
+      ],
+      "runs": [
+        "S8-1",
+        "S8-2",
+        "S8-3",
+        "S8-4",
+        "S8-5",
+        "S8-6",
+        "S8-7",
+        "S8-8"
+      ]
+    },
+    {
+      "id": "Q18",
+      "question": "Does the agent commit on the launch branch in the linked worktree, and is the fake token found under the data directory or in the logs after the run?",
+      "answer": "yes",
+      "summary": "The agent committed greeting.txt as dbe1709 \"Add greeting file\" on task/PROBE/l1 in the linked worktree <scratch>/wt and left it clean (S1b; S9 did the same through `opencode run`); the fake token was never found under the run's XDG data, state, cache or config directories nor on stderr: passed in the session/new `env` it is in the client's frames file only (S1, S1b), and passed through `--orch-env-file` (S1e) it is nowhere but the shim's own record, so the env file keeps it out of the frames as well.",
+      "commands": [
+        "node test/fixtures/acp/opencode/probe.mjs --run S1b",
+        "node test/fixtures/acp/opencode/probe.mjs --run S1e",
+        "grep -A3 '\"branchLog\"' test/fixtures/acp/opencode/records/S1b.json",
+        "grep -h -A1 '\"tokenFoundIn\"\\|\"fileTokenFoundIn\"' test/fixtures/acp/opencode/records/S1.json test/fixtures/acp/opencode/records/S1b.json test/fixtures/acp/opencode/records/S1e.json"
+      ],
+      "evidence": [
+        "records/S1b.json",
+        "records/S1e.json",
+        "records/S1.json",
+        "shim/S1e.jsonl",
+        "frames/S1e.jsonl"
+      ],
+      "runs": [
+        "S1b",
+        "S1e",
+        "S1"
+      ]
+    }
+  ]
+}

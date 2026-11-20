@@ -1,0 +1,144 @@
+{
+  "id": "S1b",
+  "scenario": "S1b",
+  "probedAt": "2026-11-20T20:41:09.647Z",
+  "modelCalls": 1,
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--mcp-json",
+    "<scratch>/out/S1b/mcp.json",
+    "--policy",
+    "<scratch>/out/S1b/policy.json",
+    "--frames",
+    "<scratch>/out/S1b/frames.jsonl",
+    "--turn-timeout-ms",
+    "290000",
+    "--cancel-grace-ms",
+    "15000",
+    "--prompt-file",
+    "<scratch>/out/S1b/prompt.txt"
+  ],
+  "spawnCwd": "<scratch>/wt",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"},\"mcp\":{\"orchestrator\":{\"type\":\"local\",\"command\":[\"~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node\",\"<repo>/test/fixtures/acp/recording-shim.mjs\",\"<scratch>/out/S1b/shim-config.jsonl\"],\"enabled\":false,\"timeout\":900000}}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-1dbe4501",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S1b/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S1b/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S1b/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S1b/state"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 206373
+  },
+  "timedOut": false,
+  "limitMs": 330000,
+  "driven": null,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 36598,
+      "ppid": 36315,
+      "pgid": 36598,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 36653,
+      "ppid": 36598,
+      "pgid": 36598,
+      "comm": "opencode",
+      "in": "tree"
+    },
+    {
+      "pid": 37837,
+      "ppid": 36653,
+      "pgid": 36598,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 73230,
+      "ppid": 36653,
+      "pgid": 73230,
+      "comm": "(zsh)",
+      "in": "tree"
+    },
+    {
+      "pid": 73273,
+      "ppid": 73230,
+      "pgid": 73230,
+      "comm": "(git)",
+      "in": "tree"
+    }
+  ],
+  "frameStats": {
+    "frames": 896,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 75159,
+    "maxGapAfterMs": 99887,
+    "usageUpdates": 1,
+    "lastUsage": {
+      "sessionUpdate": "usage_update",
+      "used": 10980,
+      "size": 200000,
+      "cost": {
+        "amount": 0,
+        "currency": "USD"
+      }
+    },
+    "promptAnswer": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 996,
+          "outputTokens": 35,
+          "totalTokens": 11079,
+          "thoughtTokens": 64,
+          "cachedReadTokens": 9984
+        },
+        "_meta": {}
+      }
+    }
+  },
+  "token": "orch-probe-token-1dbe4501",
+  "tokenFoundIn": [
+    "frames:<scratch>/out/S1b/frames.jsonl"
+  ],
+  "git": {
+    "branchLog": [
+      "dbe1709 Add greeting file",
+      "Fixture Author <author@example.invalid>"
+    ],
+    "worktreeStatus": [],
+    "files": [
+      "README.md",
+      "greeting.txt"
+    ]
+  },
+  "configShimCalls": 0,
+  "evidence": {
+    "frames": "frames/S1b.jsonl",
+    "stderr": "stderr/S1b.txt",
+    "shim": "shim/S1b.jsonl",
+    "logs": "logs/S1b.log",
+    "client": "client/S1b.jsonl"
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "id": "S1b-exp",
+  "scenario": "S1b",
+  "probedAt": "2026-11-20T20:43:04.460Z",
+  "modelCalls": 1,
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--mcp-json",
+    "<scratch>/out/S1b-exp/mcp.json",
+    "--policy",
+    "<scratch>/out/S1b-exp/policy.json",
+    "--frames",
+    "<scratch>/out/S1b-exp/frames.jsonl",
+    "--turn-timeout-ms",
+    "290000",
+    "--cancel-grace-ms",
+    "15000",
+    "--prompt-file",
+    "<scratch>/out/S1b-exp/prompt.txt"
+  ],
+  "spawnCwd": "<scratch>/wt",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"},\"experimental\":{\"mcp_timeout\":900000}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-7d760649",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S1b-exp/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S1b-exp/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S1b-exp/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S1b-exp/state"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null,
+    "ms": 111979
+  },
+  "timedOut": false,
+  "limitMs": 330000,
+  "driven": null,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 21646,
+      "ppid": 36315,
+      "pgid": 21646,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 21665,
+      "ppid": 21646,
+      "pgid": 21646,
+      "comm": "opencode",
+      "in": "tree"
+    },
+    {
+      "pid": 21700,
+      "ppid": 21665,
+      "pgid": 21646,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 66575,
+      "ppid": 21665,
+      "pgid": 66575,
+      "comm": "zsh",
+      "in": "tree"
+    },
+    {
+      "pid": 66679,
+      "ppid": 66575,
+      "pgid": 66575,
+      "comm": "(zsh)",
+      "in": "tree"
+    }
+  ],
+  "frameStats": {
+    "frames": 199,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 75017,
+    "maxGapAfterMs": 5104,
+    "usageUpdates": 1,
+    "lastUsage": {
+      "sessionUpdate": "usage_update",
+      "used": 8563,
+      "size": 200000,
+      "cost": {
+        "amount": 0,
+        "currency": "USD"
+      }
+    },
+    "promptAnswer": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 627,
+          "outputTokens": 7,
+          "totalTokens": 8588,
+          "thoughtTokens": 18,
+          "cachedReadTokens": 7936
+        },
+        "_meta": {}
+      }
+    }
+  },
+  "token": "orch-probe-token-7d760649",
+  "tokenFoundIn": [
+    "frames:<scratch>/out/S1b-exp/frames.jsonl"
+  ],
+  "git": {
+    "branchLog": [
+      "6774503 Add operator-named greeting file",
+      "Fixture Author <author@example.invalid>"
+    ],
+    "worktreeStatus": [],
+    "files": [
+      "README.md",
+      "greeting.txt"
+    ]
+  },
+  "evidence": {
+    "frames": "frames/S1b-exp.jsonl",
+    "stderr": "stderr/S1b-exp.txt",
+    "shim": "shim/S1b-exp.jsonl",
+    "logs": "logs/S1b-exp.log",
+    "client": "client/S1b-exp.jsonl"
+  }
+}

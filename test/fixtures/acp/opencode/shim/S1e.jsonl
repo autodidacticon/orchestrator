@@ -1,0 +1,34 @@
+{"t":1795206822193,"pid":72021,"event":"start","argv":["<repo>/test/fixtures/acp/recording-shim.mjs","<scratch>/out/S1e/shim.jsonl","--block-sec","75","--orch-env-file","<scratch>/home/shim.env"],"cwd":"<scratch>/wt","envNames":["AGENT","HOME","LANG","OPENCODE","OPENCODE_CLIENT","OPENCODE_CONFIG_CONTENT","OPENCODE_LOG_LEVEL","OPENCODE_PID","OPENCODE_PRINT_LOGS","OPENCODE_PURE","ORCH_API","ORCH_LAUNCH_ID","ORCH_TOKEN","PATH","PROBE_MARKER","PWD","TMPDIR","USER","XDG_CACHE_HOME","XDG_CONFIG_HOME","XDG_DATA_HOME","XDG_STATE_HOME","__CF_USER_TEXT_ENCODING","npm_config_user_agent"],"values":{"ORCH_LAUNCH_ID":{"value":"probe-launch","source":"envFile","envValue":"probe-launch"},"ORCH_TOKEN":{"value":"orch-probe-token-015c453b","source":"envFile","envValue":"orch-probe-token-aa76492e"},"ORCH_API":{"value":"http://127.0.0.1:9","source":"envFile","envValue":"http://127.0.0.1:9"},"PROBE_MARKER":{"value":"from-client-env","source":"env"}},"envFile":"<scratch>/home/shim.env","chain":[{"pid":72021,"ppid":70937,"pgid":70715,"comm":"node"},{"pid":70937,"ppid":70715,"pgid":70715,"comm":"opencode"},{"pid":70715,"ppid":69356,"pgid":70715,"comm":"node"},{"pid":69356,"ppid":1,"pgid":69352,"comm":"node"}]}
+{"t":1795206822195,"pid":72021,"event":"request","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"roots":{}},"clientInfo":{"name":"opencode","version":"1.18.30"}}}
+{"t":1795206822202,"pid":72021,"event":"request","method":"notifications/initialized"}
+{"t":1795206822202,"pid":72021,"event":"request","method":"tools/list"}
+{"t":1795206824190,"pid":72021,"event":"call","tool":"heartbeat","args":{"progress":"Starting T1: about to ask operator for the greeting filename"}}
+{"t":1795206824229,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206826853,"pid":72021,"event":"call","tool":"block","args":{"seq":0,"kind":"needsDecision","message":"What filename should I use for the greeting file at the repository root? I will create it with exactly this name and content `hello from opencode`.","options":[]}}
+{"t":1795206886871,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206886872,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206889516,"pid":72021,"event":"call","tool":"heartbeat","args":{"progress":"needsDecision timed out; checking inbox for the operator's answer"}}
+{"t":1795206889530,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206891239,"pid":72021,"event":"call","tool":"inbox","args":{}}
+{"t":1795206891342,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206894429,"pid":72021,"event":"call","tool":"log","args":{"text":"First needsDecision (seq 0) timed out; no inbox notices. Retrying the question.","seq":0}}
+{"t":1795206894440,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206897572,"pid":72021,"event":"call","tool":"block","args":{"seq":1,"kind":"needsDecision","message":"Please name the greeting file to create at the repository root (content will be exactly `hello from opencode`). Reply with just the filename.","options":[]}}
+{"t":1795206901853,"pid":72021,"event":"answered","tool":"block"}
+{"t":1795206957589,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206957590,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206959954,"pid":72021,"event":"call","tool":"inbox","args":{}}
+{"t":1795206959985,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795206972573,"pid":72021,"event":"answered","tool":"block"}
+{"t":1795206972622,"pid":72021,"event":"call","tool":"block","args":{"seq":2,"kind":"needsDecision","message":"Choose the exact filename for the root greeting file containing `hello from opencode`.","options":["greeting.txt","hello.txt","hello-from-opencode.txt"]}}
+{"t":1795207032637,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795207032638,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795207036229,"pid":72021,"event":"call","tool":"heartbeat","args":{"progress":"Three needsDecision attempts timed out; waiting briefly before rechecking inbox"}}
+{"t":1795207036241,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795207040460,"pid":72021,"event":"call","tool":"block","args":{"seq":3,"kind":"needsDecision","message":"Filename for root greeting file?","options":[]}}
+{"t":1795207047620,"pid":72021,"event":"answered","tool":"block"}
+{"t":1795207100498,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795207100499,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795207102454,"pid":72021,"event":"call","tool":"inbox","args":{}}
+{"t":1795207102460,"pid":72021,"event":"request","method":"notifications/cancelled"}
+{"t":1795207112886,"pid":72021,"event":"stdinClosed"}

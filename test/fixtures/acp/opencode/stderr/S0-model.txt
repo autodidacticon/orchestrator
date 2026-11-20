@@ -1,0 +1,33 @@
+Error handling request {
+  jsonrpc: "2.0",
+  id: 2,
+  method: "session/set_config_option",
+  params: {
+    sessionId: "ses_e0556082bffeH7cGrH0iRI5QZG",
+    configId: "model",
+    value: "opencode/gpt-bogus-9",
+  },
+} {
+  code: -32602,
+  message: "Invalid params: model not found: opencode/gpt-bogus-9",
+  data: {
+    providerId: "opencode",
+    modelId: "opencode/gpt-bogus-9",
+  },
+}
+Error handling request {
+  jsonrpc: "2.0",
+  id: 3,
+  method: "session/set_config_option",
+  params: {
+    sessionId: "ses_e0556082bffeH7cGrH0iRI5QZG",
+    configId: "effort",
+    value: "high",
+  },
+} {
+  code: -32602,
+  message: "Invalid params: effort not found: high",
+  data: {
+    effort: "high",
+  },
+}

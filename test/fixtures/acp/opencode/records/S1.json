@@ -1,0 +1,188 @@
+{
+  "id": "S1",
+  "scenario": "S1",
+  "probedAt": "2026-11-20T20:36:13.365Z",
+  "modelCalls": 1,
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--mcp-json",
+    "<scratch>/out/S1/mcp.json",
+    "--policy",
+    "<scratch>/out/S1/policy.json",
+    "--frames",
+    "<scratch>/out/S1/frames.jsonl",
+    "--turn-timeout-ms",
+    "290000",
+    "--cancel-grace-ms",
+    "15000",
+    "--prompt-file",
+    "<scratch>/out/S1/prompt.txt"
+  ],
+  "spawnCwd": "<scratch>/wt",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"deny\",\"read\":\"allow\",\"glob\":\"allow\",\"grep\":\"allow\",\"list\":\"allow\",\"edit\":\"allow\",\"write\":\"allow\",\"bash\":{\"*\":\"deny\",\"git *\":\"allow\",\"node *\":\"allow\"},\"orchestrator_*\":\"allow\"}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-12a0409d",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S1/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S1/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S1/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S1/state"
+  },
+  "exit": {
+    "code": 5,
+    "signal": null,
+    "ms": 291324
+  },
+  "timedOut": false,
+  "limitMs": 330000,
+  "driven": null,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 99033,
+      "ppid": 64325,
+      "pgid": 99033,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 99088,
+      "ppid": 99033,
+      "pgid": 99033,
+      "comm": "opencode",
+      "in": "tree"
+    },
+    {
+      "pid": 1357,
+      "ppid": 99088,
+      "pgid": 99033,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 1904,
+      "ppid": 99088,
+      "pgid": 1904,
+      "comm": "(git)",
+      "in": "tree"
+    },
+    {
+      "pid": 1300,
+      "ppid": 1173,
+      "pgid": 1173,
+      "comm": "opencode",
+      "in": "opencode"
+    }
+  ],
+  "frameStats": {
+    "frames": 563,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 60067,
+    "maxGapAfterMs": 74546,
+    "usageUpdates": 1,
+    "lastUsage": {
+      "sessionUpdate": "usage_update",
+      "used": 0,
+      "size": 200000,
+      "cost": {
+        "amount": 0,
+        "currency": "USD"
+      }
+    },
+    "promptAnswer": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "stopReason": "cancelled",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "_meta": {}
+      }
+    }
+  },
+  "token": "orch-probe-token-12a0409d",
+  "tokenFoundIn": [
+    "frames:<scratch>/out/S1/frames.jsonl"
+  ],
+  "git": {
+    "branchLog": [],
+    "worktreeStatus": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "xdg": [
+    "cache/",
+    "cache/opencode/",
+    "cache/opencode/bin/",
+    "cache/opencode/models.json",
+    "config/",
+    "config/opencode/",
+    "config/opencode/.gitignore",
+    "config/opencode/node_modules/",
+    "config/opencode/node_modules/.bin/",
+    "config/opencode/node_modules/.package-lock.json",
+    "config/opencode/node_modules/@ai-sdk/",
+    "config/opencode/node_modules/@msgpackr-extract/",
+    "config/opencode/node_modules/@opencode-ai/",
+    "config/opencode/node_modules/@standard-schema/",
+    "config/opencode/node_modules/cross-spawn/",
+    "config/opencode/node_modules/detect-libc/",
+    "config/opencode/node_modules/effect/",
+    "config/opencode/node_modules/fast-check/",
+    "config/opencode/node_modules/find-my-way-ts/",
+    "config/opencode/node_modules/ini/",
+    "config/opencode/node_modules/isexe/",
+    "config/opencode/node_modules/json-schema/",
+    "config/opencode/node_modules/kubernetes-types/",
+    "config/opencode/node_modules/msgpackr/",
+    "config/opencode/node_modules/msgpackr-extract/",
+    "config/opencode/node_modules/multipasta/",
+    "config/opencode/node_modules/node-gyp-build-optional-packages/",
+    "config/opencode/node_modules/path-key/",
+    "config/opencode/node_modules/pure-rand/",
+    "config/opencode/node_modules/shebang-command/",
+    "config/opencode/node_modules/shebang-regex/",
+    "config/opencode/node_modules/toml/",
+    "config/opencode/node_modules/uuid/",
+    "config/opencode/node_modules/which/",
+    "config/opencode/node_modules/yaml/",
+    "config/opencode/node_modules/zod/",
+    "config/opencode/package-lock.json",
+    "config/opencode/package.json",
+    "data/",
+    "data/opencode/",
+    "data/opencode/log/",
+    "data/opencode/log/opencode.log",
+    "data/opencode/opencode.db",
+    "data/opencode/opencode.db-shm",
+    "data/opencode/opencode.db-wal",
+    "data/opencode/repos/",
+    "state/",
+    "state/opencode/",
+    "state/opencode/locks/"
+  ],
+  "evidence": {
+    "frames": "frames/S1.jsonl",
+    "stderr": "stderr/S1.txt",
+    "shim": "shim/S1.jsonl",
+    "logs": "logs/S1.log",
+    "client": "client/S1.jsonl"
+  }
+}

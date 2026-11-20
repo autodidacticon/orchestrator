@@ -1,0 +1,196 @@
+{"type":"initialized","t":504,"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true},"promptCapabilities":{"embeddedContext":true,"image":true},"sessionCapabilities":{"close":{},"fork":{},"list":{},"resume":{}}},"authMethods":[{"description":"Run `opencode auth login` in the terminal","name":"Login with opencode","id":"opencode-login"}],"agentInfo":{"name":"OpenCode","version":"1.18.30"}}
+{"type":"session","t":850,"sessionId":"ses_e054eef8cffeBqagqxDWx3sF2f","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opencode/big-pickle","options":[{"value":"opencode/big-pickle","name":"OpenCode Zen/Big Pickle"},{"value":"opencode/ling-3.0-flash-fin-free","name":"OpenCode Zen/Ling 3.0 Flash Fin Free"},{"value":"opencode/mimo-v2.5-free","name":"OpenCode Zen/MiMo V2.5 Free"},{"value":"opencode/muse-spark-1.2-contributor-free","name":"OpenCode Zen/Muse Spark 1.2 Free"},{"value":"opencode/muse-spark-1.3-contributor-free","name":"OpenCode Zen/Muse Spark 1.3 Free"},{"value":"opencode/nemotron-3-ultra-free","name":"OpenCode Zen/Nemotron 3 Ultra Free"},{"value":"opencode/nemotron-3.5-lightning-free","name":"OpenCode Zen/Nemotron 3.5 Lightning Free"}]},{"id":"mode","name":"Session Mode","category":"mode","type":"select","currentValue":"build","options":[{"value":"build","name":"build","description":"The default agent. Executes tools based on configured permissions."},{"value":"plan","name":"plan","description":"Plan mode. Disallows all edit tools."}]}]}
+{"type":"update","t":851,"kind":"available_commands_update"}
+{"type":"update","t":2624,"kind":"agent_message_chunk"}
+{"type":"update","t":2632,"kind":"agent_message_chunk"}
+{"type":"update","t":2778,"kind":"agent_message_chunk"}
+{"type":"update","t":2778,"kind":"agent_message_chunk"}
+{"type":"update","t":2778,"kind":"agent_message_chunk"}
+{"type":"update","t":2778,"kind":"tool_call","toolCallId":"chatcmpl-tool-8adc2147012e6beb","title":"orchestrator_heartbeat","status":"pending","toolKind":"other"}
+{"type":"update","t":2841,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-8adc2147012e6beb","title":"orchestrator_heartbeat","status":"in_progress","toolKind":"other"}
+{"type":"update","t":2846,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-8adc2147012e6beb","status":"completed"}
+{"type":"update","t":4646,"kind":"tool_call","toolCallId":"chatcmpl-tool-b5be85d9a8453e36","title":"orchestrator_block","status":"pending","toolKind":"other"}
+{"type":"update","t":5104,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-b5be85d9a8453e36","title":"orchestrator_block","status":"in_progress","toolKind":"other"}
+{"type":"update","t":80121,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-b5be85d9a8453e36","status":"completed"}
+{"type":"update","t":82160,"kind":"agent_thought_chunk"}
+{"type":"update","t":82183,"kind":"agent_thought_chunk"}
+{"type":"update","t":82287,"kind":"agent_thought_chunk"}
+{"type":"update","t":82287,"kind":"agent_thought_chunk"}
+{"type":"update","t":82287,"kind":"agent_thought_chunk"}
+{"type":"update","t":82290,"kind":"agent_thought_chunk"}
+{"type":"update","t":82323,"kind":"agent_thought_chunk"}
+{"type":"update","t":82379,"kind":"agent_thought_chunk"}
+{"type":"update","t":82379,"kind":"agent_thought_chunk"}
+{"type":"update","t":82379,"kind":"agent_thought_chunk"}
+{"type":"update","t":82379,"kind":"agent_thought_chunk"}
+{"type":"update","t":82411,"kind":"agent_thought_chunk"}
+{"type":"update","t":82411,"kind":"agent_thought_chunk"}
+{"type":"update","t":82485,"kind":"agent_thought_chunk"}
+{"type":"update","t":82485,"kind":"agent_thought_chunk"}
+{"type":"update","t":82485,"kind":"agent_thought_chunk"}
+{"type":"update","t":82488,"kind":"agent_message_chunk"}
+{"type":"update","t":82488,"kind":"agent_message_chunk"}
+{"type":"update","t":82488,"kind":"agent_message_chunk"}
+{"type":"update","t":82574,"kind":"agent_message_chunk"}
+{"type":"update","t":82575,"kind":"agent_message_chunk"}
+{"type":"update","t":82575,"kind":"agent_message_chunk"}
+{"type":"update","t":82575,"kind":"agent_message_chunk"}
+{"type":"update","t":82575,"kind":"tool_call","toolCallId":"chatcmpl-tool-894de3435796c185","title":"orchestrator_heartbeat","status":"pending","toolKind":"other"}
+{"type":"update","t":82661,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-894de3435796c185","title":"orchestrator_heartbeat","status":"in_progress","toolKind":"other"}
+{"type":"update","t":82663,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-894de3435796c185","status":"completed"}
+{"type":"update","t":84664,"kind":"tool_call","toolCallId":"chatcmpl-tool-a5f228fbe7441915","title":"bash","status":"pending","toolKind":"execute"}
+{"type":"update","t":84920,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a5f228fbe7441915","title":"git status --short --branch && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":84920,"kind":"tool_call","toolCallId":"chatcmpl-tool-aca72ba931993d06","title":"glob","status":"pending","toolKind":"search"}
+{"type":"update","t":84929,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a5f228fbe7441915","title":"git status --short --branch && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":84939,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a5f228fbe7441915","title":"git status --short --branch && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":84943,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a5f228fbe7441915","title":"git status --short --branch && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":84949,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a5f228fbe7441915","title":"git status --short --branch && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":84949,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a5f228fbe7441915","title":"git status --short --branch && git rev-parse --abbrev-ref HEAD && git rev-parse HEAD","status":"completed"}
+{"type":"update","t":85107,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-aca72ba931993d06","title":"glob","status":"in_progress","toolKind":"search"}
+{"type":"update","t":85142,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-aca72ba931993d06","status":"completed"}
+{"type":"update","t":86682,"kind":"agent_thought_chunk"}
+{"type":"update","t":86721,"kind":"agent_thought_chunk"}
+{"type":"update","t":86835,"kind":"agent_thought_chunk"}
+{"type":"update","t":86836,"kind":"agent_thought_chunk"}
+{"type":"update","t":86836,"kind":"agent_thought_chunk"}
+{"type":"update","t":86836,"kind":"agent_thought_chunk"}
+{"type":"update","t":86836,"kind":"agent_thought_chunk"}
+{"type":"update","t":86836,"kind":"agent_thought_chunk"}
+{"type":"update","t":86938,"kind":"agent_thought_chunk"}
+{"type":"update","t":86939,"kind":"agent_thought_chunk"}
+{"type":"update","t":86939,"kind":"agent_thought_chunk"}
+{"type":"update","t":86939,"kind":"agent_thought_chunk"}
+{"type":"update","t":86939,"kind":"agent_thought_chunk"}
+{"type":"update","t":87031,"kind":"agent_thought_chunk"}
+{"type":"update","t":87031,"kind":"agent_thought_chunk"}
+{"type":"update","t":87032,"kind":"agent_thought_chunk"}
+{"type":"update","t":87032,"kind":"agent_thought_chunk"}
+{"type":"update","t":87032,"kind":"agent_thought_chunk"}
+{"type":"update","t":87032,"kind":"agent_thought_chunk"}
+{"type":"update","t":87104,"kind":"agent_thought_chunk"}
+{"type":"update","t":87104,"kind":"tool_call","toolCallId":"chatcmpl-tool-a28143927788d1a6","title":"write","status":"pending","toolKind":"edit"}
+{"type":"update","t":87281,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a28143927788d1a6","title":"write","status":"in_progress","toolKind":"edit"}
+{"type":"update","t":87284,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a28143927788d1a6","title":"greeting.txt","status":"completed"}
+{"type":"update","t":89063,"kind":"agent_message_chunk"}
+{"type":"update","t":89077,"kind":"agent_message_chunk"}
+{"type":"update","t":89133,"kind":"agent_message_chunk"}
+{"type":"update","t":89133,"kind":"agent_message_chunk"}
+{"type":"update","t":89133,"kind":"agent_message_chunk"}
+{"type":"update","t":89133,"kind":"agent_message_chunk"}
+{"type":"update","t":89136,"kind":"tool_call","toolCallId":"chatcmpl-tool-b211ce4bde2cdce8","title":"bash","status":"pending","toolKind":"execute"}
+{"type":"update","t":89311,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-b211ce4bde2cdce8","title":"node --version","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":89311,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-b211ce4bde2cdce8","title":"node --version","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":89312,"kind":"tool_call","toolCallId":"chatcmpl-tool-a9181a9e6541d415","title":"bash","status":"pending","toolKind":"execute"}
+{"type":"update","t":89331,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-b211ce4bde2cdce8","title":"node --version","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":89331,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-b211ce4bde2cdce8","title":"node --version","status":"completed"}
+{"type":"update","t":89679,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a9181a9e6541d415","title":"od -c greeting.txt && git status --short","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":89679,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-a9181a9e6541d415","title":"od -c greeting.txt && git status --short","status":"failed","toolKind":"execute"}
+{"type":"update","t":92951,"kind":"agent_thought_chunk"}
+{"type":"update","t":92989,"kind":"agent_thought_chunk"}
+{"type":"update","t":93101,"kind":"agent_thought_chunk"}
+{"type":"update","t":93105,"kind":"agent_thought_chunk"}
+{"type":"update","t":93105,"kind":"agent_thought_chunk"}
+{"type":"update","t":93105,"kind":"agent_thought_chunk"}
+{"type":"update","t":93132,"kind":"agent_thought_chunk"}
+{"type":"update","t":93132,"kind":"agent_thought_chunk"}
+{"type":"update","t":93217,"kind":"agent_thought_chunk"}
+{"type":"update","t":93217,"kind":"agent_thought_chunk"}
+{"type":"update","t":93217,"kind":"agent_thought_chunk"}
+{"type":"update","t":93218,"kind":"agent_thought_chunk"}
+{"type":"update","t":93218,"kind":"agent_thought_chunk"}
+{"type":"update","t":93218,"kind":"agent_thought_chunk"}
+{"type":"update","t":93317,"kind":"agent_thought_chunk"}
+{"type":"update","t":93317,"kind":"agent_thought_chunk"}
+{"type":"update","t":93317,"kind":"agent_thought_chunk"}
+{"type":"update","t":93317,"kind":"agent_thought_chunk"}
+{"type":"update","t":93317,"kind":"agent_thought_chunk"}
+{"type":"update","t":93317,"kind":"agent_thought_chunk"}
+{"type":"update","t":93319,"kind":"agent_message_chunk"}
+{"type":"update","t":93420,"kind":"agent_message_chunk"}
+{"type":"update","t":93420,"kind":"agent_message_chunk"}
+{"type":"update","t":93420,"kind":"agent_message_chunk"}
+{"type":"update","t":93420,"kind":"agent_message_chunk"}
+{"type":"update","t":93420,"kind":"agent_message_chunk"}
+{"type":"update","t":93420,"kind":"agent_message_chunk"}
+{"type":"update","t":93514,"kind":"agent_message_chunk"}
+{"type":"update","t":93514,"kind":"tool_call","toolCallId":"chatcmpl-tool-8e29ab2b6791efae","title":"read","status":"pending","toolKind":"read"}
+{"type":"update","t":93621,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-8e29ab2b6791efae","title":"read","status":"in_progress","toolKind":"read"}
+{"type":"update","t":93624,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-8e29ab2b6791efae","title":"greeting.txt","status":"completed"}
+{"type":"update","t":93693,"kind":"tool_call","toolCallId":"chatcmpl-tool-992c1b9f6258691a","title":"bash","status":"pending","toolKind":"execute"}
+{"type":"update","t":94086,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-992c1b9f6258691a","title":"git status --short && git diff --no-index -- /dev/null greeting.txt","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":94086,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-992c1b9f6258691a","title":"git status --short && git diff --no-index -- /dev/null greeting.txt","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":94096,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-992c1b9f6258691a","title":"git status --short && git diff --no-index -- /dev/null greeting.txt","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":94105,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-992c1b9f6258691a","title":"git status --short && git diff --no-index -- /dev/null greeting.txt","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":94106,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-992c1b9f6258691a","title":"git status --short && git diff --no-index -- /dev/null greeting.txt","status":"completed"}
+{"type":"update","t":96336,"kind":"agent_thought_chunk"}
+{"type":"update","t":96384,"kind":"agent_thought_chunk"}
+{"type":"update","t":96507,"kind":"agent_thought_chunk"}
+{"type":"update","t":96510,"kind":"agent_thought_chunk"}
+{"type":"update","t":96511,"kind":"agent_thought_chunk"}
+{"type":"update","t":96511,"kind":"agent_thought_chunk"}
+{"type":"update","t":96547,"kind":"agent_thought_chunk"}
+{"type":"update","t":96547,"kind":"agent_thought_chunk"}
+{"type":"update","t":96650,"kind":"agent_thought_chunk"}
+{"type":"update","t":96651,"kind":"agent_thought_chunk"}
+{"type":"update","t":96652,"kind":"agent_thought_chunk"}
+{"type":"update","t":96653,"kind":"agent_thought_chunk"}
+{"type":"update","t":96660,"kind":"agent_thought_chunk"}
+{"type":"update","t":96661,"kind":"agent_thought_chunk"}
+{"type":"update","t":96801,"kind":"agent_thought_chunk"}
+{"type":"update","t":96804,"kind":"agent_thought_chunk"}
+{"type":"update","t":96807,"kind":"agent_thought_chunk"}
+{"type":"update","t":96813,"kind":"agent_thought_chunk"}
+{"type":"update","t":96813,"kind":"agent_thought_chunk"}
+{"type":"update","t":96822,"kind":"agent_thought_chunk"}
+{"type":"update","t":96827,"kind":"agent_message_chunk"}
+{"type":"update","t":96828,"kind":"agent_message_chunk"}
+{"type":"update","t":96828,"kind":"agent_message_chunk"}
+{"type":"update","t":96828,"kind":"agent_message_chunk"}
+{"type":"update","t":96838,"kind":"agent_message_chunk"}
+{"type":"update","t":96849,"kind":"tool_call","toolCallId":"chatcmpl-tool-9f7978943c7f2520","title":"bash","status":"pending","toolKind":"execute"}
+{"type":"update","t":97152,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-9f7978943c7f2520","title":"git add greeting.txt && git commit -m \"Add operator-named greeting file\" && git status --short --branch && git log --oneline -1","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":97152,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-9f7978943c7f2520","title":"git add greeting.txt && git commit -m \"Add operator-named greeting file\" && git status --short --branch && git log --oneline -1","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":97363,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-9f7978943c7f2520","title":"git add greeting.txt && git commit -m \"Add operator-named greeting file\" && git status --short --branch && git log --oneline -1","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":97441,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-9f7978943c7f2520","title":"git add greeting.txt && git commit -m \"Add operator-named greeting file\" && git status --short --branch && git log --oneline -1","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":97461,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-9f7978943c7f2520","title":"git add greeting.txt && git commit -m \"Add operator-named greeting file\" && git status --short --branch && git log --oneline -1","status":"in_progress","toolKind":"execute"}
+{"type":"update","t":97462,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-9f7978943c7f2520","title":"git add greeting.txt && git commit -m \"Add operator-named greeting file\" && git status --short --branch && git log --oneline -1","status":"completed"}
+{"type":"update","t":99089,"kind":"tool_call","toolCallId":"chatcmpl-tool-bedd56af57fa7213","title":"orchestrator_heartbeat","status":"pending","toolKind":"other"}
+{"type":"update","t":99247,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-bedd56af57fa7213","title":"orchestrator_heartbeat","status":"in_progress","toolKind":"other"}
+{"type":"update","t":99286,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-bedd56af57fa7213","status":"completed"}
+{"type":"update","t":106429,"kind":"agent_thought_chunk"}
+{"type":"update","t":106468,"kind":"agent_thought_chunk"}
+{"type":"update","t":106583,"kind":"agent_thought_chunk"}
+{"type":"update","t":106583,"kind":"agent_thought_chunk"}
+{"type":"update","t":106584,"kind":"agent_thought_chunk"}
+{"type":"update","t":106584,"kind":"agent_thought_chunk"}
+{"type":"update","t":106584,"kind":"agent_thought_chunk"}
+{"type":"update","t":106697,"kind":"agent_thought_chunk"}
+{"type":"update","t":106697,"kind":"agent_thought_chunk"}
+{"type":"update","t":106697,"kind":"agent_thought_chunk"}
+{"type":"update","t":106697,"kind":"agent_thought_chunk"}
+{"type":"update","t":106697,"kind":"agent_thought_chunk"}
+{"type":"update","t":106699,"kind":"agent_thought_chunk"}
+{"type":"update","t":106701,"kind":"agent_thought_chunk"}
+{"type":"update","t":106807,"kind":"agent_thought_chunk"}
+{"type":"update","t":106807,"kind":"agent_thought_chunk"}
+{"type":"update","t":106812,"kind":"agent_thought_chunk"}
+{"type":"update","t":106812,"kind":"agent_thought_chunk"}
+{"type":"update","t":106813,"kind":"agent_thought_chunk"}
+{"type":"update","t":106814,"kind":"agent_thought_chunk"}
+{"type":"update","t":106903,"kind":"agent_thought_chunk"}
+{"type":"update","t":106903,"kind":"agent_thought_chunk"}
+{"type":"update","t":106903,"kind":"tool_call","toolCallId":"chatcmpl-tool-acb9a8b4cd140ff0","title":"orchestrator_report","status":"pending","toolKind":"other"}
+{"type":"update","t":108294,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-acb9a8b4cd140ff0","title":"orchestrator_report","status":"in_progress","toolKind":"other"}
+{"type":"update","t":108297,"kind":"tool_call_update","toolCallId":"chatcmpl-tool-acb9a8b4cd140ff0","status":"completed"}
+{"type":"update","t":111389,"kind":"agent_thought_chunk"}
+{"type":"update","t":111424,"kind":"agent_thought_chunk"}
+{"type":"update","t":111577,"kind":"agent_thought_chunk"}
+{"type":"update","t":111581,"kind":"agent_thought_chunk"}
+{"type":"update","t":111586,"kind":"agent_thought_chunk"}
+{"type":"update","t":111594,"kind":"agent_thought_chunk"}
+{"type":"update","t":111608,"kind":"agent_thought_chunk"}
+{"type":"update","t":111611,"kind":"agent_message_chunk"}
+{"type":"update","t":111612,"kind":"agent_message_chunk"}
+{"type":"update","t":111620,"kind":"agent_message_chunk"}
+{"type":"usage","t":111661,"update":{"sessionUpdate":"usage_update","used":8563,"size":200000,"cost":{"amount":0,"currency":"USD"}}}
+{"type":"result","t":111955,"stage":"session/prompt","sessionId":"ses_e054eef8cffeBqagqxDWx3sF2f","stopReason":"end_turn","usage":{"inputTokens":627,"outputTokens":7,"totalTokens":8588,"thoughtTokens":18,"cachedReadTokens":7936},"exitCode":0,"agentPid":21665,"agentExit":{"code":0,"signal":null,"t":111955,"how":"stdinClosed"},"treeAtEnd":[{"pid":21700,"ppid":21665,"pgid":21646,"comm":"node"}],"killedDescendants":[]}

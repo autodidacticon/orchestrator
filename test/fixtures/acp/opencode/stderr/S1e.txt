@@ -1,0 +1,1 @@
+timestamp=2026-11-20T20:38:32.218Z level=ERROR run=e02123f0 message=process session.id=ses_e0555c7aaffeP7g9iNWgNDnCCK messageID=msg_1faae9d85001hl9jMd3YpclYgK error=Aborted stack=undefined

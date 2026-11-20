@@ -1,0 +1,16 @@
+{"type":"initialized","t":559,"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true},"promptCapabilities":{"embeddedContext":true,"image":true},"sessionCapabilities":{"close":{},"fork":{},"list":{},"resume":{}}},"authMethods":[{"description":"Run `opencode auth login` in the terminal","name":"Login with opencode","id":"opencode-login"}],"agentInfo":{"name":"OpenCode","version":"1.18.30"}}
+{"type":"session","t":890,"sessionId":"ses_e0556a66dffeLLtssYyV92gjkX","configOptions":[{"id":"model","name":"Model","category":"model","type":"select","currentValue":"opencode/big-pickle","options":[{"value":"opencode/big-pickle","name":"OpenCode Zen/Big Pickle"},{"value":"opencode/ling-3.0-flash-fin-free","name":"OpenCode Zen/Ling 3.0 Flash Fin Free"},{"value":"opencode/mimo-v2.5-free","name":"OpenCode Zen/MiMo V2.5 Free"},{"value":"opencode/muse-spark-1.2-contributor-free","name":"OpenCode Zen/Muse Spark 1.2 Free"},{"value":"opencode/muse-spark-1.3-contributor-free","name":"OpenCode Zen/Muse Spark 1.3 Free"},{"value":"opencode/nemotron-3-ultra-free","name":"OpenCode Zen/Nemotron 3 Ultra Free"},{"value":"opencode/nemotron-3.5-lightning-free","name":"OpenCode Zen/Nemotron 3.5 Lightning Free"}]},{"id":"mode","name":"Session Mode","category":"mode","type":"select","currentValue":"build","options":[{"value":"build","name":"build","description":"The default agent. Executes tools based on configured permissions."},{"value":"plan","name":"plan","description":"Plan mode. Disallows all edit tools."}]}]}
+{"type":"update","t":892,"kind":"available_commands_update"}
+{"type":"update","t":2865,"kind":"agent_thought_chunk"}
+{"type":"update","t":3047,"kind":"agent_thought_chunk"}
+{"type":"update","t":3048,"kind":"agent_thought_chunk"}
+{"type":"update","t":3048,"kind":"agent_thought_chunk"}
+{"type":"update","t":3048,"kind":"agent_thought_chunk"}
+{"type":"update","t":3048,"kind":"agent_thought_chunk"}
+{"type":"update","t":3048,"kind":"agent_thought_chunk"}
+{"type":"update","t":3048,"kind":"agent_thought_chunk"}
+{"type":"update","t":3050,"kind":"agent_thought_chunk"}
+{"type":"update","t":3050,"kind":"agent_thought_chunk"}
+{"type":"update","t":3053,"kind":"agent_message_chunk"}
+{"type":"usage","t":3232,"update":{"sessionUpdate":"usage_update","used":5943,"size":200000,"cost":{"amount":0,"currency":"USD"}}}
+{"type":"result","t":5474,"stage":"session/prompt","sessionId":"ses_e0556a66dffeLLtssYyV92gjkX","stopReason":"end_turn","usage":{"inputTokens":5943,"outputTokens":3,"totalTokens":5973,"thoughtTokens":27},"exitCode":0,"agentPid":63198,"agentExit":{"code":0,"signal":null,"t":5474,"how":"stdinClosed"},"treeAtEnd":[{"pid":65907,"ppid":63198,"pgid":63144,"comm":"node"}],"killedDescendants":[]}

@@ -1,0 +1,141 @@
+{
+  "id": "S4",
+  "scenario": "S4",
+  "probedAt": "2026-11-20T20:34:40.818Z",
+  "modelCalls": 1,
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"opencode\",\"acp\",\"--pure\",\"--print-logs\",\"--log-level\",\"WARN\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--mcp-json",
+    "<scratch>/out/S4/mcp.json",
+    "--policy",
+    "<scratch>/out/S4/policy.json",
+    "--frames",
+    "<scratch>/out/S4/frames.jsonl",
+    "--turn-timeout-ms",
+    "290000",
+    "--cancel-grace-ms",
+    "15000",
+    "--prompt-file",
+    "<scratch>/out/S4/prompt.txt",
+    "--no-permission-answer"
+  ],
+  "spawnCwd": "<scratch>/wt",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "OPENCODE_CONFIG_CONTENT": "{\"$schema\":\"https://opencode.ai/config.json\",\"model\":\"opencode/big-pickle\",\"snapshots\":false,\"share\":\"disabled\",\"permission\":{\"*\":\"ask\",\"read\":\"allow\",\"bash\":{\"*\":\"ask\",\"git *\":\"allow\"},\"orchestrator_*\":\"allow\"}}",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-c9117b62",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-client-env",
+    "PWD": "<scratch>/wt",
+    "TMPDIR": "<set>",
+    "USER": "<set>",
+    "XDG_CACHE_HOME": "<scratch>/xdg/S4/cache",
+    "XDG_CONFIG_HOME": "<scratch>/xdg/S4/config",
+    "XDG_DATA_HOME": "<scratch>/xdg/S4/data",
+    "XDG_STATE_HOME": "<scratch>/xdg/S4/state"
+  },
+  "exit": {
+    "code": 3,
+    "signal": null,
+    "ms": 128132
+  },
+  "timedOut": false,
+  "limitMs": 330000,
+  "driven": {
+    "permissionAtMs": 6676,
+    "cancelSentAtClientMs": 126701
+  },
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 32646,
+      "ppid": 31682,
+      "pgid": 32646,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 32754,
+      "ppid": 32646,
+      "pgid": 32646,
+      "comm": "opencode",
+      "in": "tree"
+    },
+    {
+      "pid": 32706,
+      "ppid": 31692,
+      "pgid": 32706,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 32752,
+      "ppid": 32647,
+      "pgid": 32647,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 32761,
+      "ppid": 32648,
+      "pgid": 32648,
+      "comm": "opencode",
+      "in": "opencode"
+    },
+    {
+      "pid": 99088,
+      "ppid": 99033,
+      "pgid": 99033,
+      "comm": "opencode",
+      "in": "opencode"
+    }
+  ],
+  "frameStats": {
+    "frames": 17,
+    "nonJsonStdoutLines": 0,
+    "maxGapMs": 120005,
+    "maxGapAfterMs": 6675,
+    "usageUpdates": 1,
+    "lastUsage": {
+      "sessionUpdate": "usage_update",
+      "used": 0,
+      "size": 200000,
+      "cost": {
+        "amount": 0,
+        "currency": "USD"
+      }
+    },
+    "promptAnswer": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "stopReason": "cancelled",
+        "usage": {
+          "inputTokens": 0,
+          "outputTokens": 0,
+          "totalTokens": 0
+        },
+        "_meta": {}
+      }
+    }
+  },
+  "token": "orch-probe-token-c9117b62",
+  "tokenFoundIn": [
+    "frames:<scratch>/out/S4/frames.jsonl"
+  ],
+  "evidence": {
+    "frames": "frames/S4.jsonl",
+    "stderr": "stderr/S4.txt",
+    "shim": "shim/S4.jsonl",
+    "logs": "logs/S4.log",
+    "client": "client/S4.jsonl"
+  }
+}
