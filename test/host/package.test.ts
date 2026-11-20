@@ -13,10 +13,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { bin: Record<string, string>; exports: Record<string, { types?: string; default?: string } | string> };
 
 describe('package entrypoints', () => {
-  it('declares six executables and the subpath exports', () => {
-    expect(Object.keys(pkg.bin).sort()).toEqual(['orchestrator', 'orchestrator-ctl', 'orchestrator-mcp', 'orchestrator-mcp-shim', 'orchestrator-work', 'orchestrator-worker']);
+  it('declares seven executables and the subpath exports', () => {
+    expect(Object.keys(pkg.bin).sort()).toEqual(['orchestrator', 'orchestrator-ctl', 'orchestrator-mcp', 'orchestrator-mcp-shim', 'orchestrator-verifier', 'orchestrator-work', 'orchestrator-worker']);
     // The remote worker loop is built from src. See specs/worker-pool "Worker loop".
     expect(pkg.bin['orchestrator-worker']).toBe('dist/src/worker/loop.js');
+    // The verifier loop is built from src. See specs/verifier-pool "Verifier loop".
+    expect(pkg.bin['orchestrator-verifier']).toBe('dist/src/verifier/loop.js');
     // The Codex work loop ships as a host script, not from dist. See specs/host-integration "Codex work loop".
     expect(pkg.bin['orchestrator-work']).toBe('hosts/codex/bin/work.mjs');
     expect(existsSync(path.join(root, pkg.bin['orchestrator-work'] as string))).toBe(true);
@@ -58,6 +60,7 @@ describe('package entrypoints', () => {
     ['orchestrator-ctl', 'src/operator/cli.ts', 'operate a running orchestrator'],
     ['orchestrator-mcp', 'src/operator/mcp.ts', 'operator MCP server'],
     ['orchestrator-mcp-shim', 'src/agent/mcp-shim.ts', 'MCP façade'],
+    ['orchestrator-verifier', 'src/verifier/loop.ts', 'the verifier loop'],
   ])('%s --help prints usage', async (name, entry, phrase) => {
     const bin = pkg.bin[name] as string;
     expect(bin.replace(/^(\.\/)?dist\//, '').replace(/\.js$/, '.ts')).toBe(entry);
@@ -72,6 +75,7 @@ describe('package entrypoints', () => {
     ['orchestrator-ctl', 'src/operator/cli.ts'],
     ['orchestrator-mcp', 'src/operator/mcp.ts'],
     ['orchestrator-mcp-shim', 'src/agent/mcp-shim.ts'],
+    ['orchestrator-verifier', 'src/verifier/loop.ts'],
   ])('%s runs when invoked through a symlink', async (name, entry) => {
     const dir = mkdtempSync(path.join(tmpdir(), 'orch-bin-'));
     try {
@@ -82,6 +86,11 @@ describe('package entrypoints', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  // The image and npm link run the bin through a link, so the file itself must name its interpreter.
+  it('src/verifier/loop.ts starts with a node shebang', () => {
+    expect(readFileSync(path.join(root, 'src/verifier/loop.ts'), 'utf8').split('\n')[0]).toBe('#!/usr/bin/env node');
   });
 
   it('the production dependency tree has no native module', () => {
