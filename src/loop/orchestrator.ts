@@ -37,7 +37,7 @@ import path from 'node:path';
 import type { CascadeStep } from '../graph/query.js';
 import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
-import { NO_CLAIM, type VerifierBackend, VerifierStoppedError } from '../verify/job.js';
+import { NO_CLAIM, type VerifierBackend, VerifierStoppedError, verifyJobEnded } from '../verify/job.js';
 import { Origin, OriginConfigError, OriginFetchError } from '../workspace/origin.js';
 import { RemoteWorkspace, workspaceByAccess } from '../workspace/remote-workspace.js';
 import { gateOnDurable, RUNNER_METHODS, StoreFatalError, storeLag, VERIFIER_METHODS, waitDurable, WORKSPACE_METHODS } from '../state/gate.js';
@@ -2579,14 +2579,22 @@ export class Orchestrator implements OrchestratorCore {
             return false;
           }
           this.log.error('verifier job crashed', { jobId: job.jobId, err: String(err) });
-          this.failVerifierJob(job, startedAt, 'checkFailed', String(err));
+          try {
+            this.failVerifierJob(job, startedAt, 'checkFailed', String(err));
+          } catch (failErr) {
+            // Nothing was written: the ref is kept, and the job is decided at the next start.
+            if (failErr instanceof StoreFatalError) this.log.error('verifier job: the failure could not be written, the store is fatal', { jobId: job.jobId });
+            else this.log.error('verifier job: the failure could not be written', { jobId: job.jobId, err: String(failErr) });
+            return false;
+          }
           return true;
         },
       )
       // After the outcome is written: the remote backend deletes the verify ref here. See specs/verifier-pool "Verify ref: deletion".
       // The call is gated on durability (VERIFIER_METHODS): it waits for the outcome's batch, and on a fatal store it
       // rejects with StoreFatalError and the ref is kept. See specs/state-backend "Durability before effects".
-      .then((written) => this.verifier.afterOutcome?.(job, { written }))
+      // A run whose job has ended (applied, published, failed or dropped) deletes the ref too. See "Verify ref: deletion: sweep".
+      .then((written) => this.verifier.afterOutcome?.(job, { written, ended: written && verifyJobEnded(this.store.getJob(job.jobId)) }))
       .catch((err) => {
         if (err instanceof StoreFatalError) this.log.error('verifier job: after-outcome step skipped, the store is fatal; the verify ref is kept', { jobId: job.jobId });
         else this.log.error('verifier job: after-outcome step failed', { jobId: job.jobId, err: String(err) });

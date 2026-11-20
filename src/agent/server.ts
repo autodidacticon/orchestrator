@@ -98,6 +98,7 @@ export class ApiServer {
         send(res, out.status, out.body, headers);
       } catch (err) {
         if (err instanceof StoreFatalError) send(res, 503, { error: err.message, code: 'storeFatal' });
+        else if (err instanceof BodyTooLargeError) send(res, 413, { error: err.message });
         else {
           try {
             if (writes) await waitDurable(this.orch.store);
@@ -184,9 +185,33 @@ function send(res: http.ServerResponse, status: number, body: unknown, headers: 
   res.end(text);
 }
 
+/** The largest request body the server reads: 1 MiB. A larger one is answered 413. See specs/agent-protocol "Request body limit". */
+export const MAX_BODY_BYTES = 1024 * 1024;
+
+/** Thrown by `readJson` for a body over `MAX_BODY_BYTES`: nothing is handled, and the answer is 413. */
+export class BodyTooLargeError extends Error {
+  constructor() {
+    super(`request body exceeds ${MAX_BODY_BYTES} bytes`);
+    this.name = 'BodyTooLargeError';
+  }
+}
+
 async function readJson(req: http.IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
+  let size = 0;
+  let tooLarge = false;
+  // The rest of an oversized body is drained, not kept, so the client reads the 413 instead of a reset connection.
+  for await (const c of req) {
+    if (tooLarge) continue;
+    size += (c as Buffer).length;
+    if (size > MAX_BODY_BYTES) {
+      tooLarge = true;
+      chunks.length = 0;
+      continue;
+    }
+    chunks.push(c as Buffer);
+  }
+  if (tooLarge) throw new BodyTooLargeError();
   const text = Buffer.concat(chunks).toString('utf8');
   if (!text.trim()) return {};
   const parsed = JSON.parse(text) as unknown;

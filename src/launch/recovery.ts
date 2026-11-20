@@ -7,7 +7,7 @@ import { applyPendingCascade, recordTagPush, tagSafely } from '../loop/tick.js';
 import { scrubCarry } from '../brief/lost.js';
 import { startLaunch } from './launch.js';
 import type { Launch, VerifierJob } from '../state/store.js';
-import { NO_CLAIM } from '../verify/job.js';
+import { NO_CLAIM, verifyJobEnded } from '../verify/job.js';
 import { TRAILER_LAUNCH } from '../verify/verifier.js';
 import { findTrailer, git } from '../workspace/git.js';
 import { GitWorkspace } from '../workspace/git-workspace.js';
@@ -251,6 +251,17 @@ export async function recover(o: Orchestrator): Promise<void> {
   for (const job of store.listJobs({ status: 'queued', applied: false })) {
     if (lookup.kind === 'unreachable') o.deferredJobs.add(job.jobId);
     else await dropIfCommitLost(o, job);
+  }
+
+  // Under verifier.mode remote, every verify ref on origin whose job has ended (applied, published, failed or dropped)
+  // is deleted: refs a job ended without deleting, or a deletion that failed. With origin unreachable the sweep waits
+  // for the next start. See specs/verifier-pool "Verify ref: deletion: sweep".
+  if (remoteVerifier && lookup.kind !== 'unreachable') {
+    try {
+      await o.verifier.sweepVerifyRefs?.((jobId) => verifyJobEnded(store.getJob(jobId)));
+    } catch (err) {
+      o.log.warn('recovery: the verify ref sweep did not run; tried again at the next start', { err: String(err) });
+    }
   }
 
   // Milestone tags: re-create idempotently for submitted gated milestones lacking the marker.

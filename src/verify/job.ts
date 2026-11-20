@@ -60,6 +60,15 @@ export class VerifierStoppedError extends Error {
  */
 export const NO_CLAIM = { offer: undefined, verifier: undefined, token: undefined, result: undefined } as const satisfies Partial<VerifierJob>;
 
+/**
+ * A job that has ended for good: applied, or `published`, `failed` or `dropped`. Its verify ref, if origin holds one,
+ * is no longer read. See specs/verifier-pool "Verify ref: deletion: sweep".
+ */
+export function verifyJobEnded(job: Pick<VerifierJob, 'status' | 'applied'> | undefined): boolean {
+  if (!job) return false;
+  return job.applied || job.status === 'published' || job.status === 'failed' || job.status === 'dropped';
+}
+
 export interface VerifierBackend {
   run(job: VerifierJob, ctx: VerifierContext): Promise<VerifierOutcome>;
   /** Resolve a job found in `publishing` after a restart by inspecting the integration branch. */
@@ -68,10 +77,15 @@ export interface VerifierBackend {
   foreignCommits?(): Promise<string[]>;
   /**
    * Called once a run has ended: `written` when its outcome (or its failure) was written or the job was found no longer
-   * live, not when nothing was written because the daemon stops or the store went fatal. See specs/verifier-pool
-   * "Verify ref: deletion".
+   * live, not when nothing was written because the daemon stops or the store went fatal; `ended` when the job's row,
+   * read after the write, has ended (`verifyJobEnded`). See specs/verifier-pool "Verify ref: deletion".
    */
-  afterOutcome?(job: VerifierJob, opts: { written: boolean }): Promise<void>;
+  afterOutcome?(job: VerifierJob, opts: { written: boolean; ended?: boolean }): Promise<void>;
+  /**
+   * Called at startup recovery once every verifier job is settled: delete each ref under `refs/verify/` on origin whose
+   * job `ended` answers true for. Never throws. See specs/verifier-pool "Verify ref: deletion: sweep".
+   */
+  sweepVerifyRefs?(ended: (jobId: string) => boolean): Promise<void>;
   /** Remove temporary verification worktrees left by a crash. Called at recovery. */
   sweepTemp?(): Promise<void>;
 }

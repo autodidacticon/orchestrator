@@ -7,7 +7,7 @@
 import type { Logger } from '../loop/core.js';
 import type { VerifierJob } from '../state/store.js';
 import { git } from '../workspace/git.js';
-import { classifyFetchFailure, classifyPushFailure, OriginFetchError } from '../workspace/origin.js';
+import { classifyFetchFailure, classifyPushFailure, OriginFetchError, VERIFY_REF_PREFIX } from '../workspace/origin.js';
 import type { VerifierContext, VerifierOutcome } from './job.js';
 import { GitVerifierBackend, type GitVerifierOptions } from './verifier.js';
 
@@ -25,13 +25,15 @@ const ORIGIN_OUTPUT_TAIL = 4000;
 const silent: Logger = { info() {}, warn() {}, error() {} };
 
 /** The ref a verifier pushes its rebased commit to. */
-export const verifyRefOf = (jobId: string): string => `refs/verify/${jobId}`;
+export const verifyRefOf = (jobId: string): string => `${VERIFY_REF_PREFIX}${jobId}`;
 
 export class RemoteVerifierBackend extends GitVerifierBackend {
   private readonly now: () => number;
   private readonly log: Logger;
   /** Jobs whose run read a `verified` result: their verify ref is deleted once the outcome is written. */
   private readonly refsToDelete = new Set<string>();
+  /** Jobs whose run waited for a result: a verifier may have pushed their verify ref. */
+  private readonly offered = new Set<string>();
 
   constructor(opts: RemoteVerifierOptions) {
     const { now, log, ...rest } = opts;
@@ -63,6 +65,7 @@ export class RemoteVerifierBackend extends GitVerifierBackend {
       }
       ctx.progress({ status: 'checking', expectedHead, offer: { at: this.now(), checkCommand } });
     }
+    this.offered.add(job.jobId);
     const result = await ctx.awaitResult();
     return this.outcomeOf(job, ctx, expectedHead, result);
   }
@@ -70,16 +73,46 @@ export class RemoteVerifierBackend extends GitVerifierBackend {
   /**
    * Called by the daemon once the run's outcome (or its failure) is written, or the job was found no longer live
    * (`written` true), or when nothing was written because the daemon stops or the store went fatal (`written` false).
-   * After a run that read a `verified` result, a written outcome deletes `refs/verify/<jobId>` on origin and in the
-   * clone; a failed deletion is logged as a warning and changes nothing else. Without a write the ref is kept.
+   * After a run that read a `verified` result, or a run that waited for a result and whose job has `ended` (a job that
+   * lost its verifier, a dropped job), a written outcome deletes `refs/verify/<jobId>` on origin and in the clone; a
+   * failed deletion is logged as a warning and changes nothing else. Without a write the ref is kept.
    */
-  async afterOutcome(job: VerifierJob, opts: { written: boolean }): Promise<void> {
-    if (!this.refsToDelete.delete(job.jobId) || !opts.written || !this.origin) return;
-    const ref = verifyRefOf(job.jobId);
+  async afterOutcome(job: VerifierJob, opts: { written: boolean; ended?: boolean }): Promise<void> {
+    const read = this.refsToDelete.delete(job.jobId);
+    const waited = this.offered.delete(job.jobId);
+    if (!opts.written || !this.origin) return;
+    if (!read && !(waited && opts.ended === true)) return;
+    await this.deleteVerifyRef(job.jobId);
+  }
+
+  /**
+   * At startup recovery: list origin's refs under `refs/verify/` and delete each whose job has ended (applied,
+   * `published`, `failed` or `dropped`), as the daemon reads the job's row. A ref of a job that is not ended, or of no
+   * job, is kept. A failed listing or deletion is logged as a warning; the next start tries again.
+   * See specs/verifier-pool "Verify ref: deletion: sweep".
+   */
+  async sweepVerifyRefs(ended: (jobId: string) => boolean): Promise<void> {
+    if (!this.origin) return;
+    let refs: string[];
     try {
-      await this.origin.deleteRef(ref);
+      refs = await this.origin.listVerifyRefs();
     } catch (err) {
-      this.log.warn('verify ref could not be deleted', { jobId: job.jobId, ref, err: String(err) });
+      this.log.warn('verify refs could not be listed; the sweep is tried again at the next start', { err: String(err) });
+      return;
+    }
+    for (const ref of refs) {
+      const jobId = ref.slice(VERIFY_REF_PREFIX.length);
+      if (!jobId || !ended(jobId)) continue;
+      await this.deleteVerifyRef(jobId);
+    }
+  }
+
+  private async deleteVerifyRef(jobId: string): Promise<void> {
+    const ref = verifyRefOf(jobId);
+    try {
+      await this.origin!.deleteRef(ref);
+    } catch (err) {
+      this.log.warn('verify ref could not be deleted; the sweep at the next start tries again', { jobId, ref, err: String(err) });
     }
   }
 

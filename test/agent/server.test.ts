@@ -1,7 +1,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { ApiServer, isLoopbackBind } from '../../src/agent/server.js';
+import { ApiServer, isLoopbackBind, MAX_BODY_BYTES } from '../../src/agent/server.js';
 import type { Orchestrator } from '../../src/loop/orchestrator.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 
@@ -182,5 +182,29 @@ describe('ApiServer refuses requests from another origin', () => {
   it('isLoopbackBind follows the stated rule', () => {
     for (const b of ['localhost', '::1', '127.0.0.1', '127.1.2.3', 'LOCALHOST']) expect(isLoopbackBind(b), b).toBe(true);
     for (const b of ['0.0.0.0', '::', '10.0.0.1', '128.0.0.1', 'foo.localhost', '127.0.0.256']) expect(isLoopbackBind(b), b).toBe(false);
+  });
+});
+
+describe('ApiServer request body limit (GH-190)', () => {
+  it('criterion 4: a body over 1 MiB answers 413 and the handler does not run; a body of exactly 1 MiB is read', async () => {
+    const store = new SqliteStore(':memory:');
+    stores.push(store);
+    const server = serve(store);
+    let calls = 0;
+    server.addRoute('POST', /^\/v1\/sized$/, async (_req, body) => {
+      calls++;
+      return { status: 200, body: { length: String(body['s'] ?? '').length } };
+    });
+    const url = await server.listen(0);
+    // {"s":"..."} is 8 bytes of framing around the string.
+    const exact = JSON.stringify({ s: 'a'.repeat(MAX_BODY_BYTES - 8) });
+    expect(Buffer.byteLength(exact)).toBe(MAX_BODY_BYTES);
+    const ok = await fetch(`${url}/v1/sized`, { method: 'POST', body: exact });
+    expect(ok.status).toBe(200);
+    expect(calls).toBe(1);
+    const big = await fetch(`${url}/v1/sized`, { method: 'POST', body: JSON.stringify({ s: 'a'.repeat(MAX_BODY_BYTES) }) });
+    expect(big.status).toBe(413);
+    expect(await big.json()).toMatchObject({ error: expect.stringContaining(String(MAX_BODY_BYTES)) });
+    expect(calls).toBe(1);
   });
 });

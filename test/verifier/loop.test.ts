@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VerifyClaim, VerifyResultBody, WorkOptions } from '../../src/verifier/job.js';
-import { DEFAULT_VERIFIER_CACHE, RESULT_RETRY_MS, runVerifierLoop, USAGE, type VerifierSettings, verifierSettings } from '../../src/verifier/loop.js';
+import { DEFAULT_VERIFIER_CACHE, RESULT_RETRY_MS, runVerifierLoop, USAGE, VERIFIER_ERROR, type VerifierSettings, verifierSettings } from '../../src/verifier/loop.js';
 import { TERMINATION_CALL_MS } from '../../src/worker/http.js';
 
 const API = 'http://daemon.test';
@@ -371,7 +371,7 @@ describe('verifier loop: results and releases', () => {
   it('a result answered 400 prints result-refused and posts one release with the job token and reason verifierError', async () => {
     const r = await oneJob([{ status: 400, body: { error: 'rebasedSha is required', field: 'rebasedSha' } }]);
     expect(has(r.out, 'result-refused')).toHaveLength(1);
-    expect(r.d.releases()).toEqual([{ method: 'POST', route: '/v1/verify/job-1/release', body: { reason: 'verifierError' }, auth: 'Bearer tok-job-1' }]);
+    expect(r.d.releases()).toEqual([{ method: 'POST', route: '/v1/verify/job-1/release', body: { reason: VERIFIER_ERROR }, auth: 'Bearer tok-job-1' }]);
     expect(has(r.out, 'released')).toHaveLength(1);
     expect(r.delays).toEqual([1000]);
   });
@@ -394,8 +394,8 @@ describe('verifier loop: results and releases', () => {
     );
     expect(r.d.results()).toEqual([]);
     expect(r.d.releases().map((c) => [c.route, c.body, c.auth])).toEqual([
-      ['/v1/verify/job-1/release', { reason: 'verifierError' }, 'Bearer tok-job-1'],
-      ['/v1/verify/job-2/release', { reason: 'verifierError' }, 'Bearer tok-job-2'],
+      ['/v1/verify/job-1/release', { reason: VERIFIER_ERROR }, 'Bearer tok-job-1'],
+      ['/v1/verify/job-2/release', { reason: VERIFIER_ERROR }, 'Bearer tok-job-2'],
     ]);
     expect(r.delays).toEqual([1000, 2000]);
   });

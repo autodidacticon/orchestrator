@@ -6,6 +6,7 @@ import type { ConfigInput } from '../../src/config.js';
 import type { ApiResponse } from '../../src/loop/orchestrator.js';
 import type { VerifierJob } from '../../src/state/store.js';
 import { claimVerifyJob, postVerifyResult, releaseVerifyJob, verifyHeartbeat, verifyJobChanged, wakeVerifyWaiters } from '../../src/verify/claims.js';
+import { VERIFIER_ERROR } from '../../src/verifier/loop.js';
 import { makeHarness, type Harness } from './harness.js';
 
 /**
@@ -513,7 +514,7 @@ describe('verify lease: cycle cap (GH-184)', () => {
     expect(job(h, j.jobId).leaseLosses).toBe(1);
     // 2: a verifierError release. Two events: the job is offered again as today.
     token = tokenOf(await claim(h, 'v3'));
-    expect(releaseVerifyJob(h.orch, j.jobId, token, { reason: 'verifierError' }).status).toBe(200);
+    expect(releaseVerifyJob(h.orch, j.jobId, token, { reason: VERIFIER_ERROR }).status).toBe(200);
     expect(job(h, j.jobId)).toMatchObject({ status: 'checking', leaseLosses: 2, offer: { checkCommand: 'true' } });
     expect(events(h, 'verify.released').map((e) => e.payload?.['leaseLosses'])).toEqual([undefined, 2]);
     await h.orch.tick();
@@ -541,7 +542,7 @@ describe('verify lease: cycle cap (GH-184)', () => {
     const j = await offered(h);
     for (let i = 1; i <= 3; i++) {
       const token = tokenOf(await claim(h, `v${i}`));
-      expect(releaseVerifyJob(h.orch, j.jobId, token, { reason: 'verifierError' }).status).toBe(200);
+      expect(releaseVerifyJob(h.orch, j.jobId, token, { reason: VERIFIER_ERROR }).status).toBe(200);
     }
     expect(job(h, j.jobId)).toMatchObject({ status: 'failed', failureKind: 'verifierLost', leaseLosses: 3 });
   });
@@ -564,5 +565,16 @@ describe('verify size limits (GH-184)', () => {
     expect(postVerifyResult(h.orch, j.jobId, token, { outcome: 'conflict', conflictFiles: files, reason: 'x'.repeat(10_000) }).status).toBe(200);
     expect(job(h, j.jobId).result?.conflictFiles).toEqual(files.slice(0, 200));
     expect(job(h, j.jobId).result).not.toHaveProperty('reason');
+  });
+});
+
+describe('verify size limits (GH-190)', () => {
+  it('criterion 4: a conflictFiles entry of 10,000 characters is stored cut to 4096', async () => {
+    const h = harness();
+    const j = await offered(h);
+    const token = tokenOf(await claim(h, 'v1'));
+    const long = 'p'.repeat(10_000);
+    expect(postVerifyResult(h.orch, j.jobId, token, { outcome: 'conflict', conflictFiles: [long, 'short.txt'] }).status).toBe(200);
+    expect(job(h, j.jobId).result?.conflictFiles).toEqual(['p'.repeat(4096), 'short.txt']);
   });
 });

@@ -15,6 +15,7 @@ import { VERIFIER_METHODS } from '../../src/state/gate.js';
 import { JournaledStore, type JournalSink, type RowOp, SqliteSink } from '../../src/state/journal.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import type { Launch, VerifierJob } from '../../src/state/store.js';
+import { VERIFIER_ERROR } from '../../src/verifier/loop.js';
 import { RemoteVerifierBackend } from '../../src/verify/remote.js';
 import { gitIn, makeRepo, makeSlice, single, type SliceHarness, scriptedAgent, tsxLoader } from './harness.js';
 
@@ -638,7 +639,7 @@ describe('slice: remote verification hardening (GH-184)', () => {
     await offered(h, f);
     for (let i = 1; i <= 3; i++) {
       const c = await verifyClaim(h, `v${i}`);
-      expect((await http(h, `/v1/verify/${c.jobId}/release`, { reason: 'verifierError' }, c.token)).status).toBe(200);
+      expect((await http(h, `/v1/verify/${c.jobId}/release`, { reason: VERIFIER_ERROR }, c.token)).status).toBe(200);
     }
     await h.waitFor(() => !h.orch.verifierBusy() && h.orch.entry('T1').attempts === 1, 30_000);
     expect(h.store.listJobs({ taskId: 'T1' })[0]).toMatchObject({ status: 'failed', failureKind: 'verifierLost', leaseLosses: 3, applied: true });
@@ -843,6 +844,161 @@ describe('slice: the verify ref and the durability gate (GH-187)', () => {
     expect(batch!.some((o) => o.op === 'upsert' && o.table === 'kv' && JSON.stringify(o.row).includes(claim.jobId) && JSON.stringify(o.row).includes('refusals'))).toBe(true);
     expect(batch!.some((o) => o.op === 'upsert' && o.table === 'verifier_jobs' && JSON.stringify(o.row).includes(claim.jobId) && JSON.stringify(o.row).includes('"queued"'))).toBe(true);
     expect(requeued(h)[0]!.payload).toMatchObject({ retry: 'refused', refusals: 1 });
+  }, 60_000);
+});
+
+describe('slice: the verify ref sweep (GH-190)', () => {
+  const refOf = (claim: Claim) => `refs/verify/${claim.jobId}`;
+  const remoteHas = (f: Fixture, ref: string) => gitIn(f.dir, 'ls-remote', f.bare, ref) !== '';
+
+  it('criterion 1: a verifierLost job whose last verifier pushed and released keeps its ref when the deletion fails; the next start deletes it', async () => {
+    const f = fixture();
+    let failDeletes = true;
+    let attempts = 0;
+    const h = await remoteSlice(f, {
+      wrap: (backend) => {
+        const useOrigin = backend.useOrigin.bind(backend);
+        backend.useOrigin = (origin) => {
+          if (origin) {
+            const del = origin.deleteRef.bind(origin);
+            origin.deleteRef = async (ref) => {
+              attempts++;
+              if (failDeletes) throw new Error('origin refused the deletion');
+              return del(ref);
+            };
+          }
+          useOrigin(origin);
+        };
+      },
+    });
+    await offered(h, f);
+    let claim!: Claim;
+    for (let i = 1; i <= 3; i++) {
+      claim = await verifyClaim(h, `v${i}`);
+      // The last verifier pushes its ref, then hands the claim back after an error of its own.
+      if (i === 3) rebaseAndPush(f, claim);
+      expect((await http(h, `/v1/verify/${claim.jobId}/release`, { reason: VERIFIER_ERROR }, claim.token)).status).toBe(200);
+    }
+    await h.waitFor(() => !h.orch.verifierBusy() && h.orch.entry('T1').attempts === 1, 30_000);
+    expect(h.store.getJob(claim.jobId)).toMatchObject({ status: 'failed', failureKind: 'verifierLost' });
+    // The run tried to delete the ref once the job ended, and that deletion failed.
+    expect(attempts).toBe(1);
+    expect(remoteHas(f, refOf(claim))).toBe(true);
+    failDeletes = false;
+    await h.restart();
+    expect(remoteHas(f, refOf(claim))).toBe(false);
+    expect(attempts).toBe(2);
+  }, 60_000);
+
+  it('criterion 1: a daemon stopped after the publication push and before the published write: the next start records published and deletes the ref', async () => {
+    const f = fixture();
+    let killed = false;
+    const h = await remoteSlice(f, {
+      wrap: (backend) => {
+        const run = backend.run.bind(backend);
+        // A kill: the run that pushed the publication never returns, so neither `published` nor the deletion is written.
+        backend.run = async (job, ctx) => {
+          const outcome = await run(job, ctx);
+          if (!killed && outcome.kind === 'published') {
+            killed = true;
+            return new Promise(() => undefined);
+          }
+          return outcome;
+        };
+      },
+    });
+    await offered(h, f);
+    const claim = await verifyClaim(h);
+    const { sha } = rebaseAndPush(f, claim);
+    expect(await postResult(h, claim, { outcome: 'verified', rebasedSha: sha })).toMatchObject({ status: 200 });
+    await h.waitFor(() => killed, 30_000);
+    expect(h.store.getJob(claim.jobId)).toMatchObject({ status: 'publishing' });
+    expect(gitIn(f.bare, 'rev-parse', 'main')).not.toBe(claim.expectedHead);
+    expect(remoteHas(f, refOf(claim))).toBe(true);
+    await h.restart();
+    expect(h.store.getJob(claim.jobId)).toMatchObject({ status: 'published' });
+    expect(remoteHas(f, refOf(claim))).toBe(false);
+    expect(gitIn(f.repo, 'for-each-ref', 'refs/verify/')).toBe('');
+  }, 60_000);
+
+  it('criterion 1: a cancel while the run waits after a push, with the daemon stopped before the after-outcome step: the next start deletes the ref', async () => {
+    const f = fixture();
+    let skip = true;
+    const h = await remoteSlice(f, {
+      wrap: (backend) => {
+        const after = backend.afterOutcome.bind(backend);
+        backend.afterOutcome = async (job, opts) => {
+          if (skip) return;
+          return after(job, opts);
+        };
+      },
+    });
+    await offered(h, f);
+    const claim = await verifyClaim(h);
+    rebaseAndPush(f, claim);
+    const res = await fetch(`${h.orch.apiBaseUrl}/v1/tasks/T1/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(h.orch.verifierBusy()).toBe(false), { timeout: 5000, interval: 10 });
+    expect(h.store.getJob(claim.jobId)).toMatchObject({ status: 'dropped', applied: true });
+    expect(remoteHas(f, refOf(claim))).toBe(true);
+    skip = false;
+    await h.restart();
+    expect(remoteHas(f, refOf(claim))).toBe(false);
+  }, 60_000);
+
+  it('a cancel while the run waits after a push deletes the ref when the wait ends', async () => {
+    const f = fixture();
+    const h = await remoteSlice(f);
+    await offered(h, f);
+    const claim = await verifyClaim(h);
+    rebaseAndPush(f, claim);
+    const res = await fetch(`${h.orch.apiBaseUrl}/v1/tasks/T1/cancel`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(res.status).toBe(200);
+    await vi.waitFor(() => expect(h.orch.verifierBusy()).toBe(false), { timeout: 5000, interval: 10 });
+    expect(remoteHas(f, refOf(claim))).toBe(false);
+  }, 60_000);
+
+  it('the sweep keeps the ref of a job that has not ended, and a ref no job has', async () => {
+    const f = fixture();
+    const h = await remoteSlice(f);
+    await offered(h, f);
+    const claim = await verifyClaim(h);
+    rebaseAndPush(f, claim);
+    gitIn(f.bare, 'update-ref', 'refs/verify/no-such-job', claim.expectedHead);
+    await h.orch.stop();
+    await h.restart();
+    expect(remoteHas(f, refOf(claim))).toBe(true);
+    expect(remoteHas(f, 'refs/verify/no-such-job')).toBe(true);
+  }, 60_000);
+
+  it('criterion 2: an error thrown by failVerifierJob is logged with its own message, not as an after-outcome failure', async () => {
+    const f = fixture();
+    let thrown = false;
+    const h = await remoteSlice(f, {
+      wrap: (backend) => {
+        backend.run = async () => {
+          thrown = true;
+          throw new Error('the run broke');
+        };
+      },
+    });
+    const orch = h.orch as unknown as { failVerifierJob: (...args: unknown[]) => void };
+    const fail = vi.spyOn(orch, 'failVerifierJob').mockImplementation(() => {
+      throw new Error('the failure write broke');
+    });
+    const errors = vi.spyOn(h.orch.log, 'error');
+    try {
+      await workerSubmits(h, f);
+      await h.waitFor(() => thrown && !h.orch.verifierBusy() && errors.mock.calls.some((c) => c[0] === 'verifier job: the failure could not be written'), 30_000);
+      const messages = errors.mock.calls.map((c) => c[0]);
+      expect(messages).toContain('verifier job crashed');
+      expect(messages).not.toContain('verifier job: after-outcome step failed');
+      const call = errors.mock.calls.find((c) => c[0] === 'verifier job: the failure could not be written')!;
+      expect(String((call[1] as { err?: string }).err)).toContain('the failure write broke');
+    } finally {
+      errors.mockRestore();
+      fail.mockRestore();
+    }
   }, 60_000);
 });
 

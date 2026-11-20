@@ -11,6 +11,7 @@ import { optionalFullSha } from '../agent/seal.js';
 import type { ApiResponse, Orchestrator } from '../loop/orchestrator.js';
 import { assertStorableId } from '../state/storable.js';
 import type { VerifierJob } from '../state/store.js';
+import { VERIFIER_ERROR } from '../verifier/loop.js';
 import { NO_CLAIM } from './job.js';
 
 export type VerifyResult = NonNullable<VerifierJob['result']>;
@@ -27,14 +28,15 @@ export const VERIFY_REASON_LIMIT = 4096;
 /** The entries of a result's `conflictFiles` that are stored. See specs/verifier-pool "Verify result: limits". */
 export const VERIFY_CONFLICT_FILES_LIMIT = 200;
 
+/** The characters of each `conflictFiles` entry that are stored. See specs/verifier-pool "Verify result: body: limits". */
+export const VERIFY_CONFLICT_FILE_LIMIT = 4096;
+
 /** The longest `verifierId` a claim accepts: the longest pod name. See specs/verifier-pool "Verify claim: refusals". */
 export const VERIFIER_ID_LIMIT = 253;
 
 /** The lease expiries and `verifierError` releases after which a job ends `failed` with `verifierLost`. */
 export const VERIFIER_LOSS_LIMIT = 3;
 
-/** The release reason the verifier loop sends after an error of its own; counted as a lost verifier. */
-const VERIFIER_ERROR_REASON = 'verifierError';
 
 const UNAUTHORIZED: ApiResponse = { status: 401, body: { error: 'unauthorized' } };
 
@@ -215,7 +217,7 @@ function parseResult(body: Record<string, unknown>): Parsed {
       outcome: outcome as VerifyOutcome,
       ...(sha.sha !== undefined ? { rebasedSha: sha.sha } : {}),
       output: (output ?? '').slice(-VERIFY_OUTPUT_LIMIT),
-      conflictFiles: ((files as string[] | undefined) ?? []).slice(0, VERIFY_CONFLICT_FILES_LIMIT),
+      conflictFiles: ((files as string[] | undefined) ?? []).slice(0, VERIFY_CONFLICT_FILES_LIMIT).map((file) => file.slice(0, VERIFY_CONFLICT_FILE_LIMIT)),
     },
   };
 }
@@ -255,7 +257,7 @@ export function releaseVerifyJob(o: Orchestrator, jobId: string, token: string, 
   const now = o.now();
   const verifierId = job.verifier?.id;
   // A release after an error of the verifier counts as a lost verifier; a pod that was stopping (podTerminating) does not.
-  const lost = reason === VERIFIER_ERROR_REASON;
+  const lost = reason === VERIFIER_ERROR;
   o.store.transaction(() => {
     const losses = lost ? (job.leaseLosses ?? 0) + 1 : undefined;
     o.store.updateJob(jobId, { verifier: undefined, token: undefined, ...(losses !== undefined ? { leaseLosses: losses } : {}), updatedAt: now });
@@ -274,7 +276,7 @@ export function releaseVerifyJob(o: Orchestrator, jobId: string, token: string, 
  */
 function endIfLost(o: Orchestrator, job: VerifierJob, losses: number, now: number): void {
   if (losses < VERIFIER_LOSS_LIMIT) return;
-  const output = `verify job ${job.jobId} lost its verifier ${losses} times (lease expiries and verifierError releases); not offered again`;
+  const output = `verify job ${job.jobId} lost its verifier ${losses} times (lease expiries and ${VERIFIER_ERROR} releases); not offered again`;
   o.store.updateJob(job.jobId, { status: 'failed', failureKind: 'verifierLost', output, ...NO_CLAIM, updatedAt: now });
   o.log.warn('verify job failed: it lost its verifier too often', { jobId: job.jobId, taskId: job.taskId, losses });
 }

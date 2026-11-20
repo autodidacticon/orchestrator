@@ -69,10 +69,10 @@ export function classifyFetchFailure(stderr: string, timedOut = false): 'refused
   return 'unreachable';
 }
 
-/** A fetch that failed, with how: origin refused the credentials or access, or could not be reached in time. */
 /** The only refs `deleteRef` deletes: the verify refs of remote verification. See specs/verifier-pool "Verify ref: deletion". */
 export const VERIFY_REF_PREFIX = 'refs/verify/';
 
+/** A fetch that failed, with how: origin refused the credentials or access, or could not be reached in time. */
 export class OriginFetchError extends Error {
   constructor(
     message: string,
@@ -433,6 +433,26 @@ export class Origin {
       if (remoteSha && remoteSha === sha) return;
       if (remoteSha) throw new TagConflictError(name, remoteSha, sha);
       throw new Error(`git push ${this.remote} ${ref} failed: ${r.stderr.trim() || r.stdout.trim()}`);
+    });
+  }
+
+  /**
+   * The names of origin's refs under `refs/verify/`, read with `ls-remote`, fetching nothing. Runs on the serial chain
+   * like every other remote command. Throws `OriginFetchError` (refused or unreachable) when origin cannot be read.
+   * See specs/verifier-pool "Verify ref: deletion: sweep".
+   */
+  listVerifyRefs(): Promise<string[]> {
+    return this.serial(async () => {
+      await this.ensure();
+      const pattern = `${VERIFY_REF_PREFIX}*`;
+      const r = await this.remoteGit(['ls-remote', this.remote, pattern]);
+      if (r.code !== 0) throw new OriginFetchError(`git ls-remote ${this.remote} ${pattern} failed: ${r.stderr.trim() || r.stdout.trim()}`, classifyFetchFailure(r.stderr, r.timedOut));
+      const refs: string[] = [];
+      for (const line of r.stdout.split('\n')) {
+        const name = line.trim().split(/\s+/)[1];
+        if (name && name.startsWith(VERIFY_REF_PREFIX)) refs.push(name);
+      }
+      return refs;
     });
   }
 
