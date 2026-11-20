@@ -3,7 +3,8 @@
  * See specs/worker-pool.
  */
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TERMINATION_CALL_MS } from '../../src/worker/http.js';
 
 // A spy around the one substitution function, to show the loop calls it rather than a copy.
 vi.mock('../../src/runner/command.js', async (importOriginal) => {
@@ -233,5 +234,41 @@ describe('task filter and launch limit', () => {
     // Each launch was worked to its end (here: released, as the claim carried no repoUrl) before the next claim.
     expect(daemon.routes.filter((r) => r.endsWith('/release'))).toEqual(['POST /v1/launches/L1/release', 'POST /v1/launches/L2/release', 'POST /v1/launches/L3/release']);
     expect(out.at(-1)).toBe('worker w-1 max-launches - -');
+  });
+});
+
+describe('bounded shutdown', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('with retryWindowMs 60000 and a claim in flight that is never answered, exits 0 within TERMINATION_CALL_MS plus 1000 ms of SIGTERM', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const claims: string[] = [];
+    // Never answers; rejects once its signal is aborted, as a real fetch to a daemon that holds the connection does.
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      claims.push(String(url));
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return;
+        if (signal.aborted) reject(signal.reason);
+        else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    }) as typeof fetch;
+    const term = new AbortController();
+    const out: string[] = [];
+    let ended: { code: number; at: number } | undefined;
+    void runWorkerLoop(settings({ retryWindowMs: 60_000 }), { fetch: fetchFn, out: (l) => out.push(l), err: () => undefined, termination: term.signal }).then((code) => (ended = { code, at: Date.now() }));
+    for (let i = 0; i < 100 && claims.length === 0; i++) await new Promise<void>((r) => setImmediate(r));
+    expect(claims).toHaveLength(1);
+    const signalAt = Date.now();
+    term.abort();
+    for (let i = 0; i < TERMINATION_CALL_MS + 1000 && !ended; i += 100) await vi.advanceTimersByTimeAsync(100);
+    for (let i = 0; i < 20 && !ended; i++) await new Promise<void>((r) => setImmediate(r));
+    expect(ended).toBeDefined();
+    expect(ended!.code).toBe(0);
+    expect(ended!.at - signalAt).toBeLessThanOrEqual(TERMINATION_CALL_MS + 1000);
+    expect(claims.every((u) => u.endsWith('/v1/claims'))).toBe(true);
+    expect(out).toContain('worker w-1 terminating - -');
   });
 });

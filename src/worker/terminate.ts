@@ -6,6 +6,7 @@
  */
 import { git } from '../workspace/git.js';
 import type { ApiCall, ApiResult } from './http.js';
+import { TERMINATION_CALL_MS } from './http.js';
 import { SCRIPTED_IDENTITY } from './scripted.js';
 
 /** The release reason of a launch handed back on termination. */
@@ -14,8 +15,8 @@ export const POD_TERMINATING = 'podTerminating';
 export const DEFAULT_AGENT_STOP_MS = 10_000;
 /** The limit of a push made after the signal. */
 export const TERMINATION_PUSH_MS = 30_000;
-/** The longest connection-failure retry of an API call made after the signal, and the longest wait for a heartbeat in flight. */
-export const TERMINATION_CALL_MS = 5_000;
+/** The longest connection-failure retry of an API call after the signal, and the longest wait for a heartbeat in flight. */
+export { TERMINATION_CALL_MS };
 
 /** A running agent command: its process group leader, and when it exited (`exited`) and its pipes closed (`closed`). */
 export interface AgentHandle {

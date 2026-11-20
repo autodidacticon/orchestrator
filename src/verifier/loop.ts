@@ -10,9 +10,9 @@ import { readdir, rm } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import { isEntrypoint } from '../entry.js';
-import { type ApiCall, apiClient, type ApiResult, realSleep } from '../worker/http.js';
+import { type ApiCall, apiClient, type ApiResult, realSleep, TERMINATION_CALL_MS } from '../worker/http.js';
 import { Backoff, heartbeatEveryMs, type Schedule } from '../worker/loop.js';
-import { POD_TERMINATING, TERMINATION_CALL_MS } from '../worker/terminate.js';
+import { POD_TERMINATING } from '../worker/terminate.js';
 import { startVerifyHeartbeat } from './heartbeat.js';
 import { claimIds, JOB_ID, parseClaim, VERIFY_DIR, type VerifyClaim, type VerifyResultBody, type WorkOptions, workVerifyJob } from './job.js';
 
@@ -127,9 +127,8 @@ export async function runVerifierLoop(s: VerifierSettings, deps: VerifierDeps = 
   const term = deps.termination;
   const requested = () => term?.aborted === true;
   // The one place the API client is built. In M5 the claim sends no credential and the job routes only the job token.
-  const longCall = apiClient({ api: s.api, retryWindowMs: s.retryWindowMs, fetch: deps.fetch, sleep, now });
-  const shortCall = apiClient({ api: s.api, retryWindowMs: Math.min(s.retryWindowMs, TERMINATION_CALL_MS), fetch: deps.fetch, sleep, now });
-  const call: ApiCall = (...a) => (requested() ? shortCall : longCall)(...a);
+  // The termination request aborts every call in flight and leaves it, and every later call, at most TERMINATION_CALL_MS.
+  const call: ApiCall = apiClient({ api: s.api, retryWindowMs: s.retryWindowMs, fetch: deps.fetch, sleep, now, termination: term });
   const log = (event: string, c?: Ids, detail?: string) => {
     out(`verifier ${s.verifierId} ${event} ${c?.jobId || '-'} ${c?.taskId || '-'}`);
     if (detail) err(`verifier ${s.verifierId} ${event}: ${detail}\n`);
@@ -194,11 +193,11 @@ export async function runVerifierLoop(s: VerifierSettings, deps: VerifierDeps = 
         return 'lost';
       }
       const detail = `${r.status} ${JSON.stringify(r.body).slice(0, 300)}`;
-      // After the termination request a post in flight is awaited with no further retries.
+      // After the termination request no post starts: the one in flight is the last, even when the signal lands in the pause.
       if (r.status >= 500 && !requested() && now() + RESULT_RETRY_MS <= deadline) {
         err(`verifier ${s.verifierId} result ${claim.jobId}: ${detail}; posting again\n`);
         await sleep(RESULT_RETRY_MS);
-        continue;
+        if (!requested()) continue;
       }
       log('result-refused', claim, detail);
       return 'refused';
@@ -270,7 +269,11 @@ export async function runVerifierLoop(s: VerifierSettings, deps: VerifierDeps = 
       await stopHeartbeat();
       if (posted === 'stored') return requested() ? 'terminated' : 'stored';
       if (posted === 'lost') return requested() ? 'terminated' : 'other';
-      if (requested()) return 'terminated';
+      // A post refused after the signal (a 400, a 5xx, no answer) hands the job back, so it does not wait for its lease.
+      if (requested()) {
+        await release(claim, POD_TERMINATING);
+        return 'terminated';
+      }
       await release(claim, VERIFIER_ERROR);
       return 'other';
     } finally {
@@ -298,7 +301,7 @@ export async function runVerifierLoop(s: VerifierSettings, deps: VerifierDeps = 
   await sweep(s.cache, err);
   for (;;) {
     if (requested()) return 0;
-    // A claim in flight is awaited: a job it grants after the termination request is released at once.
+    // A claim in flight is aborted and sent again within TERMINATION_CALL_MS: a job it grants is released at once.
     let c: ApiResult | undefined;
     try {
       c = await call('POST', '/v1/verify/claims', { verifierId: s.verifierId });

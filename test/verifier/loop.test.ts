@@ -7,9 +7,10 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { VerifyClaim, VerifyResultBody, WorkOptions } from '../../src/verifier/job.js';
-import { DEFAULT_VERIFIER_CACHE, runVerifierLoop, USAGE, type VerifierSettings, verifierSettings } from '../../src/verifier/loop.js';
+import { DEFAULT_VERIFIER_CACHE, RESULT_RETRY_MS, runVerifierLoop, USAGE, type VerifierSettings, verifierSettings } from '../../src/verifier/loop.js';
+import { TERMINATION_CALL_MS } from '../../src/worker/http.js';
 
 const API = 'http://daemon.test';
 const dirs: string[] = [];
@@ -507,5 +508,150 @@ describe('verifier loop: termination', () => {
     expect(has(out, 'verified')).toEqual(['verifier v-1 verified job-1 T1']);
     expect(d.releases()).toEqual([]);
     expect(d.claims()).toHaveLength(1);
+  });
+});
+
+/** A fetch that never answers, and rejects once its signal is aborted, as a real fetch to a daemon that holds the connection does. */
+const neverAnswers = (init?: RequestInit) =>
+  new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal;
+    if (!signal) return;
+    if (signal.aborted) reject(signal.reason);
+    else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  });
+
+describe('verifier loop: bounded shutdown', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const refusals: Array<[string, Answer]> = [
+    ['400', { status: 400, body: { error: 'rebasedSha is required' } }],
+    ['503', { status: 503, body: { error: 'unavailable' } }],
+    ['no answer', 'throw'],
+  ];
+  for (const [name, answer] of refusals) {
+    it(`a result post answered ${name} after SIGTERM is followed by one release with podTerminating, and the loop exits 0 within 6000 ms of the signal`, async () => {
+      const term = new AbortController();
+      const held = deferred<void>();
+      const clock = fakeClock();
+      const d = fakeDaemon(async (c) => {
+        if (c.route === '/v1/verify/claims') return { status: 200, body: claimBody() };
+        if (c.route.endsWith('/result')) {
+          await held.promise;
+          return answer;
+        }
+        return { status: 200, body: { ok: true } };
+      });
+      const out: string[] = [];
+      const loop = runVerifierLoop(settings({ retryWindowMs: 60_000 }), { fetch: d.fetchFn, ...clock, schedule: fakeSchedule().schedule, out: (l) => void out.push(l), err: () => {}, termination: term.signal, work: async () => VERIFIED });
+      await until(() => d.results().length === 1, 'the result post');
+      const signalAt = clock.now();
+      term.abort();
+      held.resolve();
+      expect(await loop).toBe(0);
+      expect(clock.now() - signalAt).toBeLessThanOrEqual(6000);
+      expect(d.releases()).toEqual([{ method: 'POST', route: '/v1/verify/job-1/release', body: { reason: 'podTerminating' }, auth: 'Bearer tok-job-1' }]);
+      expect(has(out, 'result-refused')).toHaveLength(1);
+      expect(has(out, 'released')).toEqual(['verifier v-1 released job-1 T1']);
+      expect(d.claims()).toHaveLength(1);
+      // An answered post is not sent again after the signal; only a connection failure is retried, within TERMINATION_CALL_MS.
+      if (answer !== 'throw') expect(d.results()).toHaveLength(1);
+      else expect(d.results().length).toBeGreaterThan(1);
+    });
+  }
+
+  it('a claim whose answer body is cut off by the signal is sent again, and the job it grants is released with podTerminating', async () => {
+    const term = new AbortController();
+    const clock = fakeClock();
+    const calls: Call[] = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const route = String(url).replace(API, '');
+      calls.push({ method: init?.method ?? 'GET', route, body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined, auth: headers['authorization'] });
+      const signal = init!.signal!;
+      const claimsSoFar = calls.filter((c) => c.route === '/v1/verify/claims').length;
+      if (route === '/v1/verify/claims' && claimsSoFar === 1) {
+        // The headers arrive; the body is still being read when the signal comes.
+        return { status: 200, json: () => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) } as unknown as Response;
+      }
+      if (route === '/v1/verify/claims') return new Response(JSON.stringify({ ...claimBody(), repeated: true }), { status: 200 });
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+    const loop = runVerifierLoop(settings({ retryWindowMs: 60_000 }), { fetch: fetchFn, ...clock, out: () => {}, err: () => {}, termination: term.signal, work: async () => VERIFIED });
+    await until(() => calls.length === 1, 'the claim');
+    await flush();
+    term.abort();
+    expect(await loop).toBe(0);
+    expect(calls.filter((c) => c.route === '/v1/verify/claims')).toHaveLength(2);
+    expect(calls.filter((c) => c.route.endsWith('/release'))).toEqual([{ method: 'POST', route: '/v1/verify/job-1/release', body: { reason: 'podTerminating' }, auth: 'Bearer tok-job-1' }]);
+  });
+
+  it('a signal during the pause between result posts leads to exactly one result post in total, then the release', async () => {
+    const term = new AbortController();
+    const clock = fakeClock();
+    const d = fakeDaemon((c) => {
+      if (c.route === '/v1/verify/claims') return { status: 200, body: claimBody() };
+      if (c.route.endsWith('/result')) return { status: 503 };
+      return { status: 200, body: { ok: true } };
+    });
+    const sleep = async (ms: number) => {
+      if (ms === RESULT_RETRY_MS && d.results().length === 1) term.abort();
+      await clock.sleep(ms);
+    };
+    const code = await runVerifierLoop(settings({ retryWindowMs: 60_000 }), { fetch: d.fetchFn, now: clock.now, sleep, schedule: fakeSchedule().schedule, out: () => {}, err: () => {}, termination: term.signal, work: async () => VERIFIED });
+    expect(code).toBe(0);
+    expect(clock.delays).toEqual([RESULT_RETRY_MS]);
+    expect(d.results()).toHaveLength(1);
+    expect(d.releases()).toEqual([{ method: 'POST', route: '/v1/verify/job-1/release', body: { reason: 'podTerminating' }, auth: 'Bearer tok-job-1' }]);
+  });
+
+  /** Runs the loop on fake timers with a 60 s retry window; `handler` answers each call. Answers when and how it ended. */
+  async function onFakeTimers(handler: (c: Call, init?: RequestInit) => Promise<Response>, until1: (calls: Call[]) => boolean) {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const calls: Call[] = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const c: Call = { method: init?.method ?? 'GET', route: String(url).replace(API, ''), body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined, auth: headers['authorization'] };
+      calls.push(c);
+      return handler(c, init);
+    }) as typeof fetch;
+    const term = new AbortController();
+    const out: string[] = [];
+    let ended: { code: number; at: number } | undefined;
+    void runVerifierLoop(settings({ retryWindowMs: 60_000 }), { fetch: fetchFn, schedule: fakeSchedule().schedule, out: (l) => void out.push(l), err: () => {}, termination: term.signal, work: async () => VERIFIED }).then((code) => (ended = { code, at: Date.now() }));
+    await until(() => until1(calls), 'the call in flight');
+    const signalAt = Date.now();
+    term.abort();
+    for (let i = 0; i < TERMINATION_CALL_MS + 1000 && !ended; i += 100) await vi.advanceTimersByTimeAsync(100);
+    for (let i = 0; i < 20 && !ended; i++) await flush();
+    return { ended, signalAt, calls, out };
+  }
+
+  it('with retryWindowMs 60000, a claim in flight at SIGTERM that is never answered ends the loop with 0 within TERMINATION_CALL_MS plus 1000 ms', async () => {
+    const r = await onFakeTimers(
+      (_c, init) => neverAnswers(init),
+      (calls) => calls.length === 1,
+    );
+    expect(r.ended).toBeDefined();
+    expect(r.ended!.code).toBe(0);
+    expect(r.ended!.at - r.signalAt).toBeLessThanOrEqual(TERMINATION_CALL_MS + 1000);
+    expect(r.calls.every((c) => c.route === '/v1/verify/claims')).toBe(true);
+  });
+
+  it('with retryWindowMs 60000, a result post in flight at SIGTERM that is never answered is followed by a release, and the loop exits 0 within TERMINATION_CALL_MS plus 1000 ms', async () => {
+    const r = await onFakeTimers(
+      async (c, init) => {
+        if (c.route === '/v1/verify/claims') return new Response(JSON.stringify(claimBody()), { status: 200 });
+        if (c.route.endsWith('/result')) return neverAnswers(init);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+      (calls) => calls.some((c) => c.route.endsWith('/result')),
+    );
+    expect(r.ended).toBeDefined();
+    expect(r.ended!.code).toBe(0);
+    expect(r.ended!.at - r.signalAt).toBeLessThanOrEqual(TERMINATION_CALL_MS + 1000);
+    expect(r.calls.filter((c) => c.route.endsWith('/release'))).toEqual([{ method: 'POST', route: '/v1/verify/job-1/release', body: { reason: 'podTerminating' }, auth: 'Bearer tok-job-1' }]);
+    expect(has(r.out, 'released')).toEqual(['verifier v-1 released job-1 T1']);
   });
 });

@@ -330,11 +330,10 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
   const now = deps.now ?? Date.now;
   const out = deps.out ?? ((line: string) => void process.stdout.write(`${line}\n`));
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
-  const longCall = apiClient({ api: s.api, retryWindowMs: s.retryWindowMs, fetch: deps.fetch, sleep, now });
-  // After the termination request every call gets a short retry window, so the hand-back fits the grace period.
-  const shortCall = apiClient({ api: s.api, retryWindowMs: Math.min(s.retryWindowMs, TERMINATION_CALL_MS), fetch: deps.fetch, sleep, now });
+  // The termination request aborts every call in flight and leaves it, and every later call, a short retry window,
+  // so the hand-back fits the grace period.
+  const call: ApiCall = apiClient({ api: s.api, retryWindowMs: s.retryWindowMs, fetch: deps.fetch, sleep, now, termination: deps.termination });
   const term = terminationOf(deps.termination);
-  const call: ApiCall = (...a) => (term.requested() ? shortCall : longCall)(...a);
   const log = (event: string, c?: Pick<RemoteClaim, 'launchId' | 'taskId'>, detail?: string) => {
     out(`worker ${s.workerId} ${event} ${c?.launchId || '-'} ${c?.taskId || '-'}`);
     if (detail) err(`worker ${s.workerId} ${event}: ${detail}\n`);
@@ -348,8 +347,18 @@ export async function runWorkerLoop(s: WorkerSettings, deps: WorkerDeps = {}): P
   void term.wait.then(() => log('terminating', current));
   for (;;) {
     if (term.requested()) return 0;
-    // A claim in flight is awaited: a launch it answers is released at once, without keep.
-    const c = await call('POST', '/v1/claims', { workerId: s.workerId, access: 'remote', ...(s.task ? { taskId: s.task } : {}) });
+    // A claim in flight is aborted and sent again within TERMINATION_CALL_MS: a launch it answers is released at once,
+    // without keep, and no answer exits 0.
+    let c: ApiResult;
+    try {
+      c = await call('POST', '/v1/claims', { workerId: s.workerId, access: 'remote', ...(s.task ? { taskId: s.task } : {}) });
+    } catch (e) {
+      if (term.requested()) {
+        err(`worker ${s.workerId} claim: no answer: ${e instanceof Error ? e.message : String(e)}\n`);
+        return 0;
+      }
+      throw e;
+    }
     if (c.status === 200) {
       const claim = claimOf(c.body);
       const tools: LaunchTools = { log, err, sleep, schedule: deps.schedule, scriptedIdleMs: deps.scriptedIdleMs, term };
