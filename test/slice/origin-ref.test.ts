@@ -162,3 +162,45 @@ describe('one at a time', () => {
     expect(gitIn(f.repo, 'ls-remote', f.bare, 'refs/verify/x')).toBe(`${sha}\trefs/verify/x`);
   }, 30_000);
 });
+
+describe('deleteRef takes only verify refs (GH-184)', () => {
+  it('criterion 5: refs/heads/main, refs/heads/MAIN and refs/remotes/origin/main are refused and touch neither the clone nor origin; a missing verify ref resolves', async () => {
+    const f = fixture();
+    const origin = new Origin({ repo: f.repo, integrationBranch: 'main', url: f.bare });
+    const cloneMain = gitIn(f.repo, 'rev-parse', 'refs/heads/main');
+    gitIn(f.repo, 'update-ref', 'refs/remotes/origin/main', cloneMain);
+    const originMain = gitIn(f.bare, 'rev-parse', 'refs/heads/main');
+    for (const name of ['refs/heads/main', 'refs/heads/MAIN', 'refs/remotes/origin/main', 'refs/heads/feature', 'refs/tags/v1', 'refs/verifyx/a']) {
+      const err = await origin.deleteRef(name).then(() => 'resolved', (e: unknown) => e);
+      expect(err, name).toBeInstanceOf(Error);
+      expect((err as Error).message, name).toContain(JSON.stringify(name));
+      expect((err as Error).message, name).toContain('refs/verify/');
+    }
+    expect(gitIn(f.repo, 'remote')).toBe('');
+    expect(gitIn(f.repo, 'rev-parse', 'refs/heads/main')).toBe(cloneMain);
+    expect(gitIn(f.repo, 'rev-parse', 'refs/remotes/origin/main')).toBe(cloneMain);
+    expect(gitIn(f.bare, 'rev-parse', 'refs/heads/main')).toBe(originMain);
+
+    // A verify ref neither origin nor the clone has.
+    await expect(origin.deleteRef('refs/verify/missing')).resolves.toBeUndefined();
+    expect(gitIn(f.bare, 'rev-parse', 'refs/heads/main')).toBe(originMain);
+  }, 30_000);
+
+  it("criterion 5: a push git answers with \"remote ref does not exist\" resolves and removes the clone's ref; another failure rejects", async () => {
+    const f = fixture();
+    const origin = new Origin({ repo: f.repo, integrationBranch: 'main', url: f.bare });
+    const sha = gitIn(f.repo, 'rev-parse', 'HEAD');
+    // Git 2.55 exits 0 for a deletion of a ref origin lacks: answer as older git does.
+    const remoteGit = (origin as unknown as { remoteGit: (a: string[]) => Promise<unknown> }).remoteGit.bind(origin);
+    let stderr = "error: unable to delete 'refs/verify/gone': remote ref does not exist\nerror: failed to push some refs";
+    (origin as unknown as { remoteGit: (a: string[]) => Promise<unknown> }).remoteGit = async (args: string[]) =>
+      args[0] === 'push' ? { code: 1, stdout: '', stderr, timedOut: false } : remoteGit(args);
+    gitIn(f.repo, 'update-ref', 'refs/verify/gone', sha);
+    await expect(origin.deleteRef('refs/verify/gone')).resolves.toBeUndefined();
+    expect(refSha(f.repo, 'refs/verify/gone')).toBeUndefined();
+    stderr = ' ! [remote rejected] refs/verify/gone (hook declined)';
+    gitIn(f.repo, 'update-ref', 'refs/verify/gone', sha);
+    await expect(origin.deleteRef('refs/verify/gone')).rejects.toThrow(/hook declined/);
+    expect(refSha(f.repo, 'refs/verify/gone')).toBe(sha);
+  }, 30_000);
+});

@@ -79,7 +79,7 @@ const submit = (h: SliceHarness, launch: Launch, extra: Record<string, unknown>,
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A remote run under `verifier.mode: remote` whose backend is built here. */
-async function remoteSlice(f: Fixture, opts: { graph?: string; config?: ConfigInput; git?: Record<string, unknown>; clock?: () => number } = {}): Promise<SliceHarness> {
+async function remoteSlice(f: Fixture, opts: { graph?: string; config?: ConfigInput; git?: Record<string, unknown>; clock?: () => number; wrap?: (backend: RemoteVerifierBackend) => void } = {}): Promise<SliceHarness> {
   let h!: SliceHarness;
   const backend = new RemoteVerifierBackend({
     repo: f.repo,
@@ -89,6 +89,7 @@ async function remoteSlice(f: Fixture, opts: { graph?: string; config?: ConfigIn
     checkTimeoutMs: 60_000,
     ...(opts.clock ? { now: opts.clock } : {}),
   });
+  opts.wrap?.(backend);
   const run = remoteRun(f.bare);
   h = await makeSlice({
     graph: opts.graph ?? GRAPH,
@@ -199,6 +200,8 @@ describe('slice: remote verification', () => {
     const job = jobOf(h);
     expect(job).toMatchObject({ status: 'published', verifiedSha: sha, publishedSha: main, changedFiles: ['T1.txt'] });
     expectNoClaim(job);
+    // The ref is deleted once the outcome is written, as the run ends.
+    await h.waitFor(() => !h.orch.verifierBusy(), 30_000);
     expect(verifyRefs(f)).toBe('');
     expect(gitIn(f.repo, 'for-each-ref', 'refs/verify/')).toBe('');
     expect(existsSync(path.join(f.dir, 'run', 'verify'))).toBe(false);
@@ -290,6 +293,7 @@ describe('slice: remote verification', () => {
     await h.waitFor(() => h.orch.entry('T1').status.kind === 'blocked', 30_000);
     expect(h.orch.entry('T1')).toMatchObject({ status: { kind: 'blocked', reason: { kind: 'pushRefused' } }, attempts: 0 });
     expect(requeued(h)).toHaveLength(2);
+    await h.waitFor(() => !h.orch.verifierBusy(), 30_000);
     expect(gitIn(f.dir, 'ls-remote', f.bare, ref)).toBe('');
   }, 60_000);
 
@@ -467,6 +471,7 @@ describe('slice: remote verification', () => {
     const transitions = h.store.listEvents({ kind: 'transition', taskId: 'T1' });
     expect(transitions.at(-1)!.payload).toMatchObject({ trigger: 'cancel' });
     expect(gitIn(f.bare, 'rev-list', '--count', `${head}..main`)).toBe('1');
+    await h.waitFor(() => !h.orch.verifierBusy(), 30_000);
     expect(gitIn(f.dir, 'ls-remote', f.bare, `refs/verify/${claim.jobId}`)).toBe('');
   }, 60_000);
 
@@ -537,6 +542,162 @@ describe('slice: remote verification', () => {
     await h.waitFor(() => h.orch.entry('T1').status.kind === 'done', 30_000);
     expect(gitIn(f.bare, 'rev-parse', 'main')).toBe(head);
     expect(jobOf(h)).toMatchObject({ status: 'published', publishedSha: head, verifiedSha: head });
+  }, 60_000);
+});
+
+describe('slice: remote verification hardening (GH-184)', () => {
+  it('criterion 1: a daemon killed after a refused verified result and before its outcome is written leaves the ref; the resumed run counts the refusal once', async () => {
+    const f = fixture();
+    let killed = false;
+    const h = await remoteSlice(f, {
+      git: { pushRefusalLimit: 2 },
+      wrap: (backend) => {
+        const run = backend.run.bind(backend);
+        // A kill: the first run that ends in a requeue never returns, so nothing after it is written.
+        backend.run = async (job, ctx) => {
+          const outcome = await run(job, ctx);
+          if (!killed && outcome.kind === 'requeue') {
+            killed = true;
+            return new Promise(() => undefined);
+          }
+          return outcome;
+        };
+      },
+    });
+    await offered(h, f);
+    const claim = await verifyClaim(h);
+    const ref = `refs/verify/${claim.jobId}`;
+    const { dir, sha } = rebaseAndPush(f, claim, false);
+    // The ref holds another commit than the reported one: the result is refused.
+    pushVerifyRef(dir, claim, claim.expectedHead);
+    expect(await postResult(h, claim, { outcome: 'verified', rebasedSha: sha })).toMatchObject({ status: 200 });
+    await h.waitFor(() => killed, 30_000);
+    await sleep(100);
+    expect(requeued(h)).toHaveLength(0);
+    expect(jobOf(h)).toMatchObject({ status: 'checking', result: { outcome: 'verified', rebasedSha: sha } });
+    expect(gitIn(f.dir, 'ls-remote', f.bare, ref)).toBe(`${claim.expectedHead}\t${ref}`);
+
+    await h.restart();
+    // After the restart, origin still holds the ref for the resumed run.
+    expect(gitIn(f.dir, 'ls-remote', f.bare, ref)).toBe(`${claim.expectedHead}\t${ref}`);
+    // Requeued, then offered again by the next run: the first run, its ref deletion included, has ended.
+    await h.waitFor(() => requeued(h).length === 1 && offeredFree(h), 30_000);
+    const [e] = requeued(h);
+    expect(e!.payload).toMatchObject({ retry: 'refused', refusals: 1 });
+    // The resumed run found the ref (another commit), not a missing one.
+    expect(String(e!.payload?.['reason'])).toContain(`${ref} on origin holds ${claim.expectedHead}, not the reported ${sha}`);
+    expect(gitIn(f.dir, 'ls-remote', f.bare, ref)).toBe('');
+    // One refusal under git.pushRefusalLimit 2: the task is not blocked and the job is offered again.
+    expect(h.orch.entry('T1')).toMatchObject({ status: { kind: 'submitted' }, attempts: 0 });
+  }, 60_000);
+
+  it('criterion 2: a job dropped while publishFromRef runs, whose run then throws an error that is not an OriginFetchError, stays dropped and applied', async () => {
+    const f = fixture();
+    let h!: SliceHarness;
+    let dropped = false;
+    h = await remoteSlice(f, {
+      wrap: (backend) => {
+        const useOrigin = backend.useOrigin.bind(backend);
+        backend.useOrigin = (origin) => {
+          if (origin) {
+            origin.fetchRef = async () => {
+              // A cascade drops the job (it holds a result) while the ref is read, then the run fails otherwise.
+              h.store.dropJob(jobOf(h).jobId);
+              dropped = true;
+              throw new Error('rev-parse failed: not an OriginFetchError');
+            };
+          }
+          useOrigin(origin);
+        };
+      },
+    });
+    await offered(h, f);
+    const claim = await verifyClaim(h);
+    const { sha } = rebaseAndPush(f, claim);
+    expect(sha).not.toBe(claim.expectedHead);
+    const errors = vi.spyOn(h.orch.log, 'error');
+    try {
+      expect(await postResult(h, claim, { outcome: 'verified', rebasedSha: sha })).toMatchObject({ status: 200 });
+      await h.waitFor(() => dropped && !h.orch.verifierBusy(), 30_000);
+      expect(errors.mock.calls.some((c) => c[0] === 'verifier job crashed')).toBe(true);
+    } finally {
+      errors.mockRestore();
+    }
+    const job = jobOf(h);
+    expect(job).toMatchObject({ status: 'dropped', applied: true, result: { outcome: 'verified', rebasedSha: sha } });
+    expect(job.failureKind).toBeUndefined();
+    expect(h.orch.entry('T1').attempts).toBe(0);
+  }, 60_000);
+
+  it('a job that loses its verifier three times ends the wait: failed as verifierLost, the slot free and an attempt spent', async () => {
+    const f = fixture();
+    const h = await remoteSlice(f);
+    await offered(h, f);
+    for (let i = 1; i <= 3; i++) {
+      const c = await verifyClaim(h, `v${i}`);
+      expect((await http(h, `/v1/verify/${c.jobId}/release`, { reason: 'verifierError' }, c.token)).status).toBe(200);
+    }
+    await h.waitFor(() => !h.orch.verifierBusy() && h.orch.entry('T1').attempts === 1, 30_000);
+    expect(h.store.listJobs({ taskId: 'T1' })[0]).toMatchObject({ status: 'failed', failureKind: 'verifierLost', leaseLosses: 3, applied: true });
+  }, 60_000);
+
+  it('criterion 6: a result posted with the token of an expired or a released claim answers 401', async () => {
+    const f = fixture();
+    const clock = { value: Date.now() };
+    const h = await remoteSlice(f, { clock: () => clock.value });
+    await offered(h, f);
+    const first = await verifyClaim(h, 'v1');
+    const { sha } = rebaseAndPush(f, first);
+    for (let left = 61_000; left > 0; left -= 30_000) {
+      clock.value += Math.min(30_000, left);
+      h.orch.noteClock();
+    }
+    await h.orch.tick();
+    expect(h.store.listEvents({ kind: 'verify.leaseExpired' })).toHaveLength(1);
+    expect((await postResult(h, first, { outcome: 'verified', rebasedSha: sha })).status).toBe(401);
+
+    const second = await verifyClaim(h, 'v2');
+    expect(second.jobId).toBe(first.jobId);
+    expect((await http(h, `/v1/verify/${second.jobId}/release`, { reason: 'podTerminating' }, second.token)).status).toBe(200);
+    expect((await postResult(h, second, { outcome: 'verified', rebasedSha: sha })).status).toBe(401);
+    expect(jobOf(h).result).toBeUndefined();
+    expect(h.store.listEvents({ kind: 'verify.result' })).toHaveLength(0);
+
+    const third = await verifyClaim(h, 'v3');
+    expect((await postResult(h, third, { outcome: 'verified', rebasedSha: sha })).status).toBe(200);
+    await h.waitFor(() => h.orch.entry('T1').status.kind === 'done', 30_000);
+  }, 60_000);
+
+  it('criterion 6: a stale verifier that pushes the verify ref after a newer claim is refused by the tip check', async () => {
+    const f = fixture();
+    const clock = { value: Date.now() };
+    const h = await remoteSlice(f, { clock: () => clock.value });
+    await offered(h, f);
+    const stale = await verifyClaim(h, 'v1');
+    // The stale verifier's commit: the same rebase under another message, so its sha differs from the newer one.
+    const old = rebaseAndPush(f, stale, false);
+    gitIn(old.dir, 'commit', '-q', '--amend', '-m', 'stale verifier');
+    const staleSha = gitIn(old.dir, 'rev-parse', 'HEAD');
+    for (let left = 61_000; left > 0; left -= 30_000) {
+      clock.value += Math.min(30_000, left);
+      h.orch.noteClock();
+    }
+    await h.orch.tick();
+    const fresh = await verifyClaim(h, 'v2');
+    expect(fresh.jobId).toBe(stale.jobId);
+    const { sha } = rebaseAndPush(f, fresh);
+    expect(staleSha).not.toBe(sha);
+    // The late push from the stale verifier lands after the newer one.
+    pushVerifyRef(old.dir, stale, staleSha);
+    const ref = `refs/verify/${fresh.jobId}`;
+    expect(await postResult(h, fresh, { outcome: 'verified', rebasedSha: sha })).toMatchObject({ status: 200 });
+    // Requeued, then offered again by the next run: the first run, its ref deletion included, has ended.
+    await h.waitFor(() => requeued(h).length === 1 && offeredFree(h), 30_000);
+    const [e] = requeued(h);
+    expect(e!.payload).toMatchObject({ retry: 'refused', refusals: 1 });
+    expect(String(e!.payload?.['reason'])).toContain(`${ref} on origin holds ${staleSha}, not the reported ${sha}`);
+    expect(gitIn(f.bare, 'rev-parse', 'main')).toBe(fresh.expectedHead);
+    expect(h.orch.entry('T1')).toMatchObject({ status: { kind: 'submitted' }, attempts: 0 });
   }, 60_000);
 });
 

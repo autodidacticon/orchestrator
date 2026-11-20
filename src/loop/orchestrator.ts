@@ -172,6 +172,17 @@ export class JobDroppedError extends Error {
   }
 }
 
+/**
+ * Thrown by the remote wait when its job left `checking` without a result, as a job that lost its verifier three
+ * times does: the row holds its outcome already. See specs/verifier-pool "Verify lease: cycle cap".
+ */
+export class JobEndedError extends Error {
+  constructor(public readonly jobId: string, public readonly status: string) {
+    super(`job ${jobId} ended ${status} while it waited for a result`);
+    this.name = 'JobEndedError';
+  }
+}
+
 export const failBodySchema = z.object({
   tried: z.string().default(''),
   why: z.string().min(1),
@@ -2546,24 +2557,35 @@ export class Orchestrator implements OrchestratorCore {
     this.noteClock();
     const startedAt = this.now();
     this.verifierInFlight = this.runVerifierJob(job, startedAt)
-      .catch((err) => {
-        if (err instanceof JobDroppedError) {
-          this.log.info('verifier job dropped mid-flight', { jobId: job.jobId });
-          return;
-        }
-        if (err instanceof VerifierStoppedError) {
-          // The row stays as it is; the next start resumes the job when recovery keeps it. See specs/verifier-pool "Remote verification and restarts: stop".
-          this.log.info('verifier job stopped while it waited for a result', { jobId: job.jobId });
-          return;
-        }
-        if (err instanceof StoreFatalError) {
-          // Nothing is recorded: the store takes no more work, and the job is decided at the next start.
-          this.log.error('verifier job stopped before publication: the store is fatal', { jobId: job.jobId });
-          return;
-        }
-        this.log.error('verifier job crashed', { jobId: job.jobId, err: String(err) });
-        this.failVerifierJob(job, startedAt, 'checkFailed', String(err));
-      })
+      .then(
+        () => true,
+        (err) => {
+          if (err instanceof JobDroppedError) {
+            this.log.info('verifier job dropped mid-flight', { jobId: job.jobId });
+            return true;
+          }
+          if (err instanceof JobEndedError) {
+            this.log.info('verifier job ended while it waited for a result', { jobId: job.jobId, status: err.status });
+            return true;
+          }
+          if (err instanceof VerifierStoppedError) {
+            // The row stays as it is; the next start resumes the job when recovery keeps it. See specs/verifier-pool "Remote verification and restarts: stop".
+            this.log.info('verifier job stopped while it waited for a result', { jobId: job.jobId });
+            return false;
+          }
+          if (err instanceof StoreFatalError) {
+            // Nothing is recorded: the store takes no more work, and the job is decided at the next start.
+            this.log.error('verifier job stopped before publication: the store is fatal', { jobId: job.jobId });
+            return false;
+          }
+          this.log.error('verifier job crashed', { jobId: job.jobId, err: String(err) });
+          this.failVerifierJob(job, startedAt, 'checkFailed', String(err));
+          return true;
+        },
+      )
+      // After the outcome is written: the remote backend deletes the verify ref here. See specs/verifier-pool "Verify ref: deletion".
+      .then((written) => this.verifier.afterOutcome?.(job, { written }))
+      .catch((err) => this.log.error('verifier job: after-outcome step failed', { jobId: job.jobId, err: String(err) }))
       .finally(() => {
         this.verifierInFlight = undefined;
         this.wake();
@@ -2583,7 +2605,12 @@ export class Orchestrator implements OrchestratorCore {
     const gapMs = endedAt - startedAt - this.awakeMs(startedAt, endedAt);
     const current = this.store.getJob(job.jobId);
     const live = current !== undefined && current.status !== 'dropped' && !current.applied;
-    if (live && gapMs > 0 && GAP_REQUEUE_KINDS.has(failureKind) && (current.gapRequeues ?? 0) < 1) {
+    // A job a cascade dropped (or one already applied) keeps its row: no write. See specs/verifier-pool "Remote verification outcomes: dropped job".
+    if (!live) {
+      this.log.info('verifier failure discarded; job no longer live', { jobId: job.jobId, failureKind });
+      return;
+    }
+    if (gapMs > 0 && GAP_REQUEUE_KINDS.has(failureKind) && (current.gapRequeues ?? 0) < 1) {
       const reason = `check ${failureKind} after a run that overlapped a ${gapMs}ms gap in the daemon's clock; run again once without spending an attempt`;
       this.log.warn('verifier job requeued after a gap', { jobId: job.jobId, taskId: job.taskId, failureKind, gapMs });
       this.store.transaction(() => {
@@ -2623,6 +2650,7 @@ export class Orchestrator implements OrchestratorCore {
           if (!cur || cur.status === 'dropped') throw new JobDroppedError(job.jobId);
           if (this.stopping) throw new VerifierStoppedError(job.jobId);
           if (cur.result !== undefined) return cur.result;
+          if (cur.status !== 'checking') throw new JobEndedError(job.jobId, cur.status);
           if (!warned && cur.verifier === undefined && cur.offer !== undefined && this.now() - cur.offer.at >= this.config.leaseTtlMs) {
             warned = true;
             this.log.warn('verify job waits for a verifier', { jobId: job.jobId, taskId: job.taskId, waitedMs: this.now() - cur.offer.at });
@@ -2640,15 +2668,22 @@ export class Orchestrator implements OrchestratorCore {
       this.store.updateJob(job.jobId, { status: 'published', publishedSha: outcome.publishedSha, verifiedSha: outcome.verifiedSha, changedFiles: outcome.changedFiles, ...NO_CLAIM, updatedAt: this.now() });
     } else if (outcome.kind === 'requeue') {
       // A refused or unreachable push waits a backoff; refusals up to git.pushRefusalLimit, then the task is blocked. See specs/integration-pipeline "Push failures are classified".
-      const retry = outcome.retry ? recordPushRetry(this.store, job.jobId, outcome.retry, this.config.git, this.now()) : undefined;
+      // The refusal count, the event and the row are one write: a crash in between never charges a refusal twice for one result.
+      const retry = this.store.transaction(() => {
+        const r = outcome.retry ? recordPushRetry(this.store, job.jobId, outcome.retry, this.config.git, this.now()) : undefined;
+        if (r?.blocked && outcome.retry) {
+          this.store.updateJob(job.jobId, { status: 'failed', failureKind: PUSH_REFUSED, output: outcome.retry.message, ...NO_CLAIM, updatedAt: this.now() });
+          return r;
+        }
+        this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, ...(outcome.reason ? { reason: outcome.reason } : {}), ...(r && outcome.retry ? { retry: outcome.retry.kind, retryAt: r.state.retryAt, retryInMs: r.delayMs, refusals: r.state.refusals } : {}) } }, this.now());
+        this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, ...NO_CLAIM, updatedAt: this.now() });
+        return r;
+      });
       if (retry?.blocked && outcome.retry) {
         this.log.error('publication push refused; task blocked', { jobId: job.jobId, taskId: job.taskId, refusals: retry.state.refusals, reason: outcome.retry.message });
-        this.store.updateJob(job.jobId, { status: 'failed', failureKind: PUSH_REFUSED, output: outcome.retry.message, ...NO_CLAIM, updatedAt: this.now() });
         return;
       }
       if (outcome.reason) this.log.warn('verifier job requeued', { jobId: job.jobId, taskId: job.taskId, reason: outcome.reason, ...(retry ? { retryInMs: retry.delayMs } : {}) });
-      this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, ...(outcome.reason ? { reason: outcome.reason } : {}), ...(retry && outcome.retry ? { retry: outcome.retry.kind, retryAt: retry.state.retryAt, retryInMs: retry.delayMs, refusals: retry.state.refusals } : {}) } }, this.now());
-      this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, ...NO_CLAIM, updatedAt: this.now() });
     } else if (outcome.kind === 'failed') {
       this.failVerifierJob(job, startedAt, outcome.reason.kind, outcome.reason.output ?? outcome.reason.message);
     } else {

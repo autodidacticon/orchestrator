@@ -70,6 +70,9 @@ export function classifyFetchFailure(stderr: string, timedOut = false): 'refused
 }
 
 /** A fetch that failed, with how: origin refused the credentials or access, or could not be reached in time. */
+/** The only refs `deleteRef` deletes: the verify refs of remote verification. See specs/verifier-pool "Verify ref: deletion". */
+export const VERIFY_REF_PREFIX = 'refs/verify/';
+
 export class OriginFetchError extends Error {
   constructor(
     message: string,
@@ -250,13 +253,15 @@ export class Origin {
 
   /**
    * Refuse a ref name a remote method must not use: one outside `refs/`, one `git check-ref-format` rejects, and for a
-   * delete the integration branch. Runs no command that talks to origin and adds or re-points no remote.
+   * delete any name outside `refs/verify/` (the integration branch, its tracking ref and every other branch, whatever
+   * their case). Runs no command that talks to origin and adds or re-points no remote.
    */
   private async checkRefName(ref: string, forDelete: boolean): Promise<void> {
     if (!ref.startsWith('refs/')) throw new Error(`refused ref name ${JSON.stringify(ref)}: it does not start with refs/`);
     const r = await git(this.repo, ['check-ref-format', ref], { allowFail: true });
     if (r.code !== 0) throw new Error(`refused ref name ${JSON.stringify(ref)}: git check-ref-format rejects it`);
-    if (forDelete && ref === this.localRef) throw new Error(`refused ref name ${JSON.stringify(ref)}: the integration branch is never deleted`);
+    // A prefix check, not a name compare: on a case-insensitive filesystem refs/heads/MAIN is refs/heads/main.
+    if (forDelete && !ref.startsWith(VERIFY_REF_PREFIX)) throw new Error(`refused ref name ${JSON.stringify(ref)}: only a ref under ${VERIFY_REF_PREFIX} is deleted`);
   }
 
   /**
@@ -433,8 +438,8 @@ export class Origin {
 
   /**
    * Delete `<ref>` on origin, then the clone's `<ref>`. A ref origin does not have, or the clone never had, is not an
-   * error. Runs on the serial chain like every other remote command. A name outside `refs/`, one `git check-ref-format`
-   * rejects, or the integration branch is refused before origin is touched. Any other failure rejects and leaves the
+   * error. Runs on the serial chain like every other remote command. A name outside `refs/verify/` or one
+   * `git check-ref-format` rejects is refused before origin is touched. Any other failure rejects and leaves the
    * clone's ref.
    */
   deleteRef(ref: string): Promise<void> {

@@ -76,6 +76,8 @@ export type FailedKind =
   | 'leaseExpired'
   | 'checkFailed'
   | 'checkTimeout'
+  /** A remote verify job lost its verifier three times (lease expiries and `verifierError` releases). See specs/verifier-pool "Verify lease: cycle cap". */
+  | 'verifierLost'
   | 'emptySubmission'
   | 'missingAcceptanceEvidence'
   | 'integrationCapExceeded'

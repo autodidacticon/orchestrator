@@ -11,6 +11,7 @@ import { optionalFullSha } from '../agent/seal.js';
 import type { ApiResponse, Orchestrator } from '../loop/orchestrator.js';
 import { assertStorableId } from '../state/storable.js';
 import type { VerifierJob } from '../state/store.js';
+import { NO_CLAIM } from './job.js';
 
 export type VerifyResult = NonNullable<VerifierJob['result']>;
 export type VerifyOutcome = VerifyResult['outcome'];
@@ -19,6 +20,21 @@ export const VERIFY_OUTCOMES: readonly VerifyOutcome[] = ['verified', 'checkFail
 
 /** The last characters of a check's output that a result keeps, as the in-process backend keeps them. */
 export const VERIFY_OUTPUT_LIMIT = 65536;
+
+/** The characters of a release's `reason` that are stored. See specs/verifier-pool "Verify release: limits". */
+export const VERIFY_REASON_LIMIT = 4096;
+
+/** The entries of a result's `conflictFiles` that are stored. See specs/verifier-pool "Verify result: limits". */
+export const VERIFY_CONFLICT_FILES_LIMIT = 200;
+
+/** The longest `verifierId` a claim accepts: the longest pod name. See specs/verifier-pool "Verify claim: refusals". */
+export const VERIFIER_ID_LIMIT = 253;
+
+/** The lease expiries and `verifierError` releases after which a job ends `failed` with `verifierLost`. */
+export const VERIFIER_LOSS_LIMIT = 3;
+
+/** The release reason the verifier loop sends after an error of its own; counted as a lost verifier. */
+const VERIFIER_ERROR_REASON = 'verifierError';
 
 const UNAUTHORIZED: ApiResponse = { status: 401, body: { error: 'unauthorized' } };
 
@@ -140,6 +156,7 @@ function authenticateJob(o: Orchestrator, jobId: string, token: string): Verifie
 export async function claimVerifyJob(o: Orchestrator, body: Record<string, unknown>): Promise<ApiResponse> {
   const verifierId = String(body['verifierId'] ?? '').trim();
   if (!verifierId) return { status: 400, body: { error: 'verifierId is required' } };
+  if (verifierId.length > VERIFIER_ID_LIMIT) return { status: 400, body: { error: `verifierId is longer than ${VERIFIER_ID_LIMIT} characters`, field: 'verifierId' } };
   // An id the store would rewrite would never match the verifier's next claim: refused before anything is written.
   assertStorableId('verifierId', verifierId);
   if (!heldBy(o, verifierId) && !oldestClaimable(o)) return { status: 404, body: { error: 'nothing to verify' } };
@@ -198,7 +215,7 @@ function parseResult(body: Record<string, unknown>): Parsed {
       outcome: outcome as VerifyOutcome,
       ...(sha.sha !== undefined ? { rebasedSha: sha.sha } : {}),
       output: (output ?? '').slice(-VERIFY_OUTPUT_LIMIT),
-      conflictFiles: [...((files as string[] | undefined) ?? [])],
+      conflictFiles: ((files as string[] | undefined) ?? []).slice(0, VERIFY_CONFLICT_FILES_LIMIT),
     },
   };
 }
@@ -234,15 +251,32 @@ export function releaseVerifyJob(o: Orchestrator, jobId: string, token: string, 
   if (job.result !== undefined) return { status: 409, body: { ok: false, reason: 'a result is already recorded' } };
   const raw = body['reason'];
   if (raw !== undefined && typeof raw !== 'string') return { status: 400, body: { error: 'reason must be a string', field: 'reason' } };
-  const reason = raw ?? 'released by verifier';
+  const reason = (raw ?? 'released by verifier').slice(0, VERIFY_REASON_LIMIT);
   const now = o.now();
   const verifierId = job.verifier?.id;
+  // A release after an error of the verifier counts as a lost verifier; a pod that was stopping (podTerminating) does not.
+  const lost = reason === VERIFIER_ERROR_REASON;
   o.store.transaction(() => {
-    o.store.updateJob(jobId, { verifier: undefined, token: undefined, updatedAt: now });
-    o.store.appendEvent({ kind: 'verify.released', taskId: job.taskId, launchId: job.launchId, payload: { jobId, verifierId, reason } }, now);
+    const losses = lost ? (job.leaseLosses ?? 0) + 1 : undefined;
+    o.store.updateJob(jobId, { verifier: undefined, token: undefined, ...(losses !== undefined ? { leaseLosses: losses } : {}), updatedAt: now });
+    o.store.appendEvent({ kind: 'verify.released', taskId: job.taskId, launchId: job.launchId, payload: { jobId, verifierId, reason, ...(losses !== undefined ? { leaseLosses: losses } : {}) } }, now);
+    if (losses !== undefined) endIfLost(o, job, losses, now);
   });
   notifyJob(o, jobId);
   return { status: 200, body: { ok: true } };
+}
+
+/**
+ * The cap on lease cycles: at `VERIFIER_LOSS_LIMIT` lost verifiers the job ends `failed` with `failureKind`
+ * `verifierLost`, an output naming the count, and no claim fields; the tick then fails the task as for any failed
+ * verification, spending an attempt. Called inside the transaction that counts the loss. See specs/verifier-pool
+ * "Verify lease: cycle cap".
+ */
+function endIfLost(o: Orchestrator, job: VerifierJob, losses: number, now: number): void {
+  if (losses < VERIFIER_LOSS_LIMIT) return;
+  const output = `verify job ${job.jobId} lost its verifier ${losses} times (lease expiries and verifierError releases); not offered again`;
+  o.store.updateJob(job.jobId, { status: 'failed', failureKind: 'verifierLost', output, ...NO_CLAIM, updatedAt: now });
+  o.log.warn('verify job failed: it lost its verifier too often', { jobId: job.jobId, taskId: job.taskId, losses });
 }
 
 // ---- tick and gaps ----
@@ -268,8 +302,10 @@ export function expireVerifyLeases(o: Orchestrator): void {
   const now = o.now();
   for (const job of due(now)) {
     o.store.transaction(() => {
-      o.store.updateJob(job.jobId, { verifier: undefined, token: undefined, updatedAt: now });
-      o.store.appendEvent({ kind: 'verify.leaseExpired', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, verifierId: job.verifier!.id } }, now);
+      const losses = (job.leaseLosses ?? 0) + 1;
+      o.store.updateJob(job.jobId, { verifier: undefined, token: undefined, leaseLosses: losses, updatedAt: now });
+      o.store.appendEvent({ kind: 'verify.leaseExpired', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, verifierId: job.verifier!.id, leaseLosses: losses } }, now);
+      endIfLost(o, job, losses, now);
     });
   }
   wakeVerifyWaiters(o);

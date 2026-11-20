@@ -66,6 +66,12 @@ export interface VerifierBackend {
   recoverPublishing?(job: VerifierJob, opts?: { originUnreachable?: boolean }): Promise<'published' | 'requeue'>;
   /** Commits on the integration branch without an Orchestrator-Launch trailer. */
   foreignCommits?(): Promise<string[]>;
+  /**
+   * Called once a run has ended: `written` when its outcome (or its failure) was written or the job was found no longer
+   * live, not when nothing was written because the daemon stops or the store went fatal. See specs/verifier-pool
+   * "Verify ref: deletion".
+   */
+  afterOutcome?(job: VerifierJob, opts: { written: boolean }): Promise<void>;
   /** Remove temporary verification worktrees left by a crash. Called at recovery. */
   sweepTemp?(): Promise<void>;
 }

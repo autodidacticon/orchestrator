@@ -469,3 +469,100 @@ describe('verify waiters', () => {
     expect(await settled(p)).toBe(true);
   });
 });
+
+describe('verify lease: a sleep inside the tick (GH-184)', () => {
+  it('criterion 7: a sleep of five lease lengths in runner.liveness, before the verify phase, renews the verify lease instead of ending it', async () => {
+    const h = harness({}, TWO);
+    const j = await offered(h, 'A');
+    // B's spawned launch is live, so the tick asks the runner for its liveness before the verify phase.
+    expect(h.store.listLaunches({ taskId: 'B', status: 'live' })).toHaveLength(1);
+    await claim(h, 'v1');
+    h.advance(1000);
+    await h.orch.tick();
+    expect(events(h, 'verify.leaseExpired')).toHaveLength(0);
+    const liveness = h.runner.liveness.bind(h.runner);
+    let wake: number | undefined;
+    h.runner.liveness = async (x) => {
+      if (wake === undefined) {
+        h.sleep(5 * TTL(h));
+        wake = h.now.value;
+      }
+      return liveness(x);
+    };
+    await h.orch.tick();
+    expect(wake).toBeDefined();
+    expect(events(h, 'verify.leaseExpired')).toHaveLength(0);
+    expect(job(h, j.jobId).verifier).toMatchObject({ id: 'v1' });
+    expect(job(h, j.jobId).verifier!.expiresAt).toBeGreaterThanOrEqual(wake! + TTL(h));
+  });
+});
+
+describe('verify lease: cycle cap (GH-184)', () => {
+  it('criterion 3: two expiries and a verifierError release fail the job as verifierLost and spend an attempt; podTerminating is not counted', async () => {
+    const h = harness();
+    const j = await offered(h);
+    expect(h.orch.entry('A').attempts).toBe(0);
+    // 1: a lease expiry.
+    await claim(h, 'v1');
+    h.advance(TTL(h));
+    await h.orch.tick();
+    expect(job(h, j.jobId)).toMatchObject({ status: 'checking', leaseLosses: 1 });
+    // A podTerminating release is not counted.
+    let token = tokenOf(await claim(h, 'v2'));
+    expect(releaseVerifyJob(h.orch, j.jobId, token, { reason: 'podTerminating' }).status).toBe(200);
+    expect(job(h, j.jobId).leaseLosses).toBe(1);
+    // 2: a verifierError release. Two events: the job is offered again as today.
+    token = tokenOf(await claim(h, 'v3'));
+    expect(releaseVerifyJob(h.orch, j.jobId, token, { reason: 'verifierError' }).status).toBe(200);
+    expect(job(h, j.jobId)).toMatchObject({ status: 'checking', leaseLosses: 2, offer: { checkCommand: 'true' } });
+    expect(events(h, 'verify.released').map((e) => e.payload?.['leaseLosses'])).toEqual([undefined, 2]);
+    await h.orch.tick();
+    expect(h.orch.entry('A').attempts).toBe(0);
+    // 3: another expiry ends the job.
+    expect(await claim(h, 'v4')).toMatchObject({ status: 200, body: { jobId: j.jobId, repeated: false } });
+    h.advance(TTL(h));
+    await h.orch.tick();
+    const row = job(h, j.jobId);
+    expect(row).toMatchObject({ status: 'failed', failureKind: 'verifierLost', leaseLosses: 3 });
+    expect(row.output).toMatch(/\b3 times\b/);
+    for (const k of ['offer', 'verifier', 'token', 'result'] as const) expect(row[k], k).toBeUndefined();
+    expect(events(h, 'verify.leaseExpired').map((e) => e.payload?.['leaseLosses'])).toEqual([1, 3]);
+    await h.orch.tick();
+    expect(job(h, j.jobId).applied).toBe(true);
+    expect(h.orch.entry('A').attempts).toBe(1);
+    const failedBy = h.store.listEvents({ kind: 'transition', taskId: 'A' }).filter((e) => e.payload?.['to'] === 'failed');
+    expect(failedBy).toHaveLength(1);
+    expect(failedBy[0]!.payload).toMatchObject({ from: 'submitted', actor: 'verifier', trigger: 'verificationFailed' });
+    expect(await claim(h, 'v5')).toEqual({ status: 404, body: { error: 'nothing to verify' } });
+  });
+
+  it('three verifierError releases end the job the same way', async () => {
+    const h = harness();
+    const j = await offered(h);
+    for (let i = 1; i <= 3; i++) {
+      const token = tokenOf(await claim(h, `v${i}`));
+      expect(releaseVerifyJob(h.orch, j.jobId, token, { reason: 'verifierError' }).status).toBe(200);
+    }
+    expect(job(h, j.jobId)).toMatchObject({ status: 'failed', failureKind: 'verifierLost', leaseLosses: 3 });
+  });
+});
+
+describe('verify size limits (GH-184)', () => {
+  it('criterion 4: a reason is cut to 4096 characters, conflictFiles to 200 entries, and a 254-character verifierId answers 400', async () => {
+    const h = harness();
+    const j = await offered(h);
+    const seq = h.store.latestEventSeq();
+    expect(await claim(h, 'v'.repeat(254))).toMatchObject({ status: 400, body: { field: 'verifierId' } });
+    expect(h.store.latestEventSeq()).toBe(seq);
+    expect(job(h, j.jobId).verifier).toBeUndefined();
+    let token = tokenOf(await claim(h, 'v'.repeat(253)));
+    expect(job(h, j.jobId).verifier?.id).toHaveLength(253);
+    expect(releaseVerifyJob(h.orch, j.jobId, token, { reason: 'r'.repeat(10_000) }).status).toBe(200);
+    expect(events(h, 'verify.released')[0]!.payload?.['reason']).toBe('r'.repeat(4096));
+    token = tokenOf(await claim(h, 'v2'));
+    const files = Array.from({ length: 500 }, (_, i) => `f${i}.txt`);
+    expect(postVerifyResult(h.orch, j.jobId, token, { outcome: 'conflict', conflictFiles: files, reason: 'x'.repeat(10_000) }).status).toBe(200);
+    expect(job(h, j.jobId).result?.conflictFiles).toEqual(files.slice(0, 200));
+    expect(job(h, j.jobId).result).not.toHaveProperty('reason');
+  });
+});

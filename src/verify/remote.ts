@@ -30,6 +30,8 @@ export const verifyRefOf = (jobId: string): string => `refs/verify/${jobId}`;
 export class RemoteVerifierBackend extends GitVerifierBackend {
   private readonly now: () => number;
   private readonly log: Logger;
+  /** Jobs whose run read a `verified` result: their verify ref is deleted once the outcome is written. */
+  private readonly refsToDelete = new Set<string>();
 
   constructor(opts: RemoteVerifierOptions) {
     const { now, log, ...rest } = opts;
@@ -65,6 +67,22 @@ export class RemoteVerifierBackend extends GitVerifierBackend {
     return this.outcomeOf(job, ctx, expectedHead, result);
   }
 
+  /**
+   * Called by the daemon once the run's outcome (or its failure) is written, or the job was found no longer live
+   * (`written` true), or when nothing was written because the daemon stops or the store went fatal (`written` false).
+   * After a run that read a `verified` result, a written outcome deletes `refs/verify/<jobId>` on origin and in the
+   * clone; a failed deletion is logged as a warning and changes nothing else. Without a write the ref is kept.
+   */
+  async afterOutcome(job: VerifierJob, opts: { written: boolean }): Promise<void> {
+    if (!this.refsToDelete.delete(job.jobId) || !opts.written || !this.origin) return;
+    const ref = verifyRefOf(job.jobId);
+    try {
+      await this.origin.deleteRef(ref);
+    } catch (err) {
+      this.log.warn('verify ref could not be deleted', { jobId: job.jobId, ref, err: String(err) });
+    }
+  }
+
   private async outcomeOf(job: VerifierJob, ctx: VerifierContext, expectedHead: string, result: VerifyResult): Promise<VerifierOutcome> {
     switch (result.outcome) {
       case 'checkFailed':
@@ -77,17 +95,10 @@ export class RemoteVerifierBackend extends GitVerifierBackend {
       case 'originFailed':
         return originFailed(result);
       case 'verified': {
-        const ref = verifyRefOf(job.jobId);
-        try {
-          return await this.publishFromRef(job, ctx, expectedHead, result, ref);
-        } finally {
-          // Deleted whatever the outcome, a drop and a fatal store included; a failed deletion changes nothing.
-          try {
-            await this.origin!.deleteRef(ref);
-          } catch (err) {
-            this.log.warn('verify ref could not be deleted', { jobId: job.jobId, ref, err: String(err) });
-          }
-        }
+        // The ref is deleted by `afterOutcome`, once the daemon has written the outcome: a crash before the write
+        // leaves it for the resumed run. See specs/verifier-pool "Verify ref: deletion".
+        this.refsToDelete.add(job.jobId);
+        return this.publishFromRef(job, ctx, expectedHead, result, verifyRefOf(job.jobId));
       }
     }
     throw new Error(`remote verifier: unknown result outcome ${String((result as { outcome: unknown }).outcome)}`);

@@ -130,6 +130,11 @@ export interface VerifierJob {
    * "Verify job offer".
    */
   offer?: { at: number; checkCommand: string };
+  /**
+   * Times the job lost its verifier: lease expiries and releases with reason `verifierError`. Never cleared; the third
+   * ends the job `failed` with `failureKind` `verifierLost`. See specs/verifier-pool "Verify lease: cycle cap".
+   */
+  leaseLosses?: number;
   /** The per-job bearer token of the verifier that holds the claim. See specs/verifier-pool "Verify job token". */
   token?: string;
   /** The verifier that holds the claim and its lease. See specs/verifier-pool "Verify claim" and "Verify lease". */
