@@ -1,0 +1,94 @@
+{
+  "id": "H13-nullmodel",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:19:43.796Z",
+  "command": [
+    "agy",
+    "-p",
+    "Call the heartbeat tool of the orchestrator MCP server with progress \"probe\". Then reply with the exact names under which you see the tools of that server, one per line.",
+    "--model",
+    null,
+    "--output-format",
+    "stream-json",
+    "--print-timeout",
+    "180s",
+    "--dangerously-skip-permissions"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-d120b24f",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 1662,
+  "modelCalls": 0,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 77656,
+      "ppid": 85432,
+      "pgid": 77656,
+      "comm": "(antigravity)",
+      "in": "tree"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 1,
+    "maxGapMs": 0,
+    "firstMs": 1502
+  },
+  "token": "orch-probe-token-d120b24f",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [
+      "?? .agents/mcp_config.json"
+    ],
+    "porcelainIgnored": [
+      "?? .agents/mcp_config.json"
+    ],
+    "branchLog": [],
+    "files": [
+      ".agents",
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/implicit/0b6baea9-d1d2-4a73-97aa-2715018a51b3.pb",
+      "~/.gemini/antigravity-cli/log/cli-20261120_151941.log"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log",
+      "~/.gemini/antigravity-cli/conversation_summaries.db"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_151941.log"
+  ],
+  "evidence": {
+    "stdout": "headless/H13-nullmodel.stdout.txt",
+    "stderr": "headless/H13-nullmodel.stderr.txt",
+    "log0": "headless/H13-nullmodel.log0.txt",
+    "log1": "headless/H13-nullmodel.log1.txt",
+    "mcp_config.json": "headless/H13-nullmodel.mcp_config.json"
+  },
+  "note": "run by mistake without --model: the script passed the string \"null\" as --model; kept as the evidence of an unknown model."
+}

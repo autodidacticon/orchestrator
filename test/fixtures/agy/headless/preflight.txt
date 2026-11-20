@@ -1,0 +1,7 @@
+ok: binary /opt/homebrew/bin/agy
+ok: version 1.5.13
+ok: agy acp --help (exit 0, 30 lines on stdout and stderr)
+ok: agy models (23 lines)
+ok: Probe model gemini-3.8-flash-low
+ok: GEMINI_API_KEY not set
+ok: sign-in without a terminal (prompt answered in 3781 ms)

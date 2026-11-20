@@ -1,0 +1,1 @@
+error: failed to decode stream input: json: cannot unmarshal string into Go struct field StreamInputMessage.message of type printmode.StreamInputUserMessage

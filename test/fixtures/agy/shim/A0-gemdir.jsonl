@@ -1,0 +1,6 @@
+{"t":1795209419089,"pid":6241,"event":"start","argv":["<repo>/test/fixtures/acp/recording-shim.mjs","<scratch>/out/shim.jsonl","--block-sec","75"],"cwd":"<scratch>/wt","envNames":["AGY_CLI_DISABLE_AUTO_UPDATE","HOME","LANG","ORCH_API","ORCH_LAUNCH_ID","ORCH_TOKEN","PATH","PROBE_MARKER","PWD","SHLVL","TMPDIR","USER","__CF_USER_TEXT_ENCODING"],"values":{"ORCH_LAUNCH_ID":{"value":"probe-launch","source":"env"},"ORCH_TOKEN":{"value":"orch-probe-token-24b2ab64","source":"env"},"ORCH_API":{"value":"http://127.0.0.1:9","source":"env"},"PROBE_MARKER":{"value":"from-entry-env","source":"env"}},"chain":[{"pid":6241,"ppid":6222,"pgid":6209,"comm":"node"},{"pid":6222,"ppid":6209,"pgid":6209,"comm":"antigravity"},{"pid":6209,"ppid":3987,"pgid":6209,"comm":"node"},{"pid":3987,"ppid":3980,"pgid":3980,"comm":"node"}]}
+{"t":1795209419090,"pid":6241,"event":"request","method":"server/discover"}
+{"t":1795209419091,"pid":6241,"event":"request","method":"initialize","params":{"clientInfo":{"name":"antigravity-client","version":"v1.0.0"},"protocolVersion":"2025-11-25","capabilities":{"elicitation":{"form":{},"url":{}},"roots":{"listChanged":true}}}}
+{"t":1795209419092,"pid":6241,"event":"request","method":"notifications/initialized"}
+{"t":1795209419092,"pid":6241,"event":"request","method":"tools/list"}
+{"t":1795209419149,"pid":6241,"event":"stdinClosed"}

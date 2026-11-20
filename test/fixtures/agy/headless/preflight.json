@@ -1,0 +1,62 @@
+{
+  "at": "2026-11-20T21:17:44.681Z",
+  "lines": [
+    "ok: binary /opt/homebrew/bin/agy",
+    "ok: version 1.5.13",
+    "ok: agy acp --help (exit 0, 30 lines on stdout and stderr)",
+    "ok: agy models (23 lines)",
+    "ok: Probe model gemini-3.8-flash-low",
+    "ok: GEMINI_API_KEY not set",
+    "ok: sign-in without a terminal (prompt answered in 3781 ms)"
+  ],
+  "facts": {
+    "bin": "agy",
+    "path": "/opt/homebrew/bin/agy",
+    "versionRun": {
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "stdout": "1.5.13\n",
+      "stderr": ""
+    },
+    "version": "1.5.13",
+    "acpHelp": {
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "stdout": "",
+      "stderr": "Usage: antigravity acp [flags]\n\nStart the Agent Client Protocol (ACP) stdio server\n\nFlags:\n  --add-dir                         Add a directory to the workspace (repeatable) (default [])\n  --agent                           Agent for the ACP session\n  --app-data-dir                    Path where application data is stored (default antigravity-cli)\n  --app_data_dir                    Path where application data is stored (default antigravity-cli)\n  --cli_dir_name                    Subdirectory under app_data_dir for CLI settings and logs\n  --cli_log_file                    Override ACP log file path\n  --cloud_code_endpoint             CCPA API URL (default https://daily-cloudcode-pa.googleapis.com)\n  --dangerously-skip-permissions    Auto-approve all tool permission requests\n  --disable-telemetry               If true, disable telemetry\n  --disable_telemetry               If true, disable telemetry\n  --gemini-dir                      Path where Gemini files are stored (default .gemini)\n  --gemini_dir                      Path where Gemini files are stored (default .gemini)\n  -h                                Show help\n  --help                            Show help\n  --ide-mcp-port                    Port for host IDE tools MCP server (requires 'nc' in $PATH) (default 0)\n  --ide_mcp_port                    Port for host IDE tools MCP server (requires 'nc' in $PATH) (default 0)\n  --include-default-customizations  Include default customizations (default true)\n  --is_google3_workspace            Whether running in Google environment\n  --is_google_internal              Deprecated: use is_google3_workspace\n  --log-file                        Override ACP log file path\n  --login                           Log in with Google interactively, then exit (ACP terminal auth)\n  --override_user_agent_name        Override user agent name for HTTP requests\n  --process-per-session             Serve each session from an isolated worker process\n  --sandbox                         Run in a sandbox with terminal restrictions enabled\n  --stdio                           Use stdio JSON-RPC transport (default)\n  --use_stubby_auth                 Use LOAS auth\n  --worker                          Serve a single session for an ACP front process (internal)\n"
+    },
+    "models": {
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "stdout": "gemini-4-neon-high\tGemini 4 Neon (High)\ngemini-4-neon-xhigh\tGemini 4 Neon (XHigh)\ngemini-4-neon-medium\tGemini 4 Neon (Medium)\ngemini-4-neon-low\tGemini 4 Neon (Low)\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ngemini-4-argon-low\tGemini 4 Argon (Low)\ngemini-4-hydrogen-high\tGemini 4 Hydrogen (High)\ngemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (XHigh)\ngemini-4-hydrogen-medium\tGemini 4 Hydrogen (Medium)\ngemini-4-hydrogen-low\tGemini 4 Hydrogen (Low)\ngemini-pro-orchestrator-neon\tOrchestrator (Neon)\ngemini-pro-orchestrator-g1-pro\tOrchestrator (Argon)\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\ngemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)\ngemini-3.8-flash-low\tGemini 3.8 Flash (Low)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\nclaude-opus-5-5-medium\tClaude Opus 5.5 (Medium)\nclaude-opus-5-5-high\tClaude Opus 5.5 (High)\nclaude-sonnet-5-5-low\tClaude Sonnet 5.5 (Low)\nclaude-sonnet-5-5-medium\tClaude Sonnet 5.5 (Medium)\nclaude-sonnet-5-5-high\tClaude Sonnet 5.5 (High)\ngpt-oss-120b-medium\tGPT-OSS 120B (Medium)\n",
+      "stderr": "Fetching available models...\n"
+    },
+    "model": "gemini-3.8-flash-low",
+    "apiKey": "not set",
+    "prompt": {
+      "args": [
+        "-p",
+        "Reply with the single word ok.",
+        "--print-timeout",
+        "60s",
+        "--model",
+        "gemini-3.8-flash-low"
+      ],
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "timedOut": false,
+      "stdout": "ok\n",
+      "stderr": "",
+      "ms": 3781,
+      "orphans": []
+    }
+  }
+}

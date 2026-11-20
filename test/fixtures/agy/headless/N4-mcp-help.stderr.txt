@@ -1,0 +1,10 @@
+Usage: antigravity mcp <subcommand> [flags] [args]
+
+Available subcommands:
+  add      Add or update an MCP server configuration
+  remove   Remove an MCP server configuration
+  list     List all configured MCP servers
+  enable   Enable an MCP server
+  disable  Disable an MCP server
+
+Run "antigravity mcp <subcommand> --help" for flags, argument rules, and examples.

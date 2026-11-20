@@ -1,0 +1,70 @@
+{
+  "id": "N4-mcp-list-settings",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:13:26.503Z",
+  "command": [
+    "agy",
+    "mcp",
+    "list",
+    "--settings",
+    "{\"mcpServers\":{\"viasettings\":{\"command\":\"true\"}}}"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-0c0cab20",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 62,
+  "modelCalls": 0,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 34079,
+      "ppid": 31332,
+      "pgid": 34079,
+      "comm": "antigravity",
+      "in": "tree"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 0,
+    "maxGapMs": 0,
+    "firstMs": null
+  },
+  "token": "orch-probe-token-0c0cab20",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [],
+    "changed": [],
+    "removed": []
+  },
+  "logs": [],
+  "evidence": {
+    "stdout": "headless/N4-mcp-list-settings.stdout.txt",
+    "stderr": "headless/N4-mcp-list-settings.stderr.txt"
+  }
+}

@@ -1,0 +1,7 @@
+ok: binary /opt/homebrew/bin/agy
+ok: version 1.5.13
+ok: agy acp --help (exit 0, 1 lines)
+missing: agy models (exit {"code":1,"signal":null})
+missing: Probe model (the issue has no slug on its Probe model: line)
+ok: GEMINI_API_KEY not set
+missing: sign-in without a terminal (exit {"code":1,"signal":null}: error: authentication failed or timed out)

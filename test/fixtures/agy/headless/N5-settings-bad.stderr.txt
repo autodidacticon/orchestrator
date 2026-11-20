@@ -1,0 +1,1 @@
+Error: --settings must be a JSON object of settings.json keys: invalid character 'n' looking for beginning of object key string

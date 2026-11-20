@@ -1,0 +1,154 @@
+I1120 15:33:12.534874       1 resolver.go:85] Model ID gemini-3.8-flash-low not in local config, defaulting to CCPA
+I1120 15:33:12.534923       1 resolver.go:111] Model resolved via default
+I1120 15:33:12.535002      27 server.go:2650] Starting language server process with pid 99287
+I1120 15:33:12.535347      27 workflow_python.go:21] run_workflow Python: interpreter "", embedded true
+I1120 15:33:12.535444      27 server.go:2709] Language server version: 1.5.13
+I1120 15:33:12.535452      27 server.go:1299] Language server will attempt to listen on host localhost
+I1120 15:33:12.537608      27 server.go:1314] Language server listening on random port at 60217 for HTTPS (gRPC)
+I1120 15:33:12.538665      27 server.go:1322] Language server listening on random port at 60218 for HTTP
+I1120 15:33:12.539063      69 model_configs.go:230] Auth mode is unspecified, skipping fetchAvailableModels and returning empty response
+W1120 15:33:12.539306      82 cache.go:157] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+W1120 15:33:12.539324      82 cache.go:157] Cache(userInfo): Singleflight refresh failed: failed to get load code assist response: error getting token source: You are not logged into Antigravity.
+E1120 15:33:12.539486      69 errorreport.go:285] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+I1120 15:33:12.540198      75 store_client.go:714] summary store: starting background reconciliation (trigger=startup)
+I1120 15:33:12.540592      75 store_client.go:764] summary store: reconciliation complete, synced 21 records
+W1120 15:33:12.541552     143 cache.go:157] Cache(peopleInfo): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1120 15:33:12.541580     143 errorreport.go:285] error getting token source: You are not logged into Antigravity.
+W1120 15:33:12.554184      27 defaults.go:709] failed to get cs path: cs path /usr/bin/cs invalid
+I1120 15:33:12.554244      27 manager.go:152] Creating trajectory store manager with proto store and SQLite store
+I1120 15:33:12.554808     178 manager.go:98] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] is enabled
+I1120 15:33:12.554923     178 manager.go:107] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:33:12.554932     178 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] is enabled
+I1120 15:33:12.554976     178 manager.go:107] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:33:12.554981     178 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
+I1120 15:33:12.555020     178 manager.go:107] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:33:12.555030     178 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
+I1120 15:33:12.555037     178 manager.go:95] Migration [MIGRATION_ID_ADOPT_BWG_INSTALLS] is disabled, skipping entirely
+I1120 15:33:12.555046     178 manager.go:95] Migration [MIGRATION_ID_GDRIVE_BUILTIN_PLUGIN] is disabled, skipping entirely
+I1120 15:33:12.555050     178 manager.go:98] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] is enabled
+I1120 15:33:12.555087     178 manager.go:107] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:33:12.555092     178 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
+I1120 15:33:12.569345      27 server.go:4093] initialized server successfully in 34.269333ms
+I1120 15:33:12.569376      58 server.go:4927] Auth succeeded, refreshing features and managers
+I1120 15:33:12.569487       1 auto_updater.go:285] Auto-update disabled via environment variable AGY_CLI_DISABLE_AUTO_UPDATE
+I1120 15:33:12.569620       1 common.go:191] Launching CLI mode
+E1120 15:33:12.569642       1 launchsteps.go:108] Failed to resolve GeminiDir ".gemini": .gemini must be an absolute path: path is not absolute, falling back to default
+I1120 15:33:12.569676       1 common.go:212] CLI app data directory: ~/.gemini/antigravity-cli
+W1120 15:33:12.569662     100 cache.go:157] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+I1120 15:33:12.569692       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[<scratch>/wt] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
+E1120 15:33:12.569709     100 errorreport.go:285] error getting token source: You are not logged into Antigravity.
+W1120 15:33:12.569722      99 cache.go:157] Cache(peopleInfo): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1120 15:33:12.569740      99 errorreport.go:285] error getting token source: You are not logged into Antigravity.
+I1120 15:33:12.569766       1 auth_provider.go:816] [AuthProvider] SetEnableBusinessLogin called with enable: true
+W1120 15:33:12.569770      99 rpcs_plugin_auth.go:110] Not reloading plugin MCP servers: cannot get the signed-in user: error getting token source: You are not logged into Antigravity.
+E1120 15:33:12.569807      58 errorreport.go:285] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+I1120 15:33:12.569839      58 server.go:4946] State refresh took 0ms
+I1120 15:33:12.569851      58 server.go:4961] [RemoteControl] Subscription callback triggered.
+I1120 15:33:12.569950      58 server.go:4964] [RemoteControl] RemoteControlEnabled value: false
+I1120 15:33:12.569955      58 server.go:6065] [RemoteControl] Session toggle is off, staying disconnected
+I1120 15:33:12.569958      58 server.go:5743] [RemoteControl] Resolved proxyServerURL: ""
+I1120 15:33:12.570003      58 profiler.go:231] Continuous pprof profiling is disabled.
+I1120 15:33:12.570015     233 manager.go:98] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] is enabled
+I1120 15:33:12.570097     233 manager.go:107] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:33:12.570103     233 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] is enabled
+I1120 15:33:12.570129     227 reconcile_summaries.go:94] [Summaries] reconcile checked 21 conversations, restored 0, cached 21, skipped 0, dropped 0, cancelled false in 0ms (resident: 0 -> 0)
+I1120 15:33:12.570157     233 manager.go:107] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:33:12.570162     233 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
+I1120 15:33:12.570210     233 manager.go:107] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:33:12.570214     233 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
+I1120 15:33:12.570217     233 manager.go:95] Migration [MIGRATION_ID_ADOPT_BWG_INSTALLS] is disabled, skipping entirely
+I1120 15:33:12.570228     233 manager.go:95] Migration [MIGRATION_ID_GDRIVE_BUILTIN_PLUGIN] is disabled, skipping entirely
+I1120 15:33:12.570232     233 manager.go:98] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] is enabled
+I1120 15:33:12.570269     233 manager.go:107] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:33:12.570273     233 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
+I1120 15:33:12.570463       1 server.go:2339] Backend project ID updated dynamically to: <project>
+I1120 15:33:12.570479       1 analytics.go:249] CLI startup completed (took 36.708833ms, phases [main_entered=0ms ls_start=1ms ls_ready=35ms launch_cli=35ms backend_created=36ms project_resolved=36ms])
+I1120 15:33:12.570498       1 printmode.go:208] Print mode: starting (promptLength=106, model="gemini-3.8-flash-low", conversationID="")
+I1120 15:33:12.570516       1 manager.go:561] Initializing CLI store manager for workspace <scratch>/wt
+I1120 15:33:12.570683       1 cli_setting_manager.go:98] CLI settings initialized: permissions=<nil>, toolPermission=request-review
+I1120 15:33:12.570875       1 hooks_manager.go:54] loaded 0 named hooks from 0 hooks.json file(s)
+I1120 15:33:12.570888       1 manager.go:736] CLI store manager initialized successfully
+I1120 15:33:12.570897       1 session.go:79] Print mode: --dangerously-skip-permissions set, auto-approving all tool permissions
+I1120 15:33:12.573784     127 manager.go:1685] Reloading system slash commands and skills
+I1120 15:33:12.573916     127 manager.go:1641] Reloading system slash commands
+I1120 15:33:12.573951     127 manager.go:1650] Slash commands unchanged, skipping update
+I1120 15:33:12.574141       1 hooks_manager.go:54] loaded 0 named hooks from 0 hooks.json file(s)
+I1120 15:33:12.574174       1 printmode.go:409] Print mode: not authenticated, trying silent auth
+I1120 15:33:12.588430     206 keyring.go:64] keyringAuth: loaded token, expiry=2026-11-20 16:16:03.700728 -0600 CST expired=false
+I1120 15:33:12.588483       1 auth.go:157] ChainedAuth: authenticated via keyring (effective: keyring)
+I1120 15:33:12.588496       1 server_oauth.go:221] applyAuthResult: email=author@example.invalid, authMethod=consumer, quotaProject=
+I1120 15:33:12.588506       1 server_oauth.go:226] OAuth: authenticated successfully as author@example.invalid
+I1120 15:33:12.588510       1 server_oauth.go:235] b.codeAssistClient.AuthProvider (0x5773ae0032c0) is same as b.cliAuth (0x5773ae0032c0)
+W1120 15:33:12.588567     358 cache.go:189] Failed to refresh cache in background: admin controls not applicable
+W1120 15:33:12.588579     111 cache.go:189] Failed to refresh cache in background: admin controls not applicable
+I1120 15:33:12.918962     356 http_helpers.go:771] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist Trace: 0xe41735c50b11b6c9
+I1120 15:33:13.058965     354 http_helpers.go:771] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels Trace: 0x37a1f2e74bbe84cb
+I1120 15:33:13.085364       1 model_resolver.go:107] Resolving model gemini-3.8-flash-low
+I1120 15:33:13.085405       1 model_config_manager.go:375] Propagating selected model override to backend: label="Gemini 3.8 Flash (Low)"
+I1120 15:33:13.085438     221 quota_manager.go:45] doRefreshQuota: starting reload (force=true)
+I1120 15:33:13.085438       1 printmode.go:411] Print mode: silent auth succeeded
+I1120 15:33:13.085497     222 experiment_manager.go:66] Starting experiment refresh after login
+I1120 15:33:13.231195     402 code_assist_client.go:506] CCPA routed this account to AICode; serving AICode FetchConfig flags after 145.655625ms
+I1120 15:33:13.231706     222 http_helpers.go:108] UseAICodeMendel routing switch changed: false -> true
+I1120 15:33:13.231722     222 code_assist_client.go:362] ShadowCallAICodeFetchLicenses switch changed: false -> true
+I1120 15:33:13.231795     222 server.go:5588] [RemoteControl] Mendel flags changed (remote-control-setting-enabled=true, remote-control-proxy-server-url="jetski-webchannel.googleapis.com:443"), re-evaluating the connection
+I1120 15:33:13.231973     425 server.go:6065] [RemoteControl] Session toggle is off, staying disconnected
+I1120 15:33:13.231984     425 server.go:5743] [RemoteControl] Resolved proxyServerURL: ""
+I1120 15:33:13.231990     222 server.go:6065] [RemoteControl] Session toggle is off, staying disconnected
+I1120 15:33:13.231994     222 server.go:5743] [RemoteControl] Resolved proxyServerURL: ""
+I1120 15:33:13.231997     222 experiment_manager.go:70] Experiments refreshed after login
+I1120 15:33:13.232036     225 manager.go:1736] SetCycleMode called: auto
+I1120 15:33:13.232037     405 manager.go:1641] Reloading system slash commands
+I1120 15:33:13.357366     386 http_helpers.go:771] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist Trace: 0x57834e234d279c40
+I1120 15:33:13.644167     386 http_helpers.go:771] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist Trace: 0xd938ff4e7e276e7a
+I1120 15:33:13.700512     386 model_config_manager.go:375] Propagating selected model override to backend: label="Gemini 3.8 Flash (Low)"
+I1120 15:33:13.701595     222 experiment_manager.go:66] Starting experiment refresh after login
+I1120 15:33:13.701685     221 quota_manager.go:45] doRefreshQuota: starting reload (force=true)
+I1120 15:33:13.702144     394 model_config_manager.go:375] Propagating selected model override to backend: label="Gemini 3.8 Flash (Low)"
+I1120 15:33:13.703020     222 server.go:6065] [RemoteControl] Session toggle is off, staying disconnected
+I1120 15:33:13.703035     222 server.go:5743] [RemoteControl] Resolved proxyServerURL: ""
+I1120 15:33:13.703041     222 experiment_manager.go:70] Experiments refreshed after login
+I1120 15:33:13.703068     222 experiment_manager.go:66] Starting experiment refresh after login
+I1120 15:33:13.703065     474 manager.go:1641] Reloading system slash commands
+I1120 15:33:13.704498     222 server.go:6065] [RemoteControl] Session toggle is off, staying disconnected
+I1120 15:33:13.704513     222 server.go:5743] [RemoteControl] Resolved proxyServerURL: ""
+I1120 15:33:13.704518     222 experiment_manager.go:70] Experiments refreshed after login
+I1120 15:33:13.704536     547 manager.go:1641] Reloading system slash commands
+I1120 15:33:13.707158     474 manager.go:1650] Slash commands unchanged, skipping update
+I1120 15:33:13.707503     547 manager.go:1650] Slash commands unchanged, skipping update
+I1120 15:33:13.737138       1 model_resolver.go:107] Resolving model gemini-3.8-flash-low
+I1120 15:33:13.737181       1 conversation_manager.go:695] Starting new conversation (agent=false)
+I1120 15:33:13.737200       1 server.go:1222] Creating new cascade trajectory (agentScript=false)
+I1120 15:33:13.737207       1 server.go:1248] Conversation using project ID: <project>
+I1120 15:33:13.742090       1 server.go:1265] Created conversation f007b0ff-461e-4cd5-8324-222d932d568e (backend=BACKEND_TYPE_UNSPECIFIED)
+I1120 15:33:13.742232       1 server.go:3544] GetConversationDetail: found conversation f007b0ff-461e-4cd5-8324-222d932d568e (active=true)
+I1120 15:33:13.742290       1 server.go:3544] GetConversationDetail: found conversation f007b0ff-461e-4cd5-8324-222d932d568e (active=true)
+I1120 15:33:13.742296       1 conversation_manager.go:749] project: switching to conversation belonging to project ID: <project>
+I1120 15:33:13.742326       1 server.go:2339] Backend project ID updated dynamically to: <project>
+I1120 15:33:13.742332       1 cli_setting_manager.go:228] ApplyProjectPermissionGrants: no grants for project "CLI Project", cleared project permissions
+I1120 15:33:13.742342       1 conversation_manager.go:765] project: synced active project to "CLI Project" (id=<project>) from conversation switch
+I1120 15:33:13.742348       1 conversation_manager.go:1082] Streaming conversation f007b0ff-461e-4cd5-8324-222d932d568e
+I1120 15:33:13.742352     688 manager.go:1685] Reloading system slash commands and skills
+I1120 15:33:13.742366     688 manager.go:1641] Reloading system slash commands
+I1120 15:33:13.742392       1 server.go:3544] GetConversationDetail: found conversation f007b0ff-461e-4cd5-8324-222d932d568e (active=true)
+I1120 15:33:13.742454       1 server.go:1283] Starting conversation update stream for f007b0ff-461e-4cd5-8324-222d932d568e
+I1120 15:33:13.744939     688 manager.go:1650] Slash commands unchanged, skipping update
+I1120 15:33:13.746116       1 session.go:201] Print mode: conversation=f007b0ff-461e-4cd5-8324-222d932d568e, sending message
+I1120 15:33:13.746128       1 manager.go:1641] Reloading system slash commands
+I1120 15:33:13.748643       1 manager.go:1650] Slash commands unchanged, skipping update
+I1120 15:33:13.748712       1 conversation_manager.go:884] Forwarding user message to conversation f007b0ff-461e-4cd5-8324-222d932d568e (items=1, media=0)
+I1120 15:33:13.748730       1 server.go:1858] Sending user message to conversation f007b0ff-461e-4cd5-8324-222d932d568e (items=1, media=0)
+I1120 15:33:13.749384       1 latency_breakdown.go:168] SEND_USER_CASCADE_MESSAGE_LATENCY latency breakdown: map[active_user_state_latency_ms:0 blocking:false cascade_id:f007b0ff-461e-4cd5-8324-222d932d568e cascade_send_latency_ms:0 hydrate_slash_commands_latency_ms:0 load_trajectory_latency_ms:0 media_count:0 media_summaries_latency_ms:0 message_origin:AGENT_MESSAGE_ORIGIN_UNSPECIFIED resolve_agent_config_latency_ms:0 save_media_latency_ms:0 saved_media_count:0 status:OK total_latency_ms:0 trajectory_id:7dbb701f-1e7d-46dd-8a49-18e27dc1be4f user_prompt_submit_hooks_latency_ms:0]
+I1120 15:33:13.757978     782 monitor_config_manager_external.go:53] externalMonitorConfigManager: initialized with embedded config (3 monitors)
+I1120 15:33:13.758033     782 monitoring.go:413] [Sonar] Resolved active tags: [jetski_mode_turbo policy_guardian sonar_skip_tags] (detected surface: "")
+I1120 15:33:13.758047     782 monitoring.go:413] [Sonar] Resolved active tags: [jetski_mode_turbo policy_guardian sonar_skip_tags] (detected surface: "")
+I1120 15:33:13.779509     221 quota_manager.go:45] doRefreshQuota: starting reload (force=true)
+I1120 15:33:13.991661     393 http_helpers.go:771] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist Trace: 0x8c56bbfaef8636ee
+I1120 15:33:15.909578    1106 http_helpers.go:771] URL: https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse Trace: 0xb40a19d51889da4 ResponseID: mrwAa9yAAo-mmtkPkZKbuAk
+W1120 15:33:23.759359       1 poll.go:182] Print mode: print timeout after 10s with turn in progress after 376 polls (printed=2)
+I1120 15:33:23.759768       1 manager.go:948] CLI store manager shutting down
+I1120 15:33:23.760375       1 conversation_manager.go:1023] Stopping conversation stream
+I1120 15:33:23.760503     723 server.go:1346] Stream goroutine exited for f007b0ff-461e-4cd5-8324-222d932d568e, sending completion signal
+I1120 15:33:23.776485    1161 server.go:4570] Language server shutting down
+I1120 15:33:23.776525    1161 server.go:4609] Waiting for migrations to complete to prevent partial migration state...
+E1120 15:33:23.777851    1145 telemetry.go:142] error recording trajectory segment analytics: Post "https://daily-cloudcode-pa.googleapis.com/v1internal:recordTrajectoryAnalytics": context canceled

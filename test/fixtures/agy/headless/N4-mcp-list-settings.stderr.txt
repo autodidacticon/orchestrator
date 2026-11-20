@@ -1,0 +1,8 @@
+Usage: antigravity mcp list [flags]
+
+List all configured MCP servers
+
+Flags:
+  -h      Show help
+  --help  Show help
+Error: flags provided but not defined: -settings

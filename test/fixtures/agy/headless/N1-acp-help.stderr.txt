@@ -1,0 +1,32 @@
+Usage: antigravity acp [flags]
+
+Start the Agent Client Protocol (ACP) stdio server
+
+Flags:
+  --add-dir                         Add a directory to the workspace (repeatable) (default [])
+  --agent                           Agent for the ACP session
+  --app-data-dir                    Path where application data is stored (default antigravity-cli)
+  --app_data_dir                    Path where application data is stored (default antigravity-cli)
+  --cli_dir_name                    Subdirectory under app_data_dir for CLI settings and logs
+  --cli_log_file                    Override ACP log file path
+  --cloud_code_endpoint             CCPA API URL (default https://daily-cloudcode-pa.googleapis.com)
+  --dangerously-skip-permissions    Auto-approve all tool permission requests
+  --disable-telemetry               If true, disable telemetry
+  --disable_telemetry               If true, disable telemetry
+  --gemini-dir                      Path where Gemini files are stored (default .gemini)
+  --gemini_dir                      Path where Gemini files are stored (default .gemini)
+  -h                                Show help
+  --help                            Show help
+  --ide-mcp-port                    Port for host IDE tools MCP server (requires 'nc' in $PATH) (default 0)
+  --ide_mcp_port                    Port for host IDE tools MCP server (requires 'nc' in $PATH) (default 0)
+  --include-default-customizations  Include default customizations (default true)
+  --is_google3_workspace            Whether running in Google environment
+  --is_google_internal              Deprecated: use is_google3_workspace
+  --log-file                        Override ACP log file path
+  --login                           Log in with Google interactively, then exit (ACP terminal auth)
+  --override_user_agent_name        Override user agent name for HTTP requests
+  --process-per-session             Serve each session from an isolated worker process
+  --sandbox                         Run in a sandbox with terminal restrictions enabled
+  --stdio                           Use stdio JSON-RPC transport (default)
+  --use_stubby_auth                 Use LOAS auth
+  --worker                          Serve a single session for an ACP front process (internal)

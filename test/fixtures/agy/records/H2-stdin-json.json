@@ -1,0 +1,92 @@
+{
+  "id": "H2-stdin-json",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:26:26.121Z",
+  "command": [
+    "agy",
+    "--model",
+    "gemini-3.8-flash-low",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--print-timeout",
+    "180s"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-dc7f1a4a",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "30624 bytes",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 3305,
+  "modelCalls": 1,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 80151,
+      "ppid": 80096,
+      "pgid": 80151,
+      "comm": "antigravity",
+      "in": "tree"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 5,
+    "maxGapMs": 1370,
+    "firstMs": 1484
+  },
+  "token": "orch-probe-token-dc7f1a4a",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/brain/3b58fc06-8b93-47c6-916f-4a147aaf0410/.system_generated/logs/transcript.jsonl",
+      "~/.gemini/antigravity-cli/brain/3b58fc06-8b93-47c6-916f-4a147aaf0410/.system_generated/logs/transcript_full.jsonl",
+      "~/.gemini/antigravity-cli/conversations/3b58fc06-8b93-47c6-916f-4a147aaf0410.db",
+      "~/.gemini/antigravity-cli/implicit/be28eaa2-55d6-4c89-8567-7aa3ca451a1e.pb",
+      "~/.gemini/antigravity-cli/log/cli-20261120_152622.log",
+      "~/.gemini/antigravity-cli/presence/3b58fc06-8b93-47c6-916f-4a147aaf0410.lock"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/cache/last_conversations.json",
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/jetbox_summaries_proto.pb"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_152622.log"
+  ],
+  "evidence": {
+    "stdout": "headless/H2-stdin-json.stdout.txt",
+    "stderr": "headless/H2-stdin-json.stderr.txt",
+    "log0": "headless/H2-stdin-json.log0.txt",
+    "log1": "headless/H2-stdin-json.log1.txt"
+  }
+}

@@ -1,0 +1,124 @@
+{
+  "id": "A11-noanswer",
+  "kind": "acp",
+  "probedAt": "2026-11-20T21:32:38.042Z",
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"/opt/homebrew/bin/agy\",\"acp\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--frames",
+    "<scratch>/out/frames.jsonl",
+    "--turn-timeout-ms",
+    "240000",
+    "--cancel-grace-ms",
+    "5000",
+    "--mcp-json",
+    "<scratch>/out/mcp.json",
+    "--prompt-file",
+    "<scratch>/out/prompt.txt",
+    "--no-permission-answer",
+    "--requests-json",
+    "<scratch>/out/requests.json"
+  ],
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-7f6c8ed4",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agent-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "exit": {
+    "code": 3,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": {
+    "why": "termAt",
+    "at": 130099
+  },
+  "ms": 130285,
+  "modelCalls": 1,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 26204,
+      "ppid": 12119,
+      "pgid": 26204,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 26219,
+      "ppid": 26204,
+      "pgid": 26204,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 26239,
+      "ppid": 26219,
+      "pgid": 26204,
+      "comm": "node",
+      "in": "tree"
+    }
+  ],
+  "frameStats": {
+    "frames": 17,
+    "maxGapMs": 127183
+  },
+  "token": "orch-probe-token-7f6c8ed4",
+  "tokenFoundIn": [
+    "~/.gemini/antigravity-cli/conversations/ff324de7-840c-4d4c-9ab4-e17836e87efd.db",
+    "frames"
+  ],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/annotations/ff324de7-840c-4d4c-9ab4-e17836e87efd.pbtxt",
+      "~/.gemini/antigravity-cli/brain/ff324de7-840c-4d4c-9ab4-e17836e87efd/.system_generated/logs/transcript.jsonl",
+      "~/.gemini/antigravity-cli/brain/ff324de7-840c-4d4c-9ab4-e17836e87efd/.system_generated/logs/transcript_full.jsonl",
+      "~/.gemini/antigravity-cli/conversations/ff324de7-840c-4d4c-9ab4-e17836e87efd.db",
+      "~/.gemini/antigravity-cli/implicit/73c68180-7a75-4f5a-b24d-18599e0466a8.pb",
+      "~/.gemini/antigravity-cli/log/acp-server-20261120_153024-26219.log"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/jetbox_summaries_proto.pb",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/block.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/heartbeat.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/inbox.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/log.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/report.json"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/log/acp-server-20261120_152932-92904.log",
+    "~/.gemini/antigravity-cli/log/acp-server-20261120_153024-26219.log"
+  ],
+  "evidence": {
+    "frames": "acp/A11-noanswer.frames.jsonl",
+    "client": "acp/A11-noanswer.client.jsonl",
+    "stderr": "acp/A11-noanswer.stderr.txt",
+    "shim": "shim/A11-noanswer.jsonl",
+    "log0": "acp/A11-noanswer.log0.txt",
+    "log1": "acp/A11-noanswer.log1.txt"
+  }
+}

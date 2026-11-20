@@ -1,0 +1,95 @@
+{
+  "id": "N3-noauth-json",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:11:28.973Z",
+  "command": [
+    "agy",
+    "-p",
+    "Reply with the single word ok.",
+    "--output-format",
+    "json",
+    "--print-timeout",
+    "10s"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-ed404de7",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": true,
+  "termSent": {
+    "why": "limit",
+    "at": 60087
+  },
+  "ms": 60164,
+  "modelCalls": 0,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 15535,
+      "ppid": 74512,
+      "pgid": 15535,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 17305,
+      "ppid": 15535,
+      "pgid": 15535,
+      "comm": "<defunct>",
+      "in": "tree"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 1,
+    "maxGapMs": 0,
+    "firstMs": 60090
+  },
+  "token": "orch-probe-token-ed404de7",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/implicit/df6c5259-db7c-4a75-9c6f-f28062992d1e.pb",
+      "~/.gemini/antigravity-cli/log/cli-20261120_151025.log"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/cli.log"
+    ],
+    "removed": [
+      "~/.gemini/antigravity-cli/conversation_summaries.db-shm",
+      "~/.gemini/antigravity-cli/conversation_summaries.db-wal"
+    ]
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_151025.log"
+  ],
+  "evidence": {
+    "stdout": "headless/N3-noauth-json.stdout.txt",
+    "stderr": "headless/N3-noauth-json.stderr.txt",
+    "log0": "headless/N3-noauth-json.log0.txt",
+    "log1": "headless/N3-noauth-json.log1.txt"
+  }
+}

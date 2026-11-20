@@ -1,0 +1,127 @@
+{
+  "id": "H10b-rules",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:28:37.317Z",
+  "command": [
+    "agy",
+    "-p",
+    "Do these four steps in order, and go on with the next step when one fails. 1. Run the shell command `git status --short` in the current directory. 2. Write a file named note.txt in the current directory containing the word hi. 3. Write a file at the absolute path <scratch>/outside.txt containing the word hi. 4. Call the heartbeat tool of the orchestrator MCP server with progress \"probe\". Then reply with one line per step saying whether it worked and what you were told.",
+    "--model",
+    "gemini-3.8-flash-low",
+    "--output-format",
+    "stream-json",
+    "--print-timeout",
+    "180s",
+    "--settings",
+    "{\"permissions\":{\"allow\":[\"command(git)\",\"write_file(<scratch>/)\",\"mcp(orchestrator/*)\"]}}",
+    "--add-dir",
+    "<scratch>/home/launch"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-51e5ec1d",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 11481,
+  "modelCalls": 1,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 30365,
+      "ppid": 12119,
+      "pgid": 30365,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 32572,
+      "ppid": 30365,
+      "pgid": 30365,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 36957,
+      "ppid": 30365,
+      "pgid": 30365,
+      "comm": "log",
+      "in": "tree"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 34,
+    "maxGapMs": 3179,
+    "firstMs": 1341
+  },
+  "token": "orch-probe-token-51e5ec1d",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/brain/e0f5678c-c6c1-4f00-84b6-7b509c63de5b/.system_generated/logs/transcript.jsonl",
+      "~/.gemini/antigravity-cli/brain/e0f5678c-c6c1-4f00-84b6-7b509c63de5b/.system_generated/logs/transcript_full.jsonl",
+      "~/.gemini/antigravity-cli/brain/e0f5678c-c6c1-4f00-84b6-7b509c63de5b/.system_generated/steps/2/output.txt",
+      "~/.gemini/antigravity-cli/brain/e0f5678c-c6c1-4f00-84b6-7b509c63de5b/.system_generated/steps/3/output.txt",
+      "~/.gemini/antigravity-cli/brain/e0f5678c-c6c1-4f00-84b6-7b509c63de5b/.system_generated/steps/4/output.txt",
+      "~/.gemini/antigravity-cli/brain/e0f5678c-c6c1-4f00-84b6-7b509c63de5b/.system_generated/steps/7/output.txt",
+      "~/.gemini/antigravity-cli/conversations/e0f5678c-c6c1-4f00-84b6-7b509c63de5b.db",
+      "~/.gemini/antigravity-cli/implicit/4c5fcfd1-463c-46df-8884-1d81f9946c99.pb",
+      "~/.gemini/antigravity-cli/implicit/b56e993f-7a4f-4763-8bc3-baf39e181538.pb",
+      "~/.gemini/antigravity-cli/log/cli-20261120_152825.log",
+      "~/.gemini/antigravity-cli/presence/e0f5678c-c6c1-4f00-84b6-7b509c63de5b.lock"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/bin/agentapi",
+      "~/.gemini/antigravity-cli/cache/last_conversations.json",
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/jetbox_summaries_proto.pb",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/block.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/heartbeat.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/inbox.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/log.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/report.json"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_152813.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_152825.log"
+  ],
+  "outsideFile": true,
+  "noteFile": false,
+  "evidence": {
+    "stdout": "headless/H10b-rules.stdout.txt",
+    "stderr": "headless/H10b-rules.stderr.txt",
+    "shim": "shim/H10b-rules.jsonl",
+    "log0": "headless/H10b-rules.log0.txt",
+    "log1": "headless/H10b-rules.log1.txt",
+    "log2": "headless/H10b-rules.log2.txt",
+    "mcp_config.json": "headless/H10b-rules.mcp_config.json"
+  }
+}

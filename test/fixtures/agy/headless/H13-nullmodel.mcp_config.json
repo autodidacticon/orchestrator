@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "orchestrator": {
+      "command": "~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node",
+      "args": [
+        "<repo>/test/fixtures/acp/recording-shim.mjs",
+        "<scratch>/out/shim.jsonl",
+        "--block-sec",
+        "75"
+      ],
+      "env": {
+        "ORCH_LAUNCH_ID": "probe-launch",
+        "ORCH_TOKEN": "orch-probe-token-d120b24f",
+        "ORCH_API": "http://127.0.0.1:9",
+        "PROBE_MARKER": "from-entry-env"
+      }
+    }
+  }
+}

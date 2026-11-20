@@ -1,0 +1,133 @@
+{
+  "id": "A7-badshim",
+  "kind": "acp",
+  "probedAt": "2026-11-20T21:30:23.955Z",
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"/opt/homebrew/bin/agy\",\"acp\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--frames",
+    "<scratch>/out/frames.jsonl",
+    "--turn-timeout-ms",
+    "240000",
+    "--cancel-grace-ms",
+    "5000",
+    "--mcp-json",
+    "<scratch>/out/mcp.json",
+    "--prompt-file",
+    "<scratch>/out/prompt.txt",
+    "--policy",
+    "<scratch>/out/policy.json",
+    "--requests-json",
+    "<scratch>/out/requests.json"
+  ],
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-75ecb7f6",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agent-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 51306,
+  "modelCalls": 1,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 92600,
+      "ppid": 12119,
+      "pgid": 92600,
+      "comm": "(node)",
+      "in": "tree"
+    },
+    {
+      "pid": 92904,
+      "ppid": 92600,
+      "pgid": 92600,
+      "comm": "(antigravity)",
+      "in": "tree"
+    }
+  ],
+  "frameStats": {
+    "frames": 156,
+    "maxGapMs": 4299
+  },
+  "token": "orch-probe-token-75ecb7f6",
+  "tokenFoundIn": [
+    "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/logs/chunks/transcript/00000000.jsonl",
+    "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/logs/chunks/transcript_full/00000000.jsonl",
+    "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/logs/transcript.jsonl",
+    "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/logs/transcript_full.jsonl",
+    "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/15/output.txt",
+    "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/2/output.txt",
+    "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/25/output.txt",
+    "~/.gemini/antigravity-cli/conversations/de2e2599-1ba0-4387-81bc-524572bee042.db",
+    "frames"
+  ],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/annotations/de2e2599-1ba0-4387-81bc-524572bee042.pbtxt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/logs/transcript.jsonl",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/logs/transcript_full.jsonl",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/11/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/13/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/15/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/18/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/2/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/20/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/23/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/25/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/28/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/30/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/33/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/35/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/38/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/4/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/40/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/43/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/45/output.txt",
+      "~/.gemini/antigravity-cli/brain/de2e2599-1ba0-4387-81bc-524572bee042/.system_generated/steps/7/output.txt",
+      "~/.gemini/antigravity-cli/conversations/de2e2599-1ba0-4387-81bc-524572bee042.db",
+      "~/.gemini/antigravity-cli/implicit/e834d4c0-b8c0-42c8-be13-25ae472ea752.pb",
+      "~/.gemini/antigravity-cli/log/acp-server-20261120_152932-92904.log"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/bin/agentapi",
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/jetbox_summaries_proto.pb"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/log/acp-server-20261120_152932-92904.log"
+  ],
+  "evidence": {
+    "frames": "acp/A7-badshim.frames.jsonl",
+    "client": "acp/A7-badshim.client.jsonl",
+    "stderr": "acp/A7-badshim.stderr.txt",
+    "log0": "acp/A7-badshim.log0.txt"
+  }
+}

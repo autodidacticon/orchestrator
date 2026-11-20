@@ -1,0 +1,79 @@
+{
+  "id": "N5-settings-mcp",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:18:18.621Z",
+  "command": [
+    "agy",
+    "-p",
+    "Reply with the single word ok.",
+    "--print-timeout",
+    "1s",
+    "--settings",
+    "{\"mcpServers\":{}}"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-abdc77fb",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 60,
+  "modelCalls": 0,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 73249,
+      "ppid": 73195,
+      "pgid": 73249,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 60646,
+      "ppid": 55159,
+      "pgid": 60646,
+      "comm": "antigravity",
+      "in": "harness"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 0,
+    "maxGapMs": 0,
+    "firstMs": null
+  },
+  "token": "orch-probe-token-abdc77fb",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [],
+    "changed": [],
+    "removed": []
+  },
+  "logs": [],
+  "evidence": {
+    "stdout": "headless/N5-settings-mcp.stdout.txt",
+    "stderr": "headless/N5-settings-mcp.stderr.txt"
+  }
+}

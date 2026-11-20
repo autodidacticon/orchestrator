@@ -1,0 +1,121 @@
+{
+  "id": "H9-norule",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:28:13.701Z",
+  "command": [
+    "agy",
+    "-p",
+    "Do these four steps in order, and go on with the next step when one fails. 1. Run the shell command `git status --short` in the current directory. 2. Write a file named note.txt in the current directory containing the word hi. 3. Write a file at the absolute path <scratch>/outside.txt containing the word hi. 4. Call the heartbeat tool of the orchestrator MCP server with progress \"probe\". Then reply with one line per step saying whether it worked and what you were told.",
+    "--model",
+    "gemini-3.8-flash-low",
+    "--output-format",
+    "stream-json",
+    "--print-timeout",
+    "180s",
+    "--add-dir",
+    "<scratch>/home/launch"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-0a444659",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 9822,
+  "modelCalls": 1,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 12446,
+      "ppid": 12119,
+      "pgid": 12446,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 13002,
+      "ppid": 12446,
+      "pgid": 12446,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 16092,
+      "ppid": 12446,
+      "pgid": 12446,
+      "comm": "log",
+      "in": "tree"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 15,
+    "maxGapMs": 2585,
+    "firstMs": 1962
+  },
+  "token": "orch-probe-token-0a444659",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/brain/dd493d38-84db-4e3f-8f61-b66e51fe4655/.system_generated/logs/transcript.jsonl",
+      "~/.gemini/antigravity-cli/brain/dd493d38-84db-4e3f-8f61-b66e51fe4655/.system_generated/logs/transcript_full.jsonl",
+      "~/.gemini/antigravity-cli/brain/dd493d38-84db-4e3f-8f61-b66e51fe4655/.system_generated/steps/2/output.txt",
+      "~/.gemini/antigravity-cli/brain/dd493d38-84db-4e3f-8f61-b66e51fe4655/.system_generated/steps/4/output.txt",
+      "~/.gemini/antigravity-cli/conversations/dd493d38-84db-4e3f-8f61-b66e51fe4655.db",
+      "~/.gemini/antigravity-cli/implicit/83e8399c-cd04-4ed5-8899-b2b4e8c7bc10.pb",
+      "~/.gemini/antigravity-cli/implicit/f321b9b3-2915-4af9-a0b3-f73bdf66bcf9.pb",
+      "~/.gemini/antigravity-cli/log/cli-20261120_152803.log",
+      "~/.gemini/antigravity-cli/presence/dd493d38-84db-4e3f-8f61-b66e51fe4655.lock"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/bin/agentapi",
+      "~/.gemini/antigravity-cli/cache/last_conversations.json",
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/jetbox_summaries_proto.pb",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/block.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/heartbeat.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/inbox.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/log.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/report.json"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_152803.log"
+  ],
+  "outsideFile": false,
+  "noteFile": false,
+  "evidence": {
+    "stdout": "headless/H9-norule.stdout.txt",
+    "stderr": "headless/H9-norule.stderr.txt",
+    "shim": "shim/H9-norule.jsonl",
+    "log0": "headless/H9-norule.log0.txt",
+    "log1": "headless/H9-norule.log1.txt",
+    "mcp_config.json": "headless/H9-norule.mcp_config.json"
+  }
+}

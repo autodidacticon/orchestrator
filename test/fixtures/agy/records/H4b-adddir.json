@@ -1,0 +1,120 @@
+{
+  "id": "H4b-adddir",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:27:11.621Z",
+  "command": [
+    "agy",
+    "-p",
+    "Call the heartbeat tool of the orchestrator MCP server with progress \"probe\". Then reply with the exact names under which you see the tools of that server, one per line.",
+    "--model",
+    "gemini-3.8-flash-low",
+    "--output-format",
+    "stream-json",
+    "--print-timeout",
+    "180s",
+    "--dangerously-skip-permissions",
+    "--add-dir",
+    "<scratch>/home/launch"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-d2374ecb",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 8393,
+  "modelCalls": 1,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 96079,
+      "ppid": 95644,
+      "pgid": 96079,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 10339,
+      "ppid": 96079,
+      "pgid": 96079,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 10789,
+      "ppid": 10339,
+      "pgid": 96079,
+      "comm": "(ps)",
+      "in": "tree"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 16,
+    "maxGapMs": 2158,
+    "firstMs": 1516
+  },
+  "token": "orch-probe-token-d2374ecb",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/brain/8754124b-2c4a-48a6-8faf-cc35051fa77b/.system_generated/logs/transcript.jsonl",
+      "~/.gemini/antigravity-cli/brain/8754124b-2c4a-48a6-8faf-cc35051fa77b/.system_generated/logs/transcript_full.jsonl",
+      "~/.gemini/antigravity-cli/brain/8754124b-2c4a-48a6-8faf-cc35051fa77b/.system_generated/steps/2/output.txt",
+      "~/.gemini/antigravity-cli/brain/8754124b-2c4a-48a6-8faf-cc35051fa77b/.system_generated/steps/7/output.txt",
+      "~/.gemini/antigravity-cli/conversations/8754124b-2c4a-48a6-8faf-cc35051fa77b.db",
+      "~/.gemini/antigravity-cli/implicit/bc8333a4-69bc-42c4-8f78-926d0d877f0e.pb",
+      "~/.gemini/antigravity-cli/implicit/ddd646e5-9ea0-47f8-80d0-6d3cb29c5251.pb",
+      "~/.gemini/antigravity-cli/log/cli-20261120_152702.log",
+      "~/.gemini/antigravity-cli/presence/8754124b-2c4a-48a6-8faf-cc35051fa77b.lock"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/bin/agentapi",
+      "~/.gemini/antigravity-cli/cache/last_conversations.json",
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/jetbox_summaries_proto.pb",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/block.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/heartbeat.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/inbox.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/log.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/report.json"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_152702.log"
+  ],
+  "evidence": {
+    "stdout": "headless/H4b-adddir.stdout.txt",
+    "stderr": "headless/H4b-adddir.stderr.txt",
+    "shim": "shim/H4b-adddir.jsonl",
+    "log0": "headless/H4b-adddir.log0.txt",
+    "log1": "headless/H4b-adddir.log1.txt",
+    "mcp_config.json": "headless/H4b-adddir.mcp_config.json"
+  }
+}

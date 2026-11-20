@@ -1,0 +1,171 @@
+{
+  "id": "H3-home",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:19:41.611Z",
+  "command": [
+    "agy",
+    "-p",
+    "Reply with the single word ok.",
+    "--model",
+    null,
+    "--output-format",
+    "json",
+    "--print-timeout",
+    "180s"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "<scratch>/home",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-8947b9f0",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 1,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 60276,
+  "modelCalls": 0,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 94869,
+      "ppid": 85432,
+      "pgid": 94869,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 96505,
+      "ppid": 94869,
+      "pgid": 94869,
+      "comm": "<defunct>",
+      "in": "tree"
+    },
+    {
+      "pid": 60646,
+      "ppid": 55159,
+      "pgid": 60646,
+      "comm": "antigravity",
+      "in": "harness"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 1,
+    "maxGapMs": 0,
+    "firstMs": 60202
+  },
+  "token": "orch-probe-token-8947b9f0",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/log/cli-20261120_151904.log"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/cache/conversation_metadata.json",
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/log/cli-20261120_151551.log"
+    ],
+    "removed": [
+      "~/.gemini/antigravity-cli/crashes/crash_60646_addce354-0d17-44ac-92a2-b137336f7d87.log"
+    ]
+  },
+  "logs": [
+    "<scratch>/home/.gemini/antigravity-cli/cli.log",
+    "<scratch>/home/.gemini/antigravity-cli/log/cli-20261120_151840.log"
+  ],
+  "homeListing": [
+    "<scratch>/home/.gemini/",
+    "<scratch>/home/.gemini/antigravity-cli/",
+    "<scratch>/home/.gemini/antigravity-cli/brain/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/.checksum",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/.manifest",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/keep.txt",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/README.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/assets/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/plugin.json",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/sidecars/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/agy-customizations/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/antigravity_guide/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/automation/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/automation/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/generative_ui/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/generative_ui/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/mcp-app-development/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/mcp-app-development/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/migrate-agent-settings/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/migrate-agent-settings/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/migrate-workflows/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/migrate-workflows/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/native_swarm/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/native_swarm/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/native_swarm/logo.svg",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/permissioned-github/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/permissioned-github/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/plugin/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/plugin/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/run-workflow/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/run-workflow/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_monitor/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_monitor/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_narrator/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_narrator/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_pane/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_pane/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/ui-plugin-navigation/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/ui-plugin-navigation/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/cache/",
+    "<scratch>/home/.gemini/antigravity-cli/cache/default_project_id.txt",
+    "<scratch>/home/.gemini/antigravity-cli/cli.log",
+    "<scratch>/home/.gemini/antigravity-cli/conversation_summaries.db",
+    "<scratch>/home/.gemini/antigravity-cli/conversations/",
+    "<scratch>/home/.gemini/antigravity-cli/crashes/",
+    "<scratch>/home/.gemini/antigravity-cli/implicit/",
+    "<scratch>/home/.gemini/antigravity-cli/implicit/8652c7c6-61b0-471a-821f-f797a4cea0c1.pb",
+    "<scratch>/home/.gemini/antigravity-cli/installation_id",
+    "<scratch>/home/.gemini/antigravity-cli/jetski_state.pbtxt",
+    "<scratch>/home/.gemini/antigravity-cli/log/",
+    "<scratch>/home/.gemini/antigravity-cli/log/cli-20261120_151840.log",
+    "<scratch>/home/.gemini/config/",
+    "<scratch>/home/.gemini/config/.migrated",
+    "<scratch>/home/.gemini/config/config.json",
+    "<scratch>/home/.gemini/config/mcp_config.json",
+    "<scratch>/home/.gemini/config/projects/",
+    "<scratch>/home/.gemini/config/projects/<project>.json"
+  ],
+  "evidence": {
+    "stdout": "headless/H3-home.stdout.txt",
+    "stderr": "headless/H3-home.stderr.txt",
+    "log0": "headless/H3-home.log0.txt",
+    "log1": "headless/H3-home.log1.txt"
+  },
+  "note": "meant to call the model, stopped before one (see stderr)"
+}

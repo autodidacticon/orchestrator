@@ -1,0 +1,126 @@
+{
+  "id": "H15-timeout",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:33:24.377Z",
+  "command": [
+    "agy",
+    "-p",
+    "Run the shell command `sleep 60` in the current directory, wait for it, and then reply with the word done.",
+    "--model",
+    "gemini-3.8-flash-low",
+    "--output-format",
+    "json",
+    "--print-timeout",
+    "10s",
+    "--dangerously-skip-permissions"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-47eddc8b",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 3,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 11400,
+  "modelCalls": 1,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 99287,
+      "ppid": 76815,
+      "pgid": 99287,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 72871,
+      "ppid": 72701,
+      "pgid": 72871,
+      "comm": "antigravity",
+      "in": "harness"
+    },
+    {
+      "pid": 72884,
+      "ppid": 72701,
+      "pgid": 72884,
+      "comm": "antigravity",
+      "in": "harness"
+    },
+    {
+      "pid": 72910,
+      "ppid": 72897,
+      "pgid": 72897,
+      "comm": "antigravity",
+      "in": "harness"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 1,
+    "maxGapMs": 0,
+    "firstMs": 11278
+  },
+  "token": "orch-probe-token-47eddc8b",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/brain/f007b0ff-461e-4cd5-8324-222d932d568e/.system_generated/logs/transcript.jsonl",
+      "~/.gemini/antigravity-cli/brain/f007b0ff-461e-4cd5-8324-222d932d568e/.system_generated/logs/transcript_full.jsonl",
+      "~/.gemini/antigravity-cli/conversations/f007b0ff-461e-4cd5-8324-222d932d568e.db",
+      "~/.gemini/antigravity-cli/implicit/0509e749-796d-485b-b732-46c3f9fbdade.pb",
+      "~/.gemini/antigravity-cli/log/cli-20261120_153312.log",
+      "~/.gemini/antigravity-cli/presence/f007b0ff-461e-4cd5-8324-222d932d568e.lock"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/bin/agentapi",
+      "~/.gemini/antigravity-cli/cache/last_conversations.json",
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/conversations/aa305c5b-efc2-4e44-bef5-cb20bcb246dc.db",
+      "~/.gemini/antigravity-cli/conversations/dcf9d65a-2198-4d63-afcb-032042be1919.db",
+      "~/.gemini/antigravity-cli/jetbox_summaries_proto.pb"
+    ],
+    "removed": [
+      "~/.gemini/antigravity-cli/conversation_summaries.db-shm",
+      "~/.gemini/antigravity-cli/conversation_summaries.db-wal",
+      "~/.gemini/antigravity-cli/conversations/aa305c5b-efc2-4e44-bef5-cb20bcb246dc.db-shm",
+      "~/.gemini/antigravity-cli/conversations/aa305c5b-efc2-4e44-bef5-cb20bcb246dc.db-wal",
+      "~/.gemini/antigravity-cli/conversations/dcf9d65a-2198-4d63-afcb-032042be1919.db-shm",
+      "~/.gemini/antigravity-cli/conversations/dcf9d65a-2198-4d63-afcb-032042be1919.db-wal"
+    ]
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_153308.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_153312.log"
+  ],
+  "evidence": {
+    "stdout": "headless/H15-timeout.stdout.txt",
+    "stderr": "headless/H15-timeout.stderr.txt",
+    "log0": "headless/H15-timeout.log0.txt",
+    "log1": "headless/H15-timeout.log1.txt",
+    "log2": "headless/H15-timeout.log2.txt"
+  }
+}

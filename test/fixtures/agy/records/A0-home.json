@@ -1,0 +1,152 @@
+{
+  "id": "A0-home",
+  "kind": "acp",
+  "probedAt": "2026-11-20T21:17:00.661Z",
+  "command": [
+    "node",
+    "acp-client.mjs",
+    "--agent-json",
+    "[\"/opt/homebrew/bin/agy\",\"acp\"]",
+    "--cwd",
+    "<scratch>/wt",
+    "--frames",
+    "<scratch>/out/frames.jsonl",
+    "--turn-timeout-ms",
+    "240000",
+    "--cancel-grace-ms",
+    "5000",
+    "--mcp-json",
+    "<scratch>/out/mcp.json"
+  ],
+  "home": "<scratch>/home",
+  "env": {
+    "HOME": "<scratch>/home",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-91d831de",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agent-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "exit": {
+    "code": 4,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 330,
+  "modelCalls": 0,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 6377,
+      "ppid": 3987,
+      "pgid": 6377,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 60646,
+      "ppid": 55159,
+      "pgid": 60646,
+      "comm": "antigravity",
+      "in": "harness"
+    }
+  ],
+  "frameStats": {
+    "frames": 4,
+    "maxGapMs": 63
+  },
+  "token": "orch-probe-token-91d831de",
+  "tokenFoundIn": [
+    "frames"
+  ],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [],
+    "changed": [],
+    "removed": []
+  },
+  "logs": [
+    "<scratch>/home/.gemini/antigravity-cli/log/acp-server-20261120_151659-6390.log"
+  ],
+  "homeListing": [
+    "<scratch>/home/.gemini/",
+    "<scratch>/home/.gemini/antigravity-cli/",
+    "<scratch>/home/.gemini/antigravity-cli/brain/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/.checksum",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/.manifest",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/keep.txt",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/README.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/assets/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/plugin.json",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/plugins/swarm/sidecars/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/agy-customizations/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/agy-customizations/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/antigravity_guide/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/antigravity_guide/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/antigravity_guide/references/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/automation/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/automation/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/generative_ui/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/generative_ui/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/mcp-app-development/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/mcp-app-development/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/migrate-agent-settings/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/migrate-agent-settings/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/migrate-workflows/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/migrate-workflows/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/native_swarm/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/native_swarm/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/native_swarm/logo.svg",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/permissioned-github/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/permissioned-github/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/plugin/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/plugin/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/run-workflow/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/run-workflow/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_monitor/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_monitor/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_narrator/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_narrator/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_pane/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/swarm_pane/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/ui-plugin-navigation/",
+    "<scratch>/home/.gemini/antigravity-cli/builtin/skills/ui-plugin-navigation/SKILL.md",
+    "<scratch>/home/.gemini/antigravity-cli/conversation_summaries.db",
+    "<scratch>/home/.gemini/antigravity-cli/conversations/",
+    "<scratch>/home/.gemini/antigravity-cli/crashes/",
+    "<scratch>/home/.gemini/antigravity-cli/implicit/",
+    "<scratch>/home/.gemini/antigravity-cli/implicit/a1b9d5ef-23d9-4801-b610-e439cf44afdd.pb",
+    "<scratch>/home/.gemini/antigravity-cli/installation_id",
+    "<scratch>/home/.gemini/antigravity-cli/jetski_state.pbtxt",
+    "<scratch>/home/.gemini/antigravity-cli/log/",
+    "<scratch>/home/.gemini/antigravity-cli/log/acp-server-20261120_151659-6390.log",
+    "<scratch>/home/.gemini/config/",
+    "<scratch>/home/.gemini/config/.migrated",
+    "<scratch>/home/.gemini/config/config.json",
+    "<scratch>/home/.gemini/config/mcp_config.json",
+    "<scratch>/home/.gemini/config/projects/"
+  ],
+  "evidence": {
+    "frames": "acp/A0-home.frames.jsonl",
+    "client": "acp/A0-home.client.jsonl",
+    "stderr": "acp/A0-home.stderr.txt",
+    "log0": "acp/A0-home.log0.txt"
+  }
+}

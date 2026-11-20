@@ -1,0 +1,103 @@
+I1120 15:18:40.961878       1 resolver.go:85] Model ID null not in local config, defaulting to CCPA
+I1120 15:18:40.961927       1 resolver.go:111] Model resolved via default
+I1120 15:18:40.961990      47 server.go:2650] Starting language server process with pid 94869
+I1120 15:18:40.962297      47 workflow_python.go:21] run_workflow Python: interpreter "", embedded true
+I1120 15:18:40.962575      47 server.go:2709] Language server version: 1.5.13
+I1120 15:18:40.962588      47 server.go:1299] Language server will attempt to listen on host localhost
+I1120 15:18:40.972769      47 server.go:1314] Language server listening on random port at 50968 for HTTPS (gRPC)
+I1120 15:18:40.973397      47 server.go:1322] Language server listening on random port at 50969 for HTTP
+I1120 15:18:40.974235      57 model_configs.go:230] Auth mode is unspecified, skipping fetchAvailableModels and returning empty response
+W1120 15:18:40.974437      25 cache.go:157] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+W1120 15:18:40.974469      25 cache.go:157] Cache(userInfo): Singleflight refresh failed: failed to get load code assist response: error getting token source: You are not logged into Antigravity.
+E1120 15:18:40.974709      57 errorreport.go:285] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+I1120 15:18:40.976690      65 store_client.go:714] summary store: starting background reconciliation (trigger=empty_on_open)
+I1120 15:18:40.976754      65 store_client.go:743] summary store: reconcile func returned 0 records, skipping
+I1120 15:18:40.978497      47 server.go:3115] Generated and saved persistent installation UUID: ba417111-363c-4b4a-a8ad-e93d62ffe11a
+W1120 15:18:40.978906     109 cache.go:157] Cache(peopleInfo): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1120 15:18:40.978949     109 errorreport.go:285] error getting token source: You are not logged into Antigravity.
+W1120 15:18:41.003311      47 defaults.go:709] failed to get cs path: cs path /usr/bin/cs invalid
+I1120 15:18:41.003408      47 manager.go:152] Creating trajectory store manager with proto store and SQLite store
+I1120 15:18:41.003506     133 migrate.go:49] Migration marker <scratch>/home/.gemini/config/.migrated does not exist. Attempting migration from AppDataDir <scratch>/home/.gemini/antigravity-cli.
+I1120 15:18:41.003784     133 migrate.go:157] Migration complete, marked with <scratch>/home/.gemini/config/.migrated
+I1120 15:18:41.020808     146 manager.go:98] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] is enabled
+I1120 15:18:41.020951     146 manager.go:113] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] starting
+I1120 15:18:41.021721     146 project_uris_migration.go:42] Starting ProjectUrisMigration
+I1120 15:18:41.021798     146 manager.go:133] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] completed successfully in 76.958µs
+I1120 15:18:41.022244     146 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] is enabled
+I1120 15:18:41.022371     146 manager.go:113] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] starting
+I1120 15:18:41.023744     146 plugin_enablement_migration.go:64] Seeded plugin enablement for 1 plugin(s) into config.json
+I1120 15:18:41.023758     146 manager.go:133] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] completed successfully in 904µs
+I1120 15:18:41.024386     146 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
+I1120 15:18:41.024461     146 manager.go:113] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] starting
+I1120 15:18:41.024951     146 manager.go:133] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] completed successfully in 77.791µs
+I1120 15:18:41.025543     146 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
+I1120 15:18:41.025572     146 manager.go:95] Migration [MIGRATION_ID_ADOPT_BWG_INSTALLS] is disabled, skipping entirely
+I1120 15:18:41.025593     146 manager.go:95] Migration [MIGRATION_ID_GDRIVE_BUILTIN_PLUGIN] is disabled, skipping entirely
+I1120 15:18:41.025598     146 manager.go:98] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] is enabled
+I1120 15:18:41.025733     146 manager.go:113] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] starting
+I1120 15:18:41.026246     146 manager.go:133] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] completed successfully in 28.709µs
+I1120 15:18:41.026498     146 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
+I1120 15:18:41.044864      47 server.go:4093] initialized server successfully in 82.777042ms
+I1120 15:18:41.044931     117 server.go:4927] Auth succeeded, refreshing features and managers
+W1120 15:18:41.045109      10 cache.go:157] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1120 15:18:41.045143      10 errorreport.go:285] error getting token source: You are not logged into Antigravity.
+I1120 15:18:41.045145       1 auto_updater.go:285] Auto-update disabled via environment variable AGY_CLI_DISABLE_AUTO_UPDATE
+I1120 15:18:41.045216       1 common.go:191] Launching CLI mode
+E1120 15:18:41.045239       1 launchsteps.go:108] Failed to resolve GeminiDir ".gemini": .gemini must be an absolute path: path is not absolute, falling back to default
+I1120 15:18:41.045257       1 common.go:212] CLI app data directory: <scratch>/home/.gemini/antigravity-cli
+I1120 15:18:41.045280       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[<scratch>/wt] appDataDir=<scratch>/home/.gemini/antigravity-cli languageServer=true codeAssist=true
+W1120 15:18:41.045108       9 cache.go:157] Cache(peopleInfo): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1120 15:18:41.045350       9 errorreport.go:285] error getting token source: You are not logged into Antigravity.
+E1120 15:18:41.045222     117 errorreport.go:285] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+I1120 15:18:41.045360       1 auth_provider.go:816] [AuthProvider] SetEnableBusinessLogin called with enable: true
+W1120 15:18:41.045390       9 rpcs_plugin_auth.go:110] Not reloading plugin MCP servers: cannot get the signed-in user: error getting token source: You are not logged into Antigravity.
+I1120 15:18:41.045415     117 server.go:4946] State refresh took 0ms
+I1120 15:18:41.045463     117 server.go:4961] [RemoteControl] Subscription callback triggered.
+I1120 15:18:41.045674     117 server.go:4964] [RemoteControl] RemoteControlEnabled value: false
+I1120 15:18:41.045694     117 server.go:6065] [RemoteControl] Session toggle is off, staying disconnected
+I1120 15:18:41.045702     117 server.go:5743] [RemoteControl] Resolved proxyServerURL: ""
+I1120 15:18:41.045825     117 profiler.go:231] Continuous pprof profiling is disabled.
+I1120 15:18:41.045855     279 manager.go:98] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] is enabled
+I1120 15:18:41.045896      16 reconcile_summaries.go:94] [Summaries] reconcile checked 0 conversations, restored 0, cached 0, skipped 0, dropped 0, cancelled false in 0ms (resident: 0 -> 0)
+I1120 15:18:41.045990     279 manager.go:107] Migration [MIGRATION_ID_SANITY_CHECK_PROJECT_URIS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:18:41.046001     279 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] is enabled
+I1120 15:18:41.046217     127 store_client.go:714] summary store: starting background reconciliation (trigger=empty_on_open)
+I1120 15:18:41.046328     279 manager.go:107] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:18:41.046356     279 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
+E1120 15:18:41.046364     127 server.go:3345] Failed to read conversations directory <scratch>/home/.gemini/antigravity/conversations: open <scratch>/home/.gemini/antigravity/conversations: no such file or directory
+I1120 15:18:41.046403     127 server.go:3231] ListConversations returning 0 summaries
+I1120 15:18:41.046415     127 store_client.go:743] summary store: reconcile func returned 0 records, skipping
+I1120 15:18:41.046445     279 manager.go:107] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:18:41.046455     279 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
+I1120 15:18:41.046465     279 manager.go:95] Migration [MIGRATION_ID_ADOPT_BWG_INSTALLS] is disabled, skipping entirely
+I1120 15:18:41.046486     279 manager.go:95] Migration [MIGRATION_ID_GDRIVE_BUILTIN_PLUGIN] is disabled, skipping entirely
+I1120 15:18:41.046492     279 manager.go:98] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] is enabled
+I1120 15:18:41.046573     279 manager.go:107] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] already has status MIGRATION_STATUS_COMPLETED, skipping
+I1120 15:18:41.046581     279 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
+I1120 15:18:41.046877       1 project.go:78] project: created project "CLI Project" (id=<project>) at <scratch>/home/.gemini/config/projects/<project>.json
+I1120 15:18:41.046900       1 server.go:2339] Backend project ID updated dynamically to: <project>
+I1120 15:18:41.046914       1 analytics.go:249] CLI startup completed (took 87.085167ms, phases [main_entered=0ms ls_start=2ms ls_ready=85ms launch_cli=85ms backend_created=86ms project_resolved=87ms])
+I1120 15:18:41.046941       1 printmode.go:208] Print mode: starting (promptLength=30, model="null", conversationID="")
+I1120 15:18:41.046957       1 manager.go:561] Initializing CLI store manager for workspace <scratch>/wt
+W1120 15:18:41.047089       1 cli_setting_manager.go:452] cli settings not available, using defaults: failed to read cli settings: open <scratch>/home/.gemini/antigravity-cli/settings.json: no such file or directory
+I1120 15:18:41.047197       1 cli_setting_manager.go:98] CLI settings initialized: permissions=<nil>, toolPermission=request-review
+I1120 15:18:41.047686       1 hooks_manager.go:54] loaded 0 named hooks from 0 hooks.json file(s)
+I1120 15:18:41.047720       1 manager.go:736] CLI store manager initialized successfully
+I1120 15:18:41.056773     319 manager.go:1685] Reloading system slash commands and skills
+I1120 15:18:41.056821     319 manager.go:1641] Reloading system slash commands
+I1120 15:18:41.056851     319 manager.go:1650] Slash commands unchanged, skipping update
+I1120 15:18:41.057732       1 hooks_manager.go:54] loaded 0 named hooks from 0 hooks.json file(s)
+I1120 15:18:41.057812       1 printmode.go:409] Print mode: not authenticated, trying silent auth
+I1120 15:18:41.077391       1 printmode.go:415] Print mode: silent auth failed
+I1120 15:18:41.077433       1 printmode.go:432] Print mode: triggering interactive OAuth
+I1120 15:18:41.077444       1 auth_manager.go:208] Starting OAuth authentication flow
+I1120 15:18:41.077451       1 browser.go:56] consumerOAuth: starting OAuth flow
+W1120 15:19:40.977099     479 cache.go:157] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E1120 15:19:40.977895     479 errorreport.go:285] error getting token source: You are not logged into Antigravity.
+E1120 15:19:40.978492      57 errorreport.go:285] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+E1120 15:19:41.077882       1 printmode.go:482] Print mode: auth timed out
+I1120 15:19:41.078296       1 manager.go:948] CLI store manager shutting down
+I1120 15:19:41.078691     268 server.go:4570] Language server shutting down
+I1120 15:19:41.078746     268 server.go:4609] Waiting for migrations to complete to prevent partial migration state...
+W1120 15:19:41.079051     268 cache.go:157] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+W1120 15:19:41.079067     268 cache.go:157] Cache(userInfo): Singleflight refresh failed: failed to get load code assist response: error getting token source: You are not logged into Antigravity.

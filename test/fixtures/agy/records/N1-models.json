@@ -1,0 +1,87 @@
+{
+  "id": "N1-models",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:17:09.085Z",
+  "command": [
+    "agy",
+    "models"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-98b0f753",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 993,
+  "modelCalls": 0,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 12056,
+      "ppid": 12002,
+      "pgid": 12056,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 60646,
+      "ppid": 55159,
+      "pgid": 60646,
+      "comm": "antigravity",
+      "in": "harness"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 23,
+    "maxGapMs": 0,
+    "firstMs": 836
+  },
+  "token": "orch-probe-token-98b0f753",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/cache/conversation_metadata.json",
+      "~/.gemini/antigravity-cli/conversation_summaries.db-shm",
+      "~/.gemini/antigravity-cli/conversation_summaries.db-wal",
+      "~/.gemini/antigravity-cli/log/cli-20261120_151707.log"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_151707.log"
+  ],
+  "evidence": {
+    "stdout": "headless/N1-models.stdout.txt",
+    "stderr": "headless/N1-models.stderr.txt",
+    "log0": "headless/N1-models.log0.txt",
+    "log1": "headless/N1-models.log1.txt"
+  }
+}

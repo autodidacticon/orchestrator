@@ -1,0 +1,60 @@
+{
+  "at": "2026-11-20T21:03:58.015Z",
+  "lines": [
+    "ok: binary /opt/homebrew/bin/agy",
+    "ok: version 1.5.13",
+    "ok: agy acp --help (exit 0, 1 lines)",
+    "missing: agy models (exit {\"code\":1,\"signal\":null})",
+    "missing: Probe model (the issue has no slug on its Probe model: line)",
+    "ok: GEMINI_API_KEY not set",
+    "missing: sign-in without a terminal (exit {\"code\":1,\"signal\":null}: error: authentication failed or timed out)"
+  ],
+  "facts": {
+    "bin": "agy",
+    "path": "/opt/homebrew/bin/agy",
+    "versionRun": {
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "stdout": "1.5.13\n",
+      "stderr": ""
+    },
+    "version": "1.5.13",
+    "acpHelp": {
+      "exit": {
+        "code": 0,
+        "signal": null
+      },
+      "stdout": "",
+      "stderr": "Usage: antigravity acp [flags]\n\nStart the Agent Client Protocol (ACP) stdio server\n\nFlags:\n  --add-dir                         Add a directory to the workspace (repeatable) (default [])\n  --agent                           Agent for the ACP session\n  --app-data-dir                    Path where application data is stored (default antigravity-cli)\n  --app_data_dir                    Path where application data is stored (default antigravity-cli)\n  --cli_dir_name                    Subdirectory under app_data_dir for CLI settings and logs\n  --cli_log_file                    Override ACP log file path\n  --cloud_code_endpoint             CCPA API URL (default https://daily-cloudcode-pa.googleapis.com)\n  --dangerously-skip-permissions    Auto-approve all tool permission requests\n  --disable-telemetry               If true, disable telemetry\n  --disable_telemetry               If true, disable telemetry\n  --gemini-dir                      Path where Gemini files are stored (default .gemini)\n  --gemini_dir                      Path where Gemini files are stored (default .gemini)\n  -h                                Show help\n  --help                            Show help\n  --ide-mcp-port                    Port for host IDE tools MCP server (requires 'nc' in $PATH) (default 0)\n  --ide_mcp_port                    Port for host IDE tools MCP server (requires 'nc' in $PATH) (default 0)\n  --include-default-customizations  Include default customizations (default true)\n  --is_google3_workspace            Whether running in Google environment\n  --is_google_internal              Deprecated: use is_google3_workspace\n  --log-file                        Override ACP log file path\n  --login                           Log in with Google interactively, then exit (ACP terminal auth)\n  --override_user_agent_name        Override user agent name for HTTP requests\n  --process-per-session             Serve each session from an isolated worker process\n  --sandbox                         Run in a sandbox with terminal restrictions enabled\n  --stdio                           Use stdio JSON-RPC transport (default)\n  --use_stubby_auth                 Use LOAS auth\n  --worker                          Serve a single session for an ACP front process (internal)\n"
+    },
+    "models": {
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "stdout": "",
+      "stderr": "Fetching available models...\nError: Please sign in to view available models. Launch the CLI without arguments to sign in.\n"
+    },
+    "model": null,
+    "apiKey": "not set",
+    "prompt": {
+      "args": [
+        "-p",
+        "Reply with the single word ok.",
+        "--print-timeout",
+        "60s"
+      ],
+      "exit": {
+        "code": 1,
+        "signal": null
+      },
+      "timedOut": false,
+      "stdout": "",
+      "stderr": "Authentication required. Please visit the URL to log in:\n  https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com&code_challenge=BoYviIKYDQG9wAFyfaE519Q-wlWfvqiwrUPqtv5lfYE&code_challenge_method=S256&prompt=consent&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcloud-platform+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fcclog+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fexperimentsandconfigs+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Faicode+openid&state=qn_SatijpvAby9WM7GUprA\n\nWaiting for authentication (timeout 60s)...\nOr, paste the authorization code here and press Enter:\nError: authentication timed out.\nerror: authentication failed or timed out\n",
+      "ms": 60212,
+      "orphans": []
+    }
+  }
+}

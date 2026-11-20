@@ -1,0 +1,46 @@
+{
+  "id": "P2-preflight",
+  "kind": "preflight",
+  "probedAt": "2026-11-20T21:17:44.681Z",
+  "command": [
+    "node",
+    "probe.mjs",
+    "--preflight",
+    "--model",
+    "gemini-3.8-flash-low"
+  ],
+  "promptCommand": [
+    "agy",
+    "-p",
+    "Reply with the single word ok.",
+    "--print-timeout",
+    "60s",
+    "--model",
+    "gemini-3.8-flash-low"
+  ],
+  "home": "~",
+  "cwd": "<scratch>/wt",
+  "stdin": "ignore",
+  "detached": true,
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "ms": 3781,
+  "modelCalls": 1,
+  "orphans": [],
+  "lines": [
+    "ok: binary /opt/homebrew/bin/agy",
+    "ok: version 1.5.13",
+    "ok: agy acp --help (exit 0, 30 lines on stdout and stderr)",
+    "ok: agy models (23 lines)",
+    "ok: Probe model gemini-3.8-flash-low",
+    "ok: GEMINI_API_KEY not set",
+    "ok: sign-in without a terminal (prompt answered in 3781 ms)"
+  ],
+  "evidence": {
+    "lines": "headless/preflight.txt",
+    "facts": "headless/preflight.json"
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "id": "H10a-skip",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:28:24.928Z",
+  "command": [
+    "agy",
+    "-p",
+    "Do these four steps in order, and go on with the next step when one fails. 1. Run the shell command `git status --short` in the current directory. 2. Write a file named note.txt in the current directory containing the word hi. 3. Write a file at the absolute path <scratch>/outside.txt containing the word hi. 4. Call the heartbeat tool of the orchestrator MCP server with progress \"probe\". Then reply with one line per step saying whether it worked and what you were told.",
+    "--model",
+    "gemini-3.8-flash-low",
+    "--output-format",
+    "stream-json",
+    "--print-timeout",
+    "180s",
+    "--dangerously-skip-permissions",
+    "--add-dir",
+    "<scratch>/home/launch"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-129e2ed4",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 0,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 10676,
+  "modelCalls": 1,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 20547,
+      "ppid": 12119,
+      "pgid": 20547,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 23517,
+      "ppid": 20547,
+      "pgid": 20547,
+      "comm": "node",
+      "in": "tree"
+    },
+    {
+      "pid": 26567,
+      "ppid": 20547,
+      "pgid": 26567,
+      "comm": "(zsh)",
+      "in": "tree"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 31,
+    "maxGapMs": 2911,
+    "firstMs": 1550
+  },
+  "token": "orch-probe-token-129e2ed4",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [
+      "~/.gemini/antigravity-cli/brain/166f06e5-17bc-42ef-8b8a-7a7820084c44/.system_generated/logs/transcript.jsonl",
+      "~/.gemini/antigravity-cli/brain/166f06e5-17bc-42ef-8b8a-7a7820084c44/.system_generated/logs/transcript_full.jsonl",
+      "~/.gemini/antigravity-cli/brain/166f06e5-17bc-42ef-8b8a-7a7820084c44/.system_generated/steps/2/output.txt",
+      "~/.gemini/antigravity-cli/brain/166f06e5-17bc-42ef-8b8a-7a7820084c44/.system_generated/steps/3/output.txt",
+      "~/.gemini/antigravity-cli/brain/166f06e5-17bc-42ef-8b8a-7a7820084c44/.system_generated/steps/4/output.txt",
+      "~/.gemini/antigravity-cli/brain/166f06e5-17bc-42ef-8b8a-7a7820084c44/.system_generated/steps/7/output.txt",
+      "~/.gemini/antigravity-cli/conversations/166f06e5-17bc-42ef-8b8a-7a7820084c44.db",
+      "~/.gemini/antigravity-cli/implicit/8401b8e2-64c1-403c-911e-9b3775b69733.pb",
+      "~/.gemini/antigravity-cli/implicit/e918bfc4-ee5d-4c87-80ec-321f400a943a.pb",
+      "~/.gemini/antigravity-cli/log/cli-20261120_152813.log",
+      "~/.gemini/antigravity-cli/presence/166f06e5-17bc-42ef-8b8a-7a7820084c44.lock"
+    ],
+    "changed": [
+      "~/.gemini/antigravity-cli/bin/agentapi",
+      "~/.gemini/antigravity-cli/cache/last_conversations.json",
+      "~/.gemini/antigravity-cli/cache/onboarding.json",
+      "~/.gemini/antigravity-cli/cli.log",
+      "~/.gemini/antigravity-cli/conversation_summaries.db",
+      "~/.gemini/antigravity-cli/jetbox_summaries_proto.pb",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/block.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/heartbeat.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/inbox.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/log.json",
+      "~/.gemini/antigravity-cli/mcp/orchestrator/report.json"
+    ],
+    "removed": []
+  },
+  "logs": [
+    "~/.gemini/antigravity-cli/cli.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_152803.log",
+    "~/.gemini/antigravity-cli/log/cli-20261120_152813.log"
+  ],
+  "outsideFile": true,
+  "noteFile": false,
+  "evidence": {
+    "stdout": "headless/H10a-skip.stdout.txt",
+    "stderr": "headless/H10a-skip.stderr.txt",
+    "shim": "shim/H10a-skip.jsonl",
+    "log0": "headless/H10a-skip.log0.txt",
+    "log1": "headless/H10a-skip.log1.txt",
+    "log2": "headless/H10a-skip.log2.txt",
+    "mcp_config.json": "headless/H10a-skip.mcp_config.json"
+  }
+}

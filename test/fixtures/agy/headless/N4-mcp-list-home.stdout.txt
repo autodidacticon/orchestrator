@@ -1,0 +1,2 @@
+NAME          TYPE   STATUS   COMMAND/URL
+orchestrator  stdio  enabled  ~/.local/share/fnm/node-versions/v22.23.2/installation/bin/node <repo>/test/fixtures/acp/recording-shim.mjs <scratch>/out/shim.jsonl --block-sec 75

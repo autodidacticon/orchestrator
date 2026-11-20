@@ -1,0 +1,404 @@
+{
+  "header": {
+    "cli": "agy",
+    "bin": "agy",
+    "binPath": "/opt/homebrew/bin/agy",
+    "version": "1.5.13",
+    "model": "gemini-3.8-flash-low",
+    "credential": "cached sign-in",
+    "probedAt": "2026-11-20",
+    "client": "test/fixtures/acp/acp-client.mjs",
+    "shim": "test/fixtures/acp/recording-shim.mjs"
+  },
+  "userConfig": [
+    {
+      "path": "~/.gemini/antigravity-cli/settings.json",
+      "sha256Before": "absent",
+      "sha256After": "5ff2b3615b8dad859fb071346ab3d53c4311ec33c63fe48928dc1039739d8275",
+      "changedBy": [
+        "the owner's interactive sign-in between N4-mcp-list-settings and A0-gemdir (15:16 local); no probe run changed it (every record has userConfigChanged [])"
+      ]
+    },
+    {
+      "path": "~/.gemini/config/mcp_config.json",
+      "sha256Before": "absent",
+      "sha256After": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "changedBy": [
+        "P1-preflight: the first agy run created ~/.gemini and this empty file"
+      ]
+    },
+    {
+      "path": "~/.gemini/GEMINI.md",
+      "sha256Before": "absent",
+      "sha256After": "absent",
+      "changedBy": []
+    }
+  ],
+  "questions": [
+    {
+      "id": "Q1",
+      "answer": "yes",
+      "summary": "The probe ran `agy` 1.5.13 from /opt/homebrew/bin/agy, whose `acp --help` exits 0 and whose `agy models` lists 23 slugs after the sign-in, of which gemini-3.8-flash-low was used.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --preflight --model gemini-3.8-flash-low",
+        "node test/fixtures/agy/probe.mjs --run N1-acp-help,N1-models --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/preflight.txt",
+        "headless/preflight-1.txt",
+        "headless/N1-acp-help.stderr.txt",
+        "headless/N1-models.stdout.txt"
+      ],
+      "runs": [
+        "P1-preflight",
+        "P2-preflight",
+        "N1-acp-help",
+        "N1-models"
+      ],
+      "detail": "agy 1.5.13 at /opt/homebrew/bin/agy (a Homebrew wrapper that sets AGY_CLI_DISABLE_AUTO_UPDATE=true and execs the Caskroom `antigravity` binary); `agy acp --help` exits 0 with its help on stderr, and after the owner's sign-in `agy models` lists 23 slugs, of which the owner chose gemini-3.8-flash-low (before the sign-in it exited 1 with \"Please sign in to view available models\")."
+    },
+    {
+      "id": "Q2",
+      "answer": "partly",
+      "summary": "A 30 KB prompt is taken from stdin only as one `--input-format stream-json` message, the run works in its start directory, and it exits 0 on success, 1 on a failed run, 2 on an unknown flag and 3 on a reached `--print-timeout`.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H2-stdin,H2-stdin-json,N2-badflag,H15-timeout --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/H2-stdin-json.stdout.txt",
+        "headless/H2-stdin.stdout.txt",
+        "headless/attempts/H2-stdin-json-try1.stdout.txt",
+        "headless/N2-badflag.stderr.txt",
+        "headless/H15-timeout.stderr.txt"
+      ],
+      "runs": [
+        "H2-stdin",
+        "H2-stdin-json-try1",
+        "H2-stdin-json",
+        "N2-badflag",
+        "N3-noauth-json",
+        "H13-nullmodel",
+        "H15-timeout"
+      ],
+      "detail": "A 30 KB prompt is read from stdin only as one `--input-format stream-json` line `{\"event\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"...\"}}` (answered `ready 387`, 18914 input tokens); plain text on stdin is not read (`-p ''` fails with `empty prompt`, `-p` alone with `flag needs an argument`). The run works in the directory it is started in (`init.cwd` = `<scratch>/wt`). Exit codes: 0 success, 1 a failed run (no credential, unknown model, empty prompt), 2 an unknown flag, 3 a reached `--print-timeout`."
+    },
+    {
+      "id": "Q3",
+      "answer": "yes",
+      "summary": "A detached child with no terminal used the cached sign-in with no dialog, but only under the user's HOME.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --preflight --model gemini-3.8-flash-low",
+        "node test/fixtures/agy/probe.mjs --run N3-noauth-json,H3-home --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/preflight.txt",
+        "headless/preflight.json",
+        "headless/preflight-1.txt",
+        "headless/N3-noauth-json.stderr.txt",
+        "headless/H3-home.stderr.txt"
+      ],
+      "runs": [
+        "P1-preflight",
+        "P2-preflight",
+        "N3-noauth-json",
+        "H3-home"
+      ],
+      "detail": "A detached child with stdin ignored and no terminal, started as SubprocessRunner starts an agent, used the cached sign-in with no dialog and answered in 3781 ms (P2-preflight). Before the sign-in the same start printed an OAuth URL on stderr and waited 60 s for a pasted code, then exited 1; with `--print-timeout 10s` it was still waiting at the probe's 60 s limit (N3). Under a scratch HOME the cached sign-in was not found (H3-home: the same URL and wait), so the credential follows HOME."
+    },
+    {
+      "id": "Q4",
+      "answer": "partly",
+      "summary": "Only `--add-dir` with a per-launch `.agents/mcp_config.json` outside the worktree registers the shim for one run with a clean worktree and unchanged `~/.gemini` files, and the added directory can take over as the directory commands run in.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H4a-wt,H4b-adddir,H9-norule,H9b-norule-order,H3-home,N5-settings-mcp,N6-gemdir-p --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "records/H4a-wt.json",
+        "records/H4b-adddir.json",
+        "records/H9-norule.json",
+        "records/H9b-norule-order.json",
+        "headless/H4a-wt.stdout.txt",
+        "headless/H4b-adddir.stdout.txt",
+        "shim/H4b-adddir.jsonl",
+        "headless/H3-home.stderr.txt",
+        "headless/N5-settings-mcp.stderr.txt",
+        "headless/N6-gemdir-p.stderr.txt"
+      ],
+      "runs": [
+        "H4a-wt",
+        "H4b-adddir",
+        "H9-norule",
+        "H9b-norule-order",
+        "H3-home",
+        "N5-settings-mcp",
+        "N6-gemdir-p",
+        "N4-mcp-list-wt",
+        "N4-mcp-list-home"
+      ],
+      "detail": "Headless, `--add-dir <dir outside the worktree>` holding `.agents/mcp_config.json` gives one run its own shim and environment with an empty `git status --porcelain` and `--porcelain --ignored`, but the run takes its commands' directory from the workspace roots: with `<scratch>/home/launch` (sorting before `<scratch>/wt`) the commands ran there, with `<scratch>/zz-launch` in the worktree. `<worktree>/.agents/mcp_config.json` works but both statuses, taken with `--untracked-files=all`, print `?? .agents/mcp_config.json` (plain `--porcelain` would print `?? .agents/`) (the file holds the token); a scratch HOME is blocked (no credential there and no GEMINI_API_KEY); `--settings` refuses `mcpServers` (`unknown setting`) and `--gemini-dir` exists only on `agy acp`. None of the three named `~/.gemini` files changed in any of these runs; agy wrote the tool schemas to `~/.gemini/antigravity-cli/mcp/orchestrator/*.json`."
+    },
+    {
+      "id": "Q5",
+      "answer": "yes",
+      "summary": "`agy acp` answers protocol version 1 with four auth methods, and a server named in `session/new.mcpServers` starts for that session as a child of the agent, without `--process-per-session`.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run A0-init,A0-session,A0-gemdir,A1-shim --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "acp/A0-init.frames.jsonl",
+        "acp/A1-shim.frames.jsonl",
+        "shim/A1-shim.jsonl",
+        "records/A1-shim.json",
+        "records/A0-gemdir.json"
+      ],
+      "runs": [
+        "A0-init",
+        "A0-session",
+        "A0-gemdir",
+        "A1-shim"
+      ],
+      "detail": "`initialize` answers protocolVersion 1, agentCapabilities (loadSession, promptCapabilities image and embeddedContext, sessionCapabilities resume/close/load/list/additionalDirectories, auth.logout) and four authMethods (oauth-personal, oauth-business, gemini-api-key, agent-platform). The stdio server named in `session/new.mcpServers` started for that session as a child of the `antigravity` process, in the client's process group, without `--process-per-session`; before the sign-in `session/new` failed -32000 `Authentication required` and the shim never started. The entry's env, the fake token included, is stored in `~/.gemini/antigravity-cli/conversations/<session>.db` (with `--gemini-dir <scratch>/home/gem`, under that directory instead)."
+    },
+    {
+      "id": "Q6",
+      "answer": "yes",
+      "summary": "The shim gets the entry's `env` over the parent's environment, and the model reaches its tools through `call_mcp_tool` headless and as `mcp_orchestrator_<tool>` over ACP.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H4a-wt,H4b-adddir,A1-shim --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "shim/H4a-wt.jsonl",
+        "shim/H4b-adddir.jsonl",
+        "shim/A1-shim.jsonl",
+        "headless/H4a-wt.stdout.txt",
+        "acp/A1-shim.client.jsonl"
+      ],
+      "runs": [
+        "H4a-wt",
+        "H4b-adddir",
+        "A1-shim"
+      ],
+      "detail": "The shim received both: the entry's `env` (ORCH_* and `PROBE_MARKER=from-entry-env`, which overrode the parent's `from-agy-env`) on top of the parent's environment (PATH, HOME, USER, LANG, TMPDIR, PWD, SHLVL and the wrapper's AGY_CLI_DISABLE_AUTO_UPDATE), with the worktree as its cwd. Headless the five tools are not in `init.tools`: the model reaches them through `call_mcp_tool` with ServerName `orchestrator` and ToolName `heartbeat`, after reading the schema agy wrote to `~/.gemini/antigravity-cli/mcp/orchestrator/heartbeat.json`; over ACP they are `mcp_orchestrator_<tool>` (`Run mcp_orchestrator_heartbeat`)."
+    },
+    {
+      "id": "Q7",
+      "answer": "yes",
+      "summary": "A shim that cannot start fails nothing: headless and over ACP the run ends successfully with exit 0 and no line that names the failure.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H7-badshim,A7-badshim --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/H7-badshim.stdout.txt",
+        "headless/H7-badshim.stderr.txt",
+        "acp/A7-badshim.client.jsonl",
+        "acp/A7-badshim.stderr.txt",
+        "acp/A7-badshim.log0.txt"
+      ],
+      "runs": [
+        "H7-badshim",
+        "A7-badshim"
+      ],
+      "detail": "Neither way fails: headless (H7) the run ended `SUCCESS` with exit 0 and an empty stderr, and over ACP (A7) `session/new` succeeded and the turn ended `end_turn` with an empty stderr; no output, frame or log line names the failure (the ACP log says only `Preloading 1 MCP servers of the session`). The model then found the schemas cached in `~/.gemini/antigravity-cli/mcp/orchestrator/` by earlier runs and, with every action approved, read files outside the scratch directory (this checkout's fixtures and agy's own transcripts) before answering with the five tool names. Every command it ran was a read (`ls`, `cat`, `grep`, `tail`, `find`, `env`, `ps`, and `python3` reading files)."
+    },
+    {
+      "id": "Q8",
+      "answer": "partly",
+      "summary": "The 200 s `block` is cut at 180 s both ways; `timeoutSeconds` lifts the cut headless, and nothing tried lifts it over ACP.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H8-trio,A8b-block-meta --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/H8a-block-default.stdout.txt",
+        "headless/H8b-block-300.stdout.txt",
+        "shim/H8a-block-default.jsonl",
+        "shim/H8b-block-300.jsonl",
+        "acp/A8-block.client.jsonl",
+        "shim/A8-block.jsonl",
+        "acp/A8b-block-meta.frames.jsonl",
+        "shim/A8b-block-meta.jsonl"
+      ],
+      "runs": [
+        "H8a-block-default",
+        "H8b-block-300",
+        "A8-block",
+        "A8b-block-meta"
+      ],
+      "detail": "Yes, a `block` answered after 200 s is cut at 180 s (`MCP tool call to server \"orchestrator\" timed out after 3m0s: context deadline exceeded`; the shim got `notifications/cancelled` at 180.0 s) headless and over ACP, and the model is told and the turn goes on. Headless, `timeoutSeconds: 300` on the entry lifts the cut (the 200 s answer arrived). Over ACP, neither `timeoutSeconds` nor `_meta.timeoutSeconds` on the `session/new` entry lifted it (A8b), and other shapes, such as a `timeoutSeconds` entry in an `mcp_config.json` under a per-launch `--gemini-dir`, were not tried (run cap)."
+    },
+    {
+      "id": "Q9",
+      "answer": "partly",
+      "summary": "With no rule, the command and the worktree write ran, the write outside was denied to the model with a stderr notice, the turn then ended with exit 0, and the shim call was never reached.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H9-norule,H9b-norule-order --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/H9b-norule-order.stdout.txt",
+        "headless/H9b-norule-order.stderr.txt",
+        "headless/H9-norule.stdout.txt",
+        "headless/H9-norule.stderr.txt"
+      ],
+      "runs": [
+        "H9-norule",
+        "H9b-norule-order"
+      ],
+      "detail": "With no rule (H9b) `git status --short` ran and the write in the worktree was done; the write outside it was refused to the model as `permission check failed for write_file ...: user denied permission ... Do not attempt to circumvent this denial`, after which the turn ended with an empty response and `denied_actions` in the result, stderr said `jetski: no output produced \u2014 a tool required the \"write_file\" permission that headless mode cannot prompt for, so it was auto-denied...`, and the exit code was 0. The shim call after the denial was never made, so a shim tool call without a rule was not observed headless (over ACP it asks, Q11)."
+    },
+    {
+      "id": "Q10",
+      "answer": "partly",
+      "summary": "`--dangerously-skip-permissions` and `--settings` permission rules each remove every prompt for one run without writing the settings file, and issue 565 did not show.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H10a-skip,H10b-rules,N5-settings-unknown --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/H10a-skip.stdout.txt",
+        "headless/H10b-rules.stdout.txt",
+        "records/H10b-rules.json",
+        "headless/N5-settings-unknown.stderr.txt"
+      ],
+      "runs": [
+        "H10a-skip",
+        "H10b-rules",
+        "N5-settings-bad",
+        "N5-settings-unknown"
+      ],
+      "detail": "`--dangerously-skip-permissions` removed every prompt (H10a: all four steps, the write outside the worktree too, `permission_mode` `always-proceed`), and `--settings '{\"permissions\":{\"allow\":[\"command(git)\",\"write_file(<scratch>/)\",\"mcp(orchestrator/*)\"]}}'` gave rules for one run without writing `settings.json` (H10b: all four steps done, every hash unchanged). The behaviour of issue 565 did not show, though `git status` also ran without a rule (H9b), so this run cannot tell it apart; `--mode` was not tried (run cap)."
+    },
+    {
+      "id": "Q11",
+      "answer": "yes",
+      "summary": "MCP calls and shell commands arrive as `session/request_permission` with only allow_once and reject_once, `reject_once` ends the turn, and an unanswered request waits until cancelled.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run A1-shim,A11-noanswer --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "acp/A1-shim.client.jsonl",
+        "acp/A1-shim.frames.jsonl",
+        "acp/A11-noanswer.client.jsonl",
+        "acp/A11-noanswer.frames.jsonl"
+      ],
+      "runs": [
+        "A1-shim",
+        "A11-noanswer"
+      ],
+      "detail": "Without rules, the shim's tool call (kind `other`, title `Run mcp_orchestrator_heartbeat`, `rawInput` = the arguments plus `toolSummary`) and the shell command (kind `execute`, title = the command line, `rawInput.CommandLine`) each arrive as `session/request_permission` with exactly two options, `allow` (allow_once) and `deny` (reject_once). After `reject_once` the turn ended at once with `end_turn` and no message, and the workspace write the model had queued was reported `failed`. Unanswered, no frame came for 127 s and the turn waited; SIGTERM then made the client cancel and the agent exit, leaving no process."
+    },
+    {
+      "id": "Q12",
+      "answer": "yes",
+      "summary": "The agent committed on `task/PROBE/l1` in the linked worktree both without and with `--sandbox`.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H12a-commit,H12b-commit-sandbox --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/H12a-commit.stdout.txt",
+        "headless/H12b-commit-sandbox.stdout.txt",
+        "records/H12a-commit.json",
+        "records/H12b-commit-sandbox.json"
+      ],
+      "runs": [
+        "H12a-commit",
+        "H12b-commit-sandbox"
+      ],
+      "detail": "Yes, both: without `--sandbox` the agent committed `ed4f7f0 add hello` and with `--sandbox` `89d1690 add hello` on `task/PROBE/l1` in the linked worktree, with `git add` and `git commit` run by its own shell tool."
+    },
+    {
+      "id": "Q13",
+      "answer": "partly",
+      "summary": "`--model` takes effect and every slug fits `MODEL_PATTERN`, but no output shows `--effort`; an unknown model exits 1 headless and is refused -32602 over ACP.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H13-effort,H13-nullmodel,A0-session --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/H13-effort.stdout.txt",
+        "headless/H13-nullmodel.stderr.txt",
+        "acp/A0-session.client.jsonl",
+        "headless/N1-models.stdout.txt"
+      ],
+      "runs": [
+        "H13-effort",
+        "H13-nullmodel",
+        "A0-session",
+        "N1-models"
+      ],
+      "detail": "`--model` takes effect (`init.model` is the slug given), and `--model gemini-3.8-flash --effort low` was accepted, but no output or log line shows the effort, so whether it applied is not shown. All 23 slugs fit `MODEL_PATTERN`. An unknown model exits 1 with `error: invalid model selection (--model \"null\" --effort \"\"): model null is not recognized as a known model or custom model in settings` and the list. Over ACP the model is `session/set_model` or `session/set_config_option` id `model` (an unknown one is refused -32602 `Unknown model ID: no-such-model`); `configOptions` also offer `thought_level`, and the default model is `gemini-4-neon-high`."
+    },
+    {
+      "id": "Q14",
+      "answer": "yes",
+      "summary": "Headless ends with input, output, thinking, cache-read and total tokens (input excluding cache reads) and ACP with input, output, cached-read, cached-write, thought and total tokens, neither with a cost.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H4a-wt,A7-badshim,A1-shim --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/H4a-wt.stdout.txt",
+        "headless/H2-stdin-json.stdout.txt",
+        "acp/A1-shim.client.jsonl",
+        "acp/A7-badshim.client.jsonl"
+      ],
+      "runs": [
+        "H4a-wt",
+        "H2-stdin-json",
+        "A1-shim",
+        "A7-badshim"
+      ],
+      "detail": "`json` and the final `stream-json` `result` end with `usage` {input_tokens, output_tokens, thinking_tokens, cache_read_tokens, total_tokens} for the whole turn (each `step_update` of an agent step carries its own), and no cost; `input_tokens` excludes `cache_read_tokens` (H4a: input 16287, cache_read 23121, total 16437 = input + output). ACP carries `usage` on the prompt answer {inputTokens, outputTokens, cachedReadTokens, cachedWriteTokens, thoughtTokens, totalTokens}, where totalTokens includes cached reads (A7: 61890 + 2177 + 429214 = 493281), and `usage_update` {used, size}; no cost."
+    },
+    {
+      "id": "Q15",
+      "answer": "yes",
+      "summary": "Each failure has its own exit code or error except a shim that did not start, which shows nowhere.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run N3-noauth-json,A0-init,H13-nullmodel,A0-session,H7-badshim,H9b-norule-order,H15-timeout --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "headless/N3-noauth-json.stdout.txt",
+        "headless/N3-noauth-json.stderr.txt",
+        "acp/A0-init.frames.jsonl",
+        "headless/H13-nullmodel.stderr.txt",
+        "acp/A0-session.client.jsonl",
+        "headless/H7-badshim.stderr.txt",
+        "headless/H9b-norule-order.stderr.txt",
+        "headless/H15-timeout.stderr.txt",
+        "headless/H15-timeout.stdout.txt"
+      ],
+      "runs": [
+        "N3-noauth-json",
+        "A0-init",
+        "H13-nullmodel",
+        "A0-session",
+        "H7-badshim",
+        "H9b-norule-order",
+        "H15-timeout"
+      ],
+      "detail": "No credential: exit 1 after a 60 s wait, stderr `Authentication required. Please visit the URL to log in` and `error: authentication failed or timed out`, json `status` ERROR; over ACP -32000 `Authentication required`. Unknown model: exit 1, `error: invalid model selection ...`; over ACP -32602 `Unknown model ID`. A shim that did not start: nothing, exit 0. A soft-denied action: exit 0, stderr `jetski: no output produced \u2014 ...`, `denied_actions` in the result. A reached `--print-timeout`: exit 3, stderr `error: print timeout after 10s with the turn still in progress; the response is partial` and `AGY_ERROR: {...\"status\":\"DEADLINE_EXCEEDED\",\"reason\":\"print_timeout\"}`, `finished_reason` `print_timeout`."
+    },
+    {
+      "id": "Q16",
+      "answer": "partly",
+      "summary": "No run asked for trust, wrote into the worktree on its own or left a process, three runs started together all finished, and the longest silence was 200 s during a tool call, while every run read the built-in skills and wrote under `~/.gemini`.",
+      "commands": [
+        "node test/fixtures/agy/probe.mjs --run H8-trio,A11-noanswer,H15-timeout,H4b-adddir --model gemini-3.8-flash-low"
+      ],
+      "evidence": [
+        "records/H8b-block-300.json",
+        "records/H8a-block-default.json",
+        "records/A8-block.json",
+        "records/A11-noanswer.json",
+        "records/H15-timeout.json",
+        "records/H4b-adddir.json",
+        "acp/A1-shim.log0.txt"
+      ],
+      "runs": [
+        "H8a-block-default",
+        "H8b-block-300",
+        "A8-block",
+        "A11-noanswer",
+        "H15-timeout",
+        "H4b-adddir"
+      ],
+      "detail": "Every run read the built-in skills and plugins under `~/.gemini/antigravity-cli/builtin` (`Reloading system slash commands and skills`); `~/.gemini/GEMINI.md` did not exist, and a per-launch switch was not tried (`agy acp --include-default-customizations` and `--disable-slash-commands` exist). No run asked to trust its fresh directory, and no run wrote into the worktree beyond what the model wrote, while each wrote under `~/.gemini/antigravity-cli` (brain/, conversations/, implicit/, presence/, mcp/<server>/, log/). The three runs started together (H8a, H8b, A8) all finished; the longest gap between `stream-json` lines was 200 s, during the block call; after SIGTERM to the client's group (A11) and after the print timeout (H15) no process was left. SIGTERM during a headless shell command was not probed (run cap)."
+    }
+  ]
+}

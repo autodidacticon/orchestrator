@@ -1,0 +1,79 @@
+{
+  "id": "N6-gemdir-p",
+  "kind": "headless",
+  "probedAt": "2026-11-20T21:18:19.199Z",
+  "command": [
+    "agy",
+    "-p",
+    "Reply with the single word ok.",
+    "--print-timeout",
+    "1s",
+    "--gemini-dir",
+    "/nonexistent-probe-dir"
+  ],
+  "cwd": "<scratch>/wt",
+  "home": "~",
+  "env": {
+    "HOME": "~",
+    "LANG": "<set>",
+    "ORCH_API": "http://127.0.0.1:9",
+    "ORCH_LAUNCH_ID": "probe-launch",
+    "ORCH_TOKEN": "orch-probe-token-eb58fdff",
+    "PATH": "<set>",
+    "PROBE_MARKER": "from-agy-env",
+    "TMPDIR": "<set>",
+    "USER": "<set>"
+  },
+  "stdin": "ignore",
+  "exit": {
+    "code": 2,
+    "signal": null
+  },
+  "timedOut": false,
+  "termSent": null,
+  "ms": 58,
+  "modelCalls": 0,
+  "orphans": [],
+  "processes": [
+    {
+      "pid": 73363,
+      "ppid": 73195,
+      "pgid": 73363,
+      "comm": "antigravity",
+      "in": "tree"
+    },
+    {
+      "pid": 60646,
+      "ppid": 55159,
+      "pgid": 60646,
+      "comm": "antigravity",
+      "in": "harness"
+    }
+  ],
+  "stdoutLines": {
+    "lines": 0,
+    "maxGapMs": 0,
+    "firstMs": null
+  },
+  "token": "orch-probe-token-eb58fdff",
+  "tokenFoundIn": [],
+  "git": {
+    "porcelain": [],
+    "porcelainIgnored": [],
+    "branchLog": [],
+    "files": [
+      "README.md"
+    ]
+  },
+  "userConfigChanged": [],
+  "geminiDirChanges": {
+    "added": [],
+    "changed": [],
+    "removed": []
+  },
+  "logs": [],
+  "evidence": {
+    "stdout": "headless/N6-gemdir-p.stdout.txt",
+    "stderr": "headless/N6-gemdir-p.stderr.txt"
+  }
+}
