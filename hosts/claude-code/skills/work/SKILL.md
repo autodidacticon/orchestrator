@@ -68,7 +68,9 @@ three polls before returning. The claimer makes no decisions, so it runs on a fi
 model: `claude-haiku-5-5` at `low` effort. Pass `claimModel` and `claimEffort` in `args` only
 when the user asks for a different claimer. On a claim the loop runs a worker agent on the
 brief with the model and effort the claim carries (the task's choice, else the run default),
-then claims again until nothing is claimable. In the agent view the claimer is labelled
+then claims again. A loop ends when the daemon's work verdict for `claude-code`
+(`workByKind["claude-code"].verdict` in the `wait` digest) is `finished`, `stalled` or `human`,
+and runs another claimer on any other verdict. In the agent view the claimer is labelled
 `claim <workerId>` and the worker `work <workerId> <taskId>`, so the two agents of a loop
 share the worker id. The workflow runs in the background and returns short outcomes per
 launch; never paste briefs or logs into the conversation. Workers edit files in worktrees under

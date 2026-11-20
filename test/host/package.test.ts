@@ -241,7 +241,8 @@ describe('package entrypoints', () => {
     expect(workflow).toMatch(/capacity < requested \? capacity : requested/);
     // Claude Code workers claim only claude-code launches and count only those as claimable. See specs/pull-runner "Claim".
     expect(workflow).toContain('access "local", and runner "claude-code"');
-    expect(workflow).toContain('claimableByKind["claude-code"]');
+    expect(workflow).toContain('workByKind["claude-code"]');
+    expect(workflow).not.toContain('claimableByKind');
     for (const skill of ['run', 'work']) {
       const text = readFileSync(path.join(plugin, `skills/${skill}/SKILL.md`), 'utf8');
       expect(text, skill).toContain('claimModel');

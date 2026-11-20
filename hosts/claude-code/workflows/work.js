@@ -5,7 +5,7 @@ export const meta = {
   phases: [{ title: 'Claim' }, { title: 'Work' }],
 }
 
-// The claimer makes no decision (claim, wait, copy the digest fields): the script decides when a loop stops (stopRule), so the claimer runs on a fixed cheap model unless the user asks otherwise. See specs/host-integration "Work skill and workflow".
+// The claimer makes no decision (claim, wait, copy the digest fields): a loop stops on the daemon's work verdict for claude-code (STOP_VERDICTS), so the claimer runs on a fixed cheap model unless the user asks otherwise. See specs/host-integration "Work skill and workflow".
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const claimModel = String((args && args.claimModel) || 'claude-haiku-5-5')
 const claimEffort = EFFORTS.includes(args && args.claimEffort) ? args.claimEffort : 'low'
@@ -17,7 +17,8 @@ const capacity = Number(args && args.capacity)
 const workers = Number.isInteger(capacity) && capacity > 0 && capacity < requested ? capacity : requested
 if (workers !== requested) log(`workers clamped from ${requested} to the run's capacity ${workers}`)
 const runTag = String((args && args.runTag) || 'work')
-const held = {}
+// The daemon decides when there is nothing left for claude-code workers: a loop ends on these verdicts and runs another claimer on any other. See specs/host-integration "Work workflow: loop end".
+const STOP_VERDICTS = ['finished', 'stalled', 'human']
 const outcomes = []
 let lastDigest = {}
 
@@ -36,11 +37,10 @@ const CLAIM_SCHEMA = {
     effort: { type: 'string', enum: ['low', 'medium', 'high', 'xhigh', 'max'] },
     leaseTtlMs: { type: 'number' },
     renewEveryMs: { type: 'number' },
-    finished: { type: 'boolean' },
-    stalled: { type: 'boolean' },
+    verdict: { type: 'string' },
     claimable: { type: 'number' },
     preparing: { type: 'number' },
-    verifying: { type: 'array', items: { type: 'string' } },
+    working: { type: 'number' },
     openQuestions: { type: 'array', items: { type: 'string' } },
     awaitingReview: { type: 'array', items: { type: 'string' } },
     error: { type: 'string' },
@@ -65,22 +65,12 @@ function claimPrompt(workerId) {
     // brief: false leaves the parsed brief out of the answer; the worker reads the brief file itself. See specs/operator-mcp "Worker tools".
     `1. Call claim with workerId "${workerId}", access "local", and runner "claude-code", plus brief: false (the answer then leaves the brief out).`,
     '2. If it returns a launch (answer 200): return { claimed: true, launchId, taskId, token, worktree, briefPath, model, effort, leaseTtlMs: lease.ttlMs, renewEveryMs: lease.renewEveryMs, pendingSeq: pending.seq, pendingAnswer: pending.answer } (model, effort and the lease numbers exactly as the answer gives them; the pending fields only when the answer carries pending). Do not open or read the brief file.',
-    `3. If it returns 404 (nothing claimable for claude-code, or paused): call wait with until "any" and timeoutMs ${CLAIM_WAIT_MS}. From the digest in its answer take finished, stalled, claimable as claimableByKind["claude-code"], preparing as preparingByKind["claude-code"] (0 when the digest has no preparingByKind), verifying (empty when absent), openQuestions and awaitingReview.`,
-    `   If finished or stalled is true, return { claimed: false, finished, stalled, claimable, preparing, verifying, openQuestions, awaitingReview } at once. Otherwise, if you have done fewer than ${CLAIM_POLLS} polls (a poll is one claim followed by one wait), go back to step 1; after poll ${CLAIM_POLLS} return those fields with claimed false.`,
+    `3. If it returns 404 (nothing claimable for claude-code, or paused): call wait with until "any" and timeoutMs ${CLAIM_WAIT_MS}. From the digest in its answer take workByKind["claude-code"] (its verdict, claimable, preparing and working), openQuestions and awaitingReview.`,
+    '   If the digest has no workByKind, return { claimed: false } with no other field.',
+    `   If verdict is finished, stalled or human, return { claimed: false, verdict, claimable, preparing, working, openQuestions, awaitingReview } at once. Otherwise, if you have done fewer than ${CLAIM_POLLS} polls (a poll is one claim followed by one wait), go back to step 1; after poll ${CLAIM_POLLS} return those fields with claimed false.`,
     '4. On any other error return { claimed: false, error: <the error text> }.',
     'Return only the structured output; do not do any task work.',
   ].join('\n')
-}
-
-// The loop's stop decision, made in code from the claimer's last digest fields; othersHold is whether another loop holds a launch. See specs/host-integration "Work workflow: claimer agent: stop rule in the script".
-function stopRule(d, othersHold) {
-  if (!d) return false
-  if (d.finished === true || d.stalled === true) return true
-  const verifying = Array.isArray(d.verifying) ? d.verifying : []
-  const questions = Array.isArray(d.openQuestions) ? d.openQuestions : []
-  const reviews = Array.isArray(d.awaitingReview) ? d.awaitingReview : []
-  const idle = (Number(d.claimable) || 0) === 0 && (Number(d.preparing) || 0) === 0 && verifying.length === 0 && !othersHold
-  return idle && (questions.length > 0 || reviews.some((id) => !verifying.includes(id)))
 }
 
 // The interval comes from the claim (lease.ttlMs and lease.renewEveryMs, a third of the TTL); nothing renews the lease between this agent's calls. See specs/host-integration "Work workflow heartbeat interval".
@@ -121,6 +111,20 @@ function workerPrompt(c) {
   ].join('\n')
 }
 
+// The workflow result: the last verdict for claude-code with its counts; finished and stalled follow from the verdict.
+function digestOf(c) {
+  return {
+    verdict: c.verdict,
+    finished: c.verdict === 'finished',
+    stalled: c.verdict === 'stalled',
+    claimable: Number(c.claimable) || 0,
+    preparing: Number(c.preparing) || 0,
+    working: Number(c.working) || 0,
+    openQuestions: Array.isArray(c.openQuestions) ? c.openQuestions : [],
+    awaitingReview: Array.isArray(c.awaitingReview) ? c.awaitingReview : [],
+  }
+}
+
 async function loop(i) {
   const workerId = `${runTag}-${i + 1}`
   let silent = 0
@@ -141,15 +145,18 @@ async function loop(i) {
         log(`${workerId}: claimer error, loop ends: ${c.error}`)
         break
       }
-      lastDigest = { finished: c.finished, stalled: c.stalled, openQuestions: c.openQuestions || [], awaitingReview: c.awaitingReview || [], claimable: c.claimable || 0, preparing: c.preparing || 0, verifying: c.verifying || [] }
-      if (stopRule(c, Object.keys(held).some((k) => k !== workerId))) break
+      // An answer without a verdict comes from a daemon older than the work verdict, or from a claimer that copied nothing: the loop ends rather than polling to the cycle cap. See specs/host-integration "Work workflow: loop end: digest without a verdict".
+      if (typeof c.verdict !== 'string' || !c.verdict) {
+        log(`${workerId}: the wait digest holds no work verdict (an older daemon), loop ends`)
+        break
+      }
+      lastDigest = digestOf(c)
+      if (STOP_VERDICTS.includes(c.verdict)) break
       continue
     }
-    held[workerId] = c.taskId
     log(`${workerId}: working ${c.taskId}`)
     // The launch's model and effort were fixed when the daemon prepared it; the worker agent runs with them. See specs/model-selection.
     const r = await agent(workerPrompt(c), { label: `work ${workerId} ${c.taskId}`, phase: 'Work', schema: OUTCOME_SCHEMA, ...(c.model ? { model: c.model } : {}), ...(c.effort ? { effort: c.effort } : {}) })
-    delete held[workerId]
     const outcome = r || { taskId: c.taskId, outcome: 'failed', summary: 'worker agent returned nothing' }
     outcomes.push({ worker: workerId, ...outcome })
     log(`${workerId}: ${c.taskId} ${outcome.outcome}`)
