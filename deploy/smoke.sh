@@ -840,10 +840,21 @@ exit 0
 EOF
 )"
 PROBE_DIR='' PROBE_PID=''
+# The wall clock in milliseconds: bash 5's EPOCHREALTIME (its decimal separator follows the locale), else perl.
+now_ms() {
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    local us="${EPOCHREALTIME//[!0-9]/}"
+    echo "$(( 10#$us / 1000 ))"
+  else
+    perl -MTime::HiRes=time -e 'printf "%d\n", time() * 1000'
+  fi
+}
 # One sample of pod $1's container $2, whose pid 1 must run $3, appended to file $4 as "<pod> <n> <children>". A failed
-# exec or an unexpected pid 1 is written to the probe's skipped file and not counted.
+# exec or an unexpected pid 1 is written to the probe's skipped file and not counted. With $5, a sample that counts
+# also appends to file $5 the millisecond time taken just before its exec.
 probe_sample() {
-  local out first kids n
+  local out first kids n t
+  t="$(now_ms)"
   if ! out="$(kc exec "$1" -c "$2" -- sh -c "$PROBE_SCRIPT" 2>&1)"; then
     echo "$1: kubectl exec failed: $(head -n 1 <<<"$out")" >>"$PROBE_DIR/skipped"; return 0
   fi
@@ -855,6 +866,7 @@ probe_sample() {
   kids="$(sed -n 's/^child //p' <<<"$out" | tr '\n' ',' | sed 's/,$//')"
   n=0; if [ -n "$kids" ]; then n="$(tr ',' '\n' <<<"$kids" | wc -l | tr -d ' ')"; fi
   echo "$1 $n ${kids:--}" >>"$4"
+  if [ -n "${5:-}" ]; then echo "$t" >>"$5"; fi
 }
 # Rounds until the stop file appears: one daemon sample, then one per running verifier pod. Each round's seconds go
 # to the rounds file.
@@ -863,7 +875,7 @@ probe_loop() {
   while [ ! -e "$PROBE_DIR/stop" ]; do
     t=$(date +%s)
     pod="$(daemon_pod 2>/dev/null)" || pod=''
-    if [ -n "$pod" ]; then probe_sample "$pod" orchestrator /usr/local/bin/orchestrator "$PROBE_DIR/daemon"; else echo "no running daemon pod" >>"$PROBE_DIR/skipped"; fi
+    if [ -n "$pod" ]; then probe_sample "$pod" orchestrator /usr/local/bin/orchestrator "$PROBE_DIR/daemon" "$PROBE_DIR/daemon-ms"; else echo "no running daemon pod" >>"$PROBE_DIR/skipped"; fi
     for pod in $(kc get pod -l app.kubernetes.io/name=orchestrator-verifier --field-selector=status.phase=Running -o name 2>/dev/null); do
       probe_sample "${pod#pod/}" verifier /usr/local/bin/orchestrator-verifier "$PROBE_DIR/verifier"
     done
@@ -872,7 +884,7 @@ probe_loop() {
 }
 start_probe() {
   PROBE_DIR="$(mktemp -d -t smoke-probe.XXXXXX)"
-  : >"$PROBE_DIR/daemon"; : >"$PROBE_DIR/verifier"; : >"$PROBE_DIR/rounds"; : >"$PROBE_DIR/skipped"
+  : >"$PROBE_DIR/daemon"; : >"$PROBE_DIR/daemon-ms"; : >"$PROBE_DIR/verifier"; : >"$PROBE_DIR/rounds"; : >"$PROBE_DIR/skipped"
   probe_loop &
   PROBE_PID=$!
 }
@@ -883,26 +895,36 @@ stop_probe() {
   wait "$PROBE_PID" || true
   PROBE_PID=''
 }
-# The fixture check's seconds (deploy/overlays/kind/fixture/test.js waits 5 s): a round must be shorter to catch it.
+# The fixture check's seconds: deploy/overlays/kind/fixture/test.js waits M5_CHECK_S * 1000 ms, which
+# test/host/smoke.test.ts asserts. A round must be shorter, and two daemon samples that count must start less than
+# M5_GAP_MS apart, which leaves 1 s for a sample's second read, so a check under the daemon cannot fall between them.
 M5_CHECK_S=5
+M5_GAP_MS=$(( (M5_CHECK_S - 1) * 1000 ))
 PROBE_SUMMARIZED=''
-# The probe's counts, the children it reported, the samples not counted and the slowest round, from its files.
+# The longest gap in ms between two daemon samples in a row that count, from the daemon-ms file; empty with fewer than two.
+probe_gap() {
+  awk 'NR > 1 && (!seen || $1 - prev > max) { max = $1 - prev; seen = 1 } { prev = $1 } END { if (seen) print max }' "$PROBE_DIR/daemon-ms"
+}
+# The probe's counts, the children it reported, the samples not counted, the slowest round and the longest gap between
+# counted daemon samples, from its files.
 probe_summary() {
-  local samples daemon_kids verifier_kids slowest
+  local samples daemon_kids verifier_kids slowest gap
   samples="$(wc -l <"$PROBE_DIR/daemon" | tr -d ' ')"
   daemon_kids="$(awk '$2 > 0' "$PROBE_DIR/daemon" | wc -l | tr -d ' ')"
   verifier_kids="$(awk '$2 > 0' "$PROBE_DIR/verifier" | wc -l | tr -d ' ')"
   slowest="$(sort -n "$PROBE_DIR/rounds" | tail -n 1)"
-  echo "    probe: $samples daemon samples, $daemon_kids with a child other than git; $(wc -l <"$PROBE_DIR/verifier" | tr -d ' ') verifier samples, $verifier_kids with a child; $(wc -l <"$PROBE_DIR/rounds" | tr -d ' ') rounds, the slowest ${slowest:-?}s"
+  gap="$(probe_gap 2>/dev/null)" || gap=''
+  echo "    probe: $samples daemon samples, $daemon_kids with a child other than git; $(wc -l <"$PROBE_DIR/verifier" | tr -d ' ') verifier samples, $verifier_kids with a child; $(wc -l <"$PROBE_DIR/rounds" | tr -d ' ') rounds, the slowest ${slowest:-?}s; the longest gap between counted daemon samples ${gap:-?}ms"
   awk '$2 > 0 { print "    daemon child: " $0 }' "$PROBE_DIR/daemon"
   awk '$2 > 0 { print "    verifier child: " $0 }' "$PROBE_DIR/verifier"
   sed 's/^/    not counted: /' "$PROBE_DIR/skipped"
   if [ "$verifier_kids" = 0 ]; then echo "    round seconds: $(tr '\n' ' ' <"$PROBE_DIR/rounds")"; fi
 }
 # No daemon sample reported a child of pid 1 other than git, at least one verifier sample did, at least five daemon
-# samples were taken, and the slowest round was shorter than the fixture check, so a check under the daemon is seen.
+# samples were taken, the slowest round was shorter than the fixture check, and no two counted daemon samples in a row
+# started M5_GAP_MS or more apart (skipped samples between them widen the gap), so a check under the daemon is seen.
 probe_held() {
-  local samples daemon_kids verifier_kids slowest ok=1
+  local samples daemon_kids verifier_kids slowest gap ok=1
   PROBE_SUMMARIZED=1
   probe_summary
   samples="$(wc -l <"$PROBE_DIR/daemon" | tr -d ' ')"
@@ -913,6 +935,10 @@ probe_held() {
     echo "    no probe round finished"; ok=0
   elif [ "$slowest" -ge "$M5_CHECK_S" ]; then
     echo "    the slowest round took ${slowest}s, not shorter than the fixture check's ${M5_CHECK_S}s"; ok=0
+  fi
+  gap="$(probe_gap)"
+  if [ -n "$gap" ] && [ "$gap" -ge "$M5_GAP_MS" ]; then
+    echo "    two counted daemon samples in a row were ${gap}ms apart, not less than ${M5_GAP_MS}ms (the fixture check's ${M5_CHECK_S}s less 1s for the second read)"; ok=0
   fi
   [ "$ok" = 1 ] && [ "$daemon_kids" = 0 ] && [ "$verifier_kids" -gt 0 ] && [ "$samples" -ge 5 ]
 }

@@ -514,18 +514,20 @@ describe('deploy/smoke.sh M5 checks in isolation', () => {
   });
 
   // A probe directory with five daemon samples and no child, one verifier sample with a child, and the given rounds.
-  function probeDir(rounds: string[]) {
+  // The counted daemon samples start at the millisecond times `ms` (by default 2 s apart).
+  function probeDir(rounds: string[], ms: number[] = [0, 2000, 4000, 6000, 8000]) {
     const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-probe-'));
     writeFileSync(path.join(dir, 'daemon'), 'orchestrator-abc 0 -\n'.repeat(5));
+    writeFileSync(path.join(dir, 'daemon-ms'), ms.map((t) => `${1795200000000 + t}\n`).join(''));
     writeFileSync(path.join(dir, 'verifier'), 'orchestrator-verifier-x 1 42 node\n');
     writeFileSync(path.join(dir, 'rounds'), rounds.map((r) => `${r}\n`).join(''));
     writeFileSync(path.join(dir, 'skipped'), '');
     return dir;
   }
-  function probeHeld(rounds: string[]) {
-    const dir = probeDir(rounds);
+  function probeHeld(rounds: string[], ms?: number[]) {
+    const dir = probeDir(rounds, ms);
     try {
-      const body = [assignment('M5_CHECK_S'), assignment('PROBE_SUMMARIZED'), fn('probe_summary'), fn('probe_held'), `PROBE_DIR='${dir}'`, 'probe_held'].join('\n');
+      const body = [assignment('M5_CHECK_S'), assignment('M5_GAP_MS'), assignment('PROBE_SUMMARIZED'), fn('probe_gap'), fn('probe_summary'), fn('probe_held'), `PROBE_DIR='${dir}'`, 'probe_held'].join('\n');
       return runBash(body);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -536,7 +538,86 @@ describe('deploy/smoke.sh M5 checks in isolation', () => {
     const r = probeHeld(['1', '3', '2', '4', '2']);
     expect(r.stderr).toBe('');
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('5 rounds, the slowest 4s');
+    expect(r.stdout).toContain('5 rounds, the slowest 4s; the longest gap between counted daemon samples 2000ms');
+  });
+
+  it('M5_GAP_MS is the fixture check less 1 s for the second read', () => {
+    expect(runBash([assignment('M5_CHECK_S'), assignment('M5_GAP_MS'), 'echo "$M5_GAP_MS"'].join('\n')).stdout.trim()).toBe('4000');
+  });
+
+  it('probe_held passes when counted daemon samples are less than 4 s apart (GH-191)', () => {
+    const r = probeHeld(['3', '3', '3', '3', '3'], [0, 3999, 7998, 11000, 14999]);
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('the longest gap between counted daemon samples 3999ms');
+    expect(r.stdout).not.toContain('apart');
+  });
+
+  it('probe_held fails with a line naming the gap when two counted daemon samples in a row are 4 s or more apart (GH-191)', () => {
+    for (const gap of [4000, 4001, 60000]) {
+      // Rounds of 2 s each: the slowest-round rule alone would pass.
+      const r = probeHeld(['2', '2', '2', '2', '2'], [0, 2000, 2000 + gap, 4000 + gap, 6000 + gap]);
+      expect(r.status, String(gap)).not.toBe(0);
+      expect(r.stdout, String(gap)).toContain(`two counted daemon samples in a row were ${gap}ms apart, not less than 4000ms (the fixture check's 5s less 1s for the second read)`);
+    }
+  });
+
+  // probe_sample with a stub kc that answers each exec from `answers` in turn (`fail` for a failed exec), then the
+  // probe's daemon, daemon-ms and skipped files.
+  function sampled(answers: string[]) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-sample-'));
+    try {
+      answers.forEach((a, i) => writeFileSync(path.join(dir, `answer${i}`), a));
+      for (const f of ['daemon', 'daemon-ms', 'skipped', 'n']) writeFileSync(path.join(dir, f), '');
+      const body = [
+        `PROBE_SCRIPT=''`,
+        `kc() { local i; i="$(wc -c <'${dir}/n' | tr -d ' ')"; echo x >>'${dir}/n'; i=$(( i / 2 )); if [ "$(cat "${dir}/answer$i")" = fail ]; then echo 'error: no such pod'; return 1; fi; cat "${dir}/answer$i"; }`,
+        fn('now_ms'),
+        fn('probe_sample'),
+        `PROBE_DIR='${dir}'`,
+        ...answers.map(() => `probe_sample orchestrator-abc orchestrator /usr/local/bin/orchestrator "$PROBE_DIR/daemon" "$PROBE_DIR/daemon-ms"`),
+      ].join('\n');
+      const r = runBash(body);
+      expect(r.stderr).toBe('');
+      expect(r.status).toBe(0);
+      const read = (f: string) => readFileSync(path.join(dir, f), 'utf8').split('\n').filter((l) => l !== '');
+      return { daemon: read('daemon'), ms: read('daemon-ms').map(Number), skipped: read('skipped') };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('probe_sample records a millisecond time only for a daemon sample that counts, so skipped samples widen the gap (GH-191)', () => {
+    const good = 'node /usr/local/bin/orchestrator --repo /data/repo \n';
+    const wrong = 'node /usr/local/bin/orchestrator-verifier \n';
+    const before = Date.now();
+    const s = sampled([good, 'fail', wrong, good]);
+    const after = Date.now();
+    expect(s.daemon).toEqual(['orchestrator-abc 0 -', 'orchestrator-abc 0 -']);
+    expect(s.skipped).toHaveLength(2);
+    expect(s.ms).toHaveLength(2);
+    for (const t of s.ms) {
+      expect(t).toBeGreaterThanOrEqual(before - 1);
+      expect(t).toBeLessThanOrEqual(after + 1);
+    }
+    expect(s.ms[1]!).toBeGreaterThanOrEqual(s.ms[0]!);
+  });
+
+  it('probe_held fails on a gap of 4 s or more that skipped samples fill (GH-191)', () => {
+    // Daemon samples every 1.5 s, the ones between 3000 and 7500 skipped (failed exec): the counted ones around
+    // them are 6000 ms apart, though no round took 5 s.
+    const r = probeHeld(['1', '1', '1', '1', '1'], [0, 1500, 7500, 9000, 10500]);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain('two counted daemon samples in a row were 6000ms apart');
+  });
+
+  it('M5_CHECK_S x 1000 is the wait of the fixture check in deploy/overlays/kind/fixture/test.js (GH-191)', () => {
+    const fixture = readFileSync(path.join(path.dirname(script), 'overlays/kind/fixture/test.js'), 'utf8');
+    const waits = [...fixture.matchAll(/setTimeout\([\s\S]*?\}\s*,\s*(\d+)\s*\)/g)].map((m) => Number(m[1]));
+    expect(waits).toHaveLength(1);
+    const checkS = Number(/^M5_CHECK_S=(\d+)$/m.exec(text)?.[1]);
+    expect(checkS).toBeGreaterThan(0);
+    expect(waits[0]).toBe(checkS * 1000);
   });
 
   it('probe_held fails with a line naming the slowest round when it took 5 s or longer', () => {
@@ -561,7 +642,7 @@ describe('deploy/smoke.sh M5 checks in isolation', () => {
     const end = textLines.findIndex((l) => l === 'trap cleanup EXIT');
     expect(start).toBeGreaterThanOrEqual(0);
     expect(end).toBeGreaterThan(start);
-    const body = ['set -euo pipefail', "REAL_AGENT_KEY='' DRY_RUN=0", fn('probe_summary'), ...textLines.slice(start, end + 1), `PROBE_DIR='${dir}'`, extra, `exit ${rc}`].join('\n');
+    const body = ['set -euo pipefail', "REAL_AGENT_KEY='' DRY_RUN=0", fn('probe_gap'), fn('probe_summary'), ...textLines.slice(start, end + 1), `PROBE_DIR='${dir}'`, extra, `exit ${rc}`].join('\n');
     try {
       const r = runBash(body);
       return { ...r, removed: !existsSync(dir) };
@@ -574,7 +655,7 @@ describe('deploy/smoke.sh M5 checks in isolation', () => {
     const r = cleanupRun(1);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('smoke: the M5 process probe when the script stopped:');
-    expect(r.stderr).toContain('probe: 5 daemon samples, 0 with a child other than git; 1 verifier samples, 1 with a child; 3 rounds, the slowest 3s');
+    expect(r.stderr).toContain('probe: 5 daemon samples, 0 with a child other than git; 1 verifier samples, 1 with a child; 3 rounds, the slowest 3s; the longest gap between counted daemon samples 2000ms');
     expect(r.removed).toBe(true);
   });
 
