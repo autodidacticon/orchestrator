@@ -533,3 +533,39 @@ The `start` description SHALL name `runner.confirmProfile` and `confirmProfile` 
 #### Scenario: The descriptions name the hold
 - **WHEN** a client lists the tools
 - **THEN** the `start` description contains `runner.confirmProfile` and `confirmProfile`, the `status` description contains `profiles` and `runner.confirmProfile`, and the `wait` description contains `profileHeld`
+
+### Requirement: Worker tools: brief false on a remote claim
+With `brief: false`, `claim` SHALL leave out only the parsed `brief`, also on a remote claim, whose answer keeps `briefMarkdown`; a remote worker writes its brief from `briefMarkdown`. The `claim` tool description SHALL say that `brief: false` leaves out only the parsed brief, that a local answer still carries `briefPath`, and that a remote answer, which has no `briefPath`, still carries `briefMarkdown`.
+
+#### Scenario: Remote claim without the brief
+- **WHEN** `claim` is called with `access: "remote"` and `brief: false` and the daemon answers a remote launch
+- **THEN** the tool removes only `brief` from the daemon's answer, so the result keeps every other field of it, `briefMarkdown` among them
+
+#### Scenario: Claim description
+- **WHEN** the server lists its tools
+- **THEN** the `claim` description says that `brief: false` leaves out only the parsed brief and that a remote answer still carries `briefMarkdown`
+
+### Requirement: Wait digest: unmeteredLaunches
+The wait digest SHALL carry `unmeteredLaunches`, a number equal to `status.cost.unmeteredLaunches`. It SHALL be 0 when no graph is loaded.
+
+#### Scenario: Equal to the status count
+- **WHEN** two launches are unmetered
+- **THEN** the digest's `unmeteredLaunches` is 2, as is `status.cost.unmeteredLaunches`
+
+#### Scenario: Without a graph
+- **WHEN** no graph is loaded
+- **THEN** the digest's `unmeteredLaunches` is 0
+
+### Requirement: Wait digest: workByKind
+The digest of `GET /v1/events`, which the `wait` tool returns and the exit record holds, SHALL carry `workByKind` identical to the status's, every runner kind present.
+
+#### Scenario: Same verdicts
+- **WHEN** a `claude-code` task and a `codex` task are parked and `GET /v1/status`, `GET /v1/events` and the `wait` tool are read
+- **THEN** all three carry the same `workByKind`
+
+### Requirement: Status and wait descriptions: workByKind
+The `status` and `wait` tool descriptions SHALL each name `workByKind` and say it gives, per runner kind, the verdict and its counts.
+
+#### Scenario: Descriptions
+- **WHEN** a client lists the tools
+- **THEN** the `status` and the `wait` descriptions each contain `workByKind`

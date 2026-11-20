@@ -717,7 +717,7 @@ The kind fixture's check `fixture/test.js` SHALL wait 5 seconds and then fail wh
 
 #### Scenario: The assertion
 - **WHEN** the probe has stopped
-- **THEN** the assertion holds when no daemon sample reported a child, at least one verifier sample did, at least five daemon samples were taken, and the slowest round was shorter than the fixture check's 5 s; it prints the three counts and the slowest round
+- **THEN** the assertion holds when no daemon sample reported a child, at least one verifier sample did, at least five daemon samples were taken, the slowest round was shorter than the fixture check's 5 s, and no two counted daemon samples in a row were 4 s or more apart; it prints the three counts, the slowest round and the longest gap between counted daemon samples
 
 #### Scenario: A slow round
 - **WHEN** the slowest round took 5 s or longer, or no round finished
@@ -725,7 +725,11 @@ The kind fixture's check `fixture/test.js` SHALL wait 5 seconds and then fail wh
 
 #### Scenario: The script stops before the assertion
 - **WHEN** the script exits non-zero while the probe runs or before the assertion has run
-- **THEN** `cleanup` stops the probe, prints its three counts and the slowest round on stderr, and removes its files; an exit 0, or an exit after the assertion printed them, prints nothing more
+- **THEN** `cleanup` stops the probe and prints its three counts, the slowest round and the longest gap on stderr; an exit 0, or an exit after the assertion printed them, prints nothing more
+
+#### Scenario: The probe files on any exit
+- **WHEN** the script exits for any reason, with any status, after the probe started
+- **THEN** `cleanup` stops the probe and removes its files
 
 ### Requirement: Smoke M5 step: failed jobs and verifier logs
 `deploy/smoke.sh` SHALL assert `M5: the failed jobs are checkFailed with the check's output` from the rows that `pg_m5_jobs` reads in `orchestrator.verifier_jobs`, and `M5: verifier logs show the check` from the verifier pods' logs read with `--tail=-1`, whose lines `verifier <id> <event> <jobId> <taskId>` and check output show each check of the two M5 tasks.
@@ -756,3 +760,25 @@ The kind fixture's check `fixture/test.js` SHALL wait 5 seconds and then fail wh
 #### Scenario: A cluster kept from before this change
 - **WHEN** the M5 step runs on a cluster whose git-origin was seeded before the breaking fixture check came
 - **THEN** `SMOKE-M5-BREAK` would pass its check, so the M5 step needs a cluster made with `--fresh` after this change
+
+### Requirement: Claude worker image: runner kind
+The Claude worker image SHALL set `ORCH_WORKER_RUNNER=claude-code` beside its `ORCH_WORKER_COMMAND`, so its workers claim only launches prepared for Claude Code.
+
+#### Scenario: Runner kind asserted without a Docker daemon
+- **WHEN** `test/host/worker-image.test.ts` reads `deploy/worker-claude/Dockerfile`
+- **THEN** its environment sets `ORCH_WORKER_RUNNER` to `claude-code`
+
+### Requirement: Smoke M5 step: process probe: gap between counted daemon samples
+The process probe SHALL take a millisecond wall-clock time just before the `kubectl exec` of each daemon sample and keep it only for a sample that counts, and the M5 probe assertion MUST fail when two counted daemon samples in a row are 4 s or more apart: the fixture check's 5 s (`M5_CHECK_S`) less 1 s for a sample's second read. A test SHALL fail when `M5_CHECK_S` × 1000 differs from the fixture check's wait in `deploy/overlays/kind/fixture/test.js`.
+
+#### Scenario: A gap of 4 s or more
+- **WHEN** two daemon samples in a row that count started 4000 ms or more apart, including when samples that do not count fall between them
+- **THEN** the assertion fails with a line naming the gap in milliseconds, even when every round took less than 5 s
+
+#### Scenario: Counted samples less than 4 s apart
+- **WHEN** every two counted daemon samples in a row started less than 4000 ms apart, and the other conditions of the assertion hold
+- **THEN** the assertion holds
+
+#### Scenario: The check's length in two places
+- **WHEN** `M5_CHECK_S` in `deploy/smoke.sh` × 1000 differs from the milliseconds the fixture's `test.js` waits
+- **THEN** a test in `test/host/smoke.test.ts` fails
