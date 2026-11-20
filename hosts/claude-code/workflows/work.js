@@ -94,6 +94,12 @@ function leaseRule(c) {
   ].join('\n')
 }
 
+// A claim answer without briefPath falls back to the brief's place in the worktree. See specs/host-integration "Work workflow: worker tool instructions: brief path fallback".
+function briefPathOf(c) {
+  if (typeof c.briefPath === 'string' && c.briefPath) return c.briefPath
+  return `${String(c.worktree || '').replace(/\/+$/, '')}/.orchestrator/brief.md`
+}
+
 function workerPrompt(c) {
   return [
     `You are an orchestrator worker holding launch ${c.launchId} for task ${c.taskId}. Work in the worktree ${c.worktree} with your ordinary tools (read, edit, run commands there). Commit on the launch branch as you go; never touch the integration branch.`,
@@ -109,7 +115,7 @@ function workerPrompt(c) {
       : '',
     `Credentials: launchId ${c.launchId}, token ${c.token}.`,
     '',
-    `The brief is the file ${c.briefPath}. Read the whole file before doing anything else; it holds the task, its acceptance criteria and the definition of done.`,
+    `The brief is the file ${briefPathOf(c)}. Read the whole file before doing anything else; it holds the task, its acceptance criteria and the definition of done.`,
     '',
     'When done, return { taskId, outcome, summary } where outcome is submitted, failed, question (you asked and nobody answered within the pending retries), fenced, or released.',
   ].join('\n')

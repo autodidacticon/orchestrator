@@ -54,6 +54,10 @@ describe('worker tools on the operator MCP server', () => {
     const tools = await client.listTools();
     expect(tools.tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     expect(tools.tools).toHaveLength(31);
+    // GH-188: the claim description says brief: false leaves out only the parsed brief, and a remote answer keeps briefMarkdown. See specs/operator-mcp "Worker tools: brief false on a remote claim".
+    const claimDesc = String(tools.tools.find((t) => t.name === 'claim')!.description);
+    expect(claimDesc).toContain('brief: false leaves out only the parsed brief');
+    expect(claimDesc).toContain('a remote answer, which has no briefPath, still carries briefMarkdown');
 
     const started = await tool('start', { mode: 'pull' });
     expect(started).toMatchObject({ status: 200, started: true, mode: 'pull' });

@@ -916,6 +916,16 @@ describe('work.js claimer by path and stop in the script (GH-182)', () => {
     expect(claim.prompt).not.toMatch(/full brief/i);
   });
 
+  it('GH-188: a claim answer without briefPath gives a worker prompt naming <worktree>/.orchestrator/brief.md', async () => {
+    const { briefPath: _omit, ...bare } = launch;
+    const { prompts } = await runWorkflow({ claims: [{ ...bare, worktree: '/runs/r1/worktrees/L9' }] });
+    const work = prompts.find((p) => p.label === 'work work-1 T1')!;
+    expect(work.prompt).toContain('The brief is the file /runs/r1/worktrees/L9/.orchestrator/brief.md. Read the whole file before doing anything else');
+    expect(work.prompt).not.toContain('undefined');
+    const slash = await runWorkflow({ claims: [{ ...bare, worktree: '/wt/' }] });
+    expect(slash.prompts.find((p) => p.label === 'work work-1 T1')!.prompt).toContain('The brief is the file /wt/.orchestrator/brief.md.');
+  });
+
   it('2: the claimer waits on the digest, never calls status, holds no stop sentence, and returns early only on finished or stalled', async () => {
     const { prompts } = await runWorkflow({ claims: [{ claimed: false, finished: true }] });
     const claim = prompts.find((p) => p.label === 'claim work-1')!;
