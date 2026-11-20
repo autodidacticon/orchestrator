@@ -10,7 +10,8 @@ import { parse as parseYaml, stringify as toYaml } from 'yaml';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
 import * as q from '../graph/query.js';
 import { trackerSchema } from '../import/mapping.js';
-import { zeroByKind } from '../runner/selection.js';
+import { RUNNER_KINDS, zeroByKind } from '../runner/selection.js';
+import { emptyWorkByKind } from '../loop/verdict.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import { logPath } from '../runner/subprocess.js';
 import { type OutboxEffect, setTracker, trackerOf } from '../state/store.js';
@@ -25,7 +26,7 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
   /** Keys still unresolved; `checkCommand` here means submitted work is held until it is set. See specs/operator-control "Status report: configuration". */
   const needsConfig = orch.effective().needsConfig;
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, claimableByKind: zeroByKind(), preparing: 0, preparingByKind: zeroByKind(), deferred: 0, needsConfig, profileHeld: [], ...tracker };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, claimableByKind: zeroByKind(), preparing: 0, preparingByKind: zeroByKind(), workByKind: emptyWorkByKind(RUNNER_KINDS, orch.isPaused()), deferred: 0, needsConfig, profileHeld: [], ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
@@ -42,6 +43,8 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
     /** Launches being prepared plus tasks waiting for a prepare retry. See specs/operator-control "Status report: launches being prepared". */
     preparing: Object.values(s.preparingByKind).reduce((a, b) => a + b, 0),
     preparingByKind: s.preparingByKind,
+    /** Per runner kind, the work verdict and its counts, as in the status. See specs/operator-mcp "Wait digest: workByKind". */
+    workByKind: s.workByKind,
     /** Candidates skipped by the scope filter; `status` names their blockers. */
     deferred: s.deferred.length,
     openQuestions: s.openQuestions,
@@ -239,6 +242,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
           preparing: [],
           prepareRetry: [],
           preparingByKind: zeroByKind(),
+          workByKind: emptyWorkByKind(RUNNER_KINDS, orch.isPaused()),
           workers: [],
           foreignCommits: [],
           latestSeq: orch.store.durability().eventSeq,

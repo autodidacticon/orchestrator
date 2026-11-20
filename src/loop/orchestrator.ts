@@ -62,6 +62,7 @@ import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { PUSH_REFUSED, pushRetryDue, recordPushRetry } from '../verify/push-retry.js';
 import { renewVerifyLeases, verifyJobChanged, wakeVerifyWaiters } from '../verify/claims.js';
+import { type KindWork, type WorkCounts, workByKindOf } from './verdict.js';
 
 /** The triggers that remove a task's prepare retry entry. See specs/pull-runner "Prepare failure limit". */
 const PREPARE_RETRY_RESETS: ReadonlySet<string> = new Set(['unblock', 'reopen', 'uncancel', 'cascade']);
@@ -314,6 +315,8 @@ export interface StatusReport {
   prepareRetry: Array<{ taskId: Id; failures: number; retryAt: number }>;
   /** Per runner kind, the launches being prepared plus the tasks in `prepareRetry`; every kind present. */
   preparingByKind: Record<RunnerKind, number>;
+  /** Per runner kind, whether a worker loop has work in sight, with the counts behind it; every kind present. See specs/operator-control "Work verdict". */
+  workByKind: Record<RunnerKind, KindWork>;
   workers: Array<{ id: string; launchId: string; taskId: Id; claimedAt: number }>;
   /** Tracker sync: the recorded tracker, pending effects, and effects that failed at the retry cap. */
   tracker: TrackerRecord | undefined;
@@ -2416,18 +2419,39 @@ export class Orchestrator implements OrchestratorCore {
       .sort((a, b) => a.retryAt - b.retryAt || (a.taskId < b.taskId ? -1 : a.taskId > b.taskId ? 1 : 0));
     const preparingByKind = countByKind(preparing);
     for (const r of prepareRetry) preparingByKind[this.selectionFor(r.taskId).runner] += 1;
+    const claimableByKind = countByKind(claimable);
+    // Working: live launches whose task runs or waits on them, the predicate of claim(). See specs/operator-control "Work verdict: working launches".
+    const workingByKind = countByKind(
+      this.store.listLaunches({ status: 'live' }).filter((l) => {
+        const e = this.entry(l.taskId);
+        return e.lease?.launchId === l.launchId && (e.status.kind === 'running' || e.status.kind === 'waiting');
+      }),
+    );
+    const finished = q.finished(g, o);
+    const stalled = q.stalled(g, o, live);
+    const paused = this.isPaused();
+    const awaitingReview = q.awaitingReview(g, o);
+    const verifying = awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'task');
+    const openQuestions = q.openQuestions(g, o);
+    const counts = Object.fromEntries(
+      RUNNER_KINDS.map((k) => [k, { claimable: claimableByKind[k], preparing: preparingByKind[k], working: workingByKind[k] }]),
+    ) as Record<RunnerKind, WorkCounts>;
+    const workByKind = workByKindOf(
+      { finished, stalled, paused, verifying: verifying.length, openQuestions: openQuestions.length, milestonesAwaitingReview: awaitingReview.filter((id) => g.nodes.get(id)?.kind === 'milestone').length },
+      counts,
+    );
     return {
-      finished: q.finished(g, o),
-      stalled: q.stalled(g, o, live),
-      paused: this.isPaused(),
+      finished,
+      stalled,
+      paused,
       graphRev: g.rev,
       graphRejected: this._graphRejected,
       byStatus,
       external: q.externals(g),
       stallRoots: q.stallRoots(g, o),
-      awaitingReview: q.awaitingReview(g, o),
-      verifying: q.awaitingReview(g, o).filter((id) => g.nodes.get(id)?.kind === 'task'),
-      openQuestions: q.openQuestions(g, o),
+      awaitingReview,
+      verifying,
+      openQuestions,
       liveLaunches,
       stuck: liveLaunches.filter((l) => l.stuck).map((l) => l.taskId),
       pausedReason: this.pausedReason(),
@@ -2452,10 +2476,11 @@ export class Orchestrator implements OrchestratorCore {
       runner: { mode: this.effectiveMode(), claimWindowMs: this.config.runner.claimWindowMs, confirmProfile: this.confirmProfile() },
       profiles: this.profiles(),
       claimable: claimable.map((l) => l.taskId),
-      claimableByKind: countByKind(claimable),
+      claimableByKind,
       preparing: preparing.map((l) => l.taskId),
       prepareRetry,
       preparingByKind,
+      workByKind,
       workers: this.store.listLaunches({ status: 'live' }).filter((l) => l.worker).map((l) => ({ id: l.worker!.id, launchId: l.launchId, taskId: l.taskId, claimedAt: l.worker!.claimedAt })),
       tracker: trackerOf(this.store),
       outboxPending: this.store.countOutbox('pending'),

@@ -119,6 +119,9 @@ describe('operator MCP server', () => {
     for (const word of ['runner.confirmProfile', 'confirmProfile']) expect(startTool?.description, word).toContain(word);
     for (const word of ['profiles', 'runner.confirmProfile']) expect(statusTool?.description, word).toContain(word);
     expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain('profileHeld');
+    // The work verdict per runner kind. See specs/operator-mcp "Status and wait descriptions: workByKind".
+    expect(statusTool?.description).toContain('workByKind');
+    expect(tools.tools.find((t) => t.name === 'wait')?.description).toContain('workByKind');
 
     const noDaemon = await client.callTool({ name: 'status', arguments: {} });
     expect(noDaemon.isError).toBe(true);
