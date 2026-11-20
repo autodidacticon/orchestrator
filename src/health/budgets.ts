@@ -59,6 +59,23 @@ export function unpricedLaunches(store: Store): number {
   return n;
 }
 
+/**
+ * Launches that ended (`ended` or `revoked`), had an agent (a worker claimed them or they were spawned), and hold no
+ * usage at all: no cost, turns, duration, or tokens. Their cost is unknown and outside the run cost, and they never
+ * overlap `unpricedLaunches`. The count falls when a worker posts usage for an ended launch.
+ * See specs/health-monitoring "Usage accounting: unmetered launches".
+ */
+export function unmeteredLaunches(store: Store): number {
+  let n = 0;
+  for (const l of store.listLaunches()) {
+    if (l.status !== 'ended' && l.status !== 'revoked') continue;
+    if (!l.worker && l.spawnedAt === undefined) continue;
+    if (l.costUsd !== undefined || l.turns !== undefined || l.durationMs !== undefined || l.tokens !== undefined) continue;
+    n++;
+  }
+  return n;
+}
+
 export function tokensOf(store: Store): { run: TokenUsage; byTask: Record<Id, TokenUsage> } {
   const run: TokenUsage = { input: 0, output: 0 };
   const byTask: Record<Id, TokenUsage> = {};

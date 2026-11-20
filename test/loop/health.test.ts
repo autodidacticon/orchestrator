@@ -269,7 +269,7 @@ describe('health: budgets and usage', () => {
     await h.orch.tick();
     expect(h.store.listEvents({ kind: 'launch.usage' })).toHaveLength(2);
     const s = h.orch.status();
-    expect(s.cost).toEqual({ runUsd: 2, byTask: { T1: 1.25, T5: 0.75 }, ceilingUsd: undefined, overrides: 0, unpricedLaunches: 0 });
+    expect(s.cost).toEqual({ runUsd: 2, byTask: { T1: 1.25, T5: 0.75 }, ceilingUsd: undefined, overrides: 0, unpricedLaunches: 0, unmeteredLaunches: 0 });
     const again = new Orchestrator({ store: h.store, config: h.orch.config, graphSource: h.source, runner: h.runner, workspace: h.workspace, verifier: h.verifier, clock: () => h.now.value });
     await again.loadGraph();
     expect(again.status().cost).toEqual(s.cost);

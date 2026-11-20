@@ -26,7 +26,7 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
   /** Keys still unresolved; `checkCommand` here means submitted work is held until it is set. See specs/operator-control "Status report: configuration". */
   const needsConfig = orch.effective().needsConfig;
-  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, claimableByKind: zeroByKind(), preparing: 0, preparingByKind: zeroByKind(), workByKind: emptyWorkByKind(RUNNER_KINDS, orch.isPaused()), deferred: 0, needsConfig, profileHeld: [], ...tracker };
+  if (!orch.hasGraph()) return { graphLoaded: false, openQuestions: [], awaitingReview: [], finished: false, stalled: false, running: [], blocked: [], stuck: [], pausedReason: orch.pausedReason(), proposals: [], claimable: 0, claimableByKind: zeroByKind(), preparing: 0, preparingByKind: zeroByKind(), workByKind: emptyWorkByKind(RUNNER_KINDS, orch.isPaused()), deferred: 0, unmeteredLaunches: 0, needsConfig, profileHeld: [], ...tracker };
   const s = orch.status();
   const g = orch.graph();
   return {
@@ -45,6 +45,8 @@ export function digestOf(orch: Orchestrator): Record<string, unknown> {
     preparingByKind: s.preparingByKind,
     /** Per runner kind, the work verdict and its counts, as in the status. See specs/operator-mcp "Wait digest: workByKind". */
     workByKind: s.workByKind,
+    /** Ended launches that had an agent and recorded no usage, as `status.cost.unmeteredLaunches`. See specs/operator-mcp "Wait digest: unmeteredLaunches". */
+    unmeteredLaunches: s.cost.unmeteredLaunches,
     /** Candidates skipped by the scope filter; `status` names their blockers. */
     deferred: s.deferred.length,
     openQuestions: s.openQuestions,

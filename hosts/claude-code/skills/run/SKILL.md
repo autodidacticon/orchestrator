@@ -86,6 +86,11 @@ counts into cost. A Codex launch without a price for its model counts in
 `cost.unpricedLaunches` and its cost stays unknown, so `budgets.maxRunCostUsd` cannot stop it;
 mention this when a codex run has a cost budget and no price.
 
+A launch that ended with no usage recorded counts in `cost.unmeteredLaunches` (the digest's
+`unmeteredLaunches`). Its cost is unknown and outside `cost.runUsd`, so `budgets.maxRunCostUsd`
+cannot stop it. When the run has a cost budget and the count is above 0, name the count whenever
+you report the run cost.
+
 ## 1b. Resolve what detection could not
 
 When `needsConfig` names `checkCommand`, in the `start` result or in a later `wait` digest,
@@ -144,6 +149,10 @@ not wait for its completion notice, monitor with `wait` (section 2). When the wo
 answered after it stopped, or a task was retried), re-run it with the same run tag: a worker
 with the same id claims its launch back. In `spawn` mode run no workflow; the daemon's agents
 do the work and you only monitor.
+
+Launches worked by this session's subagents record no usage with the daemon: the workflow posts
+none, so once each ends it counts in `cost.unmeteredLaunches` and its cost is outside
+`budgets.maxRunCostUsd`.
 
 ## 2. Monitor loop
 
@@ -214,8 +223,8 @@ answers (section 2b), then act on the digest:
   (node ids from `gh api graphql`); the `nodeId` is `GH-<new number>`. In a file-based run call
   `accept_proposal` without `nodeId` and report the new node id. On rejection call
   `reject_proposal` with the user's note. Never accept a proposal the user has not approved.
-- **pausedReason** is `costBudget`: the run cost reached its ceiling. Report `cost.runUsd`
-  and `cost.ceilingUsd` from `status`, then offer `resume` with `overrideBudget: true`
+- **pausedReason** is `costBudget`: the run cost reached its ceiling. Report `cost.runUsd`,
+  `cost.ceilingUsd`, and `cost.unmeteredLaunches` (launches whose cost is unknown) from `status`, then offer `resume` with `overrideBudget: true`
   (raises the ceiling by one budget) or stopping. Never override the budget unless the user
   says so.
 - **deferred** non-zero: ready tasks are held back because their declared scope overlaps a

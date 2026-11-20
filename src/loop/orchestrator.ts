@@ -48,7 +48,7 @@ import { pidAlive } from '../runner/subprocess.js';
 import { runTick } from './tick.js';
 import { clearPrepareRetry, defaultPrepareRunner, pendingPrepareRetries, type PrepareJob, type PrepareRunner, startPrepareCommand, stopPrepareJobs } from '../launch/prepare.js';
 import { deriveEffects } from '../tracker/effects.js';
-import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, exceedsTimeBudget, priceFor, priceUsage, runCostUsd, tokensOf, unpricedLaunches } from '../health/budgets.js';
+import { budgetOverrides, ceilingUsd, costByTask, elapsedMs, exceedsTimeBudget, priceFor, priceUsage, runCostUsd, tokensOf, unmeteredLaunches, unpricedLaunches } from '../health/budgets.js';
 import { applyFingerprint, recordSignal } from '../health/progress.js';
 import { FINGERPRINT_PATTERN } from '../workspace/fingerprint.js';
 import { exceedsStuckFail, humanDiagnoser, idleMsOf, type StuckDiagnoser } from '../health/stuck.js';
@@ -286,8 +286,12 @@ export interface StatusReport {
   /** Health: flagged tasks, why admission is paused, cost and the configured budgets. See specs/health-monitoring. */
   stuck: Id[];
   pausedReason: PausedReason | undefined;
-  /** `unpricedLaunches`: launches with tokens and no cost, outside `runUsd`. See specs/health-monitoring "Run cost budget". */
-  cost: { runUsd: number; byTask: Record<Id, number>; ceilingUsd: number | undefined; overrides: number; unpricedLaunches: number };
+  /**
+   * `unpricedLaunches`: launches with tokens and no cost, outside `runUsd`. See specs/health-monitoring "Run cost budget".
+   * `unmeteredLaunches`: ended or revoked launches that had an agent and hold no usage at all; their cost is unknown.
+   * See specs/operator-control "Status report: unmetered launches".
+   */
+  cost: { runUsd: number; byTask: Record<Id, number>; ceilingUsd: number | undefined; overrides: number; unpricedLaunches: number; unmeteredLaunches: number };
   tokens: { run: TokenUsage; byTask: Record<Id, TokenUsage> };
   budgets: { maxLaunchMs: number; maxRunCostUsd: number; stuckAfterMs: number; stuckFailAfterMs: number };
   foreignCommits: string[];
@@ -2455,7 +2459,7 @@ export class Orchestrator implements OrchestratorCore {
       liveLaunches,
       stuck: liveLaunches.filter((l) => l.stuck).map((l) => l.taskId),
       pausedReason: this.pausedReason(),
-      cost: { runUsd: runCostUsd(this.store), byTask: costByTask(this.store), ceilingUsd: ceilingUsd(this.config, this.store), overrides: budgetOverrides(this.store), unpricedLaunches: unpricedLaunches(this.store) },
+      cost: { runUsd: runCostUsd(this.store), byTask: costByTask(this.store), ceilingUsd: ceilingUsd(this.config, this.store), overrides: budgetOverrides(this.store), unpricedLaunches: unpricedLaunches(this.store), unmeteredLaunches: unmeteredLaunches(this.store) },
       tokens: tokensOf(this.store),
       // The limits in force, overrides applied; the run cost budget is a start-time key. See specs/operator-control "Status report: limits in force".
       budgets: {
