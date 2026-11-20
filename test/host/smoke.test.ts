@@ -439,3 +439,200 @@ describe('deploy/smoke.sh', () => {
     }
   });
 });
+
+// --- M5 probe and log checks, run outside a cluster (GH-186) ---
+//
+// smoke.sh cannot be sourced, so these cases cut the in-pod probe script and the functions out of its text and run
+// them in bash with stubs. The probe script runs against a fake /proc tree.
+describe('deploy/smoke.sh M5 checks in isolation', () => {
+  const text = readFileSync(script, 'utf8');
+  const textLines = text.split('\n');
+  // A function's text, from "name() {" to the next line that is "}".
+  function fn(name: string): string {
+    const start = textLines.findIndex((l) => l.startsWith(`${name}() {`));
+    expect(start, name).toBeGreaterThanOrEqual(0);
+    const end = textLines.findIndex((l, i) => i > start && l === '}');
+    return textLines.slice(start, end + 1).join('\n');
+  }
+  const assignment = (name: string) => {
+    const l = textLines.find((x) => x.startsWith(`${name}=`));
+    expect(l, name).toBeDefined();
+    return l!;
+  };
+  const probeScript = () => {
+    const m = /PROBE_SCRIPT="\$\(cat <<'EOF'\n([\s\S]*?)\nEOF\n/.exec(text);
+    expect(m).not.toBeNull();
+    return m![1]!;
+  };
+  function runBash(body: string, env: Record<string, string> = {}) {
+    return spawnSync(bash, ['-c', body], { encoding: 'utf8', env: { PATH: '/usr/bin:/bin', ...env } });
+  }
+
+  // A fake /proc: pid 1 runs the daemon, pid 10's comm is node at the first read and becomes `second10` at the second
+  // (a fake sleep on PATH rewrites it), pid 11 is node at both reads.
+  function probeOn(second10: string) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-proc-'));
+    try {
+      const proc = path.join(dir, 'proc');
+      const bin = path.join(dir, 'bin');
+      execFileSync('mkdir', ['-p', `${proc}/1`, `${proc}/10`, `${proc}/11`, `${proc}/12`, bin]);
+      writeFileSync(`${proc}/1/cmdline`, 'node\0/usr/local/bin/orchestrator\0--repo\0/data/repo\0');
+      writeFileSync(`${proc}/1/status`, 'Name:\tnode\nState:\tS (sleeping)\nPPid:\t0\n');
+      writeFileSync(`${proc}/1/comm`, 'node\n');
+      for (const pid of ['10', '11']) {
+        writeFileSync(`${proc}/${pid}/status`, 'Name:\tnode\nState:\tS (sleeping)\nPPid:\t1\n');
+        writeFileSync(`${proc}/${pid}/comm`, 'node\n');
+      }
+      // A zombie child of pid 1 is never reported.
+      writeFileSync(`${proc}/12/status`, 'Name:\tnode\nState:\tZ (zombie)\nPPid:\t1\n');
+      writeFileSync(`${proc}/12/comm`, 'node\n');
+      writeFileSync(path.join(bin, 'sleep'), `#!/bin/sh\nprintf '%s\\n' '${second10}' > '${proc}/10/comm'\n`);
+      chmodSync(path.join(bin, 'sleep'), 0o755);
+      const body = probeScript().split('/proc').join(proc);
+      const r = spawnSync('sh', ['-c', body], { encoding: 'utf8', env: { PATH: `${bin}:/usr/bin:/bin` } });
+      expect(r.status).toBe(0);
+      return r.stdout.split('\n');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('the probe takes comm from the second read: a child node at the first read and git at the second is not reported', () => {
+    const out = probeOn('git');
+    expect(out[0]).toBe('node /usr/local/bin/orchestrator --repo /data/repo ');
+    expect(out.filter((l) => l.startsWith('child '))).toEqual(['child 11 node']);
+  });
+
+  it('the probe still reports a node child seen at both reads', () => {
+    const out = probeOn('node');
+    expect(out.filter((l) => l.startsWith('child ')).sort()).toEqual(['child 10 node', 'child 11 node']);
+  });
+
+  it('the in-pod probe script uses only sh, cat, sed, grep, tr and sleep', () => {
+    const words = new Set(probeScript().match(/\b(awk|wc|ps|head|tail|cut|sort|pgrep|find|ls)\b/g) ?? []);
+    expect([...words]).toEqual([]);
+  });
+
+  // A probe directory with five daemon samples and no child, one verifier sample with a child, and the given rounds.
+  function probeDir(rounds: string[]) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-probe-'));
+    writeFileSync(path.join(dir, 'daemon'), 'orchestrator-abc 0 -\n'.repeat(5));
+    writeFileSync(path.join(dir, 'verifier'), 'orchestrator-verifier-x 1 42 node\n');
+    writeFileSync(path.join(dir, 'rounds'), rounds.map((r) => `${r}\n`).join(''));
+    writeFileSync(path.join(dir, 'skipped'), '');
+    return dir;
+  }
+  function probeHeld(rounds: string[]) {
+    const dir = probeDir(rounds);
+    try {
+      const body = [assignment('M5_CHECK_S'), assignment('PROBE_SUMMARIZED'), fn('probe_summary'), fn('probe_held'), `PROBE_DIR='${dir}'`, 'probe_held'].join('\n');
+      return runBash(body);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('probe_held passes when the slowest round is shorter than the fixture check', () => {
+    const r = probeHeld(['1', '3', '2', '4', '2']);
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('5 rounds, the slowest 4s');
+  });
+
+  it('probe_held fails with a line naming the slowest round when it took 5 s or longer', () => {
+    for (const slow of ['5', '7']) {
+      const r = probeHeld(['1', slow, '2', '3', '2']);
+      expect(r.status, slow).not.toBe(0);
+      expect(r.stdout, slow).toContain(`the slowest round took ${slow}s, not shorter than the fixture check's 5s`);
+    }
+  });
+
+  it('probe_held fails when no round finished', () => {
+    const r = probeHeld([]);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain('no probe round finished');
+    expect(r.stderr).toBe('');
+  });
+
+  // The script's cleanup block (its variables, cleanup and the trap) on a probe directory, ending with `exit <rc>`.
+  function cleanupRun(rc: number, extra = '') {
+    const dir = probeDir(['1', '3', '2']);
+    const start = textLines.findIndex((l) => l === "PF_PID=''");
+    const end = textLines.findIndex((l) => l === 'trap cleanup EXIT');
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const body = ['set -euo pipefail', "REAL_AGENT_KEY='' DRY_RUN=0", fn('probe_summary'), ...textLines.slice(start, end + 1), `PROBE_DIR='${dir}'`, extra, `exit ${rc}`].join('\n');
+    try {
+      const r = runBash(body);
+      return { ...r, removed: !existsSync(dir) };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('a failure before probe_held prints the probe counts and slowest round on exit, then removes the probe files', () => {
+    const r = cleanupRun(1);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('smoke: the M5 process probe when the script stopped:');
+    expect(r.stderr).toContain('probe: 5 daemon samples, 0 with a child other than git; 1 verifier samples, 1 with a child; 3 rounds, the slowest 3s');
+    expect(r.removed).toBe(true);
+  });
+
+  it('a passing exit, or one after probe_held printed the summary, prints nothing from the probe', () => {
+    for (const [rc, extra] of [[0, ''], [1, 'PROBE_SUMMARIZED=1']] as const) {
+      const r = cleanupRun(rc, extra);
+      expect(r.status).toBe(rc);
+      expect(r.stderr).toBe('');
+      expect(r.removed).toBe(true);
+    }
+  });
+
+  // m5_verifier_logs with one verifier pod whose log is `log` and with pg_m5_jobs answering `rows`.
+  function verifierLogs(log: string, rows: string[]) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-logs-'));
+    try {
+      writeFileSync(path.join(dir, 'log'), log);
+      writeFileSync(path.join(dir, 'rows'), rows.map((r) => `${r}\n`).join(''));
+      const body = [
+        ...['M5_PASS', 'M5_BREAK', 'M5_BREAK_OUTPUT', 'M5_PASS_OUTPUT'].map(assignment),
+        `kc() { case "$1" in get) echo 'orchestrator-verifier-x 0' ;; logs) cat '${dir}/log' ;; esac; }`,
+        `pg_m5_jobs() { cat '${dir}/rows'; }`,
+        fn('check_output_of'),
+        fn('m5_verifier_logs'),
+        'm5_verifier_logs',
+      ].join('\n');
+      return runBash(body);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const PASS_LOG = [
+    'verifier v1 check jp SMOKE-M5-PASS',
+    'check jp: npm test',
+    'check jp exit: 0',
+    'fixture check: ok',
+    'verifier v1 verified jp SMOKE-M5-PASS',
+  ];
+  const breakLog = (j: string) => [
+    `verifier v1 check ${j} SMOKE-M5-BREAK`,
+    `check ${j}: npm test`,
+    `check ${j} exit: 1`,
+    'fixture check: README.md names a task that breaks the check',
+    `verifier v1 checkFailed ${j} SMOKE-M5-BREAK`,
+  ];
+
+  it('m5_verifier_logs fails when there are no BREAK job rows and no BREAK log lines', () => {
+    const r = verifierLogs(`${PASS_LOG.join('\n')}\n`, []);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain('SMOKE-M5-BREAK has 0 job rows, not 2');
+  });
+
+  it('m5_verifier_logs fails with one BREAK row and its log lines, and passes with two', () => {
+    const one = verifierLogs(`${[...PASS_LOG, ...breakLog('jb1')].join('\n')}\n`, ['jb1|failed|checkFailed|yes']);
+    expect(one.status).not.toBe(0);
+    expect(one.stdout).toContain('SMOKE-M5-BREAK has 1 job rows, not 2');
+    const two = verifierLogs(`${[...PASS_LOG, ...breakLog('jb1'), ...breakLog('jb2')].join('\n')}\n`, ['jb1|failed|checkFailed|yes', 'jb2|failed|checkFailed|yes']);
+    expect(two.stdout).not.toContain('job rows');
+    expect(two.status).toBe(0);
+  });
+});

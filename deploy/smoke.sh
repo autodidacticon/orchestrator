@@ -141,9 +141,14 @@ BREAK_PATCHED=''
 PG_LOG_PID='' PG_LOG=''
 WORKER_LOG_DIR='' WORKER_LOG_PIDS=''
 cleanup() {
+  local rc=$?
   if [ -n "${PROBE_DIR:-}" ]; then
     touch "$PROBE_DIR/stop" 2>/dev/null || true
     if [ -n "${PROBE_PID:-}" ]; then kill "$PROBE_PID" 2>/dev/null || true; fi
+    # A failure before probe_held leaves its diagnostics here only: print them before the files go.
+    if [ "$rc" != 0 ] && [ -z "${PROBE_SUMMARIZED:-}" ]; then
+      { echo "smoke: the M5 process probe when the script stopped:"; probe_summary; } >&2 2>/dev/null || true
+    fi
     rm -rf "$PROBE_DIR"
   fi
   for pid in $WORKER_LOG_PIDS; do kill "$pid" 2>/dev/null || true; done
@@ -812,7 +817,8 @@ M5_PASS_OUTPUT='fixture check: ok'
 
 # The probe's in-pod script: only sh, cat, sed, grep, tr and sleep. It prints pid 1's command line, then lists the
 # processes whose parent is pid 1 and that are not zombies, twice and one second apart, and prints "child <pid> <comm>"
-# for each pid found in both lists whose command name is not git. The probe's own processes never have parent pid 1:
+# for each pid found in both lists whose command name at the second read is not git: a child read between fork and exec
+# still carries its parent's name at the first read. The probe's own processes never have parent pid 1:
 # the exec'd shell's parent is outside the container's pid namespace, and its children are its own.
 PROBE_SCRIPT="$(cat <<'EOF'
 tr '\0' ' ' </proc/1/cmdline; echo
@@ -825,10 +831,10 @@ list() {
   done
 }
 a="$(list)"; sleep 1; b="$(list)"
-printf '%s\n' "$a" | while read -r pid comm; do
+printf '%s\n' "$b" | while read -r pid comm; do
   [ -n "$pid" ] || continue
   [ "$comm" = git ] && continue
-  printf '%s\n' "$b" | grep -q "^$pid " && echo "child $pid $comm"
+  printf '%s\n' "$a" | grep -q "^$pid " && echo "child $pid $comm"
 done
 exit 0
 EOF
@@ -877,9 +883,11 @@ stop_probe() {
   wait "$PROBE_PID" || true
   PROBE_PID=''
 }
-# No daemon sample reported a child of pid 1 other than git, at least one verifier sample did, and at least five
-# daemon samples were taken.
-probe_held() {
+# The fixture check's seconds (deploy/overlays/kind/fixture/test.js waits 5 s): a round must be shorter to catch it.
+M5_CHECK_S=5
+PROBE_SUMMARIZED=''
+# The probe's counts, the children it reported, the samples not counted and the slowest round, from its files.
+probe_summary() {
   local samples daemon_kids verifier_kids slowest
   samples="$(wc -l <"$PROBE_DIR/daemon" | tr -d ' ')"
   daemon_kids="$(awk '$2 > 0' "$PROBE_DIR/daemon" | wc -l | tr -d ' ')"
@@ -890,7 +898,23 @@ probe_held() {
   awk '$2 > 0 { print "    verifier child: " $0 }' "$PROBE_DIR/verifier"
   sed 's/^/    not counted: /' "$PROBE_DIR/skipped"
   if [ "$verifier_kids" = 0 ]; then echo "    round seconds: $(tr '\n' ' ' <"$PROBE_DIR/rounds")"; fi
-  [ "$daemon_kids" = 0 ] && [ "$verifier_kids" -gt 0 ] && [ "$samples" -ge 5 ]
+}
+# No daemon sample reported a child of pid 1 other than git, at least one verifier sample did, at least five daemon
+# samples were taken, and the slowest round was shorter than the fixture check, so a check under the daemon is seen.
+probe_held() {
+  local samples daemon_kids verifier_kids slowest ok=1
+  PROBE_SUMMARIZED=1
+  probe_summary
+  samples="$(wc -l <"$PROBE_DIR/daemon" | tr -d ' ')"
+  daemon_kids="$(awk '$2 > 0' "$PROBE_DIR/daemon" | wc -l | tr -d ' ')"
+  verifier_kids="$(awk '$2 > 0' "$PROBE_DIR/verifier" | wc -l | tr -d ' ')"
+  slowest="$(sort -n "$PROBE_DIR/rounds" | tail -n 1)"
+  if [ -z "$slowest" ]; then
+    echo "    no probe round finished"; ok=0
+  elif [ "$slowest" -ge "$M5_CHECK_S" ]; then
+    echo "    the slowest round took ${slowest}s, not shorter than the fixture check's ${M5_CHECK_S}s"; ok=0
+  fi
+  [ "$ok" = 1 ] && [ "$daemon_kids" = 0 ] && [ "$verifier_kids" -gt 0 ] && [ "$samples" -ge 5 ]
 }
 
 # The three Deployments exist, and the verifier reports one ready replica.
@@ -931,7 +955,8 @@ m5_jobs_failed() {
 # the next check's "check <jobId>: <command>" line (stdout lines of the loop may fall between).
 check_output_of() { awk -v j="check $2 exit:" 'index($0, j) == 1 { on = 1; next } on && /^check [^ ]+: / { on = 0 } on' <<<"$1"; }
 # The verifier pods' logs: a check and a verified line for M5_PASS with the check's ok output, two check and two
-# checkFailed lines for M5_BREAK naming the two job ids of pg_m5_jobs, with the breaking output after each check.
+# checkFailed lines for M5_BREAK naming the two job ids of pg_m5_jobs, which must read exactly two, with the breaking
+# output after each check.
 m5_verifier_logs() {
   local pods pod restarts logs ok=1 jobs got pass_job j ev
   pods="$(kc get pod -l app.kubernetes.io/name=orchestrator-verifier -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[?(@.name=="verifier")].restartCount}{"\n"}{end}')" || return 1
@@ -947,6 +972,8 @@ m5_verifier_logs() {
   grep -qE "^verifier [^ ]+ check $pass_job $M5_PASS\$" <<<"$logs" || { echo "    no check line for $M5_PASS"; ok=0; }
   grep -qxF "check $pass_job exit: 0" <<<"$logs" && check_output_of "$logs" "$pass_job" | grep -qF "$M5_PASS_OUTPUT" || { echo "    no '$M5_PASS_OUTPUT' after the check of $pass_job"; ok=0; }
   jobs="$(pg_m5_jobs | cut -d'|' -f1 | sort)" || return 1
+  # Exactly the two BREAK job ids, so no rows and no log lines never compare equal and pass.
+  [ "$(grep -c . <<<"$jobs")" = 2 ] || { echo "    $M5_BREAK has $(grep -c . <<<"$jobs") job rows, not 2"; ok=0; }
   for ev in check checkFailed; do
     got="$(grep -E "^verifier [^ ]+ $ev [^ ]+ $M5_BREAK\$" <<<"$logs" | awk '{ print $4 }' | sort)"
     [ "$got" = "$jobs" ] || { echo "    $ev lines of $M5_BREAK name $(tr '\n' ' ' <<<"$got"), the rows $(tr '\n' ' ' <<<"$jobs")"; ok=0; }
