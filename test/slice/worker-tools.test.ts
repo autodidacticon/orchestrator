@@ -61,8 +61,16 @@ describe('worker tools on the operator MCP server', () => {
     const s0 = await until((s) => (s['claimable'] as string[]).includes('T1'));
     expect(s0).toMatchObject({ runner: { mode: 'pull' }, claimable: ['T1'], workers: [] });
 
+    // GH-182: brief: false leaves the parsed brief out and keeps every other field. See specs/operator-mcp "Worker tools".
+    const lean = await tool('claim', { workerId: 'w1', brief: false });
+    expect(lean).toMatchObject({ status: 200, taskId: 'T1', workerId: 'w1', model: expect.any(String), effort: expect.any(String), leaseTtlMs: 60000, lease: { ttlMs: 60000, renewEveryMs: 20000 } });
+    expect(String(lean['launchId'])).toMatch(/\S/);
+    expect(String(lean['token'])).toMatch(/\S/);
+    expect(String(lean['briefPath'])).toBe(path.join(String(lean['worktree']), '.orchestrator', 'brief.md'));
+    expect(lean).not.toHaveProperty('brief');
+    // Without the option the answer is unchanged: the same worker id gets the same launch back, brief included.
     const c = await tool('claim', { workerId: 'w1' });
-    expect(c).toMatchObject({ status: 200, taskId: 'T1', workerId: 'w1' });
+    expect(c).toMatchObject({ status: 200, taskId: 'T1', workerId: 'w1', repeated: true, launchId: lean['launchId'], token: lean['token'], worktree: lean['worktree'], briefPath: lean['briefPath'] });
     const launchId = String(c['launchId']);
     const token = String(c['token']);
     const worktree = String(c['worktree']);

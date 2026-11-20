@@ -5,7 +5,7 @@ export const meta = {
   phases: [{ title: 'Claim' }, { title: 'Work' }],
 }
 
-// The claimer makes no decision (claim, wait, status, a spelled-out stop rule), so it runs on a fixed cheap model unless the user asks otherwise. See specs/host-integration "Work skill and workflow".
+// The claimer makes no decision (claim, wait, copy the digest fields): the script decides when a loop stops (stopRule), so the claimer runs on a fixed cheap model unless the user asks otherwise. See specs/host-integration "Work skill and workflow".
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const claimModel = String((args && args.claimModel) || 'claude-haiku-5-5')
 const claimEffort = EFFORTS.includes(args && args.claimEffort) ? args.claimEffort : 'low'
@@ -25,13 +25,11 @@ const CLAIM_SCHEMA = {
   type: 'object',
   properties: {
     claimed: { type: 'boolean' },
-    stop: { type: 'boolean' },
     launchId: { type: 'string' },
     taskId: { type: 'string' },
     token: { type: 'string' },
     worktree: { type: 'string' },
     briefPath: { type: 'string' },
-    briefMarkdown: { type: 'string' },
     pendingSeq: { type: 'number' },
     pendingAnswer: { type: 'string' },
     model: { type: 'string' },
@@ -40,11 +38,14 @@ const CLAIM_SCHEMA = {
     renewEveryMs: { type: 'number' },
     finished: { type: 'boolean' },
     stalled: { type: 'boolean' },
+    claimable: { type: 'number' },
+    preparing: { type: 'number' },
+    verifying: { type: 'array', items: { type: 'string' } },
     openQuestions: { type: 'array', items: { type: 'string' } },
     awaitingReview: { type: 'array', items: { type: 'string' } },
-    claimable: { type: 'number' },
+    error: { type: 'string' },
   },
-  required: ['claimed', 'stop'],
+  required: ['claimed'],
 }
 
 const OUTCOME_SCHEMA = {
@@ -57,18 +58,29 @@ const OUTCOME_SCHEMA = {
   required: ['taskId', 'outcome', 'summary'],
 }
 
-function claimPrompt(workerId, heldCount) {
+function claimPrompt(workerId) {
   return [
-    `You are the claimer for orchestrator worker "${workerId}". Use the orchestrator operator MCP tools (names end in claim, wait, status; load them with ToolSearch if needed). You make no decisions: follow these steps exactly.`,
+    `You are the claimer for orchestrator worker "${workerId}". Use the orchestrator operator MCP tools claim and wait (load them with ToolSearch if needed). You make no decisions: follow these steps exactly.`,
     // This workflow's workers are Claude Code subagents, so they only take launches prepared for claude-code. See specs/pull-runner "Claim".
-    `1. Call claim with workerId "${workerId}", access "local", and runner "claude-code".`,
-    '2. If it returns a launch (status 200): read the markdown brief at briefPath and return { claimed: true, launchId, taskId, token, worktree, briefPath, briefMarkdown: <the full brief file>, model, effort, leaseTtlMs: lease.ttlMs, renewEveryMs: lease.renewEveryMs, pendingSeq, pendingAnswer } (model, effort and the lease numbers exactly as the response gives them; pending fields only when the response carries pending).',
-    `3. If it returns 404 (nothing claimable for claude-code, or paused): call wait with until "any" and timeoutMs ${CLAIM_WAIT_MS}, then call status, take claimable as status claimableByKind["claude-code"], take preparing as status preparingByKind["claude-code"] (0 when status has no preparingByKind), and compute stop:`,
-    `   stop is true when finished is true, or stalled is true, or (claimable is 0 and preparing is 0 and verifying is empty and ${heldCount} launches are held by other loops is false and (openQuestions is non-empty or awaitingReview lists an id that verifying does not)). Otherwise stop is false.`,
-    `   If stop is false and you have done fewer than ${CLAIM_POLLS} polls (a poll is one claim followed by one wait and one status), go back to step 1. Otherwise return { claimed: false, stop, finished, stalled, openQuestions, awaitingReview, claimable } from the last status.`,
-    '4. On any other error return { claimed: false, stop: true }.',
+    // brief: false leaves the parsed brief out of the answer; the worker reads the brief file itself. See specs/operator-mcp "Worker tools".
+    `1. Call claim with workerId "${workerId}", access "local", and runner "claude-code", plus brief: false (the answer then leaves the brief out).`,
+    '2. If it returns a launch (answer 200): return { claimed: true, launchId, taskId, token, worktree, briefPath, model, effort, leaseTtlMs: lease.ttlMs, renewEveryMs: lease.renewEveryMs, pendingSeq: pending.seq, pendingAnswer: pending.answer } (model, effort and the lease numbers exactly as the answer gives them; the pending fields only when the answer carries pending). Do not open or read the brief file.',
+    `3. If it returns 404 (nothing claimable for claude-code, or paused): call wait with until "any" and timeoutMs ${CLAIM_WAIT_MS}. From the digest in its answer take finished, stalled, claimable as claimableByKind["claude-code"], preparing as preparingByKind["claude-code"] (0 when the digest has no preparingByKind), verifying (empty when absent), openQuestions and awaitingReview.`,
+    `   If finished or stalled is true, return { claimed: false, finished, stalled, claimable, preparing, verifying, openQuestions, awaitingReview } at once. Otherwise, if you have done fewer than ${CLAIM_POLLS} polls (a poll is one claim followed by one wait), go back to step 1; after poll ${CLAIM_POLLS} return those fields with claimed false.`,
+    '4. On any other error return { claimed: false, error: <the error text> }.',
     'Return only the structured output; do not do any task work.',
   ].join('\n')
+}
+
+// The loop's stop decision, made in code from the claimer's last digest fields; othersHold is whether another loop holds a launch. See specs/host-integration "Work workflow: claimer agent: stop rule in the script".
+function stopRule(d, othersHold) {
+  if (!d) return false
+  if (d.finished === true || d.stalled === true) return true
+  const verifying = Array.isArray(d.verifying) ? d.verifying : []
+  const questions = Array.isArray(d.openQuestions) ? d.openQuestions : []
+  const reviews = Array.isArray(d.awaitingReview) ? d.awaitingReview : []
+  const idle = (Number(d.claimable) || 0) === 0 && (Number(d.preparing) || 0) === 0 && verifying.length === 0 && !othersHold
+  return idle && (questions.length > 0 || reviews.some((id) => !verifying.includes(id)))
 }
 
 // The interval comes from the claim (lease.ttlMs and lease.renewEveryMs, a third of the TTL); nothing renews the lease between this agent's calls. See specs/host-integration "Work workflow heartbeat interval".
@@ -97,8 +109,7 @@ function workerPrompt(c) {
       : '',
     `Credentials: launchId ${c.launchId}, token ${c.token}.`,
     '',
-    'The brief:',
-    c.briefMarkdown || `(read ${c.briefPath})`,
+    `The brief is the file ${c.briefPath}. Read the whole file before doing anything else; it holds the task, its acceptance criteria and the definition of done.`,
     '',
     'When done, return { taskId, outcome, summary } where outcome is submitted, failed, question (you asked and nobody answered within the pending retries), fenced, or released.',
   ].join('\n')
@@ -106,13 +117,26 @@ function workerPrompt(c) {
 
 async function loop(i) {
   const workerId = `${runTag}-${i + 1}`
+  let silent = 0
   for (let cycle = 0; cycle < 200; cycle++) {
-    const heldCount = Object.keys(held).filter((k) => k !== workerId).length
-    const c = await agent(claimPrompt(workerId, heldCount), { label: `claim ${workerId}`, phase: 'Claim', schema: CLAIM_SCHEMA, model: claimModel, effort: claimEffort })
-    if (!c) break
+    const c = await agent(claimPrompt(workerId), { label: `claim ${workerId}`, phase: 'Claim', schema: CLAIM_SCHEMA, model: claimModel, effort: claimEffort })
+    // A claimer that returns nothing is run once more; a held launch comes back to the same worker id with repeated: true. See specs/host-integration "Work workflow: claimer agent: a silent claimer".
+    if (!c) {
+      if (++silent >= 2) {
+        log(`${workerId}: claimer returned nothing twice, loop ends`)
+        break
+      }
+      log(`${workerId}: claimer returned nothing, retrying`)
+      continue
+    }
+    silent = 0
     if (!c.claimed) {
-      lastDigest = { finished: c.finished, stalled: c.stalled, openQuestions: c.openQuestions || [], awaitingReview: c.awaitingReview || [], claimable: c.claimable || 0 }
-      if (c.stop) break
+      if (c.error) {
+        log(`${workerId}: claimer error, loop ends: ${c.error}`)
+        break
+      }
+      lastDigest = { finished: c.finished, stalled: c.stalled, openQuestions: c.openQuestions || [], awaitingReview: c.awaitingReview || [], claimable: c.claimable || 0, preparing: c.preparing || 0, verifying: c.verifying || [] }
+      if (stopRule(c, Object.keys(held).some((k) => k !== workerId))) break
       continue
     }
     held[workerId] = c.taskId

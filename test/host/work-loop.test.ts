@@ -848,8 +848,8 @@ describe('work.mjs lease renewal (ORC-85)', () => {
       prompts.push({ label: opts.label, prompt, schema: opts.schema });
       if (opts.label.startsWith('claim')) {
         return claims++ === 0
-          ? { claimed: true, stop: false, launchId: 'L1', taskId: 'T1', token: 'tok', worktree: '/wt', briefPath: '/wt/b.md', briefMarkdown: 'brief', leaseTtlMs: 90_000, renewEveryMs: 30_000 }
-          : { claimed: false, stop: true };
+          ? { claimed: true, launchId: 'L1', taskId: 'T1', token: 'tok', worktree: '/wt', briefPath: '/wt/b.md', leaseTtlMs: 90_000, renewEveryMs: 30_000 }
+          : { claimed: false, finished: true };
       }
       return { taskId: 'T1', outcome: 'submitted', summary: 's' };
     };
@@ -863,23 +863,139 @@ describe('work.mjs lease renewal (ORC-85)', () => {
     expect(work.prompt).toContain('at least every 30000ms');
   });
 
-  // ORC-132: the claimer reads preparingByKind["claude-code"] and the stop rule needs it to be 0.
-  it('the Claude Code workflow claimer counts launches being prepared in its stop rule', async () => {
-    const src = readFileSync(path.resolve(here, '../../hosts/claude-code/workflows/work.js'), 'utf8').replace(/^export const meta/m, 'const meta');
-    const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (...a: string[]) => (...v: unknown[]) => Promise<unknown>;
-    const run = new AsyncFunction('args', 'agent', 'parallel', 'log', src);
-    const prompts: Array<{ label: string; prompt: string }> = [];
-    const agent = async (prompt: string, opts: { label: string }) => {
-      prompts.push({ label: opts.label, prompt });
-      return { claimed: false, stop: true };
-    };
-    const parallel = async (fns: Array<() => Promise<unknown>>) => Promise.all(fns.map((f) => f()));
-    await run({ workers: 1 }, agent, parallel, () => {});
-    const claim = prompts.find((p) => p.label.startsWith('claim'))!;
-    expect(claim.prompt).toContain('take preparing as status preparingByKind["claude-code"] (0 when status has no preparingByKind)');
-    const stopRule = claim.prompt.split('\n').find((line) => line.includes('stop is true when'))!;
-    expect(stopRule).toContain('preparing is 0');
-    expect(stopRule).toMatch(/claimable is 0 and preparing is 0 and verifying is empty/);
+  // ORC-132, GH-182: the claimer copies preparingByKind["claude-code"] from the wait digest, and stopRule in the script needs it to be 0.
+  it('the Claude Code workflow claimer takes preparing from the wait digest, 0 when absent', async () => {
+    const claim = (await runWorkflow({ claims: [{ claimed: false, finished: true }] })).prompts.find((p) => p.label.startsWith('claim'))!;
+    expect(claim.prompt).toContain('preparing as preparingByKind["claude-code"] (0 when the digest has no preparingByKind)');
+    expect(claim.prompt).toContain('claimable as claimableByKind["claude-code"]');
+  });
+});
+
+// GH-182: the claimer passes the brief's path, the script decides when a loop stops, the claimer reads the wait digest
+// and never status, and a claimer that returns nothing is retried once. See specs/host-integration "Work workflow: claimer agent".
+type Prompt = { label: string; prompt: string; schema?: { properties?: Record<string, unknown>; required?: string[] }; model?: string };
+type Claim = Record<string, unknown> | null;
+const workJs = () => readFileSync(path.resolve(here, '../../hosts/claude-code/workflows/work.js'), 'utf8');
+async function runWorkflow(o: { workers?: number; claims?: Claim[]; claimer?: (workerId: string, n: number) => Promise<Claim>; worker?: (taskId: string) => Promise<unknown> }) {
+  const src = workJs().replace(/^export const meta/m, 'const meta');
+  const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor as new (...a: string[]) => (...v: unknown[]) => Promise<unknown>;
+  const run = new AsyncFunction('args', 'agent', 'parallel', 'log', src);
+  const prompts: Prompt[] = [];
+  const logs: string[] = [];
+  const perWorker: Record<string, number> = {};
+  const agent = async (prompt: string, opts: { label: string; schema?: Prompt['schema']; model?: string }) => {
+    prompts.push({ label: opts.label, prompt, schema: opts.schema, model: opts.model });
+    if (opts.label.startsWith('claim')) {
+      const id = opts.label.slice('claim '.length);
+      const n = (perWorker[id] = (perWorker[id] ?? 0) + 1);
+      if (o.claimer) return o.claimer(id, n);
+      return n <= (o.claims?.length ?? 0) ? o.claims![n - 1] : { claimed: false, finished: true };
+    }
+    const taskId = opts.label.split(' ')[2]!;
+    return o.worker ? o.worker(taskId) : { taskId, outcome: 'submitted', summary: 's' };
+  };
+  const parallel = async (fns: Array<() => Promise<unknown>>) => Promise.all(fns.map((f) => f()));
+  const result = (await run({ workers: o.workers ?? 1 }, agent, parallel, (m: string) => logs.push(m))) as Record<string, unknown>;
+  return { prompts, logs, result, perWorker };
+}
+
+describe('work.js claimer by path and stop in the script (GH-182)', () => {
+  const launch = { claimed: true, launchId: 'L1', taskId: 'T1', token: 'tok', worktree: '/wt', briefPath: '/wt/.orchestrator/brief.md', leaseTtlMs: 600_000, renewEveryMs: 200_000 };
+
+  it('1: the worker prompt names briefPath and says to read the whole file first; the claimer claims with brief: false and never reads the brief', async () => {
+    const { prompts } = await runWorkflow({ claims: [launch] });
+    const work = prompts.find((p) => p.label === 'work work-1 T1')!;
+    expect(work.prompt).toContain('/wt/.orchestrator/brief.md');
+    expect(work.prompt).toContain('The brief is the file /wt/.orchestrator/brief.md. Read the whole file before doing anything else');
+    const claim = prompts.find((p) => p.label === 'claim work-1')!;
+    expect(Object.keys(claim.schema!.properties!)).not.toContain('briefMarkdown');
+    expect(workJs()).not.toContain('briefMarkdown');
+    expect(claim.prompt).toContain('access "local", and runner "claude-code", plus brief: false');
+    expect(claim.prompt).toContain('Do not open or read the brief file.');
+    expect(claim.prompt).not.toMatch(/read the (markdown )?brief at/i);
+    expect(claim.prompt).not.toMatch(/full brief/i);
+  });
+
+  it('2: the claimer waits on the digest, never calls status, holds no stop sentence, and returns early only on finished or stalled', async () => {
+    const { prompts } = await runWorkflow({ claims: [{ claimed: false, finished: true }] });
+    const claim = prompts.find((p) => p.label === 'claim work-1')!;
+    expect(claim.prompt).not.toMatch(/\bstatus\b/);
+    expect(claim.prompt).not.toMatch(/\bstop\b/i);
+    expect(claim.prompt).toContain('call wait with until "any" and timeoutMs 90000');
+    expect(claim.prompt).toContain('From the digest in its answer take finished, stalled, claimable as claimableByKind["claude-code"], preparing as preparingByKind["claude-code"] (0 when the digest has no preparingByKind), verifying (empty when absent), openQuestions and awaitingReview');
+    expect(claim.prompt).toContain('If finished or stalled is true, return { claimed: false, finished, stalled, claimable, preparing, verifying, openQuestions, awaitingReview } at once');
+    expect(claim.prompt).toContain('if you have done fewer than 3 polls (a poll is one claim followed by one wait), go back to step 1; after poll 3 return those fields with claimed false');
+    expect(claim.schema!.required).toEqual(['claimed']);
+    expect(Object.keys(claim.schema!.properties!)).not.toContain('stop');
+    for (const k of ['finished', 'stalled', 'claimable', 'preparing', 'verifying', 'openQuestions', 'awaitingReview']) expect(claim.schema!.properties!, k).toHaveProperty(k);
+  });
+
+  it('3: stopRule, pulled out of the source, applies the stop rule as a table', () => {
+    const body = /function stopRule\(d, othersHold\) \{[\s\S]*?\n\}\n/.exec(workJs())![0];
+    const stopRule = new Function(`${body}; return stopRule`)() as (d: Record<string, unknown>, othersHold: boolean) => boolean;
+    const quiet = { finished: false, stalled: false, claimable: 0, preparing: 0, verifying: [], openQuestions: ['T1'], awaitingReview: [] };
+    const table: Array<[string, Record<string, unknown>, boolean, boolean]> = [
+      ['finished', { ...quiet, finished: true, claimable: 2, openQuestions: [] }, true, true],
+      ['stalled', { ...quiet, stalled: true, claimable: 2, openQuestions: [] }, true, true],
+      ['question open, nothing claimable, prepared or verifying, no other loop holds', quiet, false, true],
+      ['the same while another loop holds a launch', quiet, true, false],
+      ['a launch being prepared', { ...quiet, preparing: 1 }, false, false],
+      ['a launch claimable', { ...quiet, claimable: 1 }, false, false],
+      ['a task under verification', { ...quiet, verifying: ['T2'] }, false, false],
+      ['awaited review for an id under verification', { ...quiet, openQuestions: [], awaitingReview: ['M1'], verifying: ['M1'] }, false, false],
+      ['awaited review for an id not under verification', { ...quiet, openQuestions: [], awaitingReview: ['M1'] }, false, true],
+      ['nothing to wait on a human for', { ...quiet, openQuestions: [] }, false, false],
+      ['a digest without preparing counts it as 0', { finished: false, stalled: false, claimable: 0, verifying: [], openQuestions: ['T1'], awaitingReview: [] }, false, true],
+      ['a digest without verifying counts it as empty', { claimable: 0, openQuestions: ['T1'] }, false, true],
+    ];
+    for (const [name, d, others, want] of table) expect(stopRule(d, others), name).toBe(want);
+  });
+
+  it('4: another loop holding a launch keeps the loop claiming; after that worker returns, the same digest ends it', async () => {
+    const digest = { claimed: false, finished: false, stalled: false, claimable: 0, preparing: 0, verifying: [], openQuestions: ['T9'], awaitingReview: [] };
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const { perWorker, logs } = await runWorkflow({
+      workers: 2,
+      claimer: async (id, n) => {
+        if (id === 'work-1') return n === 1 ? launch : digest;
+        // Loop 2: its first answer arrives while loop 1's worker is pending, so the loop claims again.
+        if (n === 2) release();
+        if (n === 1) await new Promise((r) => setTimeout(r, 10));
+        else await new Promise((r) => setTimeout(r, 30));
+        return digest;
+      },
+      worker: async (taskId) => {
+        await held;
+        return { taskId, outcome: 'submitted', summary: 's' };
+      },
+    });
+    expect(perWorker['work-2']).toBe(2);
+    expect(perWorker['work-1']).toBe(2);
+    expect(logs).toContain('work-1: T1 submitted');
+  });
+
+  it('5: a claimer that returns nothing is retried once, and two in a row end the loop', async () => {
+    const once = await runWorkflow({ claims: [null, launch] });
+    expect(once.logs).toContain('work-1: claimer returned nothing, retrying');
+    expect(once.prompts.some((p) => p.label === 'work work-1 T1')).toBe(true);
+    expect(once.logs).toContain('work-1: T1 submitted');
+    const twice = await runWorkflow({ claims: [null, null, launch] });
+    expect(twice.logs).toEqual(['work-1: claimer returned nothing, retrying', 'work-1: claimer returned nothing twice, loop ends']);
+    expect(twice.perWorker['work-1']).toBe(2);
+    expect(twice.prompts.some((p) => p.label.startsWith('work '))).toBe(false);
+  });
+
+  it('a claimer error ends the loop with a log line', async () => {
+    const { logs, perWorker } = await runWorkflow({ claims: [{ claimed: false, error: 'tool missing' }] });
+    expect(logs).toEqual(['work-1: claimer error, loop ends: tool missing']);
+    expect(perWorker['work-1']).toBe(1);
+  });
+
+  it('the last digest is the workflow result', async () => {
+    const d = { claimed: false, finished: false, stalled: true, claimable: 0, preparing: 0, verifying: [], openQuestions: [], awaitingReview: [] };
+    const { result } = await runWorkflow({ claims: [d] });
+    expect(result['digest']).toEqual({ finished: false, stalled: true, openQuestions: [], awaitingReview: [], claimable: 0, preparing: 0, verifying: [] });
   });
 });
 

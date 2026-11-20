@@ -560,13 +560,19 @@ export async function startOperatorServer(argv: string[], env: NodeJS.ProcessEnv
   tool(
     'claim',
     {
-      description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner (the CLI the launch was prepared for), model, effort, the lease (leaseTtlMs, leaseExpiresAt, and lease { ttlMs, expiresAt, renewEveryMs }: the worker must call a launch tool at least every renewEveryMs, a third of the TTL, and run longer commands in the background), and pending when a question is open. runner filters by the kinds this worker can run (one or a list); a named task of another kind is 409. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable (for the runner filter) or the run is paused.',
-      inputSchema: { workerId: z.string(), taskId: z.string().optional(), access: z.enum(['local', 'remote']).optional(), runner: z.union([z.enum(RUNNER_KINDS), z.array(z.enum(RUNNER_KINDS))]).optional() },
+      description: 'Claim the oldest parked launch (or a named task\'s) for a worker id. Returns launchId, taskId, token, worktree, briefPath, brief, baseSha, apiUrl, runner (the CLI the launch was prepared for), model, effort, the lease (leaseTtlMs, leaseExpiresAt, and lease { ttlMs, expiresAt, renewEveryMs }: the worker must call a launch tool at least every renewEveryMs, a third of the TTL, and run longer commands in the background), and pending when a question is open. brief: false leaves the parsed brief out of the answer (every other field is kept; read the brief file at briefPath instead), for a claimer that only passes the claim on. runner filters by the kinds this worker can run (one or a list); a named task of another kind is 409. Idempotent: the same worker id gets its launch back. 404 when nothing is claimable (for the runner filter) or the run is paused.',
+      inputSchema: { workerId: z.string(), taskId: z.string().optional(), access: z.enum(['local', 'remote']).optional(), runner: z.union([z.enum(RUNNER_KINDS), z.array(z.enum(RUNNER_KINDS))]).optional(), brief: z.boolean().optional() },
     },
     async (a, c) =>
       guarded(async () => {
         await c.register();
-        return c.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access, runner: a.runner, attachment: client.attachmentId });
+        const r = await c.call('POST', '/v1/claims', { workerId: a.workerId, taskId: a.taskId, access: a.access, runner: a.runner, attachment: client.attachmentId });
+        // The daemon's route is unchanged; the tool drops the brief so a large one cannot push the answer over the tool-output limit. See specs/operator-mcp "Worker tools".
+        if (a.brief === false && r.body && typeof r.body === 'object' && !Array.isArray(r.body)) {
+          const { brief: _brief, ...rest } = r.body as Record<string, unknown>;
+          return { ...r, body: rest };
+        }
+        return r;
       }),
   );
   tool(

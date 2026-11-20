@@ -63,7 +63,7 @@ has been added with `/add-dir`. After one inline run the Workflow tool returns a
 a re-run with the same run tag may pass that path as `scriptPath`.
 
 Each worker loop runs a claimer agent that claims a launch with the worker id `<runTag>-<n>`;
-when nothing is claimable it waits up to 90 seconds, reads `status`, and tries again, up to
+when nothing is claimable it waits up to 90 seconds, reads the `wait` digest, and tries again, up to
 three polls before returning. The claimer makes no decisions, so it runs on a fixed cheap
 model: `claude-haiku-5-5` at `low` effort. Pass `claimModel` and `claimEffort` in `args` only
 when the user asks for a different claimer. On a claim the loop runs a worker agent on the
