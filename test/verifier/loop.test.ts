@@ -32,7 +32,11 @@ interface Call {
 }
 type Answer = { status: number; body?: Record<string, unknown> } | 'throw';
 
-/** A fake daemon: records each call and answers it with `handler(call, n)`, `n` counting the calls to that route. */
+/**
+ * A fake daemon: records each call and answers it with `handler(call, n)`, `n` counting the calls to that route. Like a
+ * real fetch, the call honors its `AbortSignal`: one aborted before its answer rejects with the signal's reason, so the
+ * client sends it again (the termination signal aborts every fetch in flight).
+ */
 function fakeDaemon(handler: (c: Call, n: number) => Answer | Promise<Answer>) {
   const calls: Call[] = [];
   const counts = new Map<string, number>();
@@ -43,7 +47,20 @@ function fakeDaemon(handler: (c: Call, n: number) => Answer | Promise<Answer>) {
     calls.push(c);
     const n = (counts.get(route) ?? 0) + 1;
     counts.set(route, n);
-    const a = await handler(c, n);
+    const signal = init?.signal;
+    if (signal?.aborted) throw signal.reason;
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(signal!.reason);
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+    aborted.catch(() => {});
+    let a: Answer;
+    try {
+      a = await Promise.race([Promise.resolve(handler(c, n)), aborted]);
+    } finally {
+      signal?.removeEventListener('abort', onAbort!);
+    }
     if (a === 'throw') throw new TypeError('fetch failed');
     return new Response(JSON.stringify(a.body ?? {}), { status: a.status });
   }) as typeof fetch;
@@ -447,7 +464,7 @@ describe('verifier loop: termination', () => {
     expect(out.at(-1)).toBe('verifier v-1 terminating - -');
   });
 
-  it('raised while a claim is held and the claim then answered 200: one release with podTerminating, no job, no further claim', async () => {
+  it('raised while a claim is held and the claim then answered 200: the claim in flight is sent again once, one release with podTerminating, no job, no further claim', async () => {
     const term = new AbortController();
     const held = deferred<Answer>();
     const d = fakeDaemon((c) => (c.route === '/v1/verify/claims' ? held.promise : { status: 200, body: { ok: true } }));
@@ -469,7 +486,9 @@ describe('verifier loop: termination', () => {
     held.resolve({ status: 200, body: claimBody() });
     expect(await loop).toBe(0);
     expect(ran).toBe(false);
-    expect(d.claims()).toHaveLength(1);
+    // The signal aborts the claim in flight and the client sends the same claim again; the loop claims no more.
+    expect(d.claims()).toHaveLength(2);
+    expect(d.claims()[1]).toEqual(d.claims()[0]);
     expect(d.releases()).toEqual([{ method: 'POST', route: '/v1/verify/job-1/release', body: { reason: 'podTerminating' }, auth: 'Bearer tok-job-1' }]);
     expect(has(out, 'terminating')).toHaveLength(1);
   });
@@ -506,6 +525,9 @@ describe('verifier loop: termination', () => {
     held.resolve({ status: 200, body: { ok: true } });
     expect(await loop).toBe(0);
     expect(has(out, 'verified')).toEqual(['verifier v-1 verified job-1 T1']);
+    // The post in flight at the signal is aborted and sent again; the one sent again is answered 200.
+    expect(d.results()).toHaveLength(2);
+    expect(d.results()[1]).toEqual(d.results()[0]);
     expect(d.releases()).toEqual([]);
     expect(d.claims()).toHaveLength(1);
   });
@@ -555,9 +577,14 @@ describe('verifier loop: bounded shutdown', () => {
       expect(has(out, 'result-refused')).toHaveLength(1);
       expect(has(out, 'released')).toEqual(['verifier v-1 released job-1 T1']);
       expect(d.claims()).toHaveLength(1);
-      // An answered post is not sent again after the signal; only a connection failure is retried, within TERMINATION_CALL_MS.
-      if (answer !== 'throw') expect(d.results()).toHaveLength(1);
-      else expect(d.results().length).toBeGreaterThan(1);
+      // The signal aborts the post in flight, and the client sends it again: same route, body and job token.
+      const posts = d.results();
+      expect(posts[0]).toEqual({ method: 'POST', route: '/v1/verify/job-1/result', body: VERIFIED, auth: 'Bearer tok-job-1' });
+      for (const p of posts) expect(p).toEqual(posts[0]);
+      // The post sent again is answered and not sent a third time; only a connection failure is retried, within
+      // TERMINATION_CALL_MS.
+      if (answer !== 'throw') expect(posts).toHaveLength(2);
+      else expect(posts.length).toBeGreaterThan(2);
     });
   }
 

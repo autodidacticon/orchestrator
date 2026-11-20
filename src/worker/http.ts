@@ -6,7 +6,8 @@
  * The client is termination-aware: given the loop's termination signal, the signal aborts the fetch in flight of
  * every call, and those calls are retried with no more than `TERMINATION_CALL_MS` left; a call started after the
  * signal gets the smaller of the retry window and `TERMINATION_CALL_MS`. Every fetch is aborted once its call's
- * remaining window has passed, so a daemon that accepts a connection and never answers cannot hold the loop.
+ * remaining window has passed, so a daemon that accepts a connection and never answers cannot hold the loop; the timer
+ * of that abort is capped at `MAX_TIMER_MS`, so a retry window of 2^31 ms or more cannot overflow it.
  * See specs/worker-pool "Worker loop" and "Pod termination", and specs/verifier-pool "Verifier termination".
  */
 
@@ -23,6 +24,11 @@ export const TERMINATION_CALL_MS = 5_000;
 export const MIN_FETCH_MS = TERMINATION_CALL_MS;
 /** The shortest timeout of one fetch after the termination signal. */
 export const MIN_TERMINATING_FETCH_MS = 1_000;
+/**
+ * The longest delay `setTimeout` takes (2^31 - 1 ms). A longer one fires after 1 ms with a `TimeoutOverflowWarning`, so
+ * the fetch timer is capped here; the retry window itself keeps its configured value.
+ */
+export const MAX_TIMER_MS = 2 ** 31 - 1;
 
 export interface ApiClientOptions {
   /** The daemon's base URL (`ORCH_API`), without a trailing slash. */
@@ -61,7 +67,7 @@ export function apiClient(o: ApiClientOptions): ApiCall {
         const ctl = new AbortController();
         attempt = ctl;
         const limit = Math.max(deadline - now(), terminating() ? MIN_TERMINATING_FETCH_MS : MIN_FETCH_MS);
-        const timer = setTimeout(() => ctl.abort(new Error(`no answer within ${limit} ms`)), limit);
+        const timer = setTimeout(() => ctl.abort(new Error(`no answer within ${limit} ms`)), Math.min(limit, MAX_TIMER_MS));
         let res: Response;
         let parsed: unknown;
         try {
