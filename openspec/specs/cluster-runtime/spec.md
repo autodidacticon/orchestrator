@@ -705,7 +705,11 @@ The kind fixture's check `fixture/test.js` SHALL wait 5 seconds and then fail wh
 
 #### Scenario: What one sample reads
 - **WHEN** the probe takes a sample of a container
-- **THEN** it runs one `kubectl exec` with only `sh`, `cat`, `sed`, `grep`, `tr` and `sleep`, which prints pid 1's command line and reads, twice and one second apart, the processes whose `PPid:` is 1 and whose `State:` is not `Z`, and reports each pid found in both reads whose `comm` is not `git`; it never looks for the text `sh -c`
+- **THEN** it runs one `kubectl exec` with only `sh`, `cat`, `sed`, `grep`, `tr` and `sleep`, which prints pid 1's command line and reads, twice and one second apart, the processes whose `PPid:` is 1 and whose `State:` is not `Z`, and reports each pid found in both reads whose `comm` at the second read is not `git`; it never looks for the text `sh -c`
+
+#### Scenario: A child caught between fork and exec
+- **WHEN** a child of pid 1 has `comm` `node` at the first read and `git` at the second
+- **THEN** the sample does not report it, and a child whose `comm` is `node` at both reads is still reported
 
 #### Scenario: Samples that do not count
 - **WHEN** a sample's `kubectl exec` fails, or the second field of its pid 1 command line is not exactly `/usr/local/bin/orchestrator` (daemon) or `/usr/local/bin/orchestrator-verifier` (verifier)
@@ -713,7 +717,15 @@ The kind fixture's check `fixture/test.js` SHALL wait 5 seconds and then fail wh
 
 #### Scenario: The assertion
 - **WHEN** the probe has stopped
-- **THEN** the assertion holds when no daemon sample reported a child, at least one verifier sample did, and at least five daemon samples were taken; it prints the three counts and the slowest round, and `cleanup` stops the probe and removes its files when the script exits early
+- **THEN** the assertion holds when no daemon sample reported a child, at least one verifier sample did, at least five daemon samples were taken, and the slowest round was shorter than the fixture check's 5 s; it prints the three counts and the slowest round
+
+#### Scenario: A slow round
+- **WHEN** the slowest round took 5 s or longer, or no round finished
+- **THEN** the assertion fails with a line naming the slowest round, or saying that no round finished
+
+#### Scenario: The script stops before the assertion
+- **WHEN** the script exits non-zero while the probe runs or before the assertion has run
+- **THEN** `cleanup` stops the probe, prints its three counts and the slowest round on stderr, and removes its files; an exit 0, or an exit after the assertion printed them, prints nothing more
 
 ### Requirement: Smoke M5 step: failed jobs and verifier logs
 `deploy/smoke.sh` SHALL assert `M5: the failed jobs are checkFailed with the check's output` from the rows that `pg_m5_jobs` reads in `orchestrator.verifier_jobs`, and `M5: verifier logs show the check` from the verifier pods' logs read with `--tail=-1`, whose lines `verifier <id> <event> <jobId> <taskId>` and check output show each check of the two M5 tasks.
@@ -725,6 +737,10 @@ The kind fixture's check `fixture/test.js` SHALL wait 5 seconds and then fail wh
 #### Scenario: The logs show each check
 - **WHEN** the log assertion reads the verifier pods' logs, printing each verifier container's restart count
 - **THEN** they hold a `check` and a `verified` line for `SMOKE-M5-PASS` with `fixture check: ok` in that check's output, and two `check` and two `checkFailed` lines for `SMOKE-M5-BREAK` naming the two job ids `pg_m5_jobs` read, each check's output holding `fixture check: README.md names a task that breaks the check`
+
+#### Scenario: The log check needs the two job ids itself
+- **WHEN** `pg_m5_jobs` does not read exactly two job ids for `SMOKE-M5-BREAK`, even with no `SMOKE-M5-BREAK` log lines to compare
+- **THEN** the log assertion fails with a line giving the number of rows, whatever assertion ran before it
 
 ### Requirement: Smoke M5 step: daemon side and the finished run
 `deploy/smoke.sh` SHALL assert `M5: the daemon pod made no verification worktree` (no `<runDir>/verify` in the daemon container) and then `M5: the run is finished again`: it cancels `SMOKE-M5-BREAK` and `/v1/status` says `finished: true` within `STATUS_TIMEOUT_S`.

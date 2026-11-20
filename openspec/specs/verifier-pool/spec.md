@@ -76,11 +76,15 @@ The job SHALL be requeued with `retry` `refused` when origin lacks `refs/verify/
 - **THEN** the first two append `verify.requeued` with `retry` `refused` naming the ref, and the third blocks the task as `pushRefused` with `attempts` 0
 
 ### Requirement: Verify ref: deletion
-Every run that read a `verified` result SHALL delete `refs/verify/<jobId>` on origin and in the clone as it ends, whatever the outcome. A failed deletion SHALL be logged as a warning and SHALL change nothing else.
+Every run that read a `verified` result SHALL delete `refs/verify/<jobId>` on origin and in the clone after the daemon has written its outcome, whatever the outcome, a failed run, a drop and a job found no longer live included. A run that ends with nothing written, because the daemon stops, the store went fatal or the daemon dies, SHALL keep the ref for the resumed run. A failed deletion SHALL be logged as a warning and SHALL change nothing else.
 
 #### Scenario: Ref gone after publication
 - **WHEN** a job verified through its ref is published
 - **THEN** `git ls-remote <origin> 'refs/verify/*'` prints nothing and the clone has no ref under `refs/verify/`
+
+#### Scenario: Daemon killed before the outcome is written
+- **WHEN** with `git.pushRefusalLimit: 2` a verified result is refused because the ref holds another commit, the daemon dies before it writes the outcome, and the daemon restarts
+- **THEN** origin still holds `refs/verify/<jobId>` after the restart, the resumed run appends one `verify.requeued` with `retry` `refused` and `refusals` 1 naming the commit the ref holds, the ref is then deleted, and the task stays `submitted` with `attempts` 0
 
 ### Requirement: Remote verification and restarts
 Under `verifier.mode: remote` the single verifier slot SHALL resume the oldest unapplied `checking` job with an `offer` before it starts a `queued` job, after the hold after a gap. A resumed run SHALL skip the sync and the offer, keep the stored `expectedHead` and check command, and return a stored result at once.
@@ -94,7 +98,7 @@ Under `verifier.mode: remote` the single verifier slot SHALL resume the oldest u
 
 #### Scenario: Stop while waiting
 - **WHEN** `stop()` is called while a job waits for a result
-- **THEN** it returns within one second and the job row is unchanged
+- **THEN** it returns within one second of the moment the reap and the prepare-command stop end, and the job row is unchanged
 
 ### Requirement: Integration steps under remote verification
 Under `verifier.mode: remote` the verifier that claimed the job SHALL carry out integration-pipeline "Rebase and conflict handling" and "Rebase from the merge base" in its own clone, from origin's launch branch, instead of a temporary worktree of the daemon. It SHALL carry out "Check and verified tree" with its claim's check command, "Check environment" in its own environment, and "Check command kept for a running check" through the offer's command.
@@ -244,18 +248,26 @@ The check SHALL get what `runCheck` gives in a process that opened no store, wha
 - **THEN** the check's environment holds none of the four, holds `ORCH_HOME` as `<cache>/child-home`, and does not contain the job token
 
 ### Requirement: Verifier termination
-SIGTERM or SIGINT SHALL make the loop print `terminating` and claim no more; a second signal SHALL change nothing. While the loop waits between claims it SHALL exit 0 at once. A claim in flight SHALL be awaited: a job it grants SHALL be released at once with reason `podTerminating`, and any other end of the claim SHALL exit 0. After the signal every call SHALL retry a connection failure for at most the smaller of the retry window and 5000 ms.
+SIGTERM or SIGINT SHALL make the loop print `terminating` and claim no more; a second signal SHALL change nothing. While the loop waits between claims it SHALL exit 0 at once. The signal SHALL abort a claim in flight, which is sent again within 5000 ms: a job it grants SHALL be released at once with reason `podTerminating`, and any other end of the claim, no answer included, SHALL exit 0. Every call SHALL be bounded as `Verifier termination: bounded calls` says.
 
 #### Scenario: Nothing to claim
 - **WHEN** a verifier loop with nothing to claim gets SIGTERM, or SIGINT
 - **THEN** it exits 0 with a `terminating` line and no `verify.released` event is appended
 
+#### Scenario: Claim never answered
+- **WHEN** in `test/verifier/loop.test.ts`, with `retryWindowMs` 60000, a claim is in flight at SIGTERM and the daemon never answers it
+- **THEN** the loop exits 0 within `TERMINATION_CALL_MS` plus 1000 ms of the signal
+
 ### Requirement: Verifier termination: job in progress
-While a job is worked and before its result is posted, the signal SHALL abort the job, which kills the check, and the loop SHALL wait at most 5000 ms for the job to return. It SHALL then post the release with the job token and `{ reason: 'podTerminating' }`, print `released` on a 200, and exit 0 whatever the answer. A result post in flight SHALL be awaited with no further retries, and the loop SHALL then exit 0.
+While a job is worked and before its result is posted, the signal SHALL abort the job, which kills the check, and the loop SHALL wait at most 5000 ms for the job to return. It SHALL then post the release with the job token and `{ reason: 'podTerminating' }`, print `released` on a 200, and exit 0 whatever the answer. After the signal no answered result post SHALL be posted again, a signal in the pause between posts included.
 
 #### Scenario: SIGTERM while the check runs
 - **WHEN** a verifier loop gets SIGTERM while its check runs
 - **THEN** it exits 0 within five seconds with `terminating` and `released` lines, the daemon holds one `verify.released` event with reason `podTerminating`, origin has no `refs/verify/<jobId>`, and another verifier can claim the job
+
+#### Scenario: Signal in the pause between posts
+- **WHEN** a result post is answered 503 and the signal lands during the 1000 ms pause before the next post
+- **THEN** no further post is made, so exactly one result post is made in total, and the job is released with reason `podTerminating`
 
 ### Requirement: Verify job offer
 A verify job SHALL carry four optional fields in its JSON document, with no column and no migration: `offer` (`at`, `checkCommand`), `token`, `verifier` (`id`, `claimedAt`, `expiresAt`) and `result`. A job SHALL be claimable only when it is unapplied and `checking`, has an `offer`, holds neither `verifier` nor `result`, and its launch row exists. A job the in-process backend checks has no `offer` and SHALL never be claimable.
@@ -356,7 +368,7 @@ The job token SHALL leave the daemon only in the claim answer: no event, log lin
 - **THEN** `verifier.expiresAt` is the clock plus `leaseTtlMs`, the answer holds `ttlMs`, `expiresAt` and `renewEveryMs`, and the latest event sequence is unchanged
 
 ### Requirement: Verify lease: expiry
-Each tick SHALL, first in its verification phase and after writing pending gaps, end every lease of an unapplied `checking` job with a `verifier`, no `result` and `verifier.expiresAt` at or before now: one transaction SHALL remove `verifier` and `token` and append `verify.leaseExpired` with `jobId` and `verifierId`. The job SHALL stay `checking` with its `offer`, claimable again, and no attempt SHALL be spent.
+Each tick SHALL, first in its verification phase and after writing pending gaps, end every lease of an unapplied `checking` job with a `verifier`, no `result` and `verifier.expiresAt` at or before now: one transaction SHALL remove `verifier` and `token` and append `verify.leaseExpired` with `jobId` and `verifierId`. Unless "Verify lease: cycle cap" ends it, the job SHALL stay `checking` with its `offer`, claimable again, and no attempt SHALL be spent.
 
 #### Scenario: Lease runs out
 - **WHEN** `leaseTtlMs` passes after a claim without a heartbeat and the tick runs
@@ -403,7 +415,7 @@ A result for a job that already holds a `result` SHALL answer 200 `{ ok: true, d
 - **THEN** each answers `{ ok: true, duplicate: true }` and still one `verify.result` event exists
 
 ### Requirement: Verify release
-`POST /v1/verify/:jobId/release` with `{ reason? }` and the job token SHALL hand the claim back: a job holding a `result` SHALL answer 409 `{ ok: false, reason: "a result is already recorded" }`; a `reason` that is not a string SHALL answer 400 naming `reason`. Otherwise one transaction SHALL remove `verifier` and `token` and append `verify.released` with `jobId`, `verifierId` and `reason` (default `released by verifier`). The job keeps its `offer`.
+`POST /v1/verify/:jobId/release` with `{ reason? }` and the job token SHALL hand the claim back: a job holding a `result` SHALL answer 409 `{ ok: false, reason: "a result is already recorded" }`; a `reason` that is not a string SHALL answer 400 naming `reason`. Otherwise one transaction SHALL remove `verifier` and `token` and append `verify.released` with `jobId`, `verifierId` and `reason` (default `released by verifier`). Unless the cycle cap ends it, the job SHALL keep its `offer`.
 
 #### Scenario: Release and claim again
 - **WHEN** `v1` releases with `reason: terminating`, `v2` claims, and `v1` releases again with its old token
@@ -412,3 +424,82 @@ A result for a job that already holds a `result` SHALL answer 200 `{ ok: true, d
 #### Scenario: Release after a result
 - **WHEN** a verifier that has posted a result releases the job
 - **THEN** the release answers 409 and the row is unchanged
+
+### Requirement: Verify ref: deletion: verify refs only
+`Origin.deleteRef` SHALL refuse with an `Error` any name that does not start with `refs/verify/`, whatever its case, before it runs a command that talks to origin, changes a ref, or adds or re-points a remote. A verify ref that origin or the clone lacks SHALL NOT be an error.
+
+#### Scenario: Branches and the tracking ref
+- **WHEN** `deleteRef` is called with `refs/heads/main`, `refs/heads/MAIN` and `refs/remotes/origin/main`
+- **THEN** each rejects with an `Error` naming the ref and `refs/verify/`, the clone's `main` and tracking ref and origin's `main` are unchanged, and no remote is added
+
+#### Scenario: Missing verify ref
+- **WHEN** `deleteRef` is called with a ref under `refs/verify/` that neither origin nor the clone has, or git answers `remote ref does not exist`
+- **THEN** the call resolves and the clone has no such ref
+
+### Requirement: Remote verification run: the wait: ended job
+The wait SHALL end with nothing recorded when the job row has left `checking` without a result, as a job that lost its verifier three times has. The verifier slot SHALL then be free.
+
+#### Scenario: Verifier lost while waiting
+- **WHEN** three verifiers in turn claim an offered job and release it with reason `verifierError`
+- **THEN** the job is `failed` with `failureKind` `verifierLost`, the verifier slot is free, and the task has spent an attempt
+
+### Requirement: Remote verification outcomes: dropped job
+A failed run, including a run that throws, SHALL write nothing to a job row that is gone, `dropped` or applied. The row SHALL keep its status, `applied` flag and fields.
+
+#### Scenario: Dropped during the ref check
+- **WHEN** a cascade drops a `checking` job that holds a `verified` result while its ref is fetched, and the run then throws an error that is not an `OriginFetchError`
+- **THEN** the job stays `dropped` and applied with its result, has no `failureKind`, and the task's `attempts` is unchanged
+
+### Requirement: Verify lease: cycle cap
+A job SHALL count in `leaseLosses`, never cleared, each lease expiry and each release with reason `verifierError`. A release with any other reason, `podTerminating` included, SHALL NOT be counted. The event of a counted loss SHALL carry `leaseLosses`. At the third loss, the same transaction SHALL set the job `failed` with `failureKind` `verifierLost`, an output that names the count, and no `offer`, `verifier`, `token` or `result`. The tick SHALL then fail the task, spending an attempt.
+
+#### Scenario: Third loss
+- **WHEN** a job's lease expires, a verifier releases it with `podTerminating`, another releases it with `verifierError`, and a further lease expires
+- **THEN** after the second counted loss the job is still `checking` with its offer and claimable, and after the third it is `failed` with `failureKind` `verifierLost`, `leaseLosses` 3 and an output naming 3, and the task has `attempts` 1
+
+### Requirement: Verify claim: refusals: long verifierId
+A `verifierId` longer than 253 characters, the longest pod name, after trimming, SHALL answer 400 `{ error, field: "verifierId" }` before anything is written.
+
+#### Scenario: 254 characters
+- **WHEN** a claim carries a `verifierId` of 254 characters, and then one of 253
+- **THEN** the first answers 400 naming `verifierId` and appends no event, and the second is granted
+
+### Requirement: Verify result: body: limits
+A result's `conflictFiles` SHALL be stored with its first 200 entries.
+
+#### Scenario: 500 conflict files
+- **WHEN** a `conflict` result carries 500 `conflictFiles`
+- **THEN** the stored result holds the first 200 files
+
+### Requirement: Verify release: reason limit
+A release `reason` SHALL be stored in `verify.released` with its first 4096 characters.
+
+#### Scenario: Long reason
+- **WHEN** a verifier releases a job with a `reason` of 10000 characters
+- **THEN** `verify.released` carries the reason's first 4096 characters
+
+### Requirement: Verifier termination: refused result post
+After the signal, a result post that ends neither stored (200) nor lost (401), because it is answered 400 or 5xx or gets no answer, SHALL be followed by one release with the job token and reason `podTerminating`, through the short window, and the loop SHALL then exit 0. A post stored or lost SHALL be followed by no release. The job is handed back, so it does not stay leased until `leaseTtlMs` runs out.
+
+#### Scenario: Refused after the signal
+- **WHEN** in `test/verifier/loop.test.ts` the result post in flight at SIGTERM is answered 400, or 503, or gets no answer
+- **THEN** the loop posts one release `{ reason: 'podTerminating' }` with the job token, prints `released`, and exits 0 within 6000 ms of the signal
+
+#### Scenario: Result post never answered
+- **WHEN** with `retryWindowMs` 60000 a result post is in flight at SIGTERM and the daemon never answers it
+- **THEN** the loop posts the release and exits 0 within `TERMINATION_CALL_MS` plus 1000 ms of the signal
+
+### Requirement: Verifier termination: bounded calls
+The verifier and worker loops SHALL share one termination-aware API client. The signal SHALL abort each fetch in flight through its `AbortSignal`, and that call SHALL retry with at most 5000 ms (`TERMINATION_CALL_MS`) left; a call started after the signal SHALL retry for at most the smaller of the retry window and 5000 ms. A fetch SHALL be aborted once its call's window has passed, but no sooner than 5000 ms before the signal or 1000 ms after it.
+
+#### Scenario: Daemon holds the connection
+- **WHEN** a call's fetch is accepted and never answered and the call's remaining window passes
+- **THEN** the fetch is aborted and the call throws its error, so a call in flight at the signal ends at most `TERMINATION_CALL_MS` plus 1000 ms after it
+
+#### Scenario: Answer cut off by the signal
+- **WHEN** the signal aborts a fetch after its headers have arrived and while its body is read
+- **THEN** the call counts it as no answer and sends it again, so a claim's grant is not taken for an empty answer: the repeated claim returns the job, which is released with `podTerminating`
+
+#### Scenario: Before the signal
+- **WHEN** no signal has come and a fetch is started with less than 5000 ms of its window left
+- **THEN** the fetch is given 5000 ms, so a slow answer near the end of the window is still awaited

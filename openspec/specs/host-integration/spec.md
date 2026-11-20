@@ -178,8 +178,8 @@ The plugin SHALL provide a `work` skill and a bundled workflow `workflows/work.j
 - **THEN** every claimer agent is started with model `claude-haiku-5-5` and effort `low`, and a run with `claimModel: "claude-sonnet-5-5"` starts them with that model instead
 
 #### Scenario: Idle loop polls inside one claimer
-- **WHEN** nothing is claimable and the stop rule does not hold
-- **THEN** one claimer agent waits, reads status, and claims again up to three times before returning, and a launch parked during a wait is claimed on the next poll of the same agent
+- **WHEN** nothing is claimable and neither `finished` nor `stalled` is true
+- **THEN** one claimer agent waits, takes its fields from the `wait` digest, and claims again up to three times before returning, and a launch parked during a wait is claimed on the next poll of the same agent
 
 #### Scenario: Labels share the worker id
 - **WHEN** worker `work-1-2` claims KNO-10
@@ -198,8 +198,8 @@ The plugin SHALL provide a `work` skill and a bundled workflow `workflows/work.j
 - **THEN** a worker claims the `claude-code` launch only, the `codex` launch stays parked until the claim window passes and the daemon spawns it, and the loop's stop rule counts only `claimableByKind["claude-code"]`
 
 #### Scenario: A launch being prepared keeps the claimer polling
-- **WHEN** nothing is claimable for `claude-code`, a question is open, and `status.preparingByKind["claude-code"]` is 1 because a launch's prepare command runs
-- **THEN** the claimer's stop is false and it polls again; a status without `preparingByKind` is read as 0
+- **WHEN** nothing is claimable for `claude-code`, a question is open, and the digest's `preparingByKind["claude-code"]` is 1 because a launch's prepare command runs
+- **THEN** the claimer returns `preparing` 1, `stopRule` gives false, and the loop runs another claimer; a digest without `preparingByKind` is read as 0
 
 #### Scenario: Workflow started inline from the plugin
 - **WHEN** a session that has not added the plugin directory runs the work or run skill in `pull` mode
@@ -1022,11 +1022,11 @@ The `work` skill SHALL say that pull-mode workers are this session's Claude suba
 - **THEN** the work skill runs no workflow and offers `start` with `mode: "spawn"` or `"mixed"`
 
 ### Requirement: Work workflow: claims only claude-code launches
-The workflow SHALL claim with `runner: "claude-code"`, so that codex-kind launches are never claimed by the Claude worker loop, and its stop rule SHALL count only `claimableByKind["claude-code"]` and `preparingByKind["claude-code"]` (0 when the status has no `preparingByKind`).
+The workflow SHALL claim with `runner: "claude-code"`, so that codex-kind launches are never claimed by the Claude worker loop, and its stop rule SHALL count only `claimableByKind["claude-code"]` and `preparingByKind["claude-code"]` (0 when the `wait` digest has no `preparingByKind`), which the claimer copies from the digest as `claimable` and `preparing`.
 
 #### Scenario: Claim names the runner
 - **WHEN** the claimer prompt of `workflows/work.js` is composed
-- **THEN** its claim step passes `runner "claude-code"`, and its stop rule reads `claimableByKind["claude-code"]` and `preparingByKind["claude-code"]`, 0 when status has no `preparingByKind`
+- **THEN** its claim step passes `runner "claude-code"`, and it takes `claimable` from the digest's `claimableByKind["claude-code"]` and `preparing` from its `preparingByKind["claude-code"]`, 0 when the digest has no `preparingByKind`
 
 ### Requirement: Work workflow: clamp and fan-out
 The workflow SHALL clamp the worker count to the `capacity` argument when one is given, logging the clamp, and SHALL fan out one loop per worker with `parallel`.
@@ -1036,18 +1036,18 @@ The workflow SHALL clamp the worker count to the `capacity` argument when one is
 - **THEN** three loops run in `parallel` and nothing about a clamp is logged
 
 ### Requirement: Work workflow: claimer agent
-Each cycle SHALL run a claimer agent on the model named by the `claimModel` argument at the effort named by `claimEffort`, defaulting to `claude-haiku-5-5` at `low`, labelled `claim <workerId>`; the claimer SHALL claim with the loop's worker id and, when nothing is claimable, SHALL wait for up to 90 seconds with `until: "any"`, read `status`, evaluate the stop rule, and claim again, up to three polls before returning without a launch.
+Each cycle SHALL run a claimer agent on the model named by the `claimModel` argument at the effort named by `claimEffort`, defaulting to `claude-haiku-5-5` at `low`, labelled `claim <workerId>`; the claimer SHALL claim with the loop's worker id and `brief: false` and, when nothing is claimable, SHALL wait for up to 90 seconds with `until: "any"`, take its fields from the `wait` digest, and claim again, up to three polls before returning without a launch. It SHALL NOT call `status`.
 
 #### Scenario: Claimer options
 - **WHEN** the workflow runs with `claimEffort: "medium"` and no `claimModel`
-- **THEN** every claimer agent is started with model `claude-haiku-5-5` and effort `medium`, labelled `claim <workerId>`, and its prompt waits with `until "any"` and `timeoutMs` 90000 before reading `status`
+- **THEN** every claimer agent is started with model `claude-haiku-5-5` and effort `medium`, labelled `claim <workerId>`, and its prompt waits with `until "any"` and `timeoutMs` 90000, takes its fields from the `wait` digest, and asks for no `status` call
 
 ### Requirement: Work workflow: worker agent
-On a claim the loop SHALL run a worker agent labelled `work <workerId> <taskId>` with the claim's `model` and `effort` as the agent's model and effort options, whose prompt is composed from the brief plus tool instructions.
+On a claim the loop SHALL run a worker agent labelled `work <workerId> <taskId>` with the claim's `model` and `effort` as the agent's model and effort options, whose prompt is composed from tool instructions plus the brief's path, `briefPath`, and SHALL tell the worker to read the whole brief file before doing anything else. The claimer SHALL NOT read the brief, and its answer SHALL have no `briefMarkdown`.
 
 #### Scenario: Brief in the prompt
-- **WHEN** a claim returns `briefMarkdown` for KNO-10
-- **THEN** the worker agent's prompt holds that brief after the tool instructions, and the agent is labelled `work <workerId> KNO-10`
+- **WHEN** a claim returns `briefPath` `/wt/.orchestrator/brief.md` for KNO-10
+- **THEN** the worker agent's prompt names `/wt/.orchestrator/brief.md` after the tool instructions and says to read the whole file before anything else, and the agent is labelled `work <workerId> KNO-10`
 
 ### Requirement: Work workflow: worker tool instructions
 On a claim the loop SHALL run a worker agent whose prompt is composed from the brief plus tool instructions: work in the worktree with ordinary tools, commit on the launch branch, ask questions through `launch_block` and call it again while pending, report through `launch_report`, commit and resubmit with the same seq on a 409 dirty-worktree rejection, never write the fallback file, and stop on 401.
@@ -1057,11 +1057,11 @@ On a claim the loop SHALL run a worker agent whose prompt is composed from the b
 - **THEN** it says to commit on the launch branch, to call `launch_block` again with the same seq while pending, to commit and call again with the same seq on a 409 `dirtyWorktree`, never to write a fallback report file, and to stop on 401
 
 ### Requirement: Work workflow: loop end
-A loop SHALL end when nothing is claimable, nothing is being prepared for `claude-code`, no loop holds a launch, and the digest reports finished, stalled, or an open question.
+A loop SHALL end when nothing is claimable, nothing is being prepared for `claude-code`, nothing is under verification, no other loop holds a launch, and the digest reports an open question or a milestone awaiting review that is not under verification, or at once when the digest reports finished or stalled.
 
 #### Scenario: Held launch keeps the loops going
 - **WHEN** nothing is claimable or being prepared and a question is open, while another loop holds a launch
-- **THEN** the claimer's stop is false and it polls again
+- **THEN** `stopRule` gives false and the loop runs another claimer
 
 ### Requirement: Work skill: claimer options and worktree access
 The `work` and `run` skills SHALL document `claimModel` and `claimEffort` with their defaults and pass them only when the user asks for a different claimer, and SHALL say that workers edit worktrees under the run directory, outside the repository, so a session in `acceptEdits` mode prompts for each file there unless started with `--add-dir` for that directory.
@@ -1838,3 +1838,40 @@ The Codex host's run skill SHALL document the loop as the way to work a `pull` o
 #### Scenario: Run skills name the loop
 - **WHEN** the Codex run skill, the OpenCode run skill and `hosts/opencode/README.md` are read
 - **THEN** the Codex run skill names `orchestrator-work` and `work.mjs` for a `pull` or `mixed` codex run, and the OpenCode run skill and README name `work.mjs --runner opencode`
+
+### Requirement: Work workflow: claimer agent: digest fields
+A claimer that claims nothing SHALL return, with `claimed: false`, the fields of its last `wait` digest: `finished`, `stalled`, `claimable` (`claimableByKind["claude-code"]`), `preparing` (`preparingByKind["claude-code"]`, 0 when absent), `verifying`, `openQuestions` and `awaitingReview`. It SHALL return before its third poll only when `finished` or `stalled` is true.
+
+#### Scenario: Finished digest returns at once
+- **WHEN** the first `wait` of a claimer answers a digest with `finished` true
+- **THEN** the claimer returns the seven fields at once with `claimed: false`, without a second poll
+
+#### Scenario: Open question keeps the claimer polling
+- **WHEN** each `wait` answers a digest with a question open, nothing claimable and neither `finished` nor `stalled`
+- **THEN** the claimer claims again until three polls are done and then returns the seven fields of the last digest
+
+### Requirement: Work workflow: claimer agent: stop rule in the script
+The script SHALL decide whether a loop stops with a function `stopRule(d, othersHold)` over the claimer's digest fields, where `othersHold` is whether another loop holds a launch. It SHALL stop when `finished` or `stalled` is true, or when nothing is claimable, being prepared or under verification, no other loop holds a launch, and a question is open or a review is awaited for an id not under verification.
+
+#### Scenario: Stop rule table
+- **WHEN** `stopRule` is given a digest with a question open, `claimable` and `preparing` 0 and `verifying` empty
+- **THEN** it gives true when no other loop holds a launch, false when another does, false when `preparing` is 1, and true when `preparing` is absent
+
+#### Scenario: Awaited review under verification
+- **WHEN** `stopRule` is given a digest whose only awaited review is for an id listed in `verifying`
+- **THEN** it gives false
+
+#### Scenario: Another loop's worker returns
+- **WHEN** loop 2's claimer answers a digest with a question open and nothing claimable while loop 1's worker is pending, and answers the same digest after that worker returns
+- **THEN** loop 2 claims again after the first answer and ends after the second
+
+### Requirement: Work workflow: claimer agent: a silent claimer
+When a claimer returns nothing, the loop SHALL log `<workerId>: claimer returned nothing, retrying` and run one more claimer; when that one also returns nothing, the loop SHALL end, logging `<workerId>: claimer returned nothing twice, loop ends`. A claimer that answers with `error` SHALL end its loop with a log line naming the error.
+
+#### Scenario: One silent claimer is retried
+- **WHEN** the first claimer of loop `work-1` returns nothing and the second claims a launch
+- **THEN** the log holds `work-1: claimer returned nothing, retrying` and the worker agent runs on the launch
+
+#### Scenario: Two silent claimers end the loop
+- **WHEN** two claimers of loop `work-1` in a row return nothing
+- **THEN** the loop ends and the log holds `work-1: claimer returned nothing twice, loop ends`

@@ -416,7 +416,7 @@ The seeded randomized journal test SHALL write, through accepted batches, every 
 - **THEN** the set of tables its accepted batches wrote equals the journal's table list, `verifier_jobs`, `proposals` and `payload_overlays` included
 
 ### Requirement: Storable ids
-An id that holds a NUL character or a lone UTF-16 surrogate SHALL be refused at its entry point, before anything is written. The entry points are graph load (each node `id` and `deps` entry), `POST /v1/claims` (`workerId`, `taskId`, `attachment`) and `POST /v1/attachments` (`id`). Every id that passes SHALL be stored unchanged. The rewrite of "Storable strings" stays as the store's backstop.
+An id that holds a NUL character or a lone UTF-16 surrogate SHALL be refused at its entry point, before anything is written. The entry points are graph load (each node `id` and `deps` entry), `POST /v1/claims` (`workerId`, `taskId`, `attachment`), `POST /v1/attachments` (`id`) and `POST /v1/verify/claims` (`verifierId`). Every id that passes SHALL be stored unchanged. The rewrite of "Storable strings" stays as the store's backstop.
 
 #### Scenario: Ids that pass are found again
 - **WHEN** task, launch, job, proposal, attachment, kv and worker ids holding non-ASCII text, a surrogate pair or U+FFFD are written to every key column of each backend

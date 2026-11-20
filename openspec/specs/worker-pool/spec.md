@@ -110,7 +110,11 @@ On SIGTERM or SIGINT the worker loop SHALL claim no more and SHALL hand back a l
 
 #### Scenario: Claim in flight
 - **WHEN** the signal arrives while a claim is in flight
-- **THEN** the claim is awaited; answered 200, its launch is released without keep with reason `podTerminating`, no agent starts and the loop exits 0 when the release is answered 200; with any other answer it exits 0; with no answer within the retry window it exits 1
+- **THEN** the claim's fetch is aborted and the claim is sent again for at most 5000 ms (`TERMINATION_CALL_MS`); answered 200, its launch is released without keep with reason `podTerminating`, no agent starts and the loop exits 0 when the release is answered 200; with any other answer, or no answer within those 5000 ms, it exits 0
+
+#### Scenario: Claim never answered
+- **WHEN** in `test/worker/loop.test.ts`, with `retryWindowMs` 60000, a claim is in flight at SIGTERM and the daemon never answers it
+- **THEN** the loop exits 0 within `TERMINATION_CALL_MS` plus 1000 ms of the signal
 
 #### Scenario: Agent not started
 - **WHEN** the signal arrives while the clone is prepared or before the agent starts
@@ -146,7 +150,7 @@ On SIGTERM or SIGINT the worker loop SHALL claim no more and SHALL hand back a l
 
 #### Scenario: Bounded calls after the signal
 - **WHEN** the loop starts an API call after the signal (the relay's post, the status read, the release)
-- **THEN** a connection failure is retried for at most the smaller of `ORCH_RETRY_WINDOW_MS` and 5000 ms; a push the relay makes after the signal is limited to 30 s and stays unforced
+- **THEN** a connection failure is retried for at most the smaller of `ORCH_RETRY_WINDOW_MS` and 5000 ms, each fetch is bounded as verifier-pool `Verifier termination: bounded calls` says, and a call in flight at the signal is aborted and has at most 5000 ms left; a push the relay makes after the signal is limited to 30 s and stays unforced
 
 #### Scenario: Handed back in a slice
 - **WHEN** in `test/slice/worker-termination.test.ts` an agent changes a tracked file, adds an untracked file and waits, and the loop gets SIGTERM
