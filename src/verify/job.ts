@@ -36,7 +36,29 @@ export interface VerifierContext {
    * when the store went fatal or the job was dropped while waiting. See specs/integration-pipeline "Durable publishing record".
    */
   durable?: () => Promise<void>;
+  /**
+   * Under `verifier.mode: remote`: resolves with the result a verifier stored for this job, reading the row after each
+   * change. Rejects with `JobDroppedError` when the row is gone or dropped and with `VerifierStoppedError` when the
+   * daemon stops. Optional, as `durable` is: the in-process backend never calls it. See specs/verifier-pool
+   * "Remote verification run: the wait".
+   */
+  awaitResult?: () => Promise<NonNullable<VerifierJob['result']>>;
 }
+
+/** Thrown by `awaitResult` when the daemon stops while a remote job waits: nothing is recorded and the row stays. */
+export class VerifierStoppedError extends Error {
+  constructor(public readonly jobId: string) {
+    super(`verifier job ${jobId} stopped while it waited for a result`);
+    this.name = 'VerifierStoppedError';
+  }
+}
+
+/**
+ * The patch that removes a job's claim fields. Every job write that sets `queued`, `published`, `failed` or
+ * `conflict` spreads it; progress records and drops keep the fields. See specs/verifier-pool
+ * "Remote verification outcomes: job fields".
+ */
+export const NO_CLAIM = { offer: undefined, verifier: undefined, token: undefined, result: undefined } as const satisfies Partial<VerifierJob>;
 
 export interface VerifierBackend {
   run(job: VerifierJob, ctx: VerifierContext): Promise<VerifierOutcome>;

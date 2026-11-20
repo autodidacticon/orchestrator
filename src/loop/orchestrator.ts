@@ -9,7 +9,7 @@ import { renewEveryMsOf } from '../brief/compose.js';
 import { scrubCarry } from '../brief/lost.js';
 import { checkSubmission, optionalFullSha, remoteSealedSha } from '../agent/seal.js';
 import { crashPoint } from '../crash.js';
-import { commitPolicyOfKind, type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, remoteAccessError, RUNNER_ACCESSES, storeDurabilityWarning } from '../config.js';
+import { commitPolicyOfKind, type Config, DEFAULT_CONTENDED_RETRIES, DEFAULT_GAP_AFTER_MS, DEFAULT_GAP_HOLD_MS, remoteAccessError, remoteVerifierError, RUNNER_ACCESSES, storeDurabilityWarning } from '../config.js';
 import { type Gap, GapClock, noteIntervalMs } from '../health/gaps.js';
 import { classifyReload, type ReloadReason } from '../graph/diff.js';
 import { GraphValidationError, parseGraph } from '../graph/load.js';
@@ -37,7 +37,7 @@ import path from 'node:path';
 import type { CascadeStep } from '../graph/query.js';
 import type { ReloadClassification } from '../graph/diff.js';
 import { type Actor, applyTransition } from '../state/transitions.js';
-import type { VerifierBackend } from '../verify/job.js';
+import { NO_CLAIM, type VerifierBackend, VerifierStoppedError } from '../verify/job.js';
 import { Origin, OriginConfigError, OriginFetchError } from '../workspace/origin.js';
 import { RemoteWorkspace, workspaceByAccess } from '../workspace/remote-workspace.js';
 import { gateOnDurable, RUNNER_METHODS, StoreFatalError, storeLag, VERIFIER_METHODS, waitDurable, WORKSPACE_METHODS } from '../state/gate.js';
@@ -61,7 +61,7 @@ import { sessionEndMatches } from '../runs/ancestry.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { PUSH_REFUSED, pushRetryDue, recordPushRetry } from '../verify/push-retry.js';
-import { renewVerifyLeases } from '../verify/claims.js';
+import { renewVerifyLeases, verifyJobChanged, wakeVerifyWaiters } from '../verify/claims.js';
 
 /** The triggers that remove a task's prepare retry entry. See specs/pull-runner "Prepare failure limit". */
 const PREPARE_RETRY_RESETS: ReadonlySet<string> = new Set(['unblock', 'reopen', 'uncancel', 'cascade']);
@@ -1826,16 +1826,22 @@ export class Orchestrator implements OrchestratorCore {
     if (entry.status.kind === 'done' || entry.status.kind === 'cancelled') {
       return { ok: false, reason: `task ${taskId} is ${entry.status.kind}` };
     }
+    const remoteVerifier = this.config.verifier?.mode === 'remote';
     this.store.transaction(() => {
       this.operatorEvent('cancel', taskId, { reason, releasesDependents });
       this.transition(taskId, { kind: 'cancelled', reason, releasesDependents }, 'human', 'cancel');
-      for (const job of this.store.listJobs({ taskId, status: 'queued' })) {
+      // Under verifier.mode remote an offered job without a stored result goes too, claimed or not; its four fields are
+      // kept. See specs/task-lifecycle "Cancellation: offered verify jobs".
+      const offered = remoteVerifier ? this.store.listJobs({ taskId, status: 'checking', applied: false }).filter((j) => j.offer !== undefined && j.result === undefined) : [];
+      for (const job of [...this.store.listJobs({ taskId, status: 'queued' }), ...offered]) {
         this.store.updateJob(job.jobId, { status: 'dropped', applied: true, updatedAt: this.now() });
       }
     });
     for (const l of this.store.listLaunches({ taskId, status: 'live' })) {
       this.resolveWaiters(l.launchId, { status: 200, body: { timeout: true, reason: 'cancelled' } });
     }
+    // The wait of a dropped offered job reads its row at once, with no tick, and ends.
+    if (remoteVerifier) wakeVerifyWaiters(this);
     this.wake();
     return { ok: true };
   }
@@ -2509,6 +2515,14 @@ export class Orchestrator implements OrchestratorCore {
         });
       return;
     }
+    // Under verifier.mode remote a kept offered job resumes first, in the same slot. See specs/verifier-pool "Remote verification and restarts".
+    if (this.config.verifier?.mode === 'remote') {
+      const offered = this.store.listJobs({ status: 'checking', applied: false }).find((j) => j.offer !== undefined);
+      if (offered) {
+        this.startVerifierRun(offered);
+        return;
+      }
+    }
     const checkCommand = this.effective().config.checkCommand;
     const job = this.store.listJobs({ status: 'queued' }).find((j) => {
       if (this.deferredJobs.has(j.jobId)) return false;
@@ -2523,6 +2537,11 @@ export class Orchestrator implements OrchestratorCore {
     if (!job) return;
     this.heldJobsLogged.delete(job.jobId);
     crashPoint('verify.afterQueued');
+    this.startVerifierRun(job);
+  }
+
+  /** Take the single verifier slot for one run of `job` (a queued job, or a resumed offered one) and record how it ends. */
+  private startVerifierRun(job: VerifierJob): void {
     // The run's start, after a note: a failed check whose run overlapped a gap is run again once. See specs/integration-pipeline "Failed check across a gap".
     this.noteClock();
     const startedAt = this.now();
@@ -2530,6 +2549,11 @@ export class Orchestrator implements OrchestratorCore {
       .catch((err) => {
         if (err instanceof JobDroppedError) {
           this.log.info('verifier job dropped mid-flight', { jobId: job.jobId });
+          return;
+        }
+        if (err instanceof VerifierStoppedError) {
+          // The row stays as it is; the next start resumes the job when recovery keeps it. See specs/verifier-pool "Remote verification and restarts: stop".
+          this.log.info('verifier job stopped while it waited for a result', { jobId: job.jobId });
           return;
         }
         if (err instanceof StoreFatalError) {
@@ -2564,17 +2588,18 @@ export class Orchestrator implements OrchestratorCore {
       this.log.warn('verifier job requeued after a gap', { jobId: job.jobId, taskId: job.taskId, failureKind, gapMs });
       this.store.transaction(() => {
         this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, reason, gap: { failureKind, gapMs } } }, endedAt);
-        this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, gapRequeues: (current.gapRequeues ?? 0) + 1, updatedAt: endedAt });
+        this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, ...NO_CLAIM, gapRequeues: (current.gapRequeues ?? 0) + 1, updatedAt: endedAt });
       });
       return;
     }
-    this.store.updateJob(job.jobId, { status: 'failed', failureKind, output, updatedAt: endedAt });
+    this.store.updateJob(job.jobId, { status: 'failed', failureKind, output, ...NO_CLAIM, updatedAt: endedAt });
   }
 
   private async runVerifierJob(job: VerifierJob, startedAt: number): Promise<void> {
     const report = this.store.getReport(job.launchId);
     const summary = String(report?.body['summary'] ?? job.taskId);
     const noChanges = Boolean(report?.body['noChanges']);
+    let warned = false;
     const outcome = await this.verifier.run(job, {
       summary,
       noChanges,
@@ -2590,6 +2615,21 @@ export class Orchestrator implements OrchestratorCore {
         const cur = this.store.getJob(job.jobId);
         if (!cur || cur.status === 'dropped') throw new JobDroppedError(job.jobId);
       },
+      // Under verifier.mode remote: the row is read after each change until a result is stored. See specs/verifier-pool "Remote verification run: the wait".
+      awaitResult: async () => {
+        for (;;) {
+          // The read and the waiter's registration are one synchronous step: no change is missed between them.
+          const cur = this.store.getJob(job.jobId);
+          if (!cur || cur.status === 'dropped') throw new JobDroppedError(job.jobId);
+          if (this.stopping) throw new VerifierStoppedError(job.jobId);
+          if (cur.result !== undefined) return cur.result;
+          if (!warned && cur.verifier === undefined && cur.offer !== undefined && this.now() - cur.offer.at >= this.config.leaseTtlMs) {
+            warned = true;
+            this.log.warn('verify job waits for a verifier', { jobId: job.jobId, taskId: job.taskId, waitedMs: this.now() - cur.offer.at });
+          }
+          await verifyJobChanged(this, job.jobId);
+        }
+      },
     });
     const current = this.store.getJob(job.jobId);
     if (!current || current.status === 'dropped' || current.applied) {
@@ -2597,22 +2637,22 @@ export class Orchestrator implements OrchestratorCore {
       return;
     }
     if (outcome.kind === 'published') {
-      this.store.updateJob(job.jobId, { status: 'published', publishedSha: outcome.publishedSha, verifiedSha: outcome.verifiedSha, changedFiles: outcome.changedFiles, updatedAt: this.now() });
+      this.store.updateJob(job.jobId, { status: 'published', publishedSha: outcome.publishedSha, verifiedSha: outcome.verifiedSha, changedFiles: outcome.changedFiles, ...NO_CLAIM, updatedAt: this.now() });
     } else if (outcome.kind === 'requeue') {
       // A refused or unreachable push waits a backoff; refusals up to git.pushRefusalLimit, then the task is blocked. See specs/integration-pipeline "Push failures are classified".
       const retry = outcome.retry ? recordPushRetry(this.store, job.jobId, outcome.retry, this.config.git, this.now()) : undefined;
       if (retry?.blocked && outcome.retry) {
         this.log.error('publication push refused; task blocked', { jobId: job.jobId, taskId: job.taskId, refusals: retry.state.refusals, reason: outcome.retry.message });
-        this.store.updateJob(job.jobId, { status: 'failed', failureKind: PUSH_REFUSED, output: outcome.retry.message, updatedAt: this.now() });
+        this.store.updateJob(job.jobId, { status: 'failed', failureKind: PUSH_REFUSED, output: outcome.retry.message, ...NO_CLAIM, updatedAt: this.now() });
         return;
       }
       if (outcome.reason) this.log.warn('verifier job requeued', { jobId: job.jobId, taskId: job.taskId, reason: outcome.reason, ...(retry ? { retryInMs: retry.delayMs } : {}) });
       this.store.appendEvent({ kind: 'verify.requeued', taskId: job.taskId, launchId: job.launchId, payload: { jobId: job.jobId, ...(outcome.reason ? { reason: outcome.reason } : {}), ...(retry && outcome.retry ? { retry: outcome.retry.kind, retryAt: retry.state.retryAt, retryInMs: retry.delayMs, refusals: retry.state.refusals } : {}) } }, this.now());
-      this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, updatedAt: this.now() });
+      this.store.updateJob(job.jobId, { status: 'queued', expectedHead: undefined, rebasedSha: undefined, verifiedSha: undefined, squashSha: undefined, ...NO_CLAIM, updatedAt: this.now() });
     } else if (outcome.kind === 'failed') {
       this.failVerifierJob(job, startedAt, outcome.reason.kind, outcome.reason.output ?? outcome.reason.message);
     } else {
-      this.store.updateJob(job.jobId, { status: 'conflict', conflictFiles: outcome.files, conflictSince: outcome.since, updatedAt: this.now() });
+      this.store.updateJob(job.jobId, { status: 'conflict', conflictFiles: outcome.files, conflictSince: outcome.since, ...NO_CLAIM, updatedAt: this.now() });
     }
   }
 
@@ -2674,6 +2714,12 @@ export class Orchestrator implements OrchestratorCore {
       this.log.error(accessError, { access: this.config.runner.access, mode: this.effectiveMode(), pushIntegration: this.config.git.pushIntegration, prepareCommand: this.config.prepareCommand !== undefined });
       throw new Error(accessError);
     }
+    // Remote verification needs remote access. See specs/verifier-pool "Verifier mode: start refusal".
+    const verifierError = remoteVerifierError(this.config);
+    if (verifierError) {
+      this.log.error(verifierError, { mode: this.config.verifier?.mode, access: this.config.runner.access });
+      throw new Error(verifierError);
+    }
     // See specs/state-backend "Postgres store without push integration".
     const durability = this.config.store && this.config.git ? storeDurabilityWarning(this.config) : undefined;
     if (durability) {
@@ -2726,6 +2772,9 @@ export class Orchestrator implements OrchestratorCore {
     if (opts.reap) await this.reapLive();
     // Prepare commands are aborted and nothing is applied; their rows stay for the next start. See specs/pull-runner "Prepare command and a task that left".
     await stopPrepareJobs(this, this.prepareStopWaitMs);
+    // A run that waits for a verifier's result ends at once and records nothing; its row stays for the next start.
+    // See specs/verifier-pool "Remote verification and restarts: stop".
+    wakeVerifyWaiters(this);
     if (this.verifierInFlight) await this.verifierInFlight;
   }
 

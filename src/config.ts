@@ -25,6 +25,10 @@ export const DEFAULT_GAP_HOLD_MS = 60_000;
 export const RUNNER_ACCESSES = ['local', 'remote'] as const;
 export type RunnerAccess = (typeof RUNNER_ACCESSES)[number];
 
+/** Where verify jobs are checked. See specs/verifier-pool "Verifier mode". */
+export const VERIFIER_MODES = ['local', 'remote'] as const;
+export type VerifierMode = (typeof VERIFIER_MODES)[number];
+
 const rate = z.number().nonnegative();
 export const priceSchema = z
   .object({
@@ -153,6 +157,13 @@ export const configSchema = z.object({
           snapshots: z.boolean().default(false),
         })
         .default({}),
+    })
+    .default({}),
+  /** Who checks verify jobs. Read from the file at start only, never an override. See specs/verifier-pool "Verifier mode". */
+  verifier: z
+    .object({
+      /** `local`: the daemon checks each job in process; `remote`: the daemon offers each job to a verifier over its API. */
+      mode: z.enum(VERIFIER_MODES, { errorMap: () => ({ message: `verifier.mode must be one of ${VERIFIER_MODES.join(', ')}` }) }).default('local'),
     })
     .default({}),
   /** The integration branch's remote. See specs/integration-pipeline "Origin as source of truth". */
@@ -343,6 +354,16 @@ const commitKey = (kind: (typeof RUNNER_KINDS)[number]): string => `runner.${kin
 export function remoteAccessError(cfg: Pick<Config, 'runner' | 'git' | 'prepareCommand' | 'apiBaseUrl'>, mode?: string): string | undefined {
   const problems = remoteAccessProblems(cfg, mode);
   return problems.length ? `runner.access remote refused: ${problems.join('; ')}` : undefined;
+}
+
+/**
+ * The startup refusal of `verifier.mode: remote`: it needs `runner.access: remote` (which itself needs a pull run,
+ * `git.pushIntegration`, no prepare command and `apiBaseUrl`). Undefined when the mode can run. See specs/verifier-pool
+ * "Verifier mode: start refusal".
+ */
+export function remoteVerifierError(cfg: Pick<Config, 'runner'> & { verifier?: Config['verifier'] }): string | undefined {
+  if (cfg.verifier?.mode !== 'remote') return undefined;
+  return cfg.runner.access === 'remote' ? undefined : 'verifier.mode remote refused: runner.access must be remote';
 }
 
 /** What a caller may pass before defaults apply: every defaulted key optional, nested blocks partial. */

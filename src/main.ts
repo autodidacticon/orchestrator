@@ -11,7 +11,7 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ApiServer } from './agent/server.js';
 import { SlotValidator } from './brief/template.js';
-import { type Config, loadConfig, redactedStore, remoteAccessError, storeConfigError, storeSchemaOf, storeUrlSource, urlSecrets } from './config.js';
+import { type Config, loadConfig, redactedStore, remoteAccessError, remoteVerifierError, storeConfigError, storeSchemaOf, storeUrlSource, urlSecrets } from './config.js';
 import { FileGraphSource, StoreGraphSource } from './graph/source.js';
 import type { Logger } from './loop/core.js';
 import { Orchestrator } from './loop/orchestrator.js';
@@ -23,6 +23,7 @@ import { MultiRunner } from './runner/multi.js';
 import { OpenCodeRunner } from './runner/opencode.js';
 import { composeAllowedTools } from './toolchain/tools.js';
 import { openStore, type OpenedStore, otherSchemasWarning } from './state/open.js';
+import { RemoteVerifierBackend } from './verify/remote.js';
 import { GitVerifierBackend } from './verify/verifier.js';
 import { chooseRunId, CONFIG_FILE, DAEMON_PID, ensureRunDir, repoRunId, type RunIdChoice, runIdInputOf, runIdWarning, type ShutdownCaller, readRepoConfigRaw, resolveFileConfig, resolveRepoPath, resolveRunConfig, type ResolveOptions, trackedInRepo, writeConfigJson, writeDaemonJson, writeExitRecord, type ExitRecord, exitStoreFields } from './runs/runDir.js';
 import { databaseVariablesIn, postgresInputsWithoutKind, setStoreWithholding, storeWithholding, storeWithholdingFor, withholdStoreUrl } from './runs/childEnv.js';
@@ -269,6 +270,13 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     await opened.close();
     throw new Error(accessError);
   }
+  // Remote verification needs remote access; refused before anything listens. See specs/verifier-pool "Verifier mode: start refusal".
+  const verifierError = remoteVerifierError(config);
+  if (verifierError) {
+    stderrLogger.error(verifierError, { mode: config.verifier.mode, access: config.runner.access });
+    await opened.close();
+    throw new Error(verifierError);
+  }
 
   // The branch the run first used is pinned; only an explicit layer can name another one, and only on an untouched run. See specs/toolchain-discovery "Integration branch detection and pinning".
   if (pinned && config.integrationBranch !== pinned) {
@@ -329,7 +337,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     }),
   });
   const workspace = new GitWorkspace(config.repoPath, config.integrationBranch, path.join(config.dataDir, 'worktrees'));
-  const verifier = new GitVerifierBackend({
+  const verifierOptions = {
     repo: config.repoPath,
     integrationBranch: config.integrationBranch,
     tempRoot: path.join(config.dataDir, 'verify'),
@@ -338,7 +346,12 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     prepareCommand: config.prepareCommand,
     prepareTimeoutMs: config.prepareTimeoutMs,
     baselineSha: store.getKv('baselineHead'),
-  });
+  };
+  // Under verifier.mode remote the daemon offers each job to a verifier and runs neither the check nor the prepare command. See specs/verifier-pool.
+  const verifier =
+    config.verifier.mode === 'remote'
+      ? new RemoteVerifierBackend({ ...verifierOptions, now: () => orch.now(), log: stderrLogger })
+      : new GitVerifierBackend(verifierOptions);
   orch = new Orchestrator({
     store,
     config,

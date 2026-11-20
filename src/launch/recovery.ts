@@ -7,6 +7,7 @@ import { applyPendingCascade, recordTagPush, tagSafely } from '../loop/tick.js';
 import { scrubCarry } from '../brief/lost.js';
 import { startLaunch } from './launch.js';
 import type { Launch, VerifierJob } from '../state/store.js';
+import { NO_CLAIM } from '../verify/job.js';
 import { TRAILER_LAUNCH } from '../verify/verifier.js';
 import { findTrailer, git } from '../workspace/git.js';
 import { GitWorkspace } from '../workspace/git-workspace.js';
@@ -43,8 +44,14 @@ async function landedOnOrigin(o: Orchestrator, jobs: readonly VerifierJob[]): Pr
 async function recordLanded(o: Orchestrator, job: VerifierJob, sha: string): Promise<void> {
   // The files the commit changed, for the baseMoved notice sent when the publication is applied.
   const changedFiles = (await git(o.config.repoPath, ['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha], { allowFail: true })).stdout.trim().split('\n').filter(Boolean).sort();
-  o.store.updateJob(job.jobId, { status: 'published', publishedSha: sha, verifiedSha: job.verifiedSha ?? sha, changedFiles, updatedAt: o.now() });
+  o.store.updateJob(job.jobId, { status: 'published', publishedSha: sha, verifiedSha: job.verifiedSha ?? sha, changedFiles, ...NO_CLAIM, updatedAt: o.now() });
   o.log.info('recovery: launch trailer found on origin; job published there', { taskId: job.taskId, jobId: job.jobId, from: job.status, publishedSha: sha });
+}
+
+/** An unapplied offered `checking` job with a stored result or a verifier whose lease runs past `now`. */
+function keptOffer(job: VerifierJob, now: number): boolean {
+  if (job.applied || job.status !== 'checking' || job.offer === undefined) return false;
+  return job.result !== undefined || (job.verifier !== undefined && job.verifier.expiresAt > now);
 }
 
 /**
@@ -218,8 +225,13 @@ export async function recover(o: Orchestrator): Promise<void> {
   } else if (lookup.kind === 'unreachable') {
     o.log.warn('recovery: origin could not be fetched; undecided verifier jobs stay queued until it answers', { err: lookup.error });
   }
+  // Under verifier.mode remote an offered job that holds a result or a live verifier lease is kept as it is, and the
+  // single slot resumes it first; every other job restarts from queued without its claim fields.
+  // See specs/crash-recovery "Recovery of verifier jobs before publishing: offered job kept".
+  const remoteVerifier = o.config.verifier?.mode === 'remote';
   for (const job of store.listJobs({ status: ['checking', 'verified'] })) {
-    store.updateJob(job.jobId, { status: 'queued', updatedAt: o.now() });
+    if (remoteVerifier && keptOffer(job, o.now())) continue;
+    store.updateJob(job.jobId, { status: 'queued', ...NO_CLAIM, updatedAt: o.now() });
   }
   for (const job of store.listJobs({ status: 'publishing' })) {
     // With origin unreachable the backend decides nothing, but still undoes the job's local swap, so no later job
@@ -228,9 +240,9 @@ export async function recover(o: Orchestrator): Promise<void> {
       originUnreachable: lookup.kind === 'unreachable',
     });
     if (resolved === 'published') {
-      store.updateJob(job.jobId, { status: 'published', publishedSha: job.squashSha, verifiedSha: job.verifiedSha, updatedAt: o.now() });
+      store.updateJob(job.jobId, { status: 'published', publishedSha: job.squashSha, verifiedSha: job.verifiedSha, ...NO_CLAIM, updatedAt: o.now() });
     } else {
-      store.updateJob(job.jobId, { status: 'queued', updatedAt: o.now() });
+      store.updateJob(job.jobId, { status: 'queued', ...NO_CLAIM, updatedAt: o.now() });
     }
   }
 
