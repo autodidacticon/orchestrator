@@ -50,6 +50,8 @@ export interface AgentRunner {
   liveness(launch: Launch): Promise<Liveness>;
   /** SIGTERM, grace, SIGKILL. Idempotent. */
   reap(launch: Launch): Promise<void>;
+  /** SIGTERM to every launch, one grace, SIGKILL. Idempotent. See specs/health-monitoring "Usage accounting: launches reaped together". */
+  reapAll(launches: readonly Launch[]): Promise<void>;
   /** Kill any process that belongs to this launch id even without a recorded pid. */
   killByLaunchId(launchId: string): Promise<void>;
   /** Usage of a launch that ended, if the runner can read it. */

@@ -22,7 +22,7 @@ export const WORKSPACE_METHODS = [
   'preserve',
 ] as const satisfies ReadonlyArray<keyof Workspace>;
 
-export const RUNNER_METHODS = ['spawn', 'alive', 'liveness', 'reap', 'killByLaunchId', 'readUsage', 'readFailure'] as const satisfies ReadonlyArray<keyof AgentRunner>;
+export const RUNNER_METHODS = ['spawn', 'alive', 'liveness', 'reap', 'reapAll', 'killByLaunchId', 'readUsage', 'readFailure'] as const satisfies ReadonlyArray<keyof AgentRunner>;
 
 export const VERIFIER_METHODS = ['run', 'recoverPublishing', 'foreignCommits', 'sweepTemp'] as const satisfies ReadonlyArray<keyof VerifierBackend>;
 

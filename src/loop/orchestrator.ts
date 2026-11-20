@@ -2721,24 +2721,35 @@ export class Orchestrator implements OrchestratorCore {
     this.clearNoteTimer();
     this.wake();
     if (this.ticking) await this.ticking;
+    // The reap comes before the prepare and verifier waits, so a check in flight cannot use up the shutdown deadline
+    // before any launch is signalled. See specs/operator-control "Shutdown: reap before the verifier wait".
+    if (opts.reap) await this.reapLive();
     // Prepare commands are aborted and nothing is applied; their rows stay for the next start. See specs/pull-runner "Prepare command and a task that left".
     await stopPrepareJobs(this, this.prepareStopWaitMs);
     if (this.verifierInFlight) await this.verifierInFlight;
-    if (opts.reap) {
-      for (const l of this.store.listLaunches({ status: 'live' })) {
-        if (l.worker) continue; // the daemon cannot terminate a worker; its lease governs it
-        await this.runner.reap(l);
-        await this.recordUsage(l);
-        const e = this.entry(l.taskId);
-        if ((e.status.kind === 'running' || e.status.kind === 'waiting') && e.lease?.launchId === l.launchId) {
-          if (e.status.kind === 'waiting') {
-            this.transition(l.taskId, { kind: 'blocked', reason: { ...e.status.question, answer: e.status.answer } }, 'orchestrator', 'maxWaitOrDead');
-          } else {
-            this.fail(l.taskId, { kind: 'reaped', message: 'daemon shutdown with --reap' }, 'orchestrator', 'deadOrExpired');
-          }
+  }
+
+  /**
+   * A reaping shutdown's reap: one runner call for every live launch no worker holds (SIGTERM to all, one grace,
+   * SIGKILL), then per launch, in listing order, its usage, its task and its end.
+   * See specs/operator-control "Shutdown: launches reaped together".
+   */
+  private async reapLive(): Promise<void> {
+    // the daemon cannot terminate a worker; its lease governs it
+    const launches = this.store.listLaunches({ status: 'live' }).filter((l) => !l.worker);
+    if (launches.length === 0) return;
+    await this.runner.reapAll(launches);
+    for (const l of launches) {
+      await this.recordUsage(l);
+      const e = this.entry(l.taskId);
+      if ((e.status.kind === 'running' || e.status.kind === 'waiting') && e.lease?.launchId === l.launchId) {
+        if (e.status.kind === 'waiting') {
+          this.transition(l.taskId, { kind: 'blocked', reason: { ...e.status.question, answer: e.status.answer } }, 'orchestrator', 'maxWaitOrDead');
+        } else {
+          this.fail(l.taskId, { kind: 'reaped', message: 'daemon shutdown with --reap' }, 'orchestrator', 'deadOrExpired');
         }
-        this.endLaunch(l, 'reaped');
       }
+      this.endLaunch(l, 'reaped');
     }
   }
 }

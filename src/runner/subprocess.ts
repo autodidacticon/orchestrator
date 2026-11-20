@@ -80,6 +80,13 @@ export class SubprocessRunner implements AgentRunner {
     await killTree(launch.pid, this.opts.graceMs ?? 2000);
   }
 
+  /** One wait for every launch's group. See specs/health-monitoring "Usage accounting: launches reaped together". */
+  async reapAll(launches: readonly Launch[]): Promise<void> {
+    const pids = launches.flatMap((l) => (l.pid ? [l.pid] : []));
+    if (pids.length === 0) return;
+    await killTrees(pids, this.opts.graceMs ?? 2000);
+  }
+
   async killByLaunchId(launchId: string): Promise<void> {
     const pids = await pgrep(launchId);
     await Promise.all(pids.map((p) => killTree(p, this.opts.graceMs ?? 2000)));
@@ -143,18 +150,45 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * See specs/health-monitoring "Usage accounting".
  */
 export async function killTree(pid: number, graceMs: number): Promise<void> {
-  if (!pidAlive(pid)) return;
-  const pgid = await pgidOf(pid);
-  const leader = pgid !== undefined && pgid === pid;
-  const target = leader ? -pid : pid;
-  const gone = leader ? () => !groupAlive(pid) : () => !pidAlive(pid);
-  signal(target, 'SIGTERM');
-  const deadline = Date.now() + graceMs;
-  while (Date.now() < deadline) {
-    if (gone()) return;
-    await sleep(50);
+  await killTrees([pid], graceMs);
+}
+
+/**
+ * `killTree` for several pids at once: every target gets SIGTERM before any wait, all of them are waited for against
+ * one deadline of `graceMs`, every target still present gets SIGKILL, and the wait after it is at most 1000 ms in
+ * all. Each pid keeps `killTree`'s rules: a dead pid is skipped, a group leader is signalled and waited for as a
+ * group, any other pid alone (SIGKILL also goes to its own group). A pid listed twice counts once. Never rejects.
+ * See specs/health-monitoring "Usage accounting: launches reaped together".
+ */
+export async function killTrees(pids: readonly number[], graceMs: number): Promise<void> {
+  try {
+    const live = [...new Set(pids)].filter((pid) => pidAlive(pid));
+    if (live.length === 0) return;
+    const pgids = await Promise.all(live.map((pid) => pgidOf(pid)));
+    const targets = live.map((pid, i) => {
+      const pgid = pgids[i];
+      const leader = pgid !== undefined && pgid === pid;
+      return {
+        pid,
+        pgid,
+        target: leader ? -pid : pid,
+        gone: leader ? () => !groupAlive(pid) : () => !pidAlive(pid),
+      };
+    });
+    for (const t of targets) signal(t.target, 'SIGTERM');
+    const deadline = Date.now() + graceMs;
+    let left = targets.filter((t) => !t.gone());
+    while (left.length > 0 && Date.now() < deadline) {
+      await sleep(50);
+      left = left.filter((t) => !t.gone());
+    }
+    if (left.length === 0) return;
+    for (const t of left) {
+      signal(t.target, 'SIGKILL');
+      if (t.pgid && t.pgid !== t.pid) signal(-t.pgid, 'SIGKILL');
+    }
+    for (let i = 0; i < 20 && left.some((t) => !t.gone()); i++) await sleep(50);
+  } catch {
+    /* killTrees never rejects; a target it could not signal is left as it is */
   }
-  signal(target, 'SIGKILL');
-  if (pgid && pgid !== pid) signal(-pgid, 'SIGKILL');
-  for (let i = 0; i < 20 && !gone(); i++) await sleep(50);
 }

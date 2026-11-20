@@ -38,6 +38,25 @@ export class MultiRunner implements AgentRunner {
     await this.runnerFor(launch)?.reap(launch);
   }
 
+  /**
+   * Each kind's launches go to that kind's runner, all kinds at the same time; a kind with no runner is skipped.
+   * Waits until every call has settled, then rejects with the first error, if any.
+   * See specs/health-monitoring "Usage accounting: launches reaped together".
+   */
+  async reapAll(launches: readonly Launch[]): Promise<void> {
+    const byRunner = new Map<AgentRunner, Launch[]>();
+    for (const l of launches) {
+      const r = this.runnerFor(l);
+      if (!r) continue;
+      const list = byRunner.get(r) ?? [];
+      list.push(l);
+      byRunner.set(r, list);
+    }
+    const settled = await Promise.allSettled([...byRunner].map(([r, ls]) => r.reapAll(ls)));
+    const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+    if (failed) throw failed.reason;
+  }
+
   /** Only the id is known here, so every registered runner is asked; each kill is idempotent. */
   async killByLaunchId(launchId: string): Promise<void> {
     await Promise.all(Object.values(this.runners).map((r) => r?.killByLaunchId(launchId)));

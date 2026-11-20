@@ -45,6 +45,10 @@ export class InprocRunner implements AgentRunner {
     this.aliveSet.delete(launch.launchId);
   }
 
+  async reapAll(launches: readonly Launch[]): Promise<void> {
+    for (const l of launches) this.aliveSet.delete(l.launchId);
+  }
+
   async killByLaunchId(launchId: string): Promise<void> {
     this.aliveSet.delete(launchId);
   }
