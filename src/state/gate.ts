@@ -24,7 +24,7 @@ export const WORKSPACE_METHODS = [
 
 export const RUNNER_METHODS = ['spawn', 'alive', 'liveness', 'reap', 'reapAll', 'killByLaunchId', 'readUsage', 'readFailure'] as const satisfies ReadonlyArray<keyof AgentRunner>;
 
-export const VERIFIER_METHODS = ['run', 'recoverPublishing', 'foreignCommits', 'sweepTemp'] as const satisfies ReadonlyArray<keyof VerifierBackend>;
+export const VERIFIER_METHODS = ['run', 'recoverPublishing', 'foreignCommits', 'sweepTemp', 'afterOutcome'] as const satisfies ReadonlyArray<keyof VerifierBackend>;
 
 /** The status report's store fields. */
 export function storeLag(store: Store): { storeLagMs: number; storePendingBatches: number } {

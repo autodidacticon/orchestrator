@@ -1,5 +1,5 @@
 /**
- * The four verify-claim fields of a job live in its JSON document: no column and no migration, on every backend.
+ * The verify-claim fields of a job (and leaseLosses) live in its JSON document: no column and no migration, on every backend.
  * See specs/verifier-pool "Verify job offer".
  */
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -46,6 +46,22 @@ for (const backend of backends) (backend.available ? describe : describe.skip)(`
     expect(row).not.toHaveProperty('verifier');
     expect(row).not.toHaveProperty('token');
     expect(row).toMatchObject({ offer: fields.offer, result: fields.result });
+    await backend.check(store);
+  });
+
+  it('leaseLosses and a verifierLost failure read back after reopen', async () => {
+    store.createJob({ jobId: 'J2', taskId: 'T2', launchId: 'L2', sealedSha: 'x', baseSha: 's', status: 'checking', expectedHead: 'h', applied: false, createdAt: 1, updatedAt: 1 });
+    store.updateJob('J2', { leaseLosses: 2, offer: { at: 2, checkCommand: 'npm test' } });
+    store = await backend.reopen(store, dir);
+    expect(store.getJob('J2')).toMatchObject({ status: 'checking', leaseLosses: 2 });
+    await backend.check(store);
+
+    // The third loss: failed as verifierLost, the claim fields gone. See specs/verifier-pool "Verify lease: cycle cap".
+    store.updateJob('J2', { leaseLosses: 3, status: 'failed', failureKind: 'verifierLost', output: 'the job lost its verifier 3 times', offer: undefined, updatedAt: 5 });
+    store = await backend.reopen(store, dir);
+    const row = store.getJob('J2')!;
+    expect(row).toMatchObject({ status: 'failed', failureKind: 'verifierLost', leaseLosses: 3, output: 'the job lost its verifier 3 times', updatedAt: 5 });
+    expect(row).not.toHaveProperty('offer');
     await backend.check(store);
   });
 });

@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConfigInput } from '../../src/config.js';
 import { listRuns, startDaemon, stopDaemon, daemonCommand, health } from '../../src/runs/lifecycle.js';
 import { readDaemonJson, runPaths } from '../../src/runs/runDir.js';
+import { VERIFIER_METHODS } from '../../src/state/gate.js';
+import { JournaledStore, type JournalSink, type RowOp, SqliteSink } from '../../src/state/journal.js';
 import { SqliteStore } from '../../src/state/sqlite.js';
 import type { Launch, VerifierJob } from '../../src/state/store.js';
 import { RemoteVerifierBackend } from '../../src/verify/remote.js';
@@ -79,7 +81,7 @@ const submit = (h: SliceHarness, launch: Launch, extra: Record<string, unknown>,
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** A remote run under `verifier.mode: remote` whose backend is built here. */
-async function remoteSlice(f: Fixture, opts: { graph?: string; config?: ConfigInput; git?: Record<string, unknown>; clock?: () => number; wrap?: (backend: RemoteVerifierBackend) => void } = {}): Promise<SliceHarness> {
+async function remoteSlice(f: Fixture, opts: { graph?: string; config?: ConfigInput; git?: Record<string, unknown>; clock?: () => number; wrap?: (backend: RemoteVerifierBackend) => void; journal?: { sink: JournalSink } } = {}): Promise<SliceHarness> {
   let h!: SliceHarness;
   const backend = new RemoteVerifierBackend({
     repo: f.repo,
@@ -97,6 +99,7 @@ async function remoteSlice(f: Fixture, opts: { graph?: string; config?: ConfigIn
     repo: f.repo,
     verifier: backend,
     ...(opts.clock ? { clock: opts.clock } : {}),
+    ...(opts.journal ? { journal: opts.journal } : {}),
     config: { ...run, verifier: { mode: 'remote' }, checkCommand: 'exit 9', ...opts.config, git: { ...run.git, pushRetryBackoffMs: 0, ...opts.git } },
   });
   harnesses.push(h);
@@ -708,6 +711,139 @@ let children: ChildProcess[] = [];
 afterEach(() => {
   for (const c of children.splice(0)) if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+
+/** A SQLite sink that can stall before a batch it matches, and records every batch it applies. */
+class StallSink implements JournalSink {
+  stalled = false;
+  stallIf: ((ops: readonly RowOp[]) => boolean) | undefined;
+  readonly applied: RowOp[][] = [];
+  private readonly waiting: Array<() => void> = [];
+  constructor(readonly inner: SqliteSink) {}
+  async applyBatch(ops: readonly RowOp[]): Promise<void> {
+    if (this.stallIf?.(ops)) {
+      this.stallIf = undefined;
+      this.stalled = true;
+    }
+    while (this.stalled) await new Promise<void>((r) => this.waiting.push(r));
+    await this.inner.applyBatch(ops);
+    this.applied.push([...ops]);
+  }
+  release(): void {
+    this.stalled = false;
+    for (const w of this.waiting.splice(0)) w();
+  }
+}
+
+/** A batch that writes the `verify.requeued` event. */
+const writesRequeue = (ops: readonly RowOp[]) => ops.some((o) => o.op === 'upsert' && o.table === 'events' && JSON.stringify(o.row).includes('verify.requeued'));
+
+/** Wait for a condition without ticking: a tick waits for durability, which a stalled sink withholds. */
+async function poll(pred: () => boolean, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!pred()) {
+    if (Date.now() > deadline) throw new Error('condition not reached');
+    await sleep(10);
+  }
+}
+
+describe('slice: the verify ref and the durability gate (GH-187)', () => {
+  const sinks: StallSink[] = [];
+  afterEach(() => {
+    for (const s of sinks.splice(0)) s.release();
+  });
+
+  /** A remote run on a journal over a stalling sink, with every afterOutcome call that reaches the backend counted. */
+  async function journaled(f: Fixture, git?: Record<string, unknown>): Promise<{ h: SliceHarness; sink: StallSink; afterOutcome: Array<{ written: boolean; outcomeDurable: boolean }> }> {
+    const sink = new StallSink(new SqliteSink(path.join(f.dir, 'sink.sqlite')));
+    sinks.push(sink);
+    const afterOutcome: Array<{ written: boolean; outcomeDurable: boolean }> = [];
+    let h!: SliceHarness;
+    h = await remoteSlice(f, {
+      journal: { sink },
+      ...(git ? { git } : {}),
+      wrap: (backend) => {
+        const real = backend.afterOutcome.bind(backend);
+        backend.afterOutcome = async (job, opts) => {
+          afterOutcome.push({ written: opts.written, outcomeDurable: sink.applied.some(writesRequeue) });
+          return real(job, opts);
+        };
+      },
+    });
+    return { h, sink, afterOutcome };
+  }
+
+  /** Claim the offered job, push its verify ref at another commit than the one reported, and post the verified result. */
+  async function refusedVerified(h: SliceHarness, f: Fixture): Promise<{ claim: Claim; ref: string; sha: string }> {
+    const claim = await verifyClaim(h);
+    const ref = `refs/verify/${claim.jobId}`;
+    const { dir, sha } = rebaseAndPush(f, claim, false);
+    pushVerifyRef(dir, claim, claim.expectedHead);
+    expect(await postResult(h, claim, { outcome: 'verified', rebasedSha: sha })).toMatchObject({ status: 200 });
+    return { claim, ref, sha };
+  }
+
+  it('VERIFIER_METHODS gates afterOutcome', () => {
+    expect(VERIFIER_METHODS).toContain('afterOutcome');
+  });
+
+  it('criterion 2: with the sink stalled on the batch of a refused verified outcome, origin keeps the ref until the batch is durable', async () => {
+    const f = fixture();
+    const { h, sink, afterOutcome } = await journaled(f);
+    await offered(h, f);
+    await h.store.durable();
+    sink.stallIf = writesRequeue;
+    const { claim, ref, sha } = await refusedVerified(h, f);
+    await poll(() => sink.stalled);
+    // The outcome is in the image, not yet in the sink.
+    await poll(() => requeued(h).length === 1);
+    await sleep(500);
+    expect(h.store.durability().pendingBatches).toBeGreaterThan(0);
+    expect(gitIn(f.dir, 'ls-remote', f.bare, ref)).toBe(`${claim.expectedHead}\t${ref}`);
+    expect(afterOutcome).toEqual([]);
+    expect(h.orch.verifierBusy()).toBe(true);
+    // The sink's row is still checking, with its result.
+    const row = sink.inner.db.prepare('SELECT doc FROM verifier_jobs WHERE job_id = ?').get(claim.jobId) as { doc: string } | undefined;
+    expect(JSON.parse(row!.doc)).toMatchObject({ status: 'checking', result: { outcome: 'verified', rebasedSha: sha } });
+
+    sink.release();
+    // The hook runs once the batch is durable; the job is then offered again to a new run, without its ref.
+    await h.waitFor(() => afterOutcome.length === 1 && gitIn(f.dir, 'ls-remote', f.bare, ref) === '', 30_000);
+    expect(afterOutcome).toEqual([{ written: true, outcomeDurable: true }]);
+  }, 60_000);
+
+  it('criterion 3: a journal made fatal after the outcome is written keeps the ref, and afterOutcome does not run', async () => {
+    const f = fixture();
+    const { h, sink, afterOutcome } = await journaled(f);
+    await offered(h, f);
+    await h.store.durable();
+    sink.stallIf = writesRequeue;
+    const { claim, ref } = await refusedVerified(h, f);
+    await poll(() => sink.stalled);
+    await poll(() => requeued(h).length === 1);
+    (h.store as JournaledStore).fence(new Error('lock lost'));
+    // The gate notices the fatal journal and the run ends without the hook.
+    await poll(() => !h.orch.verifierBusy());
+    await sleep(200);
+    expect(afterOutcome).toEqual([]);
+    expect(gitIn(f.dir, 'ls-remote', f.bare, ref)).toBe(`${claim.expectedHead}\t${ref}`);
+  }, 60_000);
+
+  it('criterion 4: the push-retry count, the verify.requeued event and the row are one batch', async () => {
+    const f = fixture();
+    const { h, sink } = await journaled(f);
+    await offered(h, f);
+    const { claim } = await refusedVerified(h, f);
+    await h.waitFor(() => requeued(h).length === 1 && offeredFree(h), 30_000);
+    await h.store.durable();
+    const batches = sink.applied.filter(writesRequeue);
+    expect(batches).toHaveLength(1);
+    const [batch] = batches;
+    // The push-retry state of the job (a kv row) and the job row put back to queued, in the same batch as the event.
+    expect(batch!.some((o) => o.op === 'upsert' && o.table === 'kv' && JSON.stringify(o.row).includes(claim.jobId) && JSON.stringify(o.row).includes('refusals'))).toBe(true);
+    expect(batch!.some((o) => o.op === 'upsert' && o.table === 'verifier_jobs' && JSON.stringify(o.row).includes(claim.jobId) && JSON.stringify(o.row).includes('"queued"'))).toBe(true);
+    expect(requeued(h)[0]!.payload).toMatchObject({ retry: 'refused', refusals: 1 });
+  }, 60_000);
 });
 
 function fresh(): string {

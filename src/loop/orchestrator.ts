@@ -2584,8 +2584,13 @@ export class Orchestrator implements OrchestratorCore {
         },
       )
       // After the outcome is written: the remote backend deletes the verify ref here. See specs/verifier-pool "Verify ref: deletion".
+      // The call is gated on durability (VERIFIER_METHODS): it waits for the outcome's batch, and on a fatal store it
+      // rejects with StoreFatalError and the ref is kept. See specs/state-backend "Durability before effects".
       .then((written) => this.verifier.afterOutcome?.(job, { written }))
-      .catch((err) => this.log.error('verifier job: after-outcome step failed', { jobId: job.jobId, err: String(err) }))
+      .catch((err) => {
+        if (err instanceof StoreFatalError) this.log.error('verifier job: after-outcome step skipped, the store is fatal; the verify ref is kept', { jobId: job.jobId });
+        else this.log.error('verifier job: after-outcome step failed', { jobId: job.jobId, err: String(err) });
+      })
       .finally(() => {
         this.verifierInFlight = undefined;
         this.wake();

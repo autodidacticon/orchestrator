@@ -10,6 +10,7 @@ import type { Config } from '../../src/config.js';
 import { RUNNER_METHODS, StoreFatalError, VERIFIER_METHODS, WORKSPACE_METHODS } from '../../src/state/gate.js';
 import { JournaledStore, type JournalSink, type RowOp, SqliteSink } from '../../src/state/journal.js';
 import type { StoredEvent } from '../../src/state/store.js';
+import { GitVerifierBackend } from '../../src/verify/verifier.js';
 import { makeSlice, type SliceHarness } from './harness.js';
 
 let h: SliceHarness | undefined;
@@ -153,6 +154,31 @@ describe('durability before effects', () => {
     expect(((await http('GET', '/v1/outbox')).body['effects'] as Array<{ taskId: string }>).map((e) => e.taskId)).toEqual(['T1']);
     expect((await http('GET', '/v1/events?after=0&limit=500')).body['seq']).toBe(h.store.latestEventSeq());
     expect((await http('GET', '/v1/status')).body).toMatchObject({ storeLagMs: 0, storePendingBatches: 0, latestSeq: h.store.latestEventSeq() });
+  }, 30_000);
+});
+
+describe('the gated verifier', () => {
+  it('lists afterOutcome, and the local GitVerifierBackend, once wrapped, still has no afterOutcome, with or without pending batches', async () => {
+    expect(VERIFIER_METHODS).toContain('afterOutcome');
+    const dir = mkdtempSync(path.join(tmpdir(), 'orch-durable-'));
+    sink = new StallSink(new SqliteSink(path.join(dir, 'sink.sqlite')));
+    h = await makeSlice({ graph: G, dir, fileGraph: true, realVerifier: true, journal: { sink } });
+    await h.store.durable();
+    const verifier = h.orch.verifier;
+    expect(verifier).toBeInstanceOf(GitVerifierBackend);
+    const absent = () => {
+      expect('afterOutcome' in verifier).toBe(false);
+      expect(verifier.afterOutcome).toBeUndefined();
+      // The daemon's optional call is a no-op on it.
+      expect(verifier.afterOutcome?.({} as never, { written: true })).toBeUndefined();
+    };
+    absent();
+    sink.stall();
+    h.store.setKv('gh-187', 'pending');
+    expect(h.store.durability().pendingBatches).toBeGreaterThan(0);
+    absent();
+    sink.release();
+    await h.store.durable();
   }, 30_000);
 });
 
