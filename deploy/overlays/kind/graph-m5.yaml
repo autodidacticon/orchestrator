@@ -1,0 +1,16 @@
+# The M5 tasks: a fragment of the graph, two nodes indented as the items of graph.yaml. deploy/smoke.sh's M5 step sends
+# graph.yaml followed by this file with PUT /v1/graph, after the run is finished; it is not mounted. A verifier pod
+# checks both: the fixture's check (fixture/test.js) passes for SMOKE-M5-PASS and fails for SMOKE-M5-BREAK, whose line
+# in README.md breaks it, so SMOKE-M5-BREAK is blocked after its attempts. The nodes name no model.
+  - id: SMOKE-M5-PASS
+    title: Verifier pool task, passing check
+    deps: [SMOKE]
+    description: Append a line to README.md in the fixture repository; a verifier pod checks it and the check passes.
+    acceptanceCriteria:
+      - README.md has one more line than before.
+  - id: SMOKE-M5-BREAK
+    title: Verifier pool task, failing check
+    deps: [SMOKE]
+    description: Append a line to README.md in the fixture repository; a verifier pod checks it and the fixture's check fails on that line.
+    acceptanceCriteria:
+      - README.md has one more line than before.

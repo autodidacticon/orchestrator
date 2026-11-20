@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { parse, parseAllDocuments } from 'yaml';
+import { SlotValidator } from '../../src/brief/template.js';
 import { leaseCoversFlushDeadline } from '../../src/config.js';
+import { parseGraph } from '../../src/graph/load.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const hasKubectl = spawnSync('kubectl', ['version', '--client'], { stdio: 'ignore' }).status === 0;
@@ -36,8 +38,8 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
   const base = hasKubectl ? render('deploy/base') : [];
   const kind = hasKubectl ? render('deploy/overlays/kind') : [];
 
-  it('base renders the namespace, config, Postgres cluster, daemon, and service, and no volume claim', () => {
-    expect(kinds(base)).toEqual(['Cluster/postgres', 'ConfigMap/orchestrator-config', 'Deployment/orchestrator', 'Deployment/orchestrator-worker', 'Namespace/orch', 'Service/orchestrator']);
+  it('base renders the namespace, config, Postgres cluster, daemon, service, worker and verifier Deployments, and no volume claim', () => {
+    expect(kinds(base)).toEqual(['Cluster/postgres', 'ConfigMap/orchestrator-config', 'Deployment/orchestrator', 'Deployment/orchestrator-verifier', 'Deployment/orchestrator-worker', 'Namespace/orch', 'Service/orchestrator']);
     for (const r of base) if (r.kind !== 'Namespace') expect(r.metadata.namespace).toBe('orch');
   });
 
@@ -141,7 +143,45 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     });
   }
 
-  it('the kind overlay replaces orchestrator.yaml with a remote run: the base keys plus runner.access remote, git.workerOriginUrl at git-origin, and capacity 3', () => {
+  // See specs/cluster-runtime "Verifier Deployment".
+  for (const [label, rs] of [['base', base], ['kind overlay', kind]] as const) {
+    it(`the ${label} renders orchestrator-verifier: its own label, uid/gid/fsGroup 1000, one container on orchestrator:dev, POD_NAME, ORCH_API at the daemon Service, an emptyDir cache, no Secret and no database variable`, () => {
+      const spec = find(rs, 'Deployment', 'orchestrator-verifier').spec;
+      // The base keeps it at 0 (verifier.mode local checks in the daemon's container); the kind overlay runs one.
+      expect(spec.replicas).toBe(label === 'base' ? 0 : 1);
+      expect(spec.template.metadata.labels['app.kubernetes.io/name']).toBe('orchestrator-verifier');
+      expect(spec.selector.matchLabels['app.kubernetes.io/name']).toBe('orchestrator-verifier');
+      const pod = spec.template.spec;
+      expect(pod.securityContext).toEqual({ runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000 });
+      expect(pod.containers).toHaveLength(1);
+      const [verifier] = pod.containers;
+      expect(verifier.name).toBe('verifier');
+      expect(verifier.image).toBe('orchestrator:dev');
+      expect(verifier.command).toEqual(['orchestrator-verifier']);
+      const vars = verifier.env as Array<{ name: string; value?: string; valueFrom?: { fieldRef?: { fieldPath: string }; secretKeyRef?: unknown } }>;
+      expect(vars.find((e) => e.name === 'POD_NAME')?.valueFrom?.fieldRef?.fieldPath).toBe('metadata.name');
+      const svc = find(rs, 'Service', 'orchestrator');
+      expect(env(verifier, 'ORCH_API')).toBe(`http://${svc.metadata.name}.${svc.metadata.namespace}.svc:${svc.spec.ports[0].port}`);
+      expect(env(verifier, 'ORCH_VERIFIER_CACHE')).toBe('/var/cache/orchestrator');
+      const mount = verifier.volumeMounts.find((m: { mountPath: string }) => m.mountPath === env(verifier, 'ORCH_VERIFIER_CACHE'));
+      expect(mount).toBeDefined();
+      expect(pod.volumes.find((v: { name: string }) => v.name === mount.name)).toEqual({ name: mount.name, emptyDir: {} });
+      expect(env(verifier, 'ORCH_VERIFIER_BACKOFF_MAX_MS')).toBe(label === 'base' ? undefined : '2000');
+      // No Secret, no claim, no store: the verifier reaches the daemon's API only.
+      for (const v of pod.volumes as Array<Record<string, unknown>>) {
+        expect(v).not.toHaveProperty('secret');
+        expect(v).not.toHaveProperty('persistentVolumeClaim');
+        expect(v).not.toHaveProperty('ephemeral');
+      }
+      expect(verifier.envFrom).toBeUndefined();
+      expect(vars.some((e) => e.valueFrom?.secretKeyRef !== undefined)).toBe(false);
+      const names = vars.map((e) => e.name);
+      for (const n of ['DATABASE_URL', 'DATABASE_URL_FILE']) expect(names).not.toContain(n);
+      expect(names.filter((n) => n.startsWith('PG'))).toEqual([]);
+    });
+  }
+
+  it('the kind overlay replaces orchestrator.yaml with a remote run: the base keys plus runner.access remote, git.workerOriginUrl at git-origin, verifier.mode remote, and capacity 3', () => {
     const cfgOf = (rs: Resource[]) => parse((rs.find((r) => r.kind === 'ConfigMap' && r.metadata.name.startsWith('orchestrator-config')) as Resource).data?.['orchestrator.yaml'] ?? '') as Record<string, any>;
     const baseCfg = cfgOf(base);
     const kindCfg = cfgOf(kind);
@@ -152,7 +192,10 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     // Everything else is the base file: kustomize replaces the file whole, so the overlay repeats each base key.
     // capacity 3 parks all three dependants of SMOKE before the drill snapshot.
     expect(kindCfg.capacity).toBe(3);
-    const strip = (c: Record<string, any>) => ({ ...c, capacity: undefined, runner: { ...c.runner, access: undefined }, git: { ...c.git, workerOriginUrl: undefined } });
+    // Remote verification in the overlay only: the base keeps verifier.mode local, the default.
+    expect(kindCfg.verifier).toEqual({ mode: 'remote' });
+    expect(baseCfg.verifier).toBeUndefined();
+    const strip = (c: Record<string, any>) => ({ ...c, capacity: undefined, verifier: undefined, runner: { ...c.runner, access: undefined }, git: { ...c.git, workerOriginUrl: undefined } });
     expect(JSON.parse(JSON.stringify(strip(kindCfg)))).toEqual(JSON.parse(JSON.stringify(strip(baseCfg))));
   });
 
@@ -163,5 +206,40 @@ describe.skipIf(!hasKubectl)('reference manifests', () => {
     expect(Object.keys(cm.data ?? {})).toEqual(['orchestrator.yaml']);
     const volumes = find(kind, 'Deployment', 'orchestrator').spec.template.spec.volumes;
     expect(volumes.find((v: { name: string }) => v.name === 'config').configMap.name).toBe(cm.metadata.name);
+  });
+});
+
+// See specs/cluster-runtime "Smoke M5 step: fixture check and fragment". No kubectl needed.
+describe('deploy/overlays/kind/graph-m5.yaml', () => {
+  const graphText = readFileSync(path.join(root, 'deploy/overlays/kind/graph.yaml'), 'utf8');
+  const fragment = readFileSync(path.join(root, 'deploy/overlays/kind/graph-m5.yaml'), 'utf8');
+  const real = readFileSync(path.join(root, 'deploy/overlays/kind-claude/real-task.yaml'), 'utf8');
+
+  it('after graph.yaml adds exactly SMOKE-M5-PASS and SMOKE-M5-BREAK, tasks on SMOKE that the brief validator accepts, and leaves every node as it was', () => {
+    const before = parseGraph(graphText);
+    const after = parseGraph(graphText + fragment);
+    expect([...after.nodes.keys()].filter((id) => !before.nodes.has(id))).toEqual(['SMOKE-M5-PASS', 'SMOKE-M5-BREAK']);
+    for (const [id, node] of before.nodes) expect(after.nodes.get(id), id).toEqual(node);
+    for (const id of ['SMOKE-M5-PASS', 'SMOKE-M5-BREAK']) {
+      const n = after.nodes.get(id)!;
+      expect(n.kind).toBe('task');
+      expect(n.deps).toEqual(['SMOKE']);
+      expect(typeof n.payload['description']).toBe('string');
+      expect((n.payload['description'] as string).trim()).not.toBe('');
+      expect(n.payload['acceptanceCriteria']).toHaveLength(1);
+      expect(n.payload).not.toHaveProperty('model');
+      expect(new SlotValidator().validate(n, n.payload as Record<string, unknown>)).toEqual({ ok: true });
+    }
+  });
+
+  it('graph.yaml, graph-m5.yaml and real-task.yaml parse as one graph that adds the two M5 tasks and SMOKE-REAL', () => {
+    const before = parseGraph(graphText);
+    const after = parseGraph(graphText + fragment + real);
+    expect([...after.nodes.keys()].filter((id) => !before.nodes.has(id))).toEqual(['SMOKE-M5-PASS', 'SMOKE-M5-BREAK', 'SMOKE-REAL']);
+  });
+
+  it('is a fragment, not a graph of its own', () => {
+    expect(fragment).not.toMatch(/^nodes:/m);
+    expect(fragment.endsWith('\n')).toBe(true);
   });
 });

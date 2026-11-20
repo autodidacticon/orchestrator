@@ -1,6 +1,7 @@
 # The real-agent task: a fragment of the graph, one node indented as the items of deploy/overlays/kind/graph.yaml.
-# deploy/smoke.sh --real-agent <key file> sends graph.yaml followed by this file with PUT /v1/graph, after the run
-# is finished. The node names no model: the launch runs on the run's default (runner.claude.model and effort).
+# deploy/smoke.sh --real-agent <key file> sends graph.yaml, deploy/overlays/kind/graph-m5.yaml and then this file with
+# PUT /v1/graph, after the run is finished: a graph that dropped the started SMOKE-M5-PASS would be refused.
+# The node names no model: the launch runs on the run's default (runner.claude.model and effort).
   - id: SMOKE-REAL
     title: Real-agent smoke task
     deps: [SMOKE]

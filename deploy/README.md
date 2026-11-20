@@ -6,7 +6,7 @@ Everything for running the orchestrator in a cluster lives here. The specificati
 
 `deploy/base` and the kind overlay are a preview for one user on a kind cluster. They are not a layout for a shared cluster.
 
-The API takes no credential except the launch token, which six routes read: a worker's `heartbeat`, `report`, `block`, `log`, `inbox` and `renew`. Every other route, the operator routes and the two probes included, answers any caller. A caller of port 8080 can therefore set `runnerCommand` and `checkCommand`, and those commands run as the daemon's user, beside the store URL file and the clone that pushes to origin.
+The API reads two credentials. The launch token is read by the six routes a worker calls: `heartbeat`, `report`, `block`, `log`, `inbox` and `renew`. The verify job token, which a verify claim answers, is read by the three verify job routes under `/v1/verify/`: `heartbeat`, `result` and `release`. `POST /v1/verify/claims` reads no credential, so until the hardening milestone any pod that reaches the API, a worker's agent included, can claim a verify job and post its result. Every other route, the operator routes and the two probes included, answers any caller. A caller of port 8080 can therefore set `runnerCommand` and `checkCommand`. Under `verifier.mode: local` (the base) the check command runs as the daemon's user, beside the store URL file and the clone that pushes to origin; under `remote` (the kind overlay) it runs in a verifier pod, which mounts no Secret.
 
 The Service is a ClusterIP with no NetworkPolicy, so every pod in the cluster reaches the API. So does every user who may run `kubectl port-forward` into namespace `orch`. Do not expose the Service through an Ingress, a NodePort or a LoadBalancer. The kind overlay's git origin accepts pushes from any pod without authentication.
 
@@ -22,17 +22,19 @@ The image is `orchestrator:dev` when built locally, from the `Dockerfile` at the
 docker build -t orchestrator:dev .
 ```
 
-It is multi-stage on `node:22-slim`: the build stage compiles `dist/`, and the final stage holds Node, `git`, `openssh-client`, the built `dist/src`, and production dependencies only. It carries no project toolchain; workers and verifiers get their own images.
+It is multi-stage on `node:22-slim`: the build stage compiles `dist/`, and the final stage holds Node, `git`, `openssh-client`, the built `dist/src`, and production dependencies only. It carries no project toolchain. One image serves the daemon, the workers and the verifiers. A project whose agent needs a toolchain builds a worker image from `orchestrator:dev` (see "Claude worker image"); a project whose check needs a toolchain builds an image from `orchestrator:dev` that installs it and sets it on the verifier Deployment (see "The verifiers").
 
-Three entrypoints are on `PATH`:
+Four entrypoints are on `PATH`:
 
 - `orchestrator`: the daemon (the default command).
 - `orchestrator-ctl`: the operator CLI.
 - `orchestrator-worker`: the remote worker loop, which the worker Deployment runs (see "The workers").
+- `orchestrator-verifier`: the verifier loop, which the verifier Deployment runs (see "The verifiers").
 
 ```sh
 docker run --rm orchestrator:dev orchestrator --help
 docker run --rm orchestrator:dev orchestrator-ctl
+docker run --rm orchestrator:dev orchestrator-verifier --help
 ```
 
 The image runs as the unprivileged `node` user.
@@ -56,7 +58,7 @@ kubectl kustomize deploy/overlays/kind-claude
 
 ```
 deploy/
-  base/                 the daemon, in namespace orch
+  base/                 the daemon and the worker and verifier pools, in namespace orch
     kustomization.yaml
     namespace.yaml      Namespace orch
     orchestrator.yaml   ConfigMap orchestrator-config (hash-suffixed, so a change rolls the daemon)
@@ -64,17 +66,23 @@ deploy/
     deployment.yaml     Deployment orchestrator (Recreate, emptyDir, no volume claim)
     service.yaml        Service orchestrator, ClusterIP, port 8080
     worker.yaml         Deployment orchestrator-worker (replicas 0, emptyDir clone cache)
+    verifier.yaml       Deployment orchestrator-verifier (replicas 0, emptyDir clone cache; see "The verifiers")
   worker-claude/
     Dockerfile          the Claude worker image, orchestrator-worker-claude:dev (see "Claude worker image")
-  overlays/kind/        base plus an in-cluster git origin, a remote run, and scripted workers
-    kustomization.yaml  sets REPO_URL to the origin, replaces orchestrator.yaml, sets ORCH_WORKER_AGENT=scripted
-    orchestrator.yaml   the base file plus runner.access: remote, git.workerOriginUrl and capacity: 3
+  overlays/kind/        base plus an in-cluster git origin, a remote run with remote verification, scripted workers
+                        and one verifier
+    kustomization.yaml  sets REPO_URL to the origin, replaces orchestrator.yaml, sets ORCH_WORKER_AGENT=scripted,
+                        patches orchestrator-verifier to replicas 1 with ORCH_VERIFIER_BACKOFF_MAX_MS=2000
+    orchestrator.yaml   the base file plus runner.access: remote, git.workerOriginUrl, verifier.mode: remote and
+                        capacity: 3
     git-origin.yaml     PVC, Deployment and Service git-origin
     graph.yaml          the graph deploy/smoke.sh sends with PUT /v1/graph
-    fixture/            the files seeded into the origin's repository
+    graph-m5.yaml       graph fragment: SMOKE-M5-PASS and SMOKE-M5-BREAK, sent by the smoke's M5 step after graph.yaml
+    fixture/            the files seeded into the origin's repository (test.js is the check)
   overlays/kind-claude/ the kind overlay with Claude workers (see "The kind overlay")
     kustomization.yaml  the kind overlay plus orchestrator-worker on orchestrator-worker-claude:dev with the key's Secret
     real-task.yaml      graph fragment: the node SMOKE-REAL, sent by deploy/smoke.sh --real-agent after graph.yaml
+                        and graph-m5.yaml
 ```
 
 ### The daemon
@@ -88,7 +96,7 @@ The run's state (tasks, launches, events, outbox, the accepted and proposed grap
 
 ### The workers
 
-The `orchestrator-worker` Deployment (`deploy/base/worker.yaml`) is the remote worker pool. Each pod runs `orchestrator-worker` (specs/worker-pool), which claims a launch with `access: remote` over the daemon's API, clones the repository into its clone cache, checks out the launch branch, runs the agent, and claims again. The agent commits on the branch and submits; the daemon seals the submission by fetching that branch from origin and comparing its tip with the report's `sealedSha`, and its verifier publishes as for any launch. An agent that reports through the shim's `report` tool (the `orchestrator` MCP server the loop names in `.orchestrator/mcp.json`) needs to push nothing: the loop writes `ORCH_ACCESS=remote`, `ORCH_WORKTREE` (the clone) and `ORCH_BRANCH` (the launch branch) into the shim's `env`, and on a submit the tool checks that the clone is clean (409 `dirtyWorktree`), force-pushes `HEAD` to the launch branch on origin within 60 seconds (503 `pushFailed`), and names the pushed commit as `sealedSha`. An agent that calls the API itself pushes the branch and sends `sealedSha` itself, and the loop's fallback relay pushes and names it for a report left in `.orchestrator/report.json`. A worker exits 0 when `/v1/status` says the run is finished, and the Deployment then restarts it.
+The `orchestrator-worker` Deployment (`deploy/base/worker.yaml`) is the remote worker pool. Each pod runs `orchestrator-worker` (specs/worker-pool), which claims a launch with `access: remote` over the daemon's API, clones the repository into its clone cache, checks out the launch branch, runs the agent, and claims again. The agent commits on the branch and submits; the daemon seals the submission by fetching that branch from origin and comparing its tip with the report's `sealedSha`. The daemon then publishes the checked submission: under `verifier.mode: local` (the base) it checks it in its own container, and under `remote` (the kind overlay) a verifier pod checks it (see "The verifiers"). An agent that reports through the shim's `report` tool (the `orchestrator` MCP server the loop names in `.orchestrator/mcp.json`) needs to push nothing: the loop writes `ORCH_ACCESS=remote`, `ORCH_WORKTREE` (the clone) and `ORCH_BRANCH` (the launch branch) into the shim's `env`, and on a submit the tool checks that the clone is clean (409 `dirtyWorktree`), force-pushes `HEAD` to the launch branch on origin within 60 seconds (503 `pushFailed`), and names the pushed commit as `sealedSha`. An agent that calls the API itself pushes the branch and sends `sealedSha` itself, and the loop's fallback relay pushes and names it for a report left in `.orchestrator/report.json`. A worker exits 0 when `/v1/status` says the run is finished, and the Deployment then restarts it.
 
 - `POD_NAME`, from the pod's `metadata.name` through the Downward API, is the worker id the daemon records for each claim.
 - `ORCH_API` is the daemon Service, `http://orchestrator.orch.svc:8080`.
@@ -149,7 +157,7 @@ A URL file holds the URL and nothing else; surrounding whitespace is trimmed. Th
 
 The libpq names are removed whatever their values, so a URL built from parts (`postgres://host/db` plus `PGPASSWORD`) does not get through either. A check command that needs `PG*` variables of its own, for a test database say, must set them itself.
 
-**What the daemon cannot remove.** A check command always runs as the daemon's user, in the daemon's container. So does an agent the daemon spawns (`runner.mode: spawn` or `mixed`), and so does a pull-mode worker that works its worktree inside the daemon's container. With this manifest the worktrees are on the daemon pod's `emptyDir`, so a worker works there: the smoke script does it with `kubectl exec`. Any such process can still read:
+**What the daemon cannot remove.** Under `verifier.mode: local` (the base) a check command runs as the daemon's user, in the daemon's container; under `remote` (the kind overlay) it runs in a verifier pod instead (see "The verifiers"). An agent the daemon spawns (`runner.mode: spawn` or `mixed`) runs in the daemon's container too, and so does a pull-mode worker that works a local launch's worktree there. With this manifest the workers are pods of their own: a remote launch is worked in the worker pod's clone, and worker and verifier pods mount no store Secret and hold no database variable. A process in the daemon's container can still read:
 
 - the URL file. The Secret mount is mode 0440, readable through the pod's `fsGroup`, which is the daemon's group;
 - the daemon's environment as the daemon was started (`/proc/<daemon pid>/environ`). This holds the URL or the password if the deployment passes `DATABASE_URL` or a `PG*` variable to the daemon;
@@ -158,9 +166,9 @@ The libpq names are removed whatever their values, so a URL built from parts (`p
 The daemon does not prevent these reads, and the spec claims nothing more (specs/state-backend "Store credentials a child can still reach"). A deployment limits them as follows:
 
 - **The daemon's environment.** Give the daemon the URL through a file, not through its environment. This manifest does: the daemon container has no `DATABASE_URL`, no `PG*` variable, no `envFrom` and no variable read from a Secret, so `/proc/<daemon pid>/environ` holds no URL or password.
-- **Agents.** In pull mode the daemon spawns no agent (`runner.mode: pull`, as here). A worker still reaches what a check command reaches when it works inside the daemon's container, and with this manifest that is the only place its worktree is. This manifest does not run workers anywhere else.
+- **Agents.** In pull mode the daemon spawns no agent (`runner.mode: pull`, as here). A worker reaches what a check command in the daemon's container reaches only when it works inside that container. The worker pods of this manifest do not: they work in their own clones, with no store Secret.
 - **The daemon's memory.** Yama `ptrace_scope` at 1 or more on the nodes keeps a child from attaching to its parent, and with that from reading the parent's memory through `/proc/<pid>/mem`. It limits ptrace-style reads only.
-- **The URL file.** Nothing in this manifest keeps it from a check command or a worker in the daemon's container. Give the run a database role with no more privileges than the run needs, and let only commands you trust with that role run there.
+- **The URL file.** Nothing in this manifest keeps it from a check command run under `verifier.mode: local`, or from any other process in the daemon's container. Under `remote` the check runs in a verifier pod, which does not mount it. Give the run a database role with no more privileges than the run needs, and let only commands you trust with that role run in the daemon's container.
 
 The init container `clone` clones `REPO_URL` into `/data/repo`. The daemon container then runs `orchestrator --repo /data/repo`, with `/healthz` as its liveness probe and `/readyz` as its readiness probe.
 
@@ -178,9 +186,25 @@ The init container `clone` clones `REPO_URL` into `/data/repo`. The daemon conta
 
 The database URL carries a password. Every surface that prints resolved config (`orchestrator-ctl start`, `orchestrator-ctl config`, `GET /v1/config`, `config.json`, and the log) shows it with the password removed.
 
-The daemon container sets `ORCH_LOG_FORMAT=json`, so every stderr line is one JSON object with `ts`, `level`, `msg`, and the line's data fields. On SIGTERM (a rollout or `kubectl delete pod`) the daemon stops its tick loop, finishes the in-flight tick and verifier job, closes the API server, writes the exit record to `daemon.json`, and exits 0 when every committed batch reached Postgres. When batches are left unflushed it logs their count and exits 1. After 8 seconds it exits anyway, with 1 when batches are still pending and 0 otherwise, and an abandoned check restarts from `queued` on the next start. `daemon.pid` and `daemon.json` are still written in the run directory, but nothing in the cluster reads them. A client outside the pod reaches the daemon with `ORCH_URL`; when that names a non-loopback host, `orchestrator-ctl` and the operator MCP server never start a local daemon and report the URL as unreachable instead.
+The daemon container sets `ORCH_LOG_FORMAT=json`, so every stderr line is one JSON object with `ts`, `level`, `msg`, and the line's data fields. On SIGTERM (a rollout or `kubectl delete pod`) the daemon stops its tick loop, finishes the in-flight tick and, under `verifier.mode: local`, the verifier job it is checking, closes the API server, writes the exit record to `daemon.json`, and exits 0 when every committed batch reached Postgres. When batches are left unflushed it logs their count and exits 1. After 8 seconds it exits anyway, with 1 when batches are still pending and 0 otherwise, and an abandoned check restarts from `queued` on the next start. Under `remote` the daemon does not wait for a job that waits for a verifier: the wait ends at once. The next start keeps that job when a verifier holds it or has posted its result, and queues it again otherwise. `daemon.pid` and `daemon.json` are still written in the run directory, but nothing in the cluster reads them. A client outside the pod reaches the daemon with `ORCH_URL`; when that names a non-loopback host, `orchestrator-ctl` and the operator MCP server never start a local daemon and report the URL as unreachable instead.
 
 The graph is not mounted. Send it with `PUT /v1/graph` (import, or `deploy/smoke.sh`): under a Postgres store the document goes to the store's proposed-graph slot and is reloaded at once. An accepted document becomes the active graph; a rejected one stays in the proposed slot with its reasons, and the active graph is unchanged, across restarts too. Accepting a proposal edits the proposed document the same way.
+
+### The verifiers
+
+The `orchestrator-verifier` Deployment (`deploy/base/verifier.yaml`) is the verifier pool. Each pod runs `orchestrator-verifier` (specs/verifier-pool), the verifier loop: it claims a verify job with `POST /v1/verify/claims`, fetches origin into its clone cache, rebases the sealed commit onto the expected integration head in a worktree of its own, runs the job's check command there, pushes a verified result to `refs/verify/<jobId>`, and posts one of six outcomes (`verified`, `checkFailed`, `checkTimeout`, `conflict`, `rebaseFailed`, `originFailed`) with the job token. The daemon then publishes a verified job, fails the task of a failed one, and deletes the `refs/verify/` ref. The loop prints one line per step, `verifier <id> <event> <jobId> <taskId>`, and after each check writes the command, its exit code and its output to stderr.
+
+- `POD_NAME`, from the pod's `metadata.name`, is the verifier id the daemon records for each claim.
+- `ORCH_API` is the daemon Service, `http://orchestrator.orch.svc:8080`.
+- The clone cache, `ORCH_VERIFIER_CACHE=/var/cache/orchestrator`, is an `emptyDir`; each job's worktree is under its `verify/` directory.
+- `ORCH_VERIFIER_BACKOFF_MAX_MS` bounds the wait between claims when there is nothing to verify (default 30000); the kind overlay sets 2000.
+- The pods carry the label `app.kubernetes.io/name: orchestrator-verifier`, uid, gid and `fsGroup` 1000, and run `orchestrator:dev`, as the workers do.
+
+The daemon offers verify jobs only under `verifier.mode: remote` in `orchestrator.yaml`, which needs `runner.access: remote`: a daemon with `remote` and any other access refuses to start. Under `local`, the default and the base's setting, the daemon checks each submission in its own container and offers nothing, so a verifier pod only idles and asks again; the base therefore sets `replicas: 0`. The daemon offers one job at a time, so one replica is enough, and the kind overlay runs one. A project whose check needs a toolchain builds an image `FROM orchestrator:dev` that installs it and sets that image on this Deployment.
+
+The pods mount no Secret and no volume claim, and their environment holds no database variable, no `envFrom` and no variable read from a Secret: a verifier reaches the daemon's API and origin, never the store. The claim reads no credential until the hardening milestone (see "Who this layout is for").
+
+On SIGTERM (a deletion, a rollout or a scale-down) the loop kills the check, releases its job with reason `podTerminating`, and exits 0; the daemon offers the job again. SIGINT does the same. The Deployment keeps Kubernetes' default grace of 30 seconds, which covers this, and has no preStop hook: the container's command is the loop itself.
 
 ### Claude worker image
 
@@ -212,13 +236,15 @@ REPO_URL=git://git-origin.orch.svc:9418/fixture.git
 
 Every fixture file is listed in the overlay's `configMapGenerator`; add a file there when adding one to `fixture/`. The init container copies `fixture/*` and, by name, `fixture/.gitattributes`, which sets `README.md merge=union`: the smoke tasks each append a line to `README.md` from the same base, and the union merge lets the verifier rebase one onto another without a conflict.
 
-The overlay runs a remote run. Its own `orchestrator.yaml` replaces the base file in the `orchestrator-config` ConfigMap (`behavior: replace`; kustomize cannot merge inside a file, so it repeats every base key) and adds `runner.access: remote`, `git.workerOriginUrl: git://git-origin.orch.svc:9418/fixture.git` (the in-cluster origin the worker pods clone and push to), and `capacity: 3`, so the three tasks that depend on `SMOKE` are all parked at once. A patch sets `ORCH_WORKER_AGENT=scripted` on `orchestrator-worker`, so the workers need no model; `replicas` stays 0 until the smoke test scales it.
+The overlay runs a remote run with remote verification. Its own `orchestrator.yaml` replaces the base file in the `orchestrator-config` ConfigMap (`behavior: replace`; kustomize cannot merge inside a file, so it repeats every base key) and adds `runner.access: remote`, `git.workerOriginUrl: git://git-origin.orch.svc:9418/fixture.git` (the in-cluster origin the worker pods clone and push to), `verifier.mode: remote`, so a verifier pod checks every submission, and `capacity: 3`, so the three tasks that depend on `SMOKE` are all parked at once. A patch sets `ORCH_WORKER_AGENT=scripted` on `orchestrator-worker`, so the workers need no model; `replicas` stays 0 until the smoke test scales it. Another patch runs `orchestrator-verifier` at one replica with `ORCH_VERIFIER_BACKOFF_MAX_MS=2000`, so an idle verifier asks for a job at least every two seconds.
 
-The overlay's `graph.yaml` holds one ready task, `SMOKE`, and three that depend on it: `SMOKE-PARKED`, `SMOKE-M3-A` and `SMOKE-M3-B`. It is not mounted: the smoke test sends it with `PUT /v1/graph`, and the daemon, in pull mode, prepares a launch for `SMOKE` and parks it as claimable, which is what the smoke test looks for.
+The fixture's check is `npm test`, which runs `fixture/test.js`. It waits 5 seconds, so the smoke's process probe sees it run, then fails when `README.md` is missing, or when a line of `README.md` starts with `- SMOKE-M5-BREAK ` (printing `fixture check: README.md names a task that breaks the check`), and prints `fixture check: ok` otherwise. git-origin seeds the fixture only when its repository does not exist, so a cluster kept from before this check came keeps the old one.
 
-`deploy/overlays/kind-claude` is the kind overlay with Claude workers. It takes `deploy/overlays/kind` whole and adds one strategic merge patch on `orchestrator-worker`: the image `orchestrator-worker-claude:dev` (see "Claude worker image", which sets `ORCH_WORKER_COMMAND`), `ORCH_WORKER_AGENT=command` in place of `scripted`, and `ANTHROPIC_API_KEY` from the Secret `anthropic-api-key`, key `ANTHROPIC_API_KEY`. It renders no Secret and sets no `ORCH_WORKER_COMMAND`; `replicas` stays 0, and every other resource is the kind overlay's, so applying it over the kind overlay restarts no daemon. Its `real-task.yaml` is not a resource but a graph fragment: one node, `SMOKE-REAL`, which depends on `SMOKE`, asks for one given line at the end of `README.md`, has one acceptance criterion and names no `model`, so its launch runs on the run's default (`runner.claude.model` and `effort`, by default `claude-opus-5-5` at `medium`). The smoke test's real-agent step creates the Secret, applies this overlay and sends `graph.yaml` followed by `real-task.yaml`.
+The overlay's `graph.yaml` holds one ready task, `SMOKE`, and three that depend on it: `SMOKE-PARKED`, `SMOKE-M3-A` and `SMOKE-M3-B`. It is not mounted: the smoke test sends it with `PUT /v1/graph`, and the daemon, in pull mode, prepares a launch for `SMOKE` and parks it as claimable, which is what the smoke test looks for. `graph-m5.yaml` is a graph fragment, not mounted either: two more tasks on `SMOKE`, `SMOKE-M5-PASS` and `SMOKE-M5-BREAK`, which the smoke's M5 step sends after `graph.yaml`.
 
-Both Deployments of the kind overlay use `orchestrator:dev`, so a kind cluster needs only that image and the CloudNativePG operator:
+`deploy/overlays/kind-claude` is the kind overlay with Claude workers. It takes `deploy/overlays/kind` whole and adds one strategic merge patch on `orchestrator-worker`: the image `orchestrator-worker-claude:dev` (see "Claude worker image", which sets `ORCH_WORKER_COMMAND`), `ORCH_WORKER_AGENT=command` in place of `scripted`, and `ANTHROPIC_API_KEY` from the Secret `anthropic-api-key`, key `ANTHROPIC_API_KEY`. It renders no Secret and sets no `ORCH_WORKER_COMMAND`; `replicas` stays 0, and every other resource is the kind overlay's, so applying it over the kind overlay restarts no daemon. Its `real-task.yaml` is not a resource but a graph fragment: one node, `SMOKE-REAL`, which depends on `SMOKE`, asks for one given line at the end of `README.md`, has one acceptance criterion and names no `model`, so its launch runs on the run's default (`runner.claude.model` and `effort`, by default `claude-opus-5-5` at `medium`). The smoke test's real-agent step creates the Secret, applies this overlay and sends `graph.yaml`, `graph-m5.yaml` and `real-task.yaml`, in that order: `SMOKE-M5-PASS` is done by then, and a graph that drops a started node is refused.
+
+Every Deployment of the kind overlay (the daemon, git-origin, the workers and the verifier) runs `orchestrator:dev`, so a kind cluster needs only that image and the CloudNativePG operator:
 
 ```sh
 docker build -t orchestrator:dev .
@@ -251,7 +277,7 @@ The steps run in this order:
 2. `kind load docker-image orchestrator:dev --name "$KIND_CLUSTER"`
 3. `kubectl apply --server-side -f "$CNPG_MANIFEST"` (the CloudNativePG operator), then its rollout
 4. `kubectl apply -k deploy/overlays/kind`
-5. `kubectl wait` for `cluster/postgres` to be Ready, then `kubectl rollout status` for `git-origin` and for `orchestrator`
+5. `kubectl wait` for `cluster/postgres` to be Ready, then `kubectl rollout status` for `git-origin`, for `orchestrator` and for `orchestrator-verifier`; from then on the verifier pod checks every submission
 6. `kubectl port-forward service/orchestrator` to `127.0.0.1:$LOCAL_PORT` (default 18080), then wait for `/healthz`
 7. `PUT /v1/graph` with the overlay's `graph.yaml`, which must be accepted
 8. The assertions, polled against `/v1/status` until they hold or `STATUS_TIMEOUT_S` (default 120) seconds pass
@@ -260,7 +286,7 @@ It asserts:
 
 - M1: `runner.mode` is `pull` and `claimable` is non-empty. The daemon runs in the cluster in pull mode and has parked a launch for the overlay's `SMOKE` task.
 - M2: no volume of the daemon pod is backed by a claim (`persistentVolumeClaim` or `ephemeral`), whatever the claim is called. The script reads the pod's volumes, not the claim names in the namespace. Postgres and `git-origin` keep their own claims.
-- M2 restart drill. The graph has `SMOKE` and three tasks that depend on it. The script works `SMOKE` with one worker pod, `smoke-worker` (`kubectl run` of `orchestrator-worker` with `ORCH_WORKER_AGENT=scripted`, `ORCH_WORKER_TASK=SMOKE` and `ORCH_WORKER_MAX_LAUNCHES=1`): it claims the launch with `access: remote`, clones git-origin, appends a line to `README.md`, pushes the launch branch, submits with its sha, and exits. The step requires the pod to succeed and its log to show `report accepted` for `SMOKE`; the pod is kept for the M3 log assertion. The script waits until the in-pod verifier has published `SMOKE` to origin and `SMOKE-PARKED` is claimable, then until `SMOKE-M3-A` and `SMOKE-M3-B` are claimable too, so the claimable set holds still through the drills. It then records three things:
+- M2 restart drill. The graph has `SMOKE` and three tasks that depend on it. The script works `SMOKE` with one worker pod, `smoke-worker` (`kubectl run` of `orchestrator-worker` with `ORCH_WORKER_AGENT=scripted`, `ORCH_WORKER_TASK=SMOKE` and `ORCH_WORKER_MAX_LAUNCHES=1`): it claims the launch with `access: remote`, clones git-origin, appends a line to `README.md`, pushes the launch branch, submits with its sha, and exits. The step requires the pod to succeed and its log to show `report accepted` for `SMOKE`; the pod is kept for the M3 log assertion. The script waits until the verifier pod has checked `SMOKE` and the daemon has published it to origin and `SMOKE-PARKED` is claimable, then until `SMOKE-M3-A` and `SMOKE-M3-B` are claimable too, so the claimable set holds still through the drills. It then records three things:
   - from the API: the claimable launches as launch id and task id, the task states, `latestSeq`, the integration head (the `publishedSha` of `SMOKE`'s transition to `done`), and the daemon pod's uid. `/v1/status` lists claimable tasks only, so the launch ids come from `/v1/events`: a launch is claimable when its latest `launch.claimable`, `launch.claimed`, `launch.released`, `launch.ended`, `launch.revoked` or `launch.failed` event is `launch.claimable`, and those launches' tasks must equal `/v1/status` `claimable`;
   - through `psql` on the CloudNativePG pod: `select status, count(*) from orchestrator.launches where run_id = ... group by 1`, the claimable launches as launch id, task id and `md5(token)`, and the task states;
   - a check that the API and `psql` agree.
@@ -281,7 +307,7 @@ It asserts:
   - within `STATUS_TIMEOUT_S`, recovery has settled, as in the restart drill (`pg-restart: startup recovery prepared every claimable launch again` and `pg-restart: one launch.reprepared per claimable launch`). Under local access it has recorded a `launch.reprepared` for every recorded claimable launch after the recorded sequence, exactly one each; under remote access no recovery event names a recorded claimable launch and no `launch.reprepared` follows the recorded sequence. `/readyz` passes before recovery runs, so the comparisons wait for this and not for a fixed time;
   - it is the same pod, and the claimable launches (ids, and tokens through `psql`) and the task states are unchanged.
 - Last of the drills, a claim of `SMOKE-PARKED` with `access: remote` must return a launch id and token (compared by md5 in `psql`) recorded before the first restart. The script then releases that launch.
-- M3: the worker Deployment. The script scales `orchestrator-worker` to 2, waits for the rollout, and follows each worker pod's log into a file from its first line (a worker exits once the run is finished and its container restarts, so a later `kubectl logs` would show the new container). The two pods claim the parked launches of `SMOKE-PARKED`, `SMOKE-M3-A` and `SMOKE-M3-B`, run the scripted agent, push and submit, and the verifier publishes each. It asserts, within `FINISH_TIMEOUT_S` (default 600) seconds:
+- M3: the worker Deployment. The script scales `orchestrator-worker` to 2, waits for the rollout, and follows each worker pod's log into a file from its first line (a worker exits once the run is finished and its container restarts, so a later `kubectl logs` would show the new container). The two pods claim the parked launches of `SMOKE-PARKED`, `SMOKE-M3-A` and `SMOKE-M3-B`, run the scripted agent, push and submit; the verifier pod checks each and the daemon publishes it. It asserts, within `FINISH_TIMEOUT_S` (default 600) seconds:
   - `M3: the run is finished`: `/v1/status` `finished` is `true`;
   - `M3: every smoke task is on origin's integration branch`: the first-parent history of origin's `main` carries an `Orchestrator-Task` trailer for each of `SMOKE`, `SMOKE-PARKED`, `SMOKE-M3-A` and `SMOKE-M3-B`;
   - `M3: worker logs show one accepted report per task`: the logs of `smoke-worker` and of the followed worker pods hold exactly one `worker <id> report accepted <launchId> <taskId>` line for each of those four tasks, and none for another.
@@ -291,7 +317,18 @@ It asserts:
 
   The block ends when `SMOKE-M3-A` is claimable again, and the M3 step works it from the kept head. A leftover `smoke-term` pod is deleted first. When `SMOKE-M3-A` then has no claimable launch (a rerun on a kept cluster where it was already worked), the termination step is skipped and its two assertions print `smoke: skip:` with the reason `SMOKE-M3-A is not claimable`. On exit the script deletes a `smoke-term` pod it started that still exists, and waits until it is gone. One cluster allows three kept releases of `SMOKE-M3-A` (`daemon.maxKeptReleases`); use `--fresh` after that.
 - M4 step, block B, after the M3 assertions: `M4: every integration commit carries its Orchestrator-Launch trailer`. Every first-parent commit of origin's `main` with an `Orchestrator-Task` trailer also has an `Orchestrator-Launch` trailer, and its value is the `launchId` of an `agent.report` event of that task.
-- The real-agent step, last, only with `--real-agent <key file>`. It creates or replaces the Secret `anthropic-api-key` in namespace `orch` with the one key `ANTHROPIC_API_KEY`, the file's content with its line ends removed; the key reaches `kubectl` on standard input only, and the script prints the path, never the key. It scales `orchestrator-worker` to 0 and waits until no worker pod is left (a scripted worker could otherwise claim the new task), applies `deploy/overlays/kind-claude`, sends `graph.yaml` followed by `real-task.yaml` with `PUT /v1/graph`, waits until `SMOKE-REAL` is claimable, and scales `orchestrator-worker` to 1. One Claude worker then works `SMOKE-REAL` on the run's default model. It asserts:
+- M5 step, after block B: the verifier pool. It needs a cluster made with `--fresh` after `graph-m5.yaml` and the breaking fixture check came: a kept older cluster's fixture would pass `SMOKE-M5-BREAK`. The script starts a process probe, sends `graph.yaml` followed by `graph-m5.yaml` with `PUT /v1/graph` (the finished run takes the two new tasks), and restarts the worker Deployment (`kubectl rollout restart`, then its rollout), since the workers exited when the run finished and sit in a growing restart delay. The probe runs rounds until it is stopped: one sample of the daemon container, then one of each running verifier pod. A sample is one `kubectl exec` that reads, twice and one second apart, the processes whose parent is the container's pid 1 and that are not zombies, and reports each one found in both reads whose command name is not `git`. A sample whose exec fails, or whose pid 1 is not `/usr/local/bin/orchestrator` (or `/usr/local/bin/orchestrator-verifier`), is printed and not counted. It asserts, in this order:
+  - `M5: orchestrator, orchestrator-worker and orchestrator-verifier are deployed`: the three Deployments exist and the verifier reports one ready replica;
+  - `M5: SMOKE-M5-PASS is published`: within `FINISH_TIMEOUT_S`, `/v1/status` lists it as done and origin's `main` carries its `Orchestrator-Task` trailer;
+  - `M5: SMOKE-M5-BREAK is blocked after its attempts`: within `FINISH_TIMEOUT_S`, `/v1/status` lists it as blocked (after its second failed check, not its first), its overlay row in `psql` (`pg_m5_reason`) holds the message `attempts exhausted after 2: checkFailed`, and origin's `main` carries no trailer for it. The script then stops the probe;
+  - `M5: the check ran in a verifier pod and never under the daemon`: no daemon sample reported a child, at least one verifier sample did, and at least five daemon samples were taken. It prints the three counts and the slowest round;
+  - `M5: the failed jobs are checkFailed with the check's output`: `orchestrator.verifier_jobs` in `psql` (`pg_m5_jobs`) has exactly two rows for `SMOKE-M5-BREAK` in this run, each `failed`, with `failureKind` `checkFailed` and an output that holds the fixture's breaking line;
+  - `M5: verifier logs show the check`: the verifier pods' logs (with their restart counts) hold a `check` and a `verified` line for `SMOKE-M5-PASS` followed by `fixture check: ok`, and two `check` and two `checkFailed` lines for `SMOKE-M5-BREAK`, whose job ids are the two rows', each followed by the breaking line;
+  - `M5: the daemon pod made no verification worktree`: `<runDir>/verify` does not exist in the daemon container;
+  - `M5: the run is finished again`: the script cancels `SMOKE-M5-BREAK` (`POST /v1/tasks/SMOKE-M5-BREAK/cancel`), and `/v1/status` says `finished: true` within `STATUS_TIMEOUT_S`, so a rerun on that cluster is refused by the finished-run check.
+
+  A pass that failed in or after the M5 step once `SMOKE-M5-PASS` or `SMOKE-M5-BREAK` had started is followed by one with `--fresh`. While the run is unfinished, the next pass's step 7 sends `graph.yaml` alone, which drops a started node and is refused; once it is finished, the finished-run check refuses the pass. The probe covers only the M5 step, and the missing `<runDir>/verify` only the time since the restart drill created the daemon pod.
+- The real-agent step, last, only with `--real-agent <key file>`. It creates or replaces the Secret `anthropic-api-key` in namespace `orch` with the one key `ANTHROPIC_API_KEY`, the file's content with its line ends removed; the key reaches `kubectl` on standard input only, and the script prints the path, never the key. It scales `orchestrator-worker` to 0 and waits until no worker pod is left (a scripted worker could otherwise claim the new task), applies `deploy/overlays/kind-claude`, sends `graph.yaml`, `graph-m5.yaml` and `real-task.yaml` with `PUT /v1/graph` (without `graph-m5.yaml` the upload would drop the done `SMOKE-M5-PASS` and be refused), waits until `SMOKE-REAL` is claimable, and scales `orchestrator-worker` to 1. One Claude worker then works `SMOKE-REAL` on the run's default model. It asserts:
   - `M4: the real task is done`, within `REAL_TIMEOUT_S` (default 900) seconds;
   - `M4: the real task's launch cost is above zero`: `cost.byTask["SMOKE-REAL"]` within `STATUS_TIMEOUT_S`, since the worker posts the usage after the agent has exited;
   - `M4: the real task's commit carries its Orchestrator-Launch trailer`, the block B rule for `SMOKE-REAL`'s commit.

@@ -49,8 +49,8 @@ describe('daemon image', () => {
     for (const dev of Object.keys(pkg.devDependencies)) expect(final.body).not.toContain(` ${dev}`);
   });
 
-  it('puts orchestrator, orchestrator-ctl and orchestrator-worker on PATH from the package bins', () => {
-    for (const name of ['orchestrator', 'orchestrator-ctl', 'orchestrator-worker']) {
+  it('puts orchestrator, orchestrator-ctl, orchestrator-worker and orchestrator-verifier on PATH from the package bins', () => {
+    for (const name of ['orchestrator', 'orchestrator-ctl', 'orchestrator-worker', 'orchestrator-verifier']) {
       const target = (pkg.bin[name] as string).replace(/^\.\//, '');
       expect(final.body).toMatch(new RegExp(`ln -s \\S*${target.replace(/[.]/g, '\\.')} /usr/local/bin/${name}(\\s|$)`));
     }
@@ -62,11 +62,10 @@ describe('daemon image', () => {
     expect(ignored).toEqual(expect.arrayContaining(['node_modules', 'dist', '.git', '.orchestrator-run', 'test/fixtures']));
   });
 
-  it('deploy/README.md names the image, the build command, and both entrypoints', () => {
+  it('deploy/README.md names the image, the build command, and the four entrypoints', () => {
     const readme = read('deploy/README.md');
     expect(readme).toContain('orchestrator:dev');
     expect(readme).toContain('docker build -t orchestrator:dev .');
-    expect(readme).toContain('`orchestrator`');
-    expect(readme).toContain('`orchestrator-ctl`');
+    for (const name of ['orchestrator', 'orchestrator-ctl', 'orchestrator-worker', 'orchestrator-verifier']) expect(readme).toContain(`\`${name}\``);
   });
 });

@@ -141,6 +141,11 @@ BREAK_PATCHED=''
 PG_LOG_PID='' PG_LOG=''
 WORKER_LOG_DIR='' WORKER_LOG_PIDS=''
 cleanup() {
+  if [ -n "${PROBE_DIR:-}" ]; then
+    touch "$PROBE_DIR/stop" 2>/dev/null || true
+    if [ -n "${PROBE_PID:-}" ]; then kill "$PROBE_PID" 2>/dev/null || true; fi
+    rm -rf "$PROBE_DIR"
+  fi
   for pid in $WORKER_LOG_PIDS; do kill "$pid" 2>/dev/null || true; done
   if [ -n "$WORKER_LOG_DIR" ]; then rm -rf "$WORKER_LOG_DIR"; fi
   if [ -n "$FROZEN" ]; then thaw_postgres "$FROZEN" || true; fi
@@ -796,6 +801,176 @@ put_graph_with() {
     | jq -e '.accepted == true' >/dev/null
 }
 
+# --- M5: the verifier pool. A verifier pod checks the M5 tasks; the daemon only publishes. ---
+
+M5_PASS=SMOKE-M5-PASS
+M5_BREAK=SMOKE-M5-BREAK
+M5_FRAGMENT=deploy/overlays/kind/graph-m5.yaml
+# The fixture check's line for a README.md that names M5_BREAK (deploy/overlays/kind/fixture/test.js).
+M5_BREAK_OUTPUT='fixture check: README.md names a task that breaks the check'
+M5_PASS_OUTPUT='fixture check: ok'
+
+# The probe's in-pod script: only sh, cat, sed, grep, tr and sleep. It prints pid 1's command line, then lists the
+# processes whose parent is pid 1 and that are not zombies, twice and one second apart, and prints "child <pid> <comm>"
+# for each pid found in both lists whose command name is not git. The probe's own processes never have parent pid 1:
+# the exec'd shell's parent is outside the container's pid namespace, and its children are its own.
+PROBE_SCRIPT="$(cat <<'EOF'
+tr '\0' ' ' </proc/1/cmdline; echo
+list() {
+  for p in /proc/[0-9]*; do
+    s="$(cat "$p/status" 2>/dev/null)" || continue
+    printf '%s\n' "$s" | grep -q '^PPid:[[:space:]]*1$' || continue
+    printf '%s\n' "$s" | grep -q '^State:[[:space:]]*Z' && continue
+    echo "${p#/proc/} $(cat "$p/comm" 2>/dev/null)"
+  done
+}
+a="$(list)"; sleep 1; b="$(list)"
+printf '%s\n' "$a" | while read -r pid comm; do
+  [ -n "$pid" ] || continue
+  [ "$comm" = git ] && continue
+  printf '%s\n' "$b" | grep -q "^$pid " && echo "child $pid $comm"
+done
+exit 0
+EOF
+)"
+PROBE_DIR='' PROBE_PID=''
+# One sample of pod $1's container $2, whose pid 1 must run $3, appended to file $4 as "<pod> <n> <children>". A failed
+# exec or an unexpected pid 1 is written to the probe's skipped file and not counted.
+probe_sample() {
+  local out first kids n
+  if ! out="$(kc exec "$1" -c "$2" -- sh -c "$PROBE_SCRIPT" 2>&1)"; then
+    echo "$1: kubectl exec failed: $(head -n 1 <<<"$out")" >>"$PROBE_DIR/skipped"; return 0
+  fi
+  first="$(head -n 1 <<<"$out")"
+  # The second field exactly: /usr/local/bin/orchestrator is a prefix of /usr/local/bin/orchestrator-verifier.
+  if [ "$(awk '{ print $2 }' <<<"$first")" != "$3" ]; then
+    echo "$1: pid 1 is '$first', not $3" >>"$PROBE_DIR/skipped"; return 0
+  fi
+  kids="$(sed -n 's/^child //p' <<<"$out" | tr '\n' ',' | sed 's/,$//')"
+  n=0; if [ -n "$kids" ]; then n="$(tr ',' '\n' <<<"$kids" | wc -l | tr -d ' ')"; fi
+  echo "$1 $n ${kids:--}" >>"$4"
+}
+# Rounds until the stop file appears: one daemon sample, then one per running verifier pod. Each round's seconds go
+# to the rounds file.
+probe_loop() {
+  local t pod
+  while [ ! -e "$PROBE_DIR/stop" ]; do
+    t=$(date +%s)
+    pod="$(daemon_pod 2>/dev/null)" || pod=''
+    if [ -n "$pod" ]; then probe_sample "$pod" orchestrator /usr/local/bin/orchestrator "$PROBE_DIR/daemon"; else echo "no running daemon pod" >>"$PROBE_DIR/skipped"; fi
+    for pod in $(kc get pod -l app.kubernetes.io/name=orchestrator-verifier --field-selector=status.phase=Running -o name 2>/dev/null); do
+      probe_sample "${pod#pod/}" verifier /usr/local/bin/orchestrator-verifier "$PROBE_DIR/verifier"
+    done
+    echo "$(( $(date +%s) - t ))" >>"$PROBE_DIR/rounds"
+  done
+}
+start_probe() {
+  PROBE_DIR="$(mktemp -d -t smoke-probe.XXXXXX)"
+  : >"$PROBE_DIR/daemon"; : >"$PROBE_DIR/verifier"; : >"$PROBE_DIR/rounds"; : >"$PROBE_DIR/skipped"
+  probe_loop &
+  PROBE_PID=$!
+}
+# Ask the loop to stop after its round and wait for it, so the files are complete.
+stop_probe() {
+  [ -n "$PROBE_PID" ] || return 0
+  touch "$PROBE_DIR/stop"
+  wait "$PROBE_PID" || true
+  PROBE_PID=''
+}
+# No daemon sample reported a child of pid 1 other than git, at least one verifier sample did, and at least five
+# daemon samples were taken.
+probe_held() {
+  local samples daemon_kids verifier_kids slowest
+  samples="$(wc -l <"$PROBE_DIR/daemon" | tr -d ' ')"
+  daemon_kids="$(awk '$2 > 0' "$PROBE_DIR/daemon" | wc -l | tr -d ' ')"
+  verifier_kids="$(awk '$2 > 0' "$PROBE_DIR/verifier" | wc -l | tr -d ' ')"
+  slowest="$(sort -n "$PROBE_DIR/rounds" | tail -n 1)"
+  echo "    probe: $samples daemon samples, $daemon_kids with a child other than git; $(wc -l <"$PROBE_DIR/verifier" | tr -d ' ') verifier samples, $verifier_kids with a child; $(wc -l <"$PROBE_DIR/rounds" | tr -d ' ') rounds, the slowest ${slowest:-?}s"
+  awk '$2 > 0 { print "    daemon child: " $0 }' "$PROBE_DIR/daemon"
+  awk '$2 > 0 { print "    verifier child: " $0 }' "$PROBE_DIR/verifier"
+  sed 's/^/    not counted: /' "$PROBE_DIR/skipped"
+  if [ "$verifier_kids" = 0 ]; then echo "    round seconds: $(tr '\n' ' ' <"$PROBE_DIR/rounds")"; fi
+  [ "$daemon_kids" = 0 ] && [ "$verifier_kids" -gt 0 ] && [ "$samples" -ge 5 ]
+}
+
+# The three Deployments exist, and the verifier reports one ready replica.
+m5_deployed() {
+  local names ready
+  names="$(kc get deploy -o name)" || return 1
+  echo "    $(tr '\n' ' ' <<<"$names")"
+  for d in orchestrator orchestrator-worker orchestrator-verifier; do grep -qxF "deployment.apps/$d" <<<"$names" || return 1; done
+  ready="$(kc get deploy orchestrator-verifier -o jsonpath='{.status.readyReplicas}')" || return 1
+  echo "    orchestrator-verifier ready replicas: ${ready:-0}"
+  [ "$ready" = 1 ]
+}
+m5_pass_published() {
+  status_is ".byStatus.done | index(\"$M5_PASS\")" || return 1
+  origin_carries_task "$M5_PASS"
+}
+# The blocked task's reason in this run's overlay row, and its message.
+pg_m5_reason() { psql_q "select entry->'status'->'reason'->>'message' from orchestrator.overlay where run_id = '$RUN_ID' and id = '$M5_BREAK'"; }
+m5_break_blocked() {
+  local reason tasks
+  status_is ".byStatus.blocked | index(\"$M5_BREAK\")" || return 1
+  reason="$(pg_m5_reason)" || return 1
+  echo "    $M5_BREAK blocked: $reason"
+  case "$reason" in 'attempts exhausted after 2: checkFailed'*) ;; *) return 1 ;; esac
+  tasks="$(origin_trailer_tasks refs/heads/main)" || return 1
+  echo "    Orchestrator-Task trailers on origin main: $(tr '\n' ' ' <<<"$tasks")"
+  ! grep -qxF "$M5_BREAK" <<<"$tasks"
+}
+# The verify job rows of M5_BREAK in this run as jobId|status|failureKind|yes or no: the output holds the breaking line.
+pg_m5_jobs() { psql_q "select job_id || '|' || status || '|' || coalesce(doc->>'failureKind', '-') || '|' || (case when strpos(coalesce(doc->>'output', ''), '$M5_BREAK_OUTPUT') > 0 then 'yes' else 'no' end) from orchestrator.verifier_jobs where run_id = '$RUN_ID' and task_id = '$M5_BREAK' order by created_at, job_id"; }
+m5_jobs_failed() {
+  local rows; rows="$(pg_m5_jobs)" || return 1
+  sed 's/^/    /' <<<"$rows"
+  [ "$(grep -c . <<<"$rows")" = 2 ] || return 1
+  ! grep -qv '^[^|]*|failed|checkFailed|yes$' <<<"$rows"
+}
+# The check output the verifier loop wrote for job $2 in the logs $1: the lines after "check <jobId> exit: <code>" up to
+# the next check's "check <jobId>: <command>" line (stdout lines of the loop may fall between).
+check_output_of() { awk -v j="check $2 exit:" 'index($0, j) == 1 { on = 1; next } on && /^check [^ ]+: / { on = 0 } on' <<<"$1"; }
+# The verifier pods' logs: a check and a verified line for M5_PASS with the check's ok output, two check and two
+# checkFailed lines for M5_BREAK naming the two job ids of pg_m5_jobs, with the breaking output after each check.
+m5_verifier_logs() {
+  local pods pod restarts logs ok=1 jobs got pass_job j ev
+  pods="$(kc get pod -l app.kubernetes.io/name=orchestrator-verifier -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[?(@.name=="verifier")].restartCount}{"\n"}{end}')" || return 1
+  logs=''
+  while read -r pod restarts; do
+    [ -n "$pod" ] || continue
+    echo "    $pod: verifier container restarts: ${restarts:-?}"
+    logs+="$(kc logs "pod/$pod" -c verifier --tail=-1)"$'\n' || return 1
+  done <<<"$pods"
+  grep -E "^verifier [^ ]+ [^ ]+ [^ ]+ ($M5_PASS|$M5_BREAK)\$" <<<"$logs" | sed 's/^/    /'
+  pass_job="$(grep -E "^verifier [^ ]+ verified [^ ]+ $M5_PASS\$" <<<"$logs" | awk '{ print $4 }' | tail -n 1)"
+  [ -n "$pass_job" ] || { echo "    no verified line for $M5_PASS"; ok=0; }
+  grep -qE "^verifier [^ ]+ check $pass_job $M5_PASS\$" <<<"$logs" || { echo "    no check line for $M5_PASS"; ok=0; }
+  grep -qxF "check $pass_job exit: 0" <<<"$logs" && check_output_of "$logs" "$pass_job" | grep -qF "$M5_PASS_OUTPUT" || { echo "    no '$M5_PASS_OUTPUT' after the check of $pass_job"; ok=0; }
+  jobs="$(pg_m5_jobs | cut -d'|' -f1 | sort)" || return 1
+  for ev in check checkFailed; do
+    got="$(grep -E "^verifier [^ ]+ $ev [^ ]+ $M5_BREAK\$" <<<"$logs" | awk '{ print $4 }' | sort)"
+    [ "$got" = "$jobs" ] || { echo "    $ev lines of $M5_BREAK name $(tr '\n' ' ' <<<"$got"), the rows $(tr '\n' ' ' <<<"$jobs")"; ok=0; }
+  done
+  for j in $jobs; do
+    grep -qxF "check $j exit: 1" <<<"$logs" && check_output_of "$logs" "$j" | grep -qF "$M5_BREAK_OUTPUT" || { echo "    no '$M5_BREAK_OUTPUT' after the check of $j"; ok=0; }
+  done
+  [ "$ok" = 1 ]
+}
+# The daemon container has no <runDir>/verify.
+m5_no_daemon_worktree() {
+  local dir got
+  dir="$(status_get .runDir)/verify" || return 1
+  got="$(kc exec "$(daemon_pod)" -c orchestrator -- sh -c 'if [ -e "$1" ]; then echo present; else echo absent; fi' sh "$dir")" || return 1
+  echo "    $dir in the daemon container: $got"
+  [ "$got" = absent ]
+}
+# Cancel M5_BREAK so the run is finished again, as the first pass left it.
+m5_finish_run() {
+  curl -fsS -o /dev/null -X POST -H 'content-type: application/json' --data '{"reason":"deploy/smoke.sh M5 step"}' "$API/v1/tasks/$M5_BREAK/cancel" || return 1
+  retry "$STATUS_TIMEOUT_S" status_is ".finished == true and (.byStatus.cancelled | index(\"$M5_BREAK\"))" || return 1
+  echo "    finished: true; cancelled: $(status_get '.byStatus.cancelled | join(" ")')"
+}
+
 # A kept cluster whose run is finished from an earlier pass has no claimable launch left, so a rerun could not pass;
 # refuse it before any step changes the cluster. --fresh starts a new cluster and skips the check.
 if [ "$FRESH" = 1 ]; then
@@ -837,10 +1012,13 @@ step kubectl --context "$KUBE_CONTEXT" -n cnpg-system rollout status deployment/
 # 4. Apply the kind overlay.
 step kubectl --context "$KUBE_CONTEXT" apply -k deploy/overlays/kind
 
-# 5. Wait for Postgres (the daemon reads its application Secret), then the rollouts. The clone init container backs off until git-origin serves.
+# 5. Wait for Postgres (the daemon reads its application Secret), then the rollouts of git-origin, the daemon and the
+# verifier. The clone init container backs off until git-origin serves.
 step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" wait --for=condition=Ready cluster/postgres --timeout="$ROLLOUT_TIMEOUT"
 step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deployment/git-origin --timeout="$ROLLOUT_TIMEOUT"
 step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deployment/orchestrator --timeout="$ROLLOUT_TIMEOUT"
+# The verifier pod checks every submission from here on (verifier.mode: remote in the kind overlay).
+step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deployment/orchestrator-verifier --timeout="$ROLLOUT_TIMEOUT"
 
 # 6. Port-forward to the Service.
 forward
@@ -1023,6 +1201,24 @@ check 'M3: worker logs show one accepted report per task' one_accepted_report_pe
 # M4 block B: every integration commit names the launch that reported it.
 check 'M4: every integration commit carries its Orchestrator-Launch trailer' trailers_name_reported_launches
 
+# M5: the verifier pool. Two more tasks on the finished run: a verifier pod checks both, the check passes for
+# SMOKE-M5-PASS and fails for SMOKE-M5-BREAK, which is blocked after its attempts. A probe samples the processes under
+# the daemon and the verifier pods meanwhile. The workers exited when the run finished and sit in a growing restart
+# delay, so they are restarted after the upload. The step needs a cluster made with --fresh after graph-m5.yaml came.
+step start_probe
+step retry 30 put_graph_with "$M5_FRAGMENT"
+step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout restart deployment/orchestrator-worker
+step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" rollout status deployment/orchestrator-worker --timeout="$ROLLOUT_TIMEOUT"
+check 'M5: orchestrator, orchestrator-worker and orchestrator-verifier are deployed' m5_deployed
+check "M5: $M5_PASS is published" retry "$FINISH_TIMEOUT_S" m5_pass_published
+check "M5: $M5_BREAK is blocked after its attempts" retry "$FINISH_TIMEOUT_S" m5_break_blocked
+step stop_probe
+check 'M5: the check ran in a verifier pod and never under the daemon' probe_held
+check "M5: the failed jobs are checkFailed with the check's output" m5_jobs_failed
+check 'M5: verifier logs show the check' m5_verifier_logs
+check 'M5: the daemon pod made no verification worktree' m5_no_daemon_worktree
+check 'M5: the run is finished again' m5_finish_run
+
 # The real-agent step, only with --real-agent: Claude workers on the key work SMOKE-REAL with the run's default model.
 # It is the last step and changes the worker pool (scaled to 0, then Claude workers): add later steps above it.
 if [ -z "$REAL_AGENT_KEY" ]; then
@@ -1032,7 +1228,8 @@ else
   step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" scale deployment/orchestrator-worker --replicas=0
   step retry "$FINISH_TIMEOUT_S" no_worker_pods
   step kubectl --context "$KUBE_CONTEXT" apply -k deploy/overlays/kind-claude
-  step retry 30 put_graph_with deploy/overlays/kind-claude/real-task.yaml
+  # graph-m5.yaml too: SMOKE-M5-PASS is done, and a graph that drops a started node is refused.
+  step retry 30 put_graph_with "$M5_FRAGMENT" deploy/overlays/kind-claude/real-task.yaml
   step retry "$STATUS_TIMEOUT_S" status_is ".claimable | index(\"$REAL_TASK\")"
   step kubectl --context "$KUBE_CONTEXT" -n "$NAMESPACE" scale deployment/orchestrator-worker --replicas=1
   check "${REAL_NAMES[0]}" retry "$REAL_TIMEOUT_S" status_is ".byStatus.done | index(\"$REAL_TASK\")"

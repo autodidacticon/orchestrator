@@ -1,0 +1,48 @@
+# The verifier pool: each pod runs orchestrator-verifier, which claims verify jobs over the daemon's API
+# (POST /v1/verify/claims), rebases the sealed commit onto the integration head in its own clone (an emptyDir clone
+# cache), runs the check command there, and posts the result; the daemon publishes. Scaled to 0 here: the daemon
+# offers jobs only under verifier.mode: remote (orchestrator.yaml), which needs runner.access: remote; under local, the
+# default, the daemon checks in its own container and a verifier pod would only idle. See deploy/README.md "The verifiers".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator-verifier
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: orchestrator-verifier
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: orchestrator-verifier
+    spec:
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      # On SIGTERM the loop kills the check, releases its job (reason podTerminating) and exits 0; Kubernetes' default
+      # 30 s grace covers it. No preStop hook: the container's command is orchestrator-verifier itself.
+      containers:
+        - name: verifier
+          image: orchestrator:dev
+          imagePullPolicy: IfNotPresent
+          command: ["orchestrator-verifier"]
+          env:
+            # The verifier id the daemon records for each claim: the pod's own name.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # The daemon's Service.
+            - name: ORCH_API
+              value: http://orchestrator.orch.svc:8080
+            - name: ORCH_VERIFIER_CACHE
+              value: /var/cache/orchestrator
+          volumeMounts:
+            - name: clone-cache
+              mountPath: /var/cache/orchestrator
+      volumes:
+        # One clone per repository, kept for the pod's life, with each job's worktree under verify/; a new pod clones again.
+        - name: clone-cache
+          emptyDir: {}

@@ -1,6 +1,6 @@
-# The base plus an in-cluster git origin seeded from ./fixture, a remote run (orchestrator.yaml here), and worker pods
-# running the scripted agent. See deploy/README.md.
-# graph.yaml here is not mounted: deploy/smoke.sh sends it with PUT /v1/graph.
+# The base plus an in-cluster git origin seeded from ./fixture, a remote run with remote verification
+# (orchestrator.yaml here), worker pods running the scripted agent, and one verifier pod. See deploy/README.md.
+# graph.yaml and graph-m5.yaml here are not mounted: deploy/smoke.sh sends them with PUT /v1/graph.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: orch
@@ -18,7 +18,8 @@ configMapGenerator:
       - fixture/README.md
       - fixture/package.json
       - fixture/test.js
-  # Replaces the base's orchestrator.yaml with this overlay's (runner.access: remote, git.workerOriginUrl).
+  # Replaces the base's orchestrator.yaml with this overlay's (runner.access: remote, git.workerOriginUrl,
+  # verifier.mode: remote).
   - name: orchestrator-config
     behavior: replace
     files:
@@ -44,3 +45,17 @@ patches:
         value:
           name: ORCH_WORKER_AGENT
           value: scripted
+  # One verifier pod checks every submission (verifier.mode: remote in orchestrator.yaml): the daemon offers one verify
+  # job at a time, so a second replica would only idle. An idle verifier asks for a job at least every 2 s.
+  - target:
+      kind: Deployment
+      name: orchestrator-verifier
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: ORCH_VERIFIER_BACKOFF_MAX_MS
+          value: "2000"

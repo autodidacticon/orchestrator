@@ -47,7 +47,7 @@ describe('deploy/smoke.sh', () => {
 
   it('the psql queries name the store schema', () => {
     const text = readFileSync(script, 'utf8');
-    const want: Record<string, string> = { pg_launch_counts: 'launches', pg_claimable: 'launches', pg_claimable_tokens: 'launches', pg_states: 'overlay' };
+    const want: Record<string, string> = { pg_launch_counts: 'launches', pg_claimable: 'launches', pg_claimable_tokens: 'launches', pg_states: 'overlay', pg_m5_jobs: 'verifier_jobs', pg_m5_reason: 'overlay' };
     for (const [fn, table] of Object.entries(want)) {
       const line = text.split('\n').find((l) => l.startsWith(`${fn}() {`));
       expect(line, fn).toBeDefined();
@@ -70,7 +70,8 @@ describe('deploy/smoke.sh', () => {
       'kubectl --context kind-orch -n cnpg-system rollout status deployment/cnpg-controller-manager',
       'kubectl --context kind-orch apply -k deploy/overlays/kind',
       'kubectl --context kind-orch -n orch wait --for=condition=Ready cluster/postgres',
-      'kubectl --context kind-orch -n orch rollout status deployment/orchestrator',
+      'kubectl --context kind-orch -n orch rollout status deployment/orchestrator --timeout',
+      'kubectl --context kind-orch -n orch rollout status deployment/orchestrator-verifier --timeout',
       'kubectl --context kind-orch -n orch port-forward service/orchestrator',
       'curl -fsS -o /dev/null http://127.0.0.1:18080/healthz',
       'retry 30 put_graph',
@@ -231,6 +232,59 @@ describe('deploy/smoke.sh', () => {
     expect(existsSync(calls)).toBe(false);
   });
 
+  // --- M5 (GH-35) ---
+
+  const M5 = [
+    'M5: orchestrator, orchestrator-worker and orchestrator-verifier are deployed',
+    'M5: SMOKE-M5-PASS is published',
+    'M5: SMOKE-M5-BREAK is blocked after its attempts',
+    'M5: the check ran in a verifier pod and never under the daemon',
+    "M5: the failed jobs are checkFailed with the check's output",
+    'M5: verifier logs show the check',
+    'M5: the daemon pod made no verification worktree',
+    'M5: the run is finished again',
+  ];
+
+  it('--dry-run lists the M5 step after block B and before the real-agent skips: probe, upload, worker restart, then the eight M5 names', () => {
+    const r = dryRun();
+    expect(r.stderr).toBe('');
+    expect(r.status).toBe(0);
+    const out = lines(r.stdout);
+    const b = out.indexOf(`smoke: skip: ${M4_B} (dry run: nothing is executed)`);
+    expect(b).toBeGreaterThanOrEqual(0);
+    const steps = (name: string) => out.findIndex((l, i) => i > b && l.startsWith('+ ') && l.includes(name));
+    const probe = steps('start_probe');
+    const upload = steps('put_graph_with deploy/overlays/kind/graph-m5.yaml');
+    const restart = steps('rollout restart deployment/orchestrator-worker');
+    const status = steps('rollout status deployment/orchestrator-worker');
+    const stop = steps('stop_probe');
+    const names = M5.map((n) => out.indexOf(`smoke: skip: ${n} (dry run: nothing is executed)`));
+    for (const [i, n] of names.entries()) {
+      expect(i === -1 ? -1 : n, M5[i]).toBeGreaterThan(b);
+      // Each name comes right after its command, and only once.
+      expect(out[n - 1]?.startsWith('+ '), M5[i]).toBe(true);
+      expect(out.filter((l) => l.includes(M5[i]!)), M5[i]).toHaveLength(1);
+    }
+    const real = REAL.map((n) => out.indexOf(`smoke: skip: ${n} (needs --real-agent)`));
+    const order = [b, probe, upload, restart, status, names[0]!, names[1]!, names[2]!, stop, ...names.slice(3), ...real];
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect(order).toEqual([...order].sort((x, y) => x - y));
+    // The M5 upload sends graph.yaml and the fragment only; the real-agent fragment is never named without --real-agent.
+    expect(out[upload]).toBe('+ retry 30 put_graph_with deploy/overlays/kind/graph-m5.yaml');
+    expect(existsSync(calls)).toBe(false);
+  });
+
+  it('every -X PUT to /v1/graph is inside put_graph or put_graph_with', () => {
+    const text = readFileSync(script, 'utf8').split('\n');
+    let fn = '';
+    for (const l of text) {
+      const m = /^([a-z_0-9]+)\(\) \{/.exec(l);
+      if (m) fn = m[1]!;
+      else if (l === '}') fn = '';
+      if (l.includes('-X PUT') && l.includes('/v1/graph')) expect(['put_graph', 'put_graph_with'], l).toContain(fn);
+    }
+  });
+
   it('--dry-run --real-agent <file> lists the real-agent step in order, reads no key, and calls no tool', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'orch-smoke-key-'));
     const key = path.join(dir, 'key');
@@ -249,7 +303,7 @@ describe('deploy/smoke.sh', () => {
         'kubectl --context kind-orch -n orch scale deployment/orchestrator-worker --replicas=0',
         'no_worker_pods',
         'kubectl --context kind-orch apply -k deploy/overlays/kind-claude',
-        'put_graph_with deploy/overlays/kind-claude/real-task.yaml',
+        'put_graph_with deploy/overlays/kind/graph-m5.yaml deploy/overlays/kind-claude/real-task.yaml',
         'status_is .claimable | index("SMOKE-REAL")',
         'kubectl --context kind-orch -n orch scale deployment/orchestrator-worker --replicas=1',
         'status_is .byStatus.done | index("SMOKE-REAL")',

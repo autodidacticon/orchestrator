@@ -1,10 +1,15 @@
 # The kind overlay's orchestrator.yaml: the base file (deploy/base/orchestrator.yaml) plus a remote run, so the
-# worker pods (deploy/base/worker.yaml) claim its launches and work them in their own clones. kustomize cannot merge
+# worker pods (deploy/base/worker.yaml) claim its launches and work them in their own clones, and remote verification,
+# so a verifier pod (deploy/base/verifier.yaml) checks each submission. kustomize cannot merge
 # inside a file, so this replaces the base file whole; keep the two in step.
 runner:
   mode: pull
   # Every launch is remote: a worker claims with access remote, clones origin, and pushes the launch branch.
   access: remote
+# Every check runs in a verifier pod (deploy/base/verifier.yaml, one replica here): the daemon offers each verify job
+# over its API and publishes the result; it makes no verification worktree and runs no check. Needs runner.access: remote.
+verifier:
+  mode: remote
 daemon:
   idleExitMs: 0
 # Three launches at once (default 2): once SMOKE is published, SMOKE-PARKED, SMOKE-M3-A and SMOKE-M3-B are all parked
