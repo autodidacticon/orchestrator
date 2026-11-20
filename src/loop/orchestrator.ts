@@ -61,6 +61,7 @@ import { sessionEndMatches } from '../runs/ancestry.js';
 import type { ShutdownCaller } from '../runs/runDir.js';
 import type { ToolchainRecord } from '../toolchain/detect.js';
 import { PUSH_REFUSED, pushRetryDue, recordPushRetry } from '../verify/push-retry.js';
+import { renewVerifyLeases } from '../verify/claims.js';
 
 /** The triggers that remove a task's prepare retry entry. See specs/pull-runner "Prepare failure limit". */
 const PREPARE_RETRY_RESETS: ReadonlySet<string> = new Set(['unblock', 'reopen', 'uncancel', 'cascade']);
@@ -474,6 +475,7 @@ export class Orchestrator implements OrchestratorCore {
     this.store.transaction(() => {
       for (const g of pending) this.store.appendEvent({ kind: 'daemon.gap', payload: { from: g.from, to: g.to, gapMs: g.gapMs, holdUntil: g.holdUntil } }, g.to);
       for (const l of this.store.listLaunches({ status: 'live' })) this.renewLease(l);
+      renewVerifyLeases(this);
     });
     this.gapClock.written(pending.length);
     this.lastActivityAt = Math.max(this.lastActivityAt, pending.at(-1)!.to);
@@ -2124,7 +2126,7 @@ export class Orchestrator implements OrchestratorCore {
   }
 
   /** The URL a remote worker clones: `git.workerOriginUrl`, else `git.originUrl`, else the clone's `origin` remote; as written. */
-  private async workerRepoUrl(): Promise<string | undefined> {
+  async workerRepoUrl(): Promise<string | undefined> {
     const configured = this.config.git.workerOriginUrl ?? this.config.git.originUrl;
     if (configured) return configured;
     const r = await git(this.config.repoPath, ['remote', 'get-url', 'origin'], { allowFail: true });

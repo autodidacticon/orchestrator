@@ -354,7 +354,7 @@ describe('deploy/smoke.sh', () => {
     expect(err[0]).toContain('--fresh');
     expect(r.calls).toHaveLength(1);
     expect(r.calls[0]).toMatch(/^kubectl --context kind-orch .*get --raw /);
-    expect(r.calls[0].endsWith(STATUS_PATH)).toBe(true);
+    expect(r.calls[0]!.endsWith(STATUS_PATH)).toBe(true);
     expect(r.calls.some((c) => /^(docker|kind) /.test(c) || c.includes(' apply'))).toBe(false);
     expect(r.stdout.split('\n').filter((l) => l.startsWith('+ '))).toEqual(['+ finished_run_check']);
   });
@@ -368,7 +368,7 @@ describe('deploy/smoke.sh', () => {
       expect(r.status).toBe(2);
       expect(r.stderr.trimEnd().split('\n')).toHaveLength(1);
       expect(r.calls).toHaveLength(1);
-      expect(r.calls[0].endsWith(STATUS_PATH)).toBe(true);
+      expect(r.calls[0]!.endsWith(STATUS_PATH)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -379,7 +379,7 @@ describe('deploy/smoke.sh', () => {
       const r = keptRun(status);
       expect(r.status, String(status)).not.toBe(0);
       expect(r.status, String(status)).not.toBe(2);
-      expect(r.calls[0].endsWith(STATUS_PATH), String(status)).toBe(true);
+      expect(r.calls[0]!.endsWith(STATUS_PATH), String(status)).toBe(true);
       expect(r.calls.at(-1), String(status)).toBe('docker build -t orchestrator:dev .');
       expect(r.stderr, String(status)).not.toContain('finished');
     }

@@ -19,6 +19,7 @@ import { assertStorableId } from '../state/storable.js';
 import { policyReport } from '../tracker/policy.js';
 import { cutSubmittedEvent, parseCutSubmitted, parseReviewQuery, reviewAnswer } from './review.js';
 import { git } from '../workspace/git.js';
+import { registerVerifyRoutes } from '../verify/routes.js';
 
 export function digestOf(orch: Orchestrator): Record<string, unknown> {
   const tracker = { outboxPending: orch.store.countOutbox('pending'), trackerErrors: orch.trackerErrors() };
@@ -283,6 +284,7 @@ export function registerOperatorRoutes(server: ApiServer, orch: Orchestrator): v
     return r.ok ? { status: 200, body: { ok: true, paused: false } } : { status: 409, body: { ok: false, reason: r.reason, runUsd: r.runUsd, ceilingUsd: r.ceilingUsd, paused: orch.isPaused() } };
   });
   server.addRoute('POST', /^\/v1\/tasks\/([^/]+)\/nudge$/, async (_req, body, [id]) => result(orch.nudge(id as string, String(body['message'] ?? ''))));
+  registerVerifyRoutes(server, orch);
   // Pull runner: claims, releases, worker usage, and the mode override. See specs/operator-control "Claims and releases".
   server.addRoute('POST', /^\/v1\/claims$/, async (_req, body) => {
     if (!orch.hasGraph()) return { status: 409, body: { ok: false, reason: 'graph not loaded' } };

@@ -124,6 +124,28 @@ export interface VerifierJob {
    * an attempt (at most 1). Never cleared. See specs/integration-pipeline "Failed check across a gap".
    */
   gapRequeues?: number;
+  /**
+   * The offer of a `checking` job to a remote verifier: when it was made and the check command kept for it. Set only
+   * by the remote backend; a job the in-process backend checks has none and is never claimable. See specs/verifier-pool
+   * "Verify job offer".
+   */
+  offer?: { at: number; checkCommand: string };
+  /** The per-job bearer token of the verifier that holds the claim. See specs/verifier-pool "Verify job token". */
+  token?: string;
+  /** The verifier that holds the claim and its lease. See specs/verifier-pool "Verify claim" and "Verify lease". */
+  verifier?: { id: string; claimedAt: number; expiresAt: number };
+  /**
+   * The result a verifier posted, stored once; separate from the job's own `rebasedSha`, `output` and `conflictFiles`.
+   * See specs/verifier-pool "Verify result".
+   */
+  result?: {
+    outcome: 'verified' | 'checkFailed' | 'checkTimeout' | 'conflict' | 'rebaseFailed' | 'originFailed';
+    rebasedSha?: string;
+    output: string;
+    conflictFiles: string[];
+    verifierId: string;
+    at: number;
+  };
   /** Terminal result applied to the overlay by the tick. */
   applied: boolean;
   createdAt: number;

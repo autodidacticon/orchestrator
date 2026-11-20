@@ -18,6 +18,7 @@ import type { TagPushResult } from '../workspace/workspace.js';
 import type { Orchestrator } from './orchestrator.js';
 import { admit } from './schedule.js';
 import { clearPushRetry, PUSH_REFUSED } from '../verify/push-retry.js';
+import { expireVerifyLeases } from '../verify/claims.js';
 import { ceilingUsd, checkTimeBudget, runCostUsd } from '../health/budgets.js';
 import { observeFingerprint, recordSignal } from '../health/progress.js';
 import { checkStuck } from '../health/stuck.js';
@@ -214,6 +215,7 @@ async function handleDeadLaunch(o: Orchestrator, launch: Launch, entry: Entry): 
  */
 export async function drainVerification(o: Orchestrator): Promise<void> {
   try {
+    expireVerifyLeases(o);
     await retryPendingRemovals(o);
     await applyJobs(o);
   } finally {
