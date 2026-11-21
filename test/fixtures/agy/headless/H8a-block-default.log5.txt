@@ -39,7 +39,7 @@ I1120 15:32:56.116516       1 common.go:191] Launching CLI mode
 E1120 15:32:56.116547       1 launchsteps.go:108] Failed to resolve GeminiDir ".gemini": .gemini must be an absolute path: path is not absolute, falling back to default
 I1120 15:32:56.116565       1 common.go:212] CLI app data directory: ~/.gemini/antigravity-cli
 E1120 15:32:56.116571      85 errorreport.go:285] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
-I1120 15:32:56.116586       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[/private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-df0hqP/wt] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
+I1120 15:32:56.116586       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[<tmpdir>/agy-probe-df0hqP/wt] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
 W1120 15:32:56.116403     152 rpcs_plugin_auth.go:110] Not reloading plugin MCP servers: cannot get the signed-in user: error getting token source: You are not logged into Antigravity.
 I1120 15:32:56.116622      85 server.go:4946] State refresh took 0ms
 I1120 15:32:56.116637      85 server.go:4961] [RemoteControl] Subscription callback triggered.
@@ -64,7 +64,7 @@ I1120 15:32:56.117647     161 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIEN
 I1120 15:32:56.118134       1 server.go:2339] Backend project ID updated dynamically to: <project>
 I1120 15:32:56.118150       1 analytics.go:249] CLI startup completed (took 38.352042ms, phases [main_entered=0ms ls_start=1ms ls_ready=36ms launch_cli=36ms backend_created=38ms project_resolved=38ms])
 I1120 15:32:56.118171       1 printmode.go:208] Print mode: starting (promptLength=235, model="gemini-3.8-flash-low", conversationID="")
-I1120 15:32:56.118189       1 manager.go:561] Initializing CLI store manager for workspace /private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-df0hqP/wt
+I1120 15:32:56.118189       1 manager.go:561] Initializing CLI store manager for workspace <tmpdir>/agy-probe-df0hqP/wt
 I1120 15:32:56.118372       1 cli_setting_manager.go:98] CLI settings initialized: permissions=<nil>, toolPermission=request-review
 I1120 15:32:56.118590       1 hooks_manager.go:54] loaded 0 named hooks from 0 hooks.json file(s)
 I1120 15:32:56.118605       1 manager.go:736] CLI store manager initialized successfully

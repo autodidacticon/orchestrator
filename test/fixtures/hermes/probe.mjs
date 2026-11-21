@@ -8,7 +8,9 @@
 //   node probe.mjs --run <ids>     runs those scenarios (comma separated), each in a fresh scratch directory, and writes their
 //                                  evidence and records/<run>.json as soon as each ends, then rebuilds results.json
 //   node probe.mjs --assemble      rebuilds results.json from records/ and answers.json (no model, no hermes)
-//   node probe.mjs --check         checks results.json and every evidence file it names (no model, no hermes)
+//   node probe.mjs --check         checks results.json and every evidence file it names, and scans every evidence file for
+//                                  host data (the user name, a temporary root, Hermes' host reports, an environment listing)
+//   node probe.mjs --scrub         rewrites every evidence file with the current redaction (no model, no hermes)
 //
 // Every CLI runs here as a detached child that leads its own process group, under a hard time limit; at the limit the script
 // signals that group (-pid) and nothing else. Children get a short environment built here (PATH, HOME, USER, LANG, TMPDIR,
@@ -20,7 +22,7 @@
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir, tmpdir, userInfo } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,6 +49,7 @@ function parseArgs(argv) {
     const v = () => { const x = argv[++i]; if (x === undefined) throw new Error(`${a} needs a value`); return x; };
     if (a === '--preflight') o.mode = 'preflight';
     else if (a === '--check') o.mode = 'check';
+    else if (a === '--scrub') o.mode = 'scrub';
     else if (a === '--assemble') o.mode = 'assemble';
     else if (a === '--run') { o.mode = 'run'; o.runs = v().split(',').filter(Boolean); }
     else if (a === '--bin') o.bin = v();
@@ -65,15 +68,21 @@ let secretValues = []; // values of the copied credential files: never written t
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const IDENTITY = /^(\s*(?:Author|Commit|Committer|Signed-off-by|Co-Authored-By):\s*)[^<\n]*?(\s*<|$)/gim;
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+// Hermes' own host reports: the SIGTERM diagnostics (ps of the whole host, pstree, load, dmesg) and the start-up security audit.
+const DIAG_REMOVED = '=== shutdown diagnostic removed: it listed every process of the host ===';
+const DIAG_SECTION = /(==> logs\/gateway-shutdown-diag\.log <==\n)[\s\S]*?(?=\n==> |$)/g;
+const DIAG_BLOCK = /=== shutdown diagnostic @[^\n]*===[\s\S]*?(?:=== end ===|(?=\n==> )|$)/g;
+const AUDIT_LINE = /^.*hermes\.security_audit.*(?:\r?\n|$)/gm;
+const dropHostReports = (s) => s.replace(DIAG_SECTION, `$1${DIAG_REMOVED}\n`).replace(DIAG_BLOCK, DIAG_REMOVED).replace(AUDIT_LINE, '');
 function redactString(s) {
-  let out = s.replace(ANSI, '');
+  let out = dropHostReports(s.replace(ANSI, ''));
   for (const root of scratchRoots) out = out.split(root).join('<scratch>');
   out = out.split(REPO).join('<repo>');
   for (const t of TMP_ROOTS) out = out.split(t).join('<tmpdir>');
   out = out.split(HOME).join('~');
   out = out.replace(IDENTITY, (_, a, b) => `${a}Fixture Author${b}`).replace(EMAIL, 'author@example.invalid');
   for (const v of secretValues) out = out.split(v).join('<credential>');
-  return out;
+  return redactHost(out);
 }
 function redact(v) {
   if (typeof v === 'string') return redactString(v);
@@ -82,6 +91,128 @@ function redact(v) {
   return v;
 }
 const redactJsonl = (text) => text.split('\n').map((l) => { if (!l.trim()) return l; try { return JSON.stringify(redact(JSON.parse(l))); } catch { return redactString(l); } }).join('\n');
+
+// ---------------------------------------------------------------- host data (GH-208)
+// The same rules in the three probes (acp/opencode, agy, hermes), each with its own copy; none imports from src/. redactString
+// applies them when evidence is written, --scrub applies them again to every evidence file, and --check scans every evidence
+// file and fails, naming the file with counts only, when one still holds host data.
+const HOST_USER = (() => { try { return userInfo().username; } catch { return ''; } })();
+const HOST_USER_WORD = HOST_USER.length > 1 ? new RegExp(`(?<![A-Za-z0-9_])${HOST_USER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![A-Za-z0-9_])`, 'g') : null;
+/** The temporary root (the real path of os.tmpdir()), with and without /private, longest first. */
+const HOST_TMP = (() => { let t = tmpdir(); try { t = realpathSync(t); } catch {} t = t.replace(/\/+$/, ''); return [...new Set([t, t.replace(/^\/private(?=\/)/, '')])].filter((x) => x.length > 1).sort((a, b) => b.length - a.length); })();
+const ENV_KEEP = /^(?:ORCH_\w*|PROBE_MARKER|HOME|PWD|LANG|TERM|SHLVL)$/;
+const ENV_SEP = /(\r?\n|(?:\\+r)?\\+n)/; // a line break, plain or escaped once or more
+const ENV_HEAD = /^([A-Za-z_][A-Za-z0-9_]*)=/;
+const ENV_QUOTED = /^(.*?(\\*["']))([A-Za-z_][A-Za-z0-9_]*)=/s; // a listing that starts inside a (JSON) string
+const ENV_PLACEHOLDER = /^<(?:value|project)>$/; // a value this rule already wrote
+const PS_ROW = /\s\d+\s+\d+[.,]\d+\s+\d+[.,]\d+\s+\d+\s+\d+\s+(?:\?\??|s\d+|ttys?\d+|pts\/\d+)\s/g;
+const PS_REMOVED = '<removed: a process listing>';
+// A shell PATH list, also without its name (a cut output): four or more absolute directories joined by `:`, one of them a
+// system bin directory. Words after a space that do not start with `/` belong to a directory (`Application Support`).
+const PATH_LIST = /[~/][^\s:"'\\]*(?: [^\s:"'\\/~][^\s:"'\\]*)*(?::[~/][^\s:"'\\]*(?: [^\s:"'\\/~][^\s:"'\\]*)*){3,}/g;
+const redactPathList = (s) => s.replace(PATH_LIST, (m) => (m.split(':').some((d) => /^\/(?:usr\/)?s?bin\/?$/.test(d)) ? '<PATH>' : m));
+/**
+ * An environment listing: three or more NAME=value lines in a row in one string, with plain or escaped line breaks. Each
+ * value outside ENV_KEEP becomes valueFor(name) (`<value>`); a value this rule already wrote stays. A listing that
+ * starts inside a quoted string ends its last value at the matching quote.
+ */
+function redactEnvListing(s, valueFor = () => '<value>') {
+  if (typeof s !== 'string' || !s.includes('=')) return s;
+  const parts = s.split(ENV_SEP); // even indices: lines; odd: the breaks
+  const lines = [];
+  let quote = null;
+  for (let i = 0; i < parts.length; i += 2) {
+    const seg = parts[i];
+    let m = ENV_HEAD.exec(seg), e = null;
+    if (m) e = { i, pre: '', name: m[1], rest: seg.slice(m[0].length) };
+    else if ((m = ENV_QUOTED.exec(seg))) { quote = m[2]; e = { i, pre: m[1], name: m[3], rest: seg.slice(m[0].length) }; }
+    else quote = null;
+    if (e) {
+      const k = quote ? e.rest.indexOf(quote) : -1;
+      e.value = k >= 0 ? e.rest.slice(0, k) : e.rest;
+      e.post = k >= 0 ? e.rest.slice(k) : '';
+      if (k >= 0) quote = null;
+    }
+    lines.push(e);
+  }
+  let run = [];
+  const flush = () => {
+    if (run.length >= 3) for (const e of run) if (!ENV_KEEP.test(e.name) && !ENV_PLACEHOLDER.test(e.value)) parts[e.i] = `${e.pre}${e.name}=${valueFor(e.name)}${e.post}`;
+    run = [];
+  };
+  for (const e of lines) { if (!e) { flush(); continue; } run.push(e); if (e.post) flush(); }
+  flush();
+  return parts.join('');
+}
+/** The host rules, applied after the scratch, checkout and home paths are rewritten. */
+function redactHost(s, { envValue } = {}) {
+  let out = s;
+  for (const t of HOST_TMP) out = out.split(t).join('<tmpdir>');
+  if (HOST_USER_WORD) out = out.replace(HOST_USER_WORD, '<user>');
+  out = redactPathList(redactEnvListing(out, envValue));
+  if ((out.match(PS_ROW) ?? []).length >= 3) out = PS_REMOVED;
+  return out;
+}
+/** Every evidence file under root: every file but the scripts and the README. */
+function evidenceFiles(root) {
+  const out = [];
+  const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (e.isFile() && !/\.m?js$/.test(e.name) && e.name !== 'README.md') out.push(p); } };
+  walk(root);
+  return out.sort();
+}
+const isJsonLine = (l) => { if (!/^\s*[[{]/.test(l)) return false; try { JSON.parse(l); return true; } catch { return false; } };
+/** How the probe writes a file: a .json file whole, a JSON-lines file line by line, anything else as one string. */
+function evidenceKind(p, text) {
+  if (/\.json$/.test(p)) { try { return { kind: 'json', value: JSON.parse(text) }; } catch {} }
+  const lines = text.split('\n').filter((l) => l.trim());
+  return { kind: lines.length && (/\.jsonl$/.test(p) || lines.every(isJsonLine)) ? 'jsonl' : 'text' };
+}
+function evidenceStrings(p, text) {
+  const k = evidenceKind(p, text);
+  if (k.kind === 'text') return [text];
+  const out = [];
+  const walk = (v) => { if (typeof v === 'string') out.push(v); else if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object') for (const [key, x] of Object.entries(v)) { out.push(key); walk(x); } };
+  if (k.kind === 'json') walk(k.value);
+  else for (const l of text.split('\n')) { if (!l.trim()) continue; try { walk(JSON.parse(l)); } catch { out.push(l); } }
+  return out;
+}
+const countOf = (s, needle) => s.split(needle).length - 1;
+const HOST_CHECKS = [
+  ['user name', (s) => (HOST_USER_WORD ? (s.match(HOST_USER_WORD) ?? []).length : 0)],
+  ['temporary root', (s) => countOf(s, HOST_TMP[HOST_TMP.length - 1])],
+  ['hermes.security_audit', (s) => countOf(s, 'hermes.security_audit')],
+  ['shutdown diagnostic', (s) => countOf(s, '=== shutdown diagnostic @')],
+  ['environment listing', (s) => (redactEnvListing(s) !== s ? 1 : 0)],
+  ['PATH list', (s) => (redactPathList(s) !== s ? 1 : 0)],
+];
+/** One problem per evidence file under root that holds host data: its name and the counts, never the text. */
+function scanHost(root) {
+  const problems = [];
+  for (const p of evidenceFiles(root)) {
+    const counts = {};
+    for (const s of evidenceStrings(p, readFileSync(p, 'utf8'))) for (const [label, f] of HOST_CHECKS) { const n = f(s); if (n) counts[label] = (counts[label] ?? 0) + n; }
+    const found = Object.entries(counts);
+    if (found.length) problems.push(`${path.relative(root, p)}: host data (${found.map(([k, n]) => `${k} ${n}`).join(', ')})`);
+  }
+  return problems;
+}
+/** Rewrites every evidence file under root with the current redaction; a line or file whose value does not change is kept. */
+function scrubEvidence(root, before) {
+  const files = evidenceFiles(root);
+  if (before) before(files);
+  let changed = 0;
+  for (const p of files) {
+    const t = readFileSync(p, 'utf8');
+    const k = evidenceKind(p, t);
+    let out = t;
+    if (k.kind === 'json') { const r = redact(k.value); if (JSON.stringify(r) !== JSON.stringify(k.value)) out = JSON.stringify(r, null, 2) + '\n'; }
+    else if (k.kind === 'jsonl') out = t.split('\n').map((l) => { if (!l.trim()) return l; try { const v = JSON.parse(l); const r = redact(v); return JSON.stringify(r) === JSON.stringify(v) ? l : JSON.stringify(r); } catch { return redactString(l); } }).join('\n');
+    else out = redactString(t);
+    if (out !== t) { writeFileSync(p, out); changed++; console.error(`[scrub] ${path.relative(root, p)}`); }
+  }
+  console.error(`[scrub] ${changed} of ${files.length} evidence files rewritten`);
+  return changed;
+}
 
 /** Credential-shaped values of a copied file, for the guard: in a .env the values of *KEY*, *TOKEN*, *SECRET* and
  *PASSWORD* names; in a JSON file the string leaves under such keys (and access/refresh token fields). 12 characters or more. */
@@ -380,9 +511,11 @@ async function main() {
     return 0;
   }
   if (o.mode === 'check') return check();
+  // Applies the current redaction again to every evidence file (GH-208), as the agy probe's --scrub does.
+  if (o.mode === 'scrub') { scrubEvidence(HERE); return 0; }
   if (o.mode === 'assemble') { assemble(); return 0; }
   if (o.mode === 'run') return runScenarios(o.runs);
-  process.stderr.write('usage: probe.mjs --preflight | --run <ids> | --assemble | --check\n');
+  process.stderr.write('usage: probe.mjs --preflight | --run <ids> | --assemble | --check | --scrub\n');
   return 64;
 }
 
@@ -454,7 +587,15 @@ function gitFacts(ctx) {
 }
 function homeLogs(ctx) {
   const parts = [];
-  for (const p of filesUnder(path.join(ctx.hermesHome, 'logs'))) { let t = ''; try { t = readFileSync(p, 'utf8'); } catch {} parts.push(`==> ${path.relative(ctx.hermesHome, p)} <==\n${t.length > 60000 ? t.slice(-60000) : t}`); }
+  for (const p of filesUnder(path.join(ctx.hermesHome, 'logs'))) {
+    // Hermes writes gateway-shutdown-diag.log on SIGTERM: ps of the whole host, pstree, the load and dmesg. Never copied.
+    if (path.basename(p) === 'gateway-shutdown-diag.log') continue;
+    let t = '';
+    try { t = readFileSync(p, 'utf8'); } catch {}
+    // The gateway's start-up audit reports findings about the host's configuration: every hermes.security_audit line is dropped.
+    t = t.split('\n').filter((l) => !l.includes('hermes.security_audit')).join('\n');
+    parts.push(`==> ${path.relative(ctx.hermesHome, p)} <==\n${t.length > 60000 ? t.slice(-60000) : t}`);
+  }
   return parts.join('\n');
 }
 /** The shim's parent chain cut at this probe's own process: nothing above it is kept. */
@@ -914,6 +1055,7 @@ function check() {
   const env = uc['~/.hermes/.env'];
   if (!(cfg === 'absent' || (cfg && 'sha256Before' in cfg && 'sha256After' in cfg))) problems.push('userConfig: ~/.hermes/config.yaml needs sha256Before and sha256After, or absent');
   if (!(env === 'absent' || (env && typeof env.changed === 'boolean'))) problems.push('userConfig: ~/.hermes/.env needs changed, or absent');
+  for (const p of scanHost(HERE)) problems.push(p);
   for (const p of problems) console.log(`problem: ${p}`);
   console.log(`hermes probe: ${recorded} of ${QIDS.length} questions recorded`);
   return problems.length ? 1 : 0;

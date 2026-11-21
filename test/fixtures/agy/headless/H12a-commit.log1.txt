@@ -59,12 +59,12 @@ I1120 15:32:45.643769      54 profiler.go:231] Continuous pprof profiling is dis
 I1120 15:32:45.644381     190 manager.go:107] Migration [MIGRATION_ID_RESET_MAGIC_WORKSPACE_VCS] already has status MIGRATION_STATUS_COMPLETED, skipping
 I1120 15:32:45.644391     190 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIENCE_PLUGIN] is disabled, skipping entirely
 I1120 15:32:45.646298       1 common.go:212] CLI app data directory: ~/.gemini/antigravity-cli
-I1120 15:32:45.646403       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[/private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-tWkVGT/wt /private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-tWkVGT/home/launch] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
+I1120 15:32:45.646403       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[<tmpdir>/agy-probe-tWkVGT/wt <tmpdir>/agy-probe-tWkVGT/home/launch] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
 I1120 15:32:45.647118       1 auth_provider.go:816] [AuthProvider] SetEnableBusinessLogin called with enable: true
 I1120 15:32:45.648117       1 server.go:2339] Backend project ID updated dynamically to: <project>
 I1120 15:32:45.648033       1 analytics.go:249] CLI startup completed (took 84.176333ms, phases [main_entered=1ms ls_start=4ms ls_ready=78ms launch_cli=80ms backend_created=83ms project_resolved=84ms])
 I1120 15:32:45.648445       1 printmode.go:208] Print mode: starting (promptLength=217, model="gemini-3.8-flash-low", conversationID="")
-I1120 15:32:45.648719       1 manager.go:561] Initializing CLI store manager for workspace /private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-meJ4Gf/wt
+I1120 15:32:45.648719       1 manager.go:561] Initializing CLI store manager for workspace <tmpdir>/agy-probe-meJ4Gf/wt
 I1120 15:32:45.650829       1 cli_setting_manager.go:98] CLI settings initialized: permissions=<nil>, toolPermission=request-review
 I1120 15:32:45.652430       1 hooks_manager.go:54] loaded 0 named hooks from 0 hooks.json file(s)
 I1120 15:32:45.652478       1 manager.go:736] CLI store manager initialized successfully

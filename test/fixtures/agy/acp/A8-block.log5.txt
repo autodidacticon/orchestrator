@@ -51,7 +51,7 @@ I1120 15:32:50.620152      96 manager.go:98] Migration [MIGRATION_ID_PLUGIN_ENAB
 I1120 15:32:50.620382       1 common.go:212] CLI app data directory: ~/.gemini/antigravity-cli
 I1120 15:32:50.620390      96 manager.go:107] Migration [MIGRATION_ID_PLUGIN_ENABLEMENT] already has status MIGRATION_STATUS_COMPLETED, skipping
 I1120 15:32:50.620400      96 manager.go:98] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] is enabled
-I1120 15:32:50.620398       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[/private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-aYkyYN/wt /private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-aYkyYN/zz-launch] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
+I1120 15:32:50.620398       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[<tmpdir>/agy-probe-aYkyYN/wt <tmpdir>/agy-probe-aYkyYN/zz-launch] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
 I1120 15:32:50.620463      96 manager.go:107] Migration [MIGRATION_ID_BUILTIN_SIDECARS_TO_PLUGINS] already has status MIGRATION_STATUS_COMPLETED, skipping
 I1120 15:32:50.620468       1 auth_provider.go:816] [AuthProvider] SetEnableBusinessLogin called with enable: true
 I1120 15:32:50.620486      96 manager.go:95] Migration [MIGRATION_ID_LIN_BUILTIN_TO_MARKETPLACE] is disabled, skipping entirely
@@ -63,7 +63,7 @@ I1120 15:32:50.620580      96 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIEN
 I1120 15:32:50.621178       1 server.go:2339] Backend project ID updated dynamically to: <project>
 I1120 15:32:50.621196       1 analytics.go:249] CLI startup completed (took 36.387834ms, phases [main_entered=0ms ls_start=1ms ls_ready=34ms launch_cli=34ms backend_created=36ms project_resolved=36ms])
 I1120 15:32:50.621216       1 printmode.go:208] Print mode: starting (promptLength=537, model="gemini-3.8-flash-low", conversationID="")
-I1120 15:32:50.621235       1 manager.go:561] Initializing CLI store manager for workspace /private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-aYkyYN/wt
+I1120 15:32:50.621235       1 manager.go:561] Initializing CLI store manager for workspace <tmpdir>/agy-probe-aYkyYN/wt
 I1120 15:32:50.621548       1 cli_setting_manager.go:98] CLI settings initialized: permissions=<nil>, toolPermission=request-review
 I1120 15:32:50.621853       1 hooks_manager.go:54] loaded 0 named hooks from 0 hooks.json file(s)
 I1120 15:32:50.621869       1 manager.go:736] CLI store manager initialized successfully

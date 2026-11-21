@@ -39,7 +39,7 @@ W1120 15:33:08.842582      53 cache.go:157] Cache(loadCodeAssistResponse): Singl
 I1120 15:33:08.842596       1 common.go:212] CLI app data directory: ~/.gemini/antigravity-cli
 W1120 15:33:08.842656      52 rpcs_plugin_auth.go:110] Not reloading plugin MCP servers: cannot get the signed-in user: error getting token source: You are not logged into Antigravity.
 E1120 15:33:08.842648      53 errorreport.go:285] error getting token source: You are not logged into Antigravity.
-I1120 15:33:08.842663       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[/private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-JHaE24/wt] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
+I1120 15:33:08.842663       1 server.go:314] Creating CLI server backend: product=antigravity workspaceDirs=[<tmpdir>/agy-probe-JHaE24/wt] appDataDir=~/.gemini/antigravity-cli languageServer=true codeAssist=true
 I1120 15:33:08.842725       1 auth_provider.go:816] [AuthProvider] SetEnableBusinessLogin called with enable: true
 E1120 15:33:08.842729     172 errorreport.go:285] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
 I1120 15:33:08.842770     172 server.go:4946] State refresh took 0ms
@@ -64,7 +64,7 @@ I1120 15:33:08.843231     159 manager.go:95] Migration [MIGRATION_ID_SPLIT_SCIEN
 I1120 15:33:08.843408       1 server.go:2339] Backend project ID updated dynamically to: <project>
 I1120 15:33:08.843423       1 analytics.go:249] CLI startup completed (took 34.217291ms, phases [main_entered=0ms ls_start=1ms ls_ready=33ms launch_cli=33ms backend_created=34ms project_resolved=34ms])
 I1120 15:33:08.843444       1 printmode.go:208] Print mode: starting (promptLength=30, model="gemini-3.8-flash", conversationID="")
-I1120 15:33:08.843460       1 manager.go:561] Initializing CLI store manager for workspace /private/var/folders/5x/dj7wwnjx2q90g2fxkpqkqp8w0000gn/T/agy-probe-JHaE24/wt
+I1120 15:33:08.843460       1 manager.go:561] Initializing CLI store manager for workspace <tmpdir>/agy-probe-JHaE24/wt
 I1120 15:33:08.843629       1 cli_setting_manager.go:98] CLI settings initialized: permissions=<nil>, toolPermission=request-review
 I1120 15:33:08.843820       1 hooks_manager.go:54] loaded 0 named hooks from 0 hooks.json file(s)
 I1120 15:33:08.843834       1 manager.go:736] CLI store manager initialized successfully
