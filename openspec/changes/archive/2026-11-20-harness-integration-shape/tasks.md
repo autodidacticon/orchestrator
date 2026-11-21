@@ -8,7 +8,7 @@
 
 ## 2. Later
 
-This section lists issues for later milestones. None is built by this change. Each line gives a size (S, M, L) and what blocks it. "(B only)" marks a line that exists only under shape (B). The rule gives no harness shape (B), so the (B only) lines apply only if the owner chooses (B) at the review. Lines marked "(from the probes)" were added after the probes; the others were known on 2026-11-20.
+This section lists issues for later milestones. None is built by this change. Each line gives a size (S, M, L) and what blocks it. "(B only)" marks a line that exists only under shape (B). The rule gives no harness shape (B), so the (B only) lines apply only if the owner chooses (B) at the review. Lines marked "(from the probes)" were added after the probes; the others were known on 2026-11-20. Line 2.24 was added by the review of 2026-11-20.
 
 ### 2a. Milestone "Harness adapter and supervisor"
 
@@ -23,9 +23,10 @@ This section lists issues for later milestones. None is built by this change. Ea
 - [ ] 2.9 (from the probes, open question 4) Probe whether the bash tool's command of `opencode run` leaves the process group. Record it in `test/fixtures/opencode/README.md` and re-grade `opencode run` C11. (S; blocked by: nothing)
 - [ ] 2.10 `orchestrator-work` runs on the adapter and the supervisor. (M; blocked by 2.2, 2.5 and 2.6)
 - [ ] 2.11 `orchestrator-worker` runs on the adapter and the supervisor. In remote mode it prepares through the adapter, and it posts the kind's usage. (L; blocked by 2.2, 2.5 and 2.6)
-- [ ] 2.12 (B only) The ACP driver as an executable, built from the client of #197 (`test/fixtures/acp/acp-client.mjs`). It needs its own timeout for an unanswered `session/request_permission`, and it never answers with `reject_once` (see Risks). (L; blocked by 2.2, and by a (B) decision)
-- [ ] 2.13 (B only) The `acp` adapter and its configuration block, with OpenCode over ACP as an opt-in control. (M; blocked by 2.3 and 2.12, and by the owner's decision 7)
-- [ ] 2.14 The owner runs the existing opt-in real-CLI tests, and they pass unchanged. (S; blocked by: every other line of 2a, so it runs last)
+- [ ] 2.12 (B only; under shape (A) it is not built and does not block 2.14) The ACP driver as an executable, built from the client of #197 (`test/fixtures/acp/acp-client.mjs`). It needs its own timeout for an unanswered `session/request_permission`, and it never answers with `reject_once` (see Risks). (L; blocked by 2.2, and by a (B) decision)
+- [ ] 2.13 (B only; under shape (A) it is not built and does not block 2.14) The `acp` adapter and its configuration block, with OpenCode over ACP as an opt-in control. (M; blocked by 2.3 and 2.12, and by the owner's decision 7)
+- [ ] 2.14 The owner runs the existing opt-in real-CLI tests, and they pass unchanged. (S; blocked by the shape (A) lines of 2a: 2.1 to 2.11 and 2.24, so it runs last; under shape (B) also by 2.12 and 2.13)
+- [ ] 2.24 (from the review of 2026-11-20, C7) `opencode run` C7: `--variant` is accepted silently on a model without variants (`test/fixtures/opencode/events/I1.jsonl`), so no run shows an effort applying. Check the effort before launch against the variants the model offers (or refuse it), probe a model that has variants, record it in `test/fixtures/opencode/README.md`, and re-grade `opencode run` C7. Numbered 2.24 so that no earlier line moves. (S; blocked by: a model with variants that the probe may run, and the owner's decision 1)
 
 ### 2b. Milestone "Antigravity and Hermes workers"
 

@@ -248,7 +248,7 @@ Evidence: `records/S1b.json`, `records/S1e.json`, `records/S1.json`, `shim/S1e.j
 
 ## For the decision record
 
-Each cell is `pass`, `fail`, `partly` or `not probed`, with the question (Q) of this probe or the fixture file it rests on. The column `opencode run` comes from the shipped code and `test/fixtures/opencode/README.md` ("the fixtures README" below).
+Each cell is `pass`, `fail`, `partly` or `not probed`, with the question (Q) of this probe or the fixture file it rests on. Since 2026-11-20 the grading rule of the decision record (`openspec/changes/archive/2026-11-20-harness-integration-shape/design.md`, section 2) governs this table: a workaround counts only when this probe ran it, and a gap that was not probed grades `partly`. The cells the review named were graded again by it; the other `pass` cells were not re-examined (the record's open question 24). The column `opencode run` comes from the shipped code and `test/fixtures/opencode/README.md` ("the fixtures README" below).
 
 | Criterion | `opencode run` | `opencode acp` |
 |---|---|---|
