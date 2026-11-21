@@ -2,8 +2,8 @@
 // (2) GETs a local HTTP listener, (3) runs `git commit` in the worktree from
 // this (MCP server) process, and reports its own environment. Decides whether
 // Codex sandboxes MCP server processes.
-import { McpServer } from '/Users/richard/git/orchestrator/node_modules/@modelcontextprotocol/sdk/dist/esm/server/mcp.js';
-import { StdioServerTransport } from '/Users/richard/git/orchestrator/node_modules/@modelcontextprotocol/sdk/dist/esm/server/stdio.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { writeFileSync, appendFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import http from 'node:http';
